@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#4f46e5" />
+    <title>Universal Services & Listings Marketplace</title>
+    <meta name="description" content="Multi-entity marketplace for services, jobs, rentals, properties, vehicles, and school admissions with configurable platform fees, provider subscriptions, customer booking, and super admin governance." />
+    <meta property="og:title" content="Universal Services & Listings Marketplace" />
+    <meta property="og:description" content="Multi-entity marketplace for services, jobs, rentals, properties, vehicles, and school admissions with configurable platform fees, provider subscriptions, customer booking, and super admin governance." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      window.__swReady = (async function () {
+        try {
+          if ('caches' in window) {
+            var keys = await caches.keys();
+            await Promise.all(
+              keys.filter(function (k) { return k !== 'crafto-marketplace-data-v2'; }).map(function (k) { return caches.delete(k); })
+            );
+          }
+          if ('serviceWorker' in navigator) {
+            var hadController = !!navigator.serviceWorker.controller;
+            var regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(function (r) { return r.unregister(); }));
+            if (hadController && !sessionStorage.getItem('__sw_purged_v4')) {
+              sessionStorage.setItem('__sw_purged_v4', '1');
+              window.location.reload();
+              return false;
+            }
+          }
+        } catch (e) {}
+        return true;
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-purple-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/entry.tsx"></script>
+  </body>
+</html>
