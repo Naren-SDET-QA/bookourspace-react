@@ -1,4 +1,7 @@
 import express from 'express';
+import dotenv from 'dotenv';
+import { hasAdminAuthorization } from './src/server/adminAuthorization';
+import { resolveSupabaseConfig } from './src/lib/supabaseConfig';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -7,6 +10,10 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load the same local env file Vite uses. Existing process variables remain
+// authoritative; .env.local is considered before the base .env file.
+dotenv.config({ path: ['.env.local', '.env'], quiet: true });
 
 const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
 
@@ -197,50 +204,60 @@ function loadServerStore(): ServerStoreData {
   };
 }
 
-function saveServerStore(data: ServerStoreData) {
+function saveServerStore(data: ServerStoreData): boolean {
+  const temporaryPath = `${DATA_FILE_PATH}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Error saving live-page-config.json:', err);
+    fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), { encoding: 'utf-8', flag: 'wx' });
+    fs.renameSync(temporaryPath, DATA_FILE_PATH);
+    return true;
+  } catch {
+    try { fs.rmSync(temporaryPath, { force: true }); } catch { /* Preserve the prior store on failed writes. */ }
+    return false;
   }
 }
 
 async function startServer() {
+  const configuredHmacSecret = (process.env.BOS_SERVER_HMAC_SECRET || '').trim();
+  if (process.env.NODE_ENV === 'production' && !configuredHmacSecret) {
+    throw new Error('BOS_SERVER_HMAC_SECRET_REQUIRED');
+  }
+  const SERVER_HMAC_SECRET = configuredHmacSecret || crypto.randomBytes(32).toString('hex');
+  if (!configuredHmacSecret) {
+    console.warn('BOS_SERVER_HMAC_SECRET is unset; using an ephemeral development-only signing key.');
+  }
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
   // 1. GET Live Page Config (OTA endpoint consumed by Web, Android, and iOS clients)
-  app.get('/api/live-page-config', (_req, res) => {
+  app.get('/api/live-page-config', (req, res) => {
     const store = loadServerStore();
+    const claims = verifySessionTokenFromRequest(req);
+    const isAdmin = Boolean(claims && hasCurrentAdminSession(claims));
     const latestVersion = store.versions[0] || null;
     res.json({
       ok: true,
       published: store.published,
-      draft: store.draft,
-      versions: store.versions,
-      auditLogs: store.auditLogs,
+      ...(isAdmin ? { draft: store.draft, versions: store.versions, auditLogs: store.auditLogs } : {}),
       otaSync: {
         web: 'synced',
         android: 'synced',
         ios: 'synced',
-        activeVersion: latestVersion ? latestVersion.versionId : 'v1.0.0',
-        lastPublishedAt: latestVersion ? latestVersion.publishedAt : 'Default Baseline',
+        activeVersion: isAdmin && latestVersion ? latestVersion.versionId : String(store.published?.versionId || 'v1.0.0'),
+        lastPublishedAt: isAdmin && latestVersion ? latestVersion.publishedAt : String(store.published?.lastPublishedAt || 'Default Baseline'),
       },
     });
   });
 
   // 2. POST Save Draft (Authorized Admin only)
   app.post('/api/live-page-config/draft', (req, res) => {
-    const role = req.headers['x-admin-role'] || req.body?.role;
-    if (role !== 'admin') {
-      res.status(403).json({
-        ok: false,
-        error: 'Unauthorized: Only an authenticated Admin can save page editor drafts.',
-      });
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || !hasCurrentAdminSession(claims)) {
+      res.status(claims ? 403 : 401).json({ ok: false, error: claims ? 'FORBIDDEN_ADMIN_ONLY' : 'UNAUTHORIZED_SESSION' });
       return;
     }
 
-    const { config, pageId = 'global', summary = 'Saved draft changes', actor = 'Narendra (Super Admin)' } = req.body || {};
+    const { config, pageId = 'global', summary = 'Saved draft changes' } = req.body || {};
     if (!config) {
       res.status(400).json({ ok: false, error: 'Missing config payload' });
       return;
@@ -253,14 +270,17 @@ async function startServer() {
     const auditEntry = {
       id: `AUD-PAGE-${Date.now().toString().slice(-5)}`,
       timestamp: now,
-      actor,
+      actor: claims.name || claims.userId,
       role: 'admin',
       action: 'Saved Page Draft',
       pageId,
       details: summary,
     };
     store.auditLogs = [auditEntry, ...store.auditLogs].slice(0, 200);
-    saveServerStore(store);
+    if (!saveServerStore(store)) {
+      res.status(500).json({ ok: false, error: 'CONFIG_PERSIST_FAILED' });
+      return;
+    }
 
     res.json({
       ok: true,
@@ -272,12 +292,9 @@ async function startServer() {
 
   // 3. POST Publish Live Config across Web, Android, and iOS (Authorized Admin only)
   app.post('/api/live-page-config/publish', (req, res) => {
-    const role = req.headers['x-admin-role'] || req.body?.role;
-    if (role !== 'admin') {
-      res.status(403).json({
-        ok: false,
-        error: 'Unauthorized: Only an authenticated Admin can publish live page updates.',
-      });
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || !hasCurrentAdminSession(claims)) {
+      res.status(claims ? 403 : 401).json({ ok: false, error: claims ? 'FORBIDDEN_ADMIN_ONLY' : 'UNAUTHORIZED_SESSION' });
       return;
     }
 
@@ -285,7 +302,6 @@ async function startServer() {
       config,
       pageId = 'all_pages',
       summary = 'Published live page updates to Web, Android & iOS',
-      actor = 'Narendra (Super Admin)',
     } = req.body || {};
 
     const store = loadServerStore();
@@ -303,14 +319,14 @@ async function startServer() {
       ...toPublish,
       versionId,
       lastPublishedAt: now,
-      publishedBy: actor,
+      publishedBy: claims.name || claims.userId,
     };
 
     const versionEntry = {
       versionId,
       versionNumber: nextNumber,
       publishedAt: now,
-      publishedBy: actor,
+      publishedBy: claims.name || claims.userId,
       summary,
       platforms: ['Web SPA', 'Android APK/Bundle (OTA)', 'iOS IPA (OTA)'],
       configSnapshot: updatedPublished,
@@ -319,7 +335,7 @@ async function startServer() {
     const auditEntry = {
       id: `AUD-PUB-${Date.now().toString().slice(-5)}`,
       timestamp: now,
-      actor,
+      actor: claims.name || claims.userId,
       role: 'admin',
       action: `Published ${versionId} (OTA)`,
       pageId,
@@ -331,7 +347,10 @@ async function startServer() {
     store.draft = updatedPublished;
     store.versions = [versionEntry, ...store.versions].slice(0, 50);
     store.auditLogs = [auditEntry, ...store.auditLogs].slice(0, 200);
-    saveServerStore(store);
+    if (!saveServerStore(store)) {
+      res.status(500).json({ ok: false, error: 'CONFIG_PERSIST_FAILED' });
+      return;
+    }
 
     res.json({
       ok: true,
@@ -346,16 +365,13 @@ async function startServer() {
 
   // 4. POST Rollback to a Previous Version (Authorized Admin only)
   app.post('/api/live-page-config/rollback', (req, res) => {
-    const role = req.headers['x-admin-role'] || req.body?.role;
-    if (role !== 'admin') {
-      res.status(403).json({
-        ok: false,
-        error: 'Unauthorized: Only an authenticated Admin can rollback versions.',
-      });
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || !hasCurrentAdminSession(claims)) {
+      res.status(claims ? 403 : 401).json({ ok: false, error: claims ? 'FORBIDDEN_ADMIN_ONLY' : 'UNAUTHORIZED_SESSION' });
       return;
     }
 
-    const { versionId, actor = 'Narendra (Super Admin)' } = req.body || {};
+    const { versionId } = req.body || {};
     const store = loadServerStore();
     const targetVersion = store.versions.find((v) => v.versionId === versionId);
     if (!targetVersion) {
@@ -368,13 +384,13 @@ async function startServer() {
       ...targetVersion.configSnapshot,
       versionId: `${targetVersion.versionId}-rollback`,
       lastPublishedAt: now,
-      publishedBy: actor,
+      publishedBy: claims.name || claims.userId,
     };
 
     const auditEntry = {
       id: `AUD-RBK-${Date.now().toString().slice(-5)}`,
       timestamp: now,
-      actor,
+      actor: claims.name || claims.userId,
       role: 'admin',
       action: `Rolled Back to ${versionId}`,
       pageId: 'all_pages',
@@ -385,7 +401,10 @@ async function startServer() {
     store.published = restored;
     store.draft = restored;
     store.auditLogs = [auditEntry, ...store.auditLogs].slice(0, 200);
-    saveServerStore(store);
+    if (!saveServerStore(store)) {
+      res.status(500).json({ ok: false, error: 'CONFIG_PERSIST_FAILED' });
+      return;
+    }
 
     res.json({
       ok: true,
@@ -832,8 +851,6 @@ Task:
   // ============================================================================
 
   const AUTH_STORE_FILE_PATH = path.join(__dirname, 'authoritative-marketplace-store.json');
-  const SERVER_HMAC_SECRET =
-    process.env.BOS_SERVER_HMAC_SECRET || 'bos-production-hmac-secret-2026-v1-a9f8e7d6c5b4';
 
   interface SeatLockEntry {
     key: string; // `${listingId}::${dateIso}::${showtime}::${seatId}`
@@ -1381,6 +1398,18 @@ Task:
     }
   }
 
+  function hasCurrentAdminSession(claims: SessionClaims | null): boolean {
+    if (!claims) return false;
+    const store = loadAuthoritativeStore();
+    const currentUser = store.users.find(
+      (user) =>
+        user.id.toLowerCase() === claims.userId.toLowerCase() ||
+        Boolean(claims.email && user.email.toLowerCase() === claims.email.toLowerCase())
+    );
+    if (!currentUser || currentUser.accountStatus !== 'active') return false;
+    return hasAdminAuthorization(claims, currentUser.role);
+  }
+
   /**
    * Checks whether a user ID or email is blocked/suspended in the authoritative store.
    */
@@ -1432,13 +1461,24 @@ Task:
     return item;
   }
 
-  const SUPABASE_PROJECT_ID = 'ezrxykyocgbolpaebnqx';
-  const rawEnvSupabaseUrl = (process.env.VITE_SUPABASE_URL || '').trim();
-  const SUPABASE_PROJECT_URL =
-    rawEnvSupabaseUrl && rawEnvSupabaseUrl.includes(SUPABASE_PROJECT_ID)
-      ? rawEnvSupabaseUrl.replace(/\/+$/, '')
-      : `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-  const SUPABASE_AUTH_CALLBACK_URL = `${SUPABASE_PROJECT_URL}/auth/v1/callback`;
+  // Same resolver as the browser client: without an explicit URL no target is
+  // selected, and an invalid configuration fails closed instead of falling
+  // back to production.
+  const serverSupabaseConfig = resolveSupabaseConfig({
+    url: process.env.VITE_SUPABASE_URL,
+    projectId: process.env.VITE_SUPABASE_PROJECT_ID,
+    developmentProjectId: process.env.VITE_SUPABASE_DEVELOPMENT_PROJECT_ID,
+    publishableKey: process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+    anonKey: process.env.VITE_SUPABASE_ANON_KEY,
+  });
+  if (serverSupabaseConfig.errors.length > 0) {
+    console.error(
+      `[Supabase Configuration] Server: ${serverSupabaseConfig.errors.join(' ')} Supabase auth stays disabled.`
+    );
+  }
+  const SUPABASE_PROJECT_ID = serverSupabaseConfig.projectId;
+  const SUPABASE_PROJECT_URL = serverSupabaseConfig.projectUrl;
+  const SUPABASE_AUTH_CALLBACK_URL = serverSupabaseConfig.authCallbackUrl;
 
   function authenticateOrRegisterGoogleUser(params: {
     email: string;
@@ -1676,7 +1716,7 @@ Task:
 
   // ============================================================================
   // 1. GOOGLE-ONLY OAUTH 2.0, SUPABASE OAUTH & SESSION ENDPOINTS
-  //    Configured for Supabase Project: ezrxykyocgbolpaebnqx
+  //    Supabase project: whatever is explicitly configured, never implicit
   // ============================================================================
 
   // 1A. GET GOOGLE OAUTH AUTHORIZATION URL (Supabase OAuth + Popup Flow for Iframe Preview & Cloud Run)
@@ -1692,9 +1732,12 @@ Task:
     const sharedCallbackUrl =
       'https://ais-pre-2sp75t3mb2qar3lhuhwjxd-429336547561.asia-southeast1.run.app/auth/callback';
 
-    const supabaseAuthorizeUrl = `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-      `${callbackUrl}?role=${encodeURIComponent(requestedRole)}`
-    )}&access_type=offline&prompt=select_account`;
+    // Only offer a Supabase authorize URL when a target is explicitly configured.
+    const supabaseAuthorizeUrl = SUPABASE_PROJECT_URL
+      ? `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
+          `${callbackUrl}?role=${encodeURIComponent(requestedRole)}`
+        )}&access_type=offline&prompt=select_account`
+      : '';
 
     const googleClientId =
       process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
@@ -1702,14 +1745,10 @@ Task:
       Boolean(googleClientId) &&
       !googleClientId.includes('your-google-oauth-client-id');
 
-    const supabasePublishableKey = (
-      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      process.env.VITE_SUPABASE_ANON_KEY ||
-      ''
-    ).trim();
+    // Already validated (and cleared when unconfigured) by resolveSupabaseConfig.
+    const supabasePublishableKey = serverSupabaseConfig.publishableKey;
     const isSupabaseKeyConfigured =
-      Boolean(supabasePublishableKey) &&
-      supabasePublishableKey !== 'your-supabase-publishable-or-anon-key';
+      Boolean(SUPABASE_PROJECT_URL) && Boolean(SUPABASE_PROJECT_ID) && Boolean(supabasePublishableKey);
 
     const statePayload = Buffer.from(
       JSON.stringify({
@@ -1769,8 +1808,9 @@ Task:
       callbackUrl,
       devCallbackUrl,
       sharedCallbackUrl,
-      message:
-        'Configured for Supabase project ezrxykyocgbolpaebnqx Google OAuth popup flow.',
+      message: isSupabaseKeyConfigured
+        ? `Configured for the explicitly selected Supabase project ${SUPABASE_PROJECT_ID} Google OAuth popup flow.`
+        : 'Supabase is not configured; no live project is selected. The Google OAuth popup will use this server only.',
     });
   });
 
@@ -2223,11 +2263,11 @@ Task:
 
     // Prevent arbitrary unverified self-escalation to admin unless valid admin key/passcode is supplied
     if (requestedRole === 'admin') {
-      const expectedAdminPasscode = process.env.BOS_ADMIN_PASSCODE || 'bos-admin-2026-verified';
-      if (adminPasscode !== expectedAdminPasscode) {
+      const expectedAdminPasscode = (process.env.BOS_ADMIN_PASSCODE || '').trim();
+      if (!expectedAdminPasscode || adminPasscode !== expectedAdminPasscode) {
         res.status(403).json({
           ok: false,
-          error: 'ADMIN_ESCALATION_DENIED',
+          error: expectedAdminPasscode ? 'ADMIN_ESCALATION_DENIED' : 'ADMIN_AUTH_NOT_CONFIGURED',
           message: 'Cannot self-escalate to admin role without verified admin credentials.',
         });
         return;
@@ -3119,6 +3159,15 @@ Task:
   // 11. AUTHORITATIVE USER MANAGEMENT & ACCOUNT BLOCKING API (/api/admin/users)
   // ============================================================================
   app.get('/api/admin/users', (_req, res) => {
+    const claims = verifySessionTokenFromRequest(_req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+      return;
+    }
     const store = loadAuthoritativeStore();
     res.json({
       ok: true,
@@ -3128,7 +3177,11 @@ Task:
 
   app.post('/api/admin/users', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role !== 'admin') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_ADMIN_ONLY',
@@ -3201,7 +3254,11 @@ Task:
 
   app.patch('/api/admin/users/:id/status', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role !== 'admin') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_ADMIN_ONLY',
@@ -3265,7 +3322,11 @@ Task:
 
   app.patch('/api/admin/users/:id/role', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role !== 'admin') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_ADMIN_ONLY',
@@ -3313,7 +3374,11 @@ Task:
 
   app.patch('/api/admin/users/:id/verify', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role !== 'admin') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
       res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
       return;
     }
@@ -3424,7 +3489,11 @@ Task:
         : 'all_users'
     ) as AuthoritativeNotificationRecord['targetRole'];
 
-    if (claims && claims.role !== 'admin') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_ADMIN_ONLY',
@@ -3718,6 +3787,15 @@ Task:
   ] as const;
 
   app.get('/api/admin/modules', (_req, res) => {
+    const claims = verifySessionTokenFromRequest(_req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+      return;
+    }
     const store = loadAuthoritativeStore();
     res.json({
       ok: true,
@@ -3729,7 +3807,11 @@ Task:
 
   app.put('/api/admin/modules/:moduleKey', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role !== 'admin') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (!hasCurrentAdminSession(claims)) {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_ADMIN_ONLY',

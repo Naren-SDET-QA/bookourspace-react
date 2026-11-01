@@ -132,13 +132,17 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   // Initial fetch from backend
   useEffect(() => {
     let mounted = true;
-    fetchLivePageConfigFromBackend().then((res) => {
-      if (!mounted) return;
-      setPublishedConfig(res.published);
-      setDraftConfig(res.draft);
-      setVersions(res.versions);
-      setAuditLogs(res.auditLogs);
-    });
+    fetchLivePageConfigFromBackend()
+      .then((res) => {
+        if (!mounted) return;
+        setPublishedConfig(res.published);
+        setDraftConfig(res.draft);
+        setVersions(res.versions);
+        setAuditLogs(res.auditLogs);
+      })
+      .catch(() => {
+        if (mounted) setEditorToast('Central App Builder storage is unavailable. No remote configuration was loaded.');
+      });
     return () => {
       mounted = false;
     };
@@ -364,39 +368,55 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
     const summary =
       changeSummaryInput.trim() ||
       `Updated ${currentPageDraft.pageName} content, labels & layout`;
-    const res = await saveLivePageDraftToBackend(draftConfig, activePageId, summary);
-    setDraftConfig(res.draft);
-    setAuditLogs(res.auditLogs);
-    setIsSaving(false);
-    notify(`📝 Draft saved to backend for ${currentPageDraft.pageName}!`);
+    try {
+      const res = await saveLivePageDraftToBackend(draftConfig, activePageId, summary);
+      setDraftConfig(res.draft);
+      setVersions(res.versions);
+      setAuditLogs(res.auditLogs);
+      notify(`📝 Draft saved to backend for ${currentPageDraft.pageName}!`);
+    } catch {
+      notify('Draft was not saved. Configure the development Supabase Auth session and active admin profile, then retry.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handlePublishLive = async () => {
     setIsSaving(true);
     const summary =
       changeSummaryInput.trim() ||
-      `Published ${currentPageDraft.pageName} updates across Web, Android & iOS`;
-    const res = await publishLivePageConfigToBackend(draftConfig, activePageId, summary);
-    setPublishedConfig(res.published);
-    setDraftConfig(res.published);
-    setVersions(res.versions);
-    setAuditLogs(res.auditLogs);
-    setChangeSummaryInput('');
-    setIsSaving(false);
-    notify(
-      `🚀 Published ${res.published.versionId} live across Android, iOS & Web without app update!`
-    );
+      `Published ${currentPageDraft.pageName} updates for connected web clients`;
+    try {
+      const res = await publishLivePageConfigToBackend(draftConfig, activePageId, summary);
+      setPublishedConfig(res.published);
+      setDraftConfig(res.published);
+      setVersions(res.versions);
+      setAuditLogs(res.auditLogs);
+      setChangeSummaryInput('');
+      notify(
+        `🚀 Published ${res.published.versionId} for connected React web clients.`
+      );
+    } catch {
+      notify('Publish failed. Published configuration is unchanged; the latest draft may have been saved. Check history before retrying.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleRollback = async (versionId: string) => {
     setIsSaving(true);
-    const res = await rollbackLivePageConfigVersion(versionId);
-    setPublishedConfig(res.published);
-    setDraftConfig(res.draft);
-    setVersions(res.versions);
-    setAuditLogs(res.auditLogs);
-    setIsSaving(false);
-    notify(`⏪ Rolled back to ${versionId} across Web, Android & iOS!`);
+    try {
+      const res = await rollbackLivePageConfigVersion(versionId);
+      setPublishedConfig(res.published);
+      setDraftConfig(res.draft);
+      setVersions(res.versions);
+      setAuditLogs(res.auditLogs);
+      notify(`⏪ Created a new rollback version from ${versionId} for connected React web clients.`);
+    } catch {
+      notify('Rollback failed. Published configuration is unchanged. Configure the development Supabase Auth session and active admin profile, then retry.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const sortedSections = [...currentPageDraft.sections].sort(
@@ -462,7 +482,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase flex items-center gap-1">
                     <Lock className="w-3 h-3" />
-                    <span>Authorized Admin • OTA Live Page Editor</span>
+                    <span>Authorized Admin • App Builder</span>
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black">
                     Live: {publishedConfig.versionId}
@@ -517,7 +537,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                 })}
               </div>
 
-              {/* Preview Mode & Multi-Platform OTA Target Bar */}
+              {/* Preview Mode & responsive device preview bar */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/10 text-[11px]">
                 <div className="flex items-center gap-1.5">
                   <span className="text-indigo-200 font-bold">State View:</span>
@@ -546,7 +566,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1">
-                  <span className="text-indigo-200 font-bold mr-1">OTA Target Preview:</span>
+                  <span className="text-indigo-200 font-bold mr-1">Device preview:</span>
                   {(
                     [
                       { id: 'web', label: 'Web', icon: Monitor },
@@ -613,7 +633,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                   <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
                     <Globe className="w-3.5 h-3.5" />
                     <span>
-                      Live {devicePreview.toUpperCase()} OTA Preview — {currentPageDraft.icon}{' '}
+                      {devicePreview.toUpperCase()} Preview — {currentPageDraft.icon}{' '}
                       {currentPageDraft.pageName} ({previewMode.toUpperCase()})
                     </span>
                   </span>
@@ -636,7 +656,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                       {draftConfig.globalBrandName} • {currentPageDraft.pageName}
                     </span>
                     <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800">
-                      {devicePreview === 'web' ? 'Web SPA' : devicePreview === 'android' ? 'Android OTA' : 'iOS OTA'}
+                      {devicePreview === 'web' ? 'Web' : devicePreview === 'android' ? 'Android layout' : 'iOS layout'}
                     </span>
                   </div>
                   {currentPageDraft.heroBanner.visible && (
@@ -1520,7 +1540,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                   {/* Version History & Rollback */}
                   <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3">
                     <div className="font-black text-slate-900 dark:text-white uppercase text-[11px]">
-                      Published OTA Version Snapshots & 1-Click Rollback
+                      App Builder Version History & Rollback
                     </div>
                     <div className="space-y-2">
                       {versions.map((ver, idx) => (
@@ -1533,18 +1553,22 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                               <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 font-black text-[10px]">
                                 {ver.versionId}
                               </span>
+                              <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-[10px]">
+                                {(ver.status || 'published').replace('_', ' ')}
+                              </span>
                               <span className="font-black text-slate-900 dark:text-white">
                                 {ver.summary}
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-500 mt-1">
-                              Published by {ver.publishedBy} at {ver.publishedAt} • Targets:{' '}
+                              {ver.status === 'draft' ? 'Draft saved by' : 'Recorded by'} {ver.publishedBy} at {ver.publishedAt} • Targets:{' '}
                               {ver.platforms.join(' • ')}
                             </div>
                           </div>
                           <button
                             type="button"
                             onClick={() => handleRollback(ver.versionId)}
+                            disabled={ver.status !== 'published' && Boolean(ver.recordId)}
                             className="px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 font-black text-[11px] flex items-center gap-1 shrink-0 cursor-pointer"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
@@ -1604,7 +1628,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>OTA Sync Ready: Web • Android • iOS</span>
+                  <span>Central config for connected React web clients</span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1623,7 +1647,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                     className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>Publish OTA (Web + Android + iOS)</span>
+                    <span>Publish to connected web clients</span>
                   </button>
                 </div>
               </div>

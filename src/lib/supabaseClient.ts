@@ -8,73 +8,40 @@ import {
   UserRole,
 } from '../types/marketplace';
 import { ensureListingPriceBreakdown } from '../data/seedData';
+import { resolveSupabaseConfig } from './supabaseConfig';
 
-// Configured for BookOurSpace Supabase Project: ezrxykyocgbolpaebnqx
-// Read strictly from Vite frontend environment variables.
-// Never put any PostgreSQL password or service-role key in frontend code.
-export const SUPABASE_PROJECT_ID = 'ezrxykyocgbolpaebnqx';
+// Configuration is resolved (and validated) in src/lib/supabaseConfig.ts:
+//   - there is no implicit target: without VITE_SUPABASE_URL the client is
+//     disabled, so no live connection happens by accident;
+//   - an explicit target is validated and an invalid one fails closed
+//     instead of silently switching to production.
+// Never put a PostgreSQL password or service-role key in frontend variables.
+const resolvedSupabaseConfig = resolveSupabaseConfig({
+  url: import.meta.env.VITE_SUPABASE_URL,
+  projectId: import.meta.env.VITE_SUPABASE_PROJECT_ID,
+  developmentProjectId: import.meta.env.VITE_SUPABASE_DEVELOPMENT_PROJECT_ID,
+  publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+});
 
-const envSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-export const SUPABASE_PROJECT_URL =
-  envSupabaseUrl && envSupabaseUrl.includes(SUPABASE_PROJECT_ID)
-    ? envSupabaseUrl.replace(/\/+$/, '')
-    : `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-
-export const SUPABASE_AUTH_CALLBACK_URL = `${SUPABASE_PROJECT_URL}/auth/v1/callback`;
-
-const rawSupabaseUrl = SUPABASE_PROJECT_URL;
-const rawPublishableKey = (
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  ''
-).trim();
-
-/**
- * Security validation: Ensure that a service-role secret key or raw PostgreSQL
- * connection string was not accidentally supplied in frontend env vars.
- */
-function isSafePublishableKey(key: string): boolean {
-  if (!key) return false;
-  const lower = key.toLowerCase();
-  if (lower.startsWith('postgres://') || lower.startsWith('postgresql://')) {
-    console.error(
-      '[Supabase Security] Do not put PostgreSQL connection strings or passwords in frontend env vars.'
-    );
-    return false;
-  }
-  if (lower.includes('sb_secret_') || lower.includes('service_role')) {
-    console.error(
-      '[Supabase Security] Refusing to initialize frontend client with a service-role or secret key. Use your publishable/anon key instead.'
-    );
-    return false;
-  }
-  const parts = key.split('.');
-  if (parts.length === 3) {
-    try {
-      const payloadJson = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-      const payload = JSON.parse(payloadJson);
-      if (payload.role === 'service_role' || payload.role === 'supabase_admin') {
-        console.error(
-          '[Supabase Security] JWT role is service_role. Only anon/publishable keys are allowed in frontend code.'
-        );
-        return false;
-      }
-      if (payload.ref && payload.ref !== SUPABASE_PROJECT_ID) {
-        return false;
-      }
-    } catch {
-      // Non-JWT publishable key format (e.g., sb_publishable_...)
-    }
-  }
-  return true;
+export const SUPABASE_CONFIG_ERRORS: string[] = resolvedSupabaseConfig.errors;
+export const SUPABASE_PROJECT_ID = resolvedSupabaseConfig.projectId;
+export const SUPABASE_PROJECT_URL = resolvedSupabaseConfig.projectUrl;
+export const SUPABASE_AUTH_CALLBACK_URL = resolvedSupabaseConfig.authCallbackUrl;
+if (SUPABASE_CONFIG_ERRORS.length > 0) {
+  console.error(
+    `[Supabase Configuration] ${SUPABASE_CONFIG_ERRORS.join(' ')} Live Supabase stays disabled; no other project is used.`
+  );
+} else if (!resolvedSupabaseConfig.isConfigured) {
+  console.warn(
+    '[Supabase Configuration] Live Supabase is disabled. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable it; no project is selected implicitly.'
+  );
 }
 
-export const isSupabaseConfigured: boolean =
-  Boolean(rawSupabaseUrl) &&
-  rawSupabaseUrl.startsWith('http') &&
-  Boolean(rawPublishableKey) &&
-  rawPublishableKey !== 'your-supabase-publishable-or-anon-key' &&
-  isSafePublishableKey(rawPublishableKey);
+const rawSupabaseUrl = SUPABASE_PROJECT_URL;
+const rawPublishableKey = resolvedSupabaseConfig.publishableKey;
+
+export const isSupabaseConfigured: boolean = resolvedSupabaseConfig.isConfigured;
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(rawSupabaseUrl, rawPublishableKey, {
@@ -92,6 +59,7 @@ export interface SupabaseProfile {
   full_name: string;
   phone?: string;
   role: UserRole;
+  account_status?: string;
 }
 
 /**
@@ -191,7 +159,7 @@ export async function fetchRlsProfile(): Promise<SupabaseProfile | null> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, phone, role')
+    .select('id, email, full_name, phone, role, account_status')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -202,6 +170,7 @@ export async function fetchRlsProfile(): Promise<SupabaseProfile | null> {
     full_name: data.full_name || user.user_metadata?.full_name || 'Marketplace User',
     phone: data.phone || user.user_metadata?.phone || '',
     role: (data.role as UserRole) || 'customer',
+    account_status: typeof data.account_status === 'string' ? data.account_status : undefined,
   };
 }
 
@@ -323,30 +292,41 @@ export async function updateRlsListing(
     updated_at: new Date().toISOString(),
   };
   if (updates.title !== undefined) updateRow.title = updates.title;
+  if (updates.categoryId !== undefined) updateRow.category_id = updates.categoryId;
+  if (updates.subcategory !== undefined) updateRow.subcategory = updates.subcategory;
+  if (updates.entityType !== undefined) updateRow.entity_type = updates.entityType;
   if (updates.price !== undefined) updateRow.price = updates.price;
+  if (updates.priceUnit !== undefined) updateRow.price_unit = updates.priceUnit;
   if (updates.status !== undefined) updateRow.status = updates.status;
   if (fullUpdatedListing) updateRow.payload = fullUpdatedListing;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('listings')
     .update(updateRow)
     .eq('id', id)
-    .eq('owner_id', user.id);
+    // RLS is the authorization boundary: owners can update their own rows and
+    // public.is_admin() permits cross-provider admin edits. Do not duplicate
+    // that policy with a client-side owner filter.
+    .select('id')
+    .maybeSingle();
 
-  return !error;
+  return !error && data?.id === id;
 }
 
 export async function deleteRlsListing(id: string): Promise<boolean> {
   const user = await requireAuthenticatedUser();
   if (!supabase || !user) return false;
 
-  const { error } = await supabase
+  // Listing removal is a safe deactivation. Preserve references from existing
+  // bookings, payment records, reviews, and audit history.
+  const { data, error } = await supabase
     .from('listings')
-    .delete()
+    .update({ status: 'expired', updated_at: new Date().toISOString() })
     .eq('id', id)
-    .eq('owner_id', user.id);
+    .select('id')
+    .maybeSingle();
 
-  return !error;
+  return !error && data?.id === id;
 }
 
 export async function fetchRlsBookings(): Promise<Booking[] | null> {
@@ -698,6 +678,11 @@ export function subscribeToRlsChanges(onRefresh: () => void): () => void {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'seat_locks' }, () => onRefresh())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => onRefresh())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => onRefresh())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'platform_config_versions' }, () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('bos-live-page-config-refresh'));
+      }
+    })
     .subscribe();
 
   return () => {
@@ -892,9 +877,11 @@ export async function signInWithSupabaseGoogleOAuth(requestedRole: UserRole = 'c
   error?: string;
 }> {
   const redirectTo = `${window.location.origin}/auth/callback?role=${encodeURIComponent(requestedRole)}`;
-  const directSupabaseAuthorizeUrl = `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-    redirectTo
-  )}&access_type=offline&prompt=select_account`;
+  const directSupabaseAuthorizeUrl = SUPABASE_PROJECT_URL
+    ? `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
+        redirectTo
+      )}&access_type=offline&prompt=select_account`
+    : '';
 
   if (supabase) {
     const { data, error } = await supabase.auth.signInWithOAuth({

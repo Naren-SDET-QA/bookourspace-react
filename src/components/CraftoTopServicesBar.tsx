@@ -114,6 +114,7 @@ interface CraftoTopServicesBarProps {
   verifiedOnly?: boolean;
   onToggleVerifiedOnly?: () => void;
   onBackToHomeHub?: () => void;
+  onOpenServicesDiscovery?: () => void;
   homeScreenStyle?: HomeScreenLayoutStyle;
   onChangeHomeScreenStyle?: (style: HomeScreenLayoutStyle) => void;
 }
@@ -174,6 +175,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   verifiedOnly = false,
   onToggleVerifiedOnly,
   onBackToHomeHub,
+  onOpenServicesDiscovery,
   homeScreenStyle = 'bento_landing_hub',
   onChangeHomeScreenStyle,
 }) => {
@@ -950,6 +952,18 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
               );
             })}
           </div>
+          {onOpenServicesDiscovery && (
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={onOpenServicesDiscovery}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-violet-200 bg-white px-4 text-xs font-extrabold text-violet-800 shadow-xs transition hover:border-violet-400 hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 dark:border-violet-900 dark:bg-slate-900 dark:text-violet-200 dark:hover:bg-violet-950"
+              >
+                <span aria-hidden="true">✦</span>
+                <span>Explore all services</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

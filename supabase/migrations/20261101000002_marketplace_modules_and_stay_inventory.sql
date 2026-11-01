@@ -414,6 +414,16 @@ create policy "Guests and owners read relevant allocations"
   );
 
 revoke insert, update, delete on public.stay_allocations from anon, authenticated;
+grant select on public.stay_allocations to authenticated, service_role;
+
+-- Data API table privileges are required in addition to RLS policies. Public
+-- discovery reads are limited by the active-row policies above; mutations are
+-- limited by owner/admin policies, and stay allocations remain RPC-only.
+grant select on public.stay_properties, public.stay_room_types, public.stay_units
+  to anon, authenticated;
+grant select on public.stay_blocks to authenticated;
+grant insert, update, delete on public.stay_properties, public.stay_room_types,
+  public.stay_units, public.stay_blocks to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. Availability + hold RPCs

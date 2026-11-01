@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Sparkles, 
   MapPin, 
@@ -74,7 +74,13 @@ import { FlipkartBannerSlider } from './components/FlipkartBannerSlider';
 import { FlipkartFilterSidebar } from './components/FlipkartFilterSidebar';
 import { TrendingNearMeSection } from './components/TrendingNearMeSection';
 import { SectionSpotlightShowcase } from './components/SectionSpotlightShowcase';
-import { DistrictMoviesSection } from './components/DistrictMoviesSection';
+const DistrictMoviesSection = lazy(() => import('./components/DistrictMoviesSection').then((module) => ({ default: module.DistrictMoviesSection })));
+const ServicesDiscoverySection = lazy(() => import('./components/ServicesDiscoverySection').then((module) => ({ default: module.ServicesDiscoverySection })));
+const HotelsStayExperience = lazy(() => import('./components/HotelsStayExperience').then((module) => ({ default: module.HotelsStayExperience })));
+const PGSectionExperience = lazy(() => import('./components/PGSectionExperience').then((module) => ({ default: module.PGSectionExperience })));
+import { fetchLivePageConfig, resolvePublishedPresentation } from './modules/moduleConfigStore';
+import type { ModuleConfigResolution } from './modules/registry';
+const HomeServicesSection = lazy(() => import('./components/HomeServicesSection').then((module) => ({ default: module.HomeServicesSection })));
 
 // Universal Marketplace Components
 import { ListingCard } from './components/ListingCard';
@@ -85,7 +91,7 @@ import { BookingEnquiryModal } from './components/BookingEnquiryModal';
 import { ChatModal } from './components/ChatModal';
 import { PostListingWizard } from './components/PostListingWizard';
 import { ProviderDashboard } from './components/ProviderDashboard';
-import { AdminDashboard } from './components/AdminDashboard';
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
 import { PaymentModal } from './components/PaymentModal';
 import { VoiceRegistrationModal } from './components/VoiceRegistrationModal';
 import { VoiceSearchModal } from './components/VoiceSearchModal';
@@ -151,6 +157,7 @@ import { QuickBookChatAssistant } from './components/QuickBookChatAssistant';
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
+  fetchLivePageConfigFromBackend,
   loadPublishedLivePageConfig,
 } from './utils/livePageEditorStore';
 
@@ -212,6 +219,24 @@ function MarketplaceAppContent() {
 
   // Active Market Section: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies'
   const [activeMarketSection, setActiveMarketSection] = useState<MarketSectionType>('pg_hostels');
+  const [isServicesDiscoveryOpen, setIsServicesDiscoveryOpen] = useState(false);
+  const [isHotelsStayExperienceOpen, setIsHotelsStayExperienceOpen] = useState(false);
+  const [isPGSectionOpen, setIsPGSectionOpen] = useState(false);
+  const [isHomeServicesOpen, setIsHomeServicesOpen] = useState(false);
+  // Published admin presentation (labels/headlines) applied to the section screens.
+  const [modulePresentation, setModulePresentation] = useState<Record<string, ModuleConfigResolution>>({});
+  const returnSectionAfterStayRef = useRef<MarketSectionType>('pg_hostels');
+  const returnSectionAfterPGRef = useRef<MarketSectionType>('pg_hostels');
+  const returnSectionAfterServicesRef = useRef<MarketSectionType>('pg_hostels');
+
+  // Section screens are deep-linkable (#pg, #services, #stays) so a section can be
+  // shared or opened directly without walking the marketplace carousels.
+  const clearSectionHash = () => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+  };
+  const previousMarketSectionRef = useRef<MarketSectionType>('pg_hostels');
 
   // View Mode: 'grid' vs 'map' (Toggle between Flipkart Product Grid and Live Map Hero)
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
@@ -272,6 +297,54 @@ function MarketplaceAppContent() {
       setActiveView('marketplace');
     }
   }, [authUser, activeView]);
+
+  useEffect(() => {
+    if (activeMarketSection === 'hotel_stay' && !isHotelsStayExperienceOpen) {
+      returnSectionAfterStayRef.current = previousMarketSectionRef.current === 'hotel_stay'
+        ? 'pg_hostels'
+        : previousMarketSectionRef.current;
+      setIsHotelsStayExperienceOpen(true);
+    }
+    previousMarketSectionRef.current = activeMarketSection;
+  }, [activeMarketSection, isHotelsStayExperienceOpen]);
+
+  useEffect(() => {
+    const applySectionHash = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'pg') {
+        setActiveMarketSection('pg_hostels');
+        setIsPGSectionOpen(true);
+        setIsHomeServicesOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (hash === 'services') {
+        setActiveMarketSection('services');
+        setIsHomeServicesOpen(true);
+        setIsPGSectionOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (hash === 'stays' || hash === 'hotels') {
+        setActiveMarketSection('hotel_stay');
+        setIsHotelsStayExperienceOpen(true);
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+      }
+    };
+    applySectionHash();
+    window.addEventListener('hashchange', applySectionHash);
+    return () => window.removeEventListener('hashchange', applySectionHash);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const config = await fetchLivePageConfig();
+        if (!cancelled) setModulePresentation(resolvePublishedPresentation(config.published));
+      } catch {
+        // Presentation overrides are optional; registry defaults keep the sections usable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const handleOAuthRedirect = (e: Event) => {
@@ -365,6 +438,18 @@ function MarketplaceAppContent() {
   const [isLivePageEditorOpen, setIsLivePageEditorOpen] = useState<boolean>(false);
 
   useEffect(() => {
+    let mounted = true;
+    const refreshPublishedConfig = () => {
+      void fetchLivePageConfigFromBackend()
+        .then((result) => {
+          if (mounted) setLivePageConfig(result.published);
+        })
+        .catch(() => {
+          // Keep the last known local cache/default when the dev backend is unavailable.
+        });
+    };
+    refreshPublishedConfig();
+    window.addEventListener('bos-live-page-config-refresh', refreshPublishedConfig);
     const handleLivePageSync = (ev: Event) => {
       const customEv = ev as CustomEvent<{ mode: string; config: LivePageEditorConfig }>;
       if (customEv.detail?.config) {
@@ -376,7 +461,11 @@ function MarketplaceAppContent() {
       setDateRangeModuleMap(loadSearchDateRangeModuleMap());
     };
     window.addEventListener('bos-live-page-config-updated', handleLivePageSync);
-    return () => window.removeEventListener('bos-live-page-config-updated', handleLivePageSync);
+    return () => {
+      mounted = false;
+      window.removeEventListener('bos-live-page-config-refresh', refreshPublishedConfig);
+      window.removeEventListener('bos-live-page-config-updated', handleLivePageSync);
+    };
   }, []);
 
   const currentLivePage =
@@ -1229,6 +1318,46 @@ function MarketplaceAppContent() {
   const selectedHotelCategoryObj = hotelStayCategories.find(c => c.id === selectedCategory);
   const selectedMovieCategoryObj = moviesCategories.find(c => c.id === selectedCategory);
 
+  const navigateFromServicesDiscovery = (section: MarketSectionType, categoryId?: string) => {
+    setIsServicesDiscoveryOpen(false);
+    setSelectedCategory(categoryId || 'all');
+    setSelectedSubcategory('all');
+    if (section === 'hotel_stay') {
+      returnSectionAfterStayRef.current = activeMarketSection === 'hotel_stay'
+        ? 'pg_hostels'
+        : activeMarketSection;
+      setActiveMarketSection('hotel_stay');
+      setIsPGSectionOpen(false);
+      setIsHomeServicesOpen(false);
+      setIsHotelsStayExperienceOpen(true);
+      return;
+    }
+    if (section === 'pg_hostels') {
+      returnSectionAfterPGRef.current = activeMarketSection === 'pg_hostels'
+        ? 'pg_hostels'
+        : activeMarketSection;
+      setActiveMarketSection('pg_hostels');
+      setIsHotelsStayExperienceOpen(false);
+      setIsHomeServicesOpen(false);
+      setIsPGSectionOpen(true);
+      return;
+    }
+    if (section === 'services') {
+      returnSectionAfterServicesRef.current = activeMarketSection === 'services'
+        ? 'pg_hostels'
+        : activeMarketSection;
+      setActiveMarketSection('services');
+      setIsHotelsStayExperienceOpen(false);
+      setIsPGSectionOpen(false);
+      setIsHomeServicesOpen(true);
+      return;
+    }
+    setIsHotelsStayExperienceOpen(false);
+    setIsPGSectionOpen(false);
+    setIsHomeServicesOpen(false);
+    setActiveMarketSection(section);
+  };
+
   // Active Area Label for headline
   const activeAreaDisplayName = selectedArea === 'all' || selectedArea === 'All Areas in City' 
     ? (selectedCity === 'All Locations' || selectedCity === 'All Cities' || selectedCity === 'all' ? 'Hyderabad' : selectedCity)
@@ -1432,6 +1561,31 @@ function MarketplaceAppContent() {
           <CraftoTopServicesBar
             activeMarketSection={activeMarketSection}
             onSelectMarketSection={(sec) => {
+              setIsServicesDiscoveryOpen(false);
+              if (sec === 'hotel_stay') {
+                returnSectionAfterStayRef.current = activeMarketSection === 'hotel_stay'
+                  ? 'pg_hostels'
+                  : activeMarketSection;
+                setIsHotelsStayExperienceOpen(true);
+              } else {
+                setIsHotelsStayExperienceOpen(false);
+              }
+              if (sec === 'pg_hostels') {
+                returnSectionAfterPGRef.current = activeMarketSection === 'pg_hostels'
+                  ? 'pg_hostels'
+                  : activeMarketSection;
+                setIsPGSectionOpen(true);
+              } else {
+                setIsPGSectionOpen(false);
+              }
+              if (sec === 'services') {
+                returnSectionAfterServicesRef.current = activeMarketSection === 'services'
+                  ? 'pg_hostels'
+                  : activeMarketSection;
+                setIsHomeServicesOpen(true);
+              } else {
+                setIsHomeServicesOpen(false);
+              }
               setActiveMarketSection(sec);
               setSelectedCategory('all');
               setSelectedSubcategory('all');
@@ -1626,6 +1780,10 @@ function MarketplaceAppContent() {
                   ? '📱 Switched to Super-App Bento Home Hub'
                   : '🏪 Switched to Classic Marketplace Home'
               );
+            }}
+            onOpenServicesDiscovery={() => {
+              setIsHotelsStayExperienceOpen(false);
+              setIsServicesDiscoveryOpen(true);
             }}
           />
 
@@ -2136,24 +2294,26 @@ function MarketplaceAppContent() {
                 Back to Marketplace
               </button>
             </div>
-            <SelfHealingBoundary moduleId="admin_console_module" moduleName="Super Admin Console Module">
-              <AdminDashboard
-                onApprovedNavigateToApp={(approvedListing) => {
-                  const targetSec = resolveSectionForCategory(approvedListing.categoryId);
-                  setActiveMarketSection(targetSec);
-                  setSelectedCategory('all');
-                  setSelectedSubcategory('all');
-                  setSearchQuery('');
-                  setActiveView('marketplace');
-                  playAlertChime('confirm');
-                  showToast(`✅ Approved by Admin! "${approvedListing.title}" is now LIVE in the Application!`);
-                }}
-                onOpenLivePageEditor={() => {
-                  setActiveView('marketplace');
-                  setIsLivePageEditorOpen(true);
-                }}
-              />
-            </SelfHealingBoundary>
+            <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading admin console…</p>}>
+              <SelfHealingBoundary moduleId="admin_console_module" moduleName="Super Admin Console Module">
+                <AdminDashboard
+                  onApprovedNavigateToApp={(approvedListing) => {
+                    const targetSec = resolveSectionForCategory(approvedListing.categoryId);
+                    setActiveMarketSection(targetSec);
+                    setSelectedCategory('all');
+                    setSelectedSubcategory('all');
+                    setSearchQuery('');
+                    setActiveView('marketplace');
+                    playAlertChime('confirm');
+                    showToast(`✅ Approved by Admin! "${approvedListing.title}" is now LIVE in the Application!`);
+                  }}
+                  onOpenLivePageEditor={() => {
+                    setActiveView('marketplace');
+                    setIsLivePageEditorOpen(true);
+                  }}
+                />
+              </SelfHealingBoundary>
+            </Suspense>
           </div>
         )}
 
@@ -2177,9 +2337,13 @@ function MarketplaceAppContent() {
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       const req = pendingAdminListings[0];
-                      updateListingStatus(req.id, 'active');
+                      const saved = await updateListingStatus(req.id, 'active');
+                      if (!saved) {
+                        showToast('Listing approval was not saved. Check the Supabase session and try again.');
+                        return;
+                      }
                       const targetSec = resolveSectionForCategory(req.categoryId);
                       setActiveMarketSection(targetSec);
                       setSelectedCategory('all');
@@ -2750,7 +2914,7 @@ function MarketplaceAppContent() {
                   listings={filteredListings}
                   currentLang={currentLang}
                   verifiedOnly={verifiedOnly}
-                  onToggleVerifiedOnly={() => setVerifiedOnly((prev) => !prev)}
+                  onToggleVerifiedOnly={() => setVerifiedOnly(!verifiedOnly)}
                   sortBy={sortBy}
                   onChangeSortBy={(s) => setSortBy(s)}
                   searchQuery={searchQuery}
@@ -2759,7 +2923,10 @@ function MarketplaceAppContent() {
                   favoriteIds={favoriteIds}
                   onToggleFavorite={toggleFavorite}
                   comparedListingIds={comparedListingIds}
-                  onToggleCompare={handleToggleCompare}
+                  onToggleCompare={(id) => {
+                    const listing = filteredListings.find((item) => item.id === id);
+                    if (listing) handleToggleCompare(listing);
+                  }}
                   onSelectListing={handleSelectListing}
                   onBookNow={(l) => setBookingListing(l)}
                   onEnquire={(l) => setChatListing(l)}
@@ -2931,8 +3098,8 @@ function MarketplaceAppContent() {
               );
 
               const topFeaturedThree = (
-                sectionSpecificPool.filter((l) => l.featured).length >= 3
-                  ? sectionSpecificPool.filter((l) => l.featured)
+                sectionSpecificPool.filter((l) => l.isFeatured).length >= 3
+                  ? sectionSpecificPool.filter((l) => l.isFeatured)
                   : sectionSpecificPool.length > 0
                   ? sectionSpecificPool
                   : filteredListings
@@ -4441,25 +4608,27 @@ function MarketplaceAppContent() {
 
             {/* 4B. BOOKOURSPACE MOVIES & GOING-OUT SECTION (SHOWN IN MOVIES SECTION USING EXISTING IMAGES & DB ONLY) */}
             {activeMarketSection === 'movies' && (
-              <SelfHealingBoundary moduleId="district_movies_section" moduleName="BookOurSpace Movies Section">
-                <DistrictMoviesSection
-                  listings={filteredListings.length > 0 ? filteredListings : listings}
-                  currentLang={currentLang}
-                  activeAreaName={activeAreaDisplayName}
-                  onSelectListing={handleSelectListing}
-                  onBookListing={(item) => setBookingListing(item)}
-                  showClassicGridBelow={showMoviesClassicGrid}
-                  onToggleClassicGrid={() => setShowMoviesClassicGrid((prev) => !prev)}
-                  onOpenDirectUpi={(planName, amount) =>
-                    setPaymentModalState({
-                      isOpen: true,
-                      planName,
-                      amount,
-                      defaultOneRupeeTest: false,
-                    })
-                  }
-                />
-              </SelfHealingBoundary>
+              <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading movies…</p>}>
+                <SelfHealingBoundary moduleId="district_movies_section" moduleName="BookOurSpace Movies Section">
+                  <DistrictMoviesSection
+                    listings={filteredListings.length > 0 ? filteredListings : listings}
+                    currentLang={currentLang}
+                    activeAreaName={activeAreaDisplayName}
+                    onSelectListing={handleSelectListing}
+                    onBookListing={(item) => setBookingListing(item)}
+                    showClassicGridBelow={showMoviesClassicGrid}
+                    onToggleClassicGrid={() => setShowMoviesClassicGrid((prev) => !prev)}
+                    onOpenDirectUpi={(planName, amount) =>
+                      setPaymentModalState({
+                        isOpen: true,
+                        planName,
+                        amount,
+                        defaultOneRupeeTest: false,
+                      })
+                    }
+                  />
+                </SelfHealingBoundary>
+              </Suspense>
             )}
 
             {/* LISTINGCARD SEARCH RESULTS VIEW — DATE-RANGE AVAILABILITY FILTER & RESULTS HEADER (ADMIN ENABLE/DISABLE • PRESENT DISABLED) */}
@@ -5523,6 +5692,61 @@ function MarketplaceAppContent() {
             </div>
           </div>
         </div>
+      )}
+
+      {isServicesDiscoveryOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading services…</div>}>
+          <ServicesDiscoverySection
+            onClose={() => setIsServicesDiscoveryOpen(false)}
+            onNavigate={navigateFromServicesDiscovery}
+          />
+        </Suspense>
+      )}
+      {isHotelsStayExperienceOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[71] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading stays…</div>}>
+          <HotelsStayExperience
+            onClose={() => {
+              setIsHotelsStayExperienceOpen(false);
+              clearSectionHash();
+              setActiveMarketSection(returnSectionAfterStayRef.current);
+              setSelectedCategory('all');
+              setSelectedSubcategory('all');
+            }}
+          />
+        </Suspense>
+      )}
+      {isPGSectionOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[71] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading PGs…</div>}>
+          <PGSectionExperience
+            listings={listings}
+            moduleLabel={modulePresentation.pg?.values.label}
+            moduleHeadline={modulePresentation.pg?.values.headline}
+            onClose={() => {
+              setIsPGSectionOpen(false);
+              clearSectionHash();
+              setActiveMarketSection(returnSectionAfterPGRef.current);
+              setSelectedCategory('all');
+              setSelectedSubcategory('all');
+            }}
+          />
+        </Suspense>
+      )}
+      {isHomeServicesOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[71] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading services…</div>}>
+          <HomeServicesSection
+            listings={listings}
+            initialCategoryId={selectedCategory === 'all' ? undefined : selectedCategory}
+            moduleLabel={modulePresentation.services?.values.label}
+            moduleHeadline={modulePresentation.services?.values.headline}
+            onClose={() => {
+              setIsHomeServicesOpen(false);
+              clearSectionHash();
+              setActiveMarketSection(returnSectionAfterServicesRef.current);
+              setSelectedCategory('all');
+              setSelectedSubcategory('all');
+            }}
+          />
+        </Suspense>
       )}
 
     </div>

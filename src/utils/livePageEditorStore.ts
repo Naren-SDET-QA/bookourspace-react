@@ -1,5 +1,6 @@
 import { MarketSectionType } from '../data/servicesStayMoviesData';
 import { appendAdminAuditLog } from './adminEnterpriseStore';
+import { supabase } from '../lib/supabaseClient';
 
 export type CustomerPageId = MarketSectionType; // 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies'
 
@@ -108,6 +109,8 @@ export interface LivePageEditorConfig {
 
 export interface LivePageVersionSnapshot {
   versionId: string;
+  recordId?: string;
+  status?: 'draft' | 'published' | 'superseded_draft';
   versionNumber: number;
   publishedAt: string;
   publishedBy: string;
@@ -644,7 +647,7 @@ export function loadLivePageVersions(): LivePageVersionSnapshot[] {
       publishedAt: '2026-10-30 09:00:00',
       publishedBy: 'Narendra (Super Admin)',
       summary: 'Initial baseline configuration across all 6 customer-facing marketplace pages',
-      platforms: ['Web SPA', 'Android App (OTA)', 'iOS App (OTA)'],
+      platforms: ['React web clients'],
       configSnapshot: DEFAULT_LIVE_PAGE_CONFIG,
     },
   ];
@@ -673,32 +676,74 @@ export async function fetchLivePageConfigFromBackend(): Promise<{
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  try {
-    const res = await fetch('/api/live-page-config');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.published) {
-        safeWriteLocal(STORAGE_KEYS.PUBLISHED, data.published);
-      }
-      if (data.draft) {
-        safeWriteLocal(STORAGE_KEYS.DRAFT, data.draft);
-      }
-      if (Array.isArray(data.versions) && data.versions.length > 0) {
-        safeWriteLocal(STORAGE_KEYS.VERSIONS, data.versions);
-      }
-      if (Array.isArray(data.auditLogs) && data.auditLogs.length > 0) {
-        safeWriteLocal(STORAGE_KEYS.AUDIT, data.auditLogs);
-      }
-    }
-  } catch {
-    // Graceful fallback to local storage if dev server route is warming up
+  if (!supabase) {
+    return {
+      published: loadPublishedLivePageConfig(),
+      draft: loadDraftLivePageConfig(),
+      versions: loadLivePageVersions(),
+      auditLogs: loadLivePageAuditLogs(),
+    };
   }
-  return {
-    published: loadPublishedLivePageConfig(),
-    draft: loadDraftLivePageConfig(),
-    versions: loadLivePageVersions(),
-    auditLogs: loadLivePageAuditLogs(),
+
+  const { data, error } = await supabase
+    .from('platform_config_versions')
+    .select('id, version_number, status, config, summary, created_by, created_at, published_at, source_version_id')
+    .eq('config_key', 'global')
+    .order('version_number', { ascending: false })
+    .limit(50);
+  if (error) throw new Error(`APP_CONFIG_LOAD_FAILED: ${error.message}`);
+
+  type ConfigVersionRow = {
+    id: string;
+    version_number: number;
+    status: 'draft' | 'published' | 'superseded_draft';
+    config: LivePageEditorConfig;
+    summary: string;
+    created_by: string;
+    created_at: string;
+    published_at: string | null;
+    source_version_id: string | null;
   };
+  const rows = (data || []) as ConfigVersionRow[];
+  const toConfig = (row: ConfigVersionRow): LivePageEditorConfig => ({
+    ...DEFAULT_LIVE_PAGE_CONFIG,
+    ...row.config,
+    versionId: `v1.${row.version_number}.0`,
+    lastPublishedAt: row.published_at || row.created_at,
+    publishedBy: row.created_by,
+    pages: ensurePageSectionsMerged(row.config?.pages || {} as LivePageEditorConfig['pages']),
+    domOverrides: row.config?.domOverrides || {},
+  });
+  const publishedRow = rows.find((row) => row.status === 'published');
+  const draftRow = rows.find((row) => row.status === 'draft');
+  const versions: LivePageVersionSnapshot[] = rows.map((row) => ({
+    versionId: `v1.${row.version_number}.0`,
+    recordId: row.id,
+    status: row.status,
+    versionNumber: row.version_number,
+    publishedAt: row.published_at || row.created_at,
+    publishedBy: row.created_by,
+    summary: row.summary,
+    platforms: ['React web clients'],
+    configSnapshot: toConfig(row),
+  }));
+  const auditLogs: LivePageAuditEntry[] = rows.map((row) => ({
+    id: row.id,
+    timestamp: row.created_at,
+    actor: row.created_by,
+    role: 'admin',
+    action: row.status === 'published' ? 'Published App Builder configuration' : `App Builder ${row.status}`,
+    pageId: 'all_pages',
+    details: row.summary,
+    versionId: `v1.${row.version_number}.0`,
+  }));
+  const published = publishedRow ? toConfig(publishedRow) : DEFAULT_LIVE_PAGE_CONFIG;
+  const draft = draftRow ? toConfig(draftRow) : published;
+  safeWriteLocal(STORAGE_KEYS.PUBLISHED, published);
+  safeWriteLocal(STORAGE_KEYS.DRAFT, draft);
+  safeWriteLocal(STORAGE_KEYS.VERSIONS, versions);
+  safeWriteLocal(STORAGE_KEYS.AUDIT, auditLogs);
+  return { published, draft, versions, auditLogs };
 }
 
 export async function saveLivePageDraftToBackend(
@@ -708,59 +753,60 @@ export async function saveLivePageDraftToBackend(
   actor = 'Narendra (Super Admin)'
 ): Promise<{
   draft: LivePageEditorConfig;
+  versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  safeWriteLocal(STORAGE_KEYS.DRAFT, draftConfig);
-
-  const localAudit: LivePageAuditEntry = {
-    id: `AUD-DRF-${Date.now().toString().slice(-5)}`,
-    timestamp: now,
-    actor,
-    role: 'admin',
-    action: 'Saved Page Draft',
-    pageId,
-    details: summary,
+  if (!supabase) throw new Error('APP_CONFIG_SUPABASE_NOT_CONFIGURED');
+  const { data, error } = await supabase.rpc('save_app_builder_config_draft', {
+    p_config: draftConfig,
+    p_summary: `${pageId}: ${summary}`.slice(0, 500),
+  });
+  if (error) throw new Error(`APP_CONFIG_DRAFT_SAVE_FAILED: ${error.message}`);
+  const row = data as { id: string; version_number: number; created_by: string; created_at: string; summary: string };
+  const savedDraft: LivePageEditorConfig = {
+    ...draftConfig,
+    versionId: `v1.${row.version_number}.0`,
+    lastPublishedAt: row.created_at,
+    publishedBy: row.created_by,
   };
-  const nextAudits = [localAudit, ...loadLivePageAuditLogs()].slice(0, 200);
-  safeWriteLocal(STORAGE_KEYS.AUDIT, nextAudits);
-
+  safeWriteLocal(STORAGE_KEYS.DRAFT, savedDraft);
+  const version: LivePageVersionSnapshot = {
+    versionId: savedDraft.versionId,
+    recordId: row.id,
+    status: 'draft',
+    versionNumber: row.version_number,
+    publishedAt: row.created_at,
+    publishedBy: row.created_by,
+    summary: row.summary,
+    platforms: ['React web clients'],
+    configSnapshot: savedDraft,
+  };
+  const versions = [version, ...loadLivePageVersions().filter((item) => item.recordId !== row.id)].slice(0, 50);
+  safeWriteLocal(STORAGE_KEYS.VERSIONS, versions);
+  const audit: LivePageAuditEntry = {
+    id: row.id,
+    timestamp: row.created_at,
+    actor: row.created_by,
+    role: 'admin',
+    action: 'Saved App Builder draft',
+    pageId,
+    details: row.summary,
+    versionId: savedDraft.versionId,
+  };
+  const auditLogs = [audit, ...loadLivePageAuditLogs()].filter((item, index, rows) => rows.findIndex((entry) => entry.id === item.id) === index).slice(0, 200);
+  safeWriteLocal(STORAGE_KEYS.AUDIT, auditLogs);
   appendAdminAuditLog('Content Management', `Live Page Editor Draft (${pageId})`, summary, 'draft_saved', actor, 'admin');
-
-  try {
-    const res = await fetch('/api/live-page-config/draft', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-admin-role': 'admin',
-      },
-      body: JSON.stringify({
-        role: 'admin',
-        config: draftConfig,
-        pageId,
-        summary,
-        actor,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.auditLogs)) {
-        safeWriteLocal(STORAGE_KEYS.AUDIT, data.auditLogs);
-      }
-    }
-  } catch {
-    // Local storage already updated
-  }
 
   window.dispatchEvent(
     new CustomEvent('bos-live-page-config-updated', {
-      detail: { mode: 'draft', config: draftConfig },
+      detail: { mode: 'draft', config: savedDraft },
     })
   );
 
   return {
-    draft: draftConfig,
-    auditLogs: loadLivePageAuditLogs(),
+    draft: savedDraft,
+    versions,
+    auditLogs,
   };
 }
 
@@ -774,79 +820,55 @@ export async function publishLivePageConfigToBackend(
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const existingVersions = loadLivePageVersions();
-  const nextNum = (existingVersions[0]?.versionNumber || 1) + 1;
-  const versionId = `v1.${nextNum}.0`;
-
+  if (!supabase) throw new Error('APP_CONFIG_SUPABASE_NOT_CONFIGURED');
+  const saved = await supabase.rpc('save_app_builder_config_draft', {
+    p_config: configToPublish,
+    p_summary: `${pageId}: ${summary}`.slice(0, 500),
+  });
+  if (saved.error) throw new Error(`APP_CONFIG_DRAFT_SAVE_FAILED: ${saved.error.message}`);
+  const savedRow = saved.data as { id: string };
+  const publishedResult = await supabase.rpc('publish_app_builder_config_draft', {
+    p_draft_id: savedRow.id,
+  });
+  if (publishedResult.error) throw new Error(`APP_CONFIG_PUBLISH_FAILED: ${publishedResult.error.message}`);
+  const row = publishedResult.data as {
+    id: string; version_number: number; config: LivePageEditorConfig;
+    created_by: string; created_at: string; published_at: string; summary: string;
+  };
   const stampedConfig: LivePageEditorConfig = {
-    ...configToPublish,
-    versionId,
-    lastPublishedAt: now,
-    publishedBy: actor,
+    ...row.config,
+    versionId: `v1.${row.version_number}.0`,
+    lastPublishedAt: row.published_at,
+    publishedBy: row.created_by,
   };
-
-  const newSnapshot: LivePageVersionSnapshot = {
-    versionId,
-    versionNumber: nextNum,
-    publishedAt: now,
-    publishedBy: actor,
-    summary,
-    platforms: ['Web SPA', 'Android App (OTA)', 'iOS App (OTA)'],
-    configSnapshot: stampedConfig,
-  };
-
-  const nextVersions = [newSnapshot, ...existingVersions].slice(0, 50);
-  const newAudit: LivePageAuditEntry = {
-    id: `AUD-PUB-${Date.now().toString().slice(-5)}`,
-    timestamp: now,
-    actor,
-    role: 'admin',
-    action: `Published ${versionId} (OTA)`,
-    pageId,
-    details: `${summary} — Live across Android, iOS & Web without app update`,
-    versionId,
-  };
-  const nextAudits = [newAudit, ...loadLivePageAuditLogs()].slice(0, 200);
-
   safeWriteLocal(STORAGE_KEYS.PUBLISHED, stampedConfig);
   safeWriteLocal(STORAGE_KEYS.DRAFT, stampedConfig);
-  safeWriteLocal(STORAGE_KEYS.VERSIONS, nextVersions);
-  safeWriteLocal(STORAGE_KEYS.AUDIT, nextAudits);
-
-  appendAdminAuditLog(
-    'Content Management',
-    `Published Live Page ${versionId} (OTA)`,
-    `${summary} [Android • iOS • Web]`,
-    'published',
-    actor,
-    'admin'
-  );
-
-  try {
-    const res = await fetch('/api/live-page-config/publish', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-admin-role': 'admin',
-      },
-      body: JSON.stringify({
-        role: 'admin',
-        config: stampedConfig,
-        pageId,
-        summary,
-        actor,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.published) safeWriteLocal(STORAGE_KEYS.PUBLISHED, data.published);
-      if (Array.isArray(data.versions)) safeWriteLocal(STORAGE_KEYS.VERSIONS, data.versions);
-      if (Array.isArray(data.auditLogs)) safeWriteLocal(STORAGE_KEYS.AUDIT, data.auditLogs);
-    }
-  } catch {
-    // Local storage already updated
-  }
+  const version: LivePageVersionSnapshot = {
+    versionId: stampedConfig.versionId,
+    recordId: row.id,
+    status: 'published',
+    versionNumber: row.version_number,
+    publishedAt: row.published_at,
+    publishedBy: row.created_by,
+    summary: row.summary,
+    platforms: ['React web clients'],
+    configSnapshot: stampedConfig,
+  };
+  const versions = [version, ...loadLivePageVersions().filter((item) => item.recordId !== row.id)].slice(0, 50);
+  safeWriteLocal(STORAGE_KEYS.VERSIONS, versions);
+  const audit: LivePageAuditEntry = {
+    id: row.id,
+    timestamp: row.created_at,
+    actor: row.created_by,
+    role: 'admin',
+    action: `Published ${stampedConfig.versionId}`,
+    pageId,
+    details: row.summary,
+    versionId: stampedConfig.versionId,
+  };
+  const auditLogs = [audit, ...loadLivePageAuditLogs()].filter((item, index, rows) => rows.findIndex((entry) => entry.id === item.id) === index).slice(0, 200);
+  safeWriteLocal(STORAGE_KEYS.AUDIT, auditLogs);
+  appendAdminAuditLog('Content Management', `Published ${stampedConfig.versionId}`, `${summary} [React web clients]`, 'published', actor, 'admin');
 
   window.dispatchEvent(
     new CustomEvent('bos-live-page-config-updated', {
@@ -855,9 +877,9 @@ export async function publishLivePageConfigToBackend(
   );
 
   return {
-    published: loadPublishedLivePageConfig(),
-    versions: loadLivePageVersions(),
-    auditLogs: loadLivePageAuditLogs(),
+    published: stampedConfig,
+    versions,
+    auditLogs,
   };
 }
 
@@ -870,71 +892,52 @@ export async function rollbackLivePageConfigVersion(
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  const existingVersions = loadLivePageVersions();
-  const target = existingVersions.find((v) => v.versionId === targetVersionId);
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-  if (target) {
-    const restored: LivePageEditorConfig = {
-      ...target.configSnapshot,
-      versionId: `${target.versionId}-restored`,
-      lastPublishedAt: now,
-      publishedBy: actor,
-    };
-
-    const newAudit: LivePageAuditEntry = {
-      id: `AUD-RBK-${Date.now().toString().slice(-5)}`,
-      timestamp: now,
-      actor,
-      role: 'admin',
-      action: `Rolled Back to ${targetVersionId}`,
-      pageId: 'all_pages',
-      details: `Restored "${target.summary}" (${targetVersionId}) across Web, Android & iOS`,
-      versionId: targetVersionId,
-    };
-    const nextAudits = [newAudit, ...loadLivePageAuditLogs()].slice(0, 200);
-
-    safeWriteLocal(STORAGE_KEYS.PUBLISHED, restored);
-    safeWriteLocal(STORAGE_KEYS.DRAFT, restored);
-    safeWriteLocal(STORAGE_KEYS.AUDIT, nextAudits);
-
-    appendAdminAuditLog(
-      'Content Management',
-      `Rolled Back Live Page to ${targetVersionId}`,
-      `Restored ${targetVersionId} across Web, Android & iOS`,
-      'sensitive_confirmed',
-      actor,
-      'admin'
-    );
-
-    try {
-      await fetch('/api/live-page-config/rollback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-role': 'admin',
-        },
-        body: JSON.stringify({
-          role: 'admin',
-          versionId: targetVersionId,
-          actor,
-        }),
-      });
-    } catch {
-      // Local storage already updated
-    }
-
-    window.dispatchEvent(
-      new CustomEvent('bos-live-page-config-updated', {
-        detail: { mode: 'rollback', config: restored },
-      })
-    );
-  }
-
-  return {
-    published: loadPublishedLivePageConfig(),
-    draft: loadDraftLivePageConfig(),
-    versions: loadLivePageVersions(),
-    auditLogs: loadLivePageAuditLogs(),
+  if (!supabase) throw new Error('APP_CONFIG_SUPABASE_NOT_CONFIGURED');
+  const target = loadLivePageVersions().find((version) => version.versionId === targetVersionId);
+  if (!target?.recordId) throw new Error('APP_CONFIG_TARGET_VERSION_NOT_FOUND');
+  const { data, error } = await supabase.rpc('rollback_app_builder_config', {
+    p_target_version_id: target.recordId,
+    p_summary: `Rollback to ${targetVersionId}`,
+  });
+  if (error) throw new Error(`APP_CONFIG_ROLLBACK_FAILED: ${error.message}`);
+  const row = data as {
+    id: string; version_number: number; config: LivePageEditorConfig;
+    created_by: string; created_at: string; published_at: string; summary: string;
   };
+  const restored: LivePageEditorConfig = {
+    ...row.config,
+    versionId: `v1.${row.version_number}.0`,
+    lastPublishedAt: row.published_at,
+    publishedBy: row.created_by,
+  };
+  safeWriteLocal(STORAGE_KEYS.PUBLISHED, restored);
+  safeWriteLocal(STORAGE_KEYS.DRAFT, restored);
+  const version: LivePageVersionSnapshot = {
+    versionId: restored.versionId,
+    recordId: row.id,
+    status: 'published',
+    versionNumber: row.version_number,
+    publishedAt: row.published_at,
+    publishedBy: row.created_by,
+    summary: row.summary,
+    platforms: ['React web clients'],
+    configSnapshot: restored,
+  };
+  const versions = [version, ...loadLivePageVersions().filter((item) => item.recordId !== row.id)].slice(0, 50);
+  safeWriteLocal(STORAGE_KEYS.VERSIONS, versions);
+  const audit: LivePageAuditEntry = {
+    id: row.id,
+    timestamp: row.created_at,
+    actor: row.created_by,
+    role: 'admin',
+    action: `Rolled back from ${targetVersionId}`,
+    pageId: 'all_pages',
+    details: row.summary,
+    versionId: restored.versionId,
+  };
+  const auditLogs = [audit, ...loadLivePageAuditLogs()].filter((item, index, rows) => rows.findIndex((entry) => entry.id === item.id) === index).slice(0, 200);
+  safeWriteLocal(STORAGE_KEYS.AUDIT, auditLogs);
+  appendAdminAuditLog('Content Management', `Rolled Back Live Page to ${targetVersionId}`, `Created ${restored.versionId} from ${targetVersionId}`, 'sensitive_confirmed', actor, 'admin');
+  window.dispatchEvent(new CustomEvent('bos-live-page-config-updated', { detail: { mode: 'rollback', config: restored } }));
+  return { published: restored, draft: restored, versions, auditLogs };
 }
