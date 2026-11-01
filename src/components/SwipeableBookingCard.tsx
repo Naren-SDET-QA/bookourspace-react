@@ -1,16 +1,16 @@
 import React, { useRef, useState } from 'react';
 import { Trash2, Ban, ChevronLeft, Download, Printer } from 'lucide-react';
-import { Booking, Listing } from '../types/marketplace';
+import { Booking, MarketplaceListing } from '../types/marketplace';
 import { UniversalBarcode } from './UniversalBarcode';
 
 interface SwipeableBookingCardProps {
   booking: Booking;
-  matchedListing?: Listing;
+  matchedListing?: MarketplaceListing;
   bookingCode: string;
   barcodeLabel: string;
   moduleTag: string;
   currentLang: string;
-  onOpenDetails: (listing: Listing) => void;
+  onOpenDetails: (listing: MarketplaceListing) => void;
   onCancelBooking: (booking: Booking) => void;
   onDeleteBooking: (booking: Booking) => void;
   onDownloadReceipt: (booking: Booking) => void;

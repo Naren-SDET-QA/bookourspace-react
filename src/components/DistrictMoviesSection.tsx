@@ -629,7 +629,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       if (selectedCityArea !== 'All Hyderabad') {
         const areaMatch =
           item.location.area.toLowerCase().includes(selectedCityArea.toLowerCase()) ||
-          item.location.address.toLowerCase().includes(selectedCityArea.toLowerCase());
+          item.location.area.toLowerCase().includes(selectedCityArea.toLowerCase());
         if (!areaMatch) return false;
       }
 

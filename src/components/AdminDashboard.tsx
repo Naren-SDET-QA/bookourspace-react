@@ -59,6 +59,9 @@ import { AdminThemeManagementSection } from './AdminThemeManagementSection';
 import { AdminIntegrationsSection } from './AdminIntegrationsSection';
 import { AdminDataManagementSection } from './AdminDataManagementSection';
 import { AdminAnnouncementsSection } from './AdminAnnouncementsSection';
+import { AdminPlatformModuleSettings } from './AdminPlatformModuleSettings';
+import { AdminMarketplaceListings } from './AdminMarketplaceListings';
+import { AdminStayInventory } from './AdminStayInventory';
 import {
   AdminManagedUser,
   AdminRolePermissions,
@@ -128,6 +131,7 @@ import {
   updateServerAdminUserRole,
   updateServerAdminUserVerify,
   sendServerNotification,
+  updateRlsListing,
 } from '../lib/supabaseClient';
 
 interface AdminDashboardProps {
@@ -154,6 +158,10 @@ export type SuperAdminSectionId =
   | 'notifications_mgmt'
   | 'app_settings';
 
+// Financial state changes stay unavailable until a server-verified, audited
+// payment/refund/settlement workflow is connected to this console.
+const FINANCIAL_ADMIN_MUTATIONS_READY = false;
+
 interface SensitiveActionModalState {
   isOpen: boolean;
   title: string;
@@ -179,10 +187,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     updatePostingPlan,
     listings,
     updateListing,
+    applyListingUpdateLocal,
     updateListingStatus,
-    toggleFeaturedListing,
     deleteListing,
-    dismissReport,
     bookings,
     transactions,
     recordPayment,
@@ -650,6 +657,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleRecordNewTransaction = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      showAdminNotification('Manual transaction recording is disabled until a verified server-side payment workflow is available.');
+      return;
+    }
     const amt = Number(newTxAmount) || 499;
     const createdTx = recordPayment(newTxType, amt, newTxDesc.trim(), newTxMethod);
     logAction(
@@ -667,6 +678,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     refund: AdminRefundRecord,
     nextStatus: 'approved' | 'processed' | 'rejected'
   ) => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      showAdminNotification('Refund status changes are disabled until an audited refund workflow is available.');
+      return;
+    }
     requestSensitiveConfirmation(
       `${nextStatus.toUpperCase()} Refund ${refund.id}?`,
       `Confirm marking refund of ₹${refund.amount} for ${refund.customerOrProviderName} (Invoice ${refund.invoiceNumber}) as ${nextStatus.toUpperCase()}.`,
@@ -695,6 +710,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     payout: AdminPayoutRecord,
     nextStatus: 'paid' | 'on_hold' | 'scheduled'
   ) => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      showAdminNotification('Payout status changes are disabled until a verified settlement workflow is available.');
+      return;
+    }
     requestSensitiveConfirmation(
       `Update Provider Payout ${payout.id}?`,
       `Set net payout of ₹${payout.netPayout.toLocaleString('en-IN')} for ${payout.providerName} to ${nextStatus.toUpperCase()}?`,
@@ -719,6 +738,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleSavePaymentSettings = (publishState: 'draft' | 'published') => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      showAdminNotification('Payment and fee settings are read-only until a reviewed backend workflow exists.');
+      return;
+    }
     const next: AdminPaymentSettings = {
       ...paymentSettings,
       publishState,
@@ -950,9 +973,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [editListingTitle, setEditListingTitle] = useState('');
   const [editListingPrice, setEditListingPrice] = useState('');
-  const [venueStatuses, setVenueStatuses] = useState<
-    Record<string, 'Available' | 'Booked' | 'Maintenance'>
-  >({});
 
   // Audit Filter
   const [auditFilterSection, setAuditFilterSection] = useState<string>('ALL');
@@ -991,11 +1011,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return 0;
     });
 
-  const handleApproveProviderRequest = (
+  const handleApproveProviderRequest = async (
     listing: MarketplaceListing,
     openInApp = false
   ) => {
-    updateListingStatus(listing.id, 'active');
+    const saved = await updateListingStatus(listing.id, 'active');
+    if (!saved) {
+      showAdminNotification('Could not save the approval. Check the Supabase session and listing permissions, then retry.');
+      return;
+    }
     logAction(
       'Listings & Venues',
       'Approved Provider Listing',
@@ -1015,8 +1039,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       `Reject Listing "${listing.title}"?`,
       `Rejecting this listing by ${listing.providerName} will prevent it from appearing in the public marketplace.`,
       'Reject Listing',
-      () => {
-        updateListingStatus(listing.id, 'rejected');
+      async () => {
+        const saved = await updateListingStatus(listing.id, 'rejected');
+        if (!saved) {
+          showAdminNotification('Could not save the rejection. Check the Supabase session and listing permissions, then retry.');
+          return;
+        }
         logAction(
           'Listings & Venues',
           'Rejected Provider Listing',
@@ -1029,6 +1057,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       },
       true
     );
+  };
+
+  const persistAdminListingPatch = async (
+    listing: MarketplaceListing,
+    updates: Partial<MarketplaceListing>,
+    successMessage: string
+  ) => {
+    const updated = { ...listing, ...updates };
+    const saved = await updateRlsListing(listing.id, updates, updated);
+    if (!saved) {
+      showAdminNotification('The listing change was not saved. Sign in with an active Supabase admin and retry.');
+      return false;
+    }
+    applyListingUpdateLocal(listing.id, updates);
+    showAdminNotification(successMessage);
+    return true;
   };
 
   const handleCreateCategory = (e: React.FormEvent) => {
@@ -1134,6 +1178,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSavePlan = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      showAdminNotification('Pricing and posting-plan changes are disabled until a reviewed backend workflow exists.');
+      return;
+    }
     if (!editingPlan) return;
     updatePostingPlan(editingPlan.id, editingPlan);
     logAction(
@@ -2078,7 +2126,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span>Payment Management (Transactions, Refunds, Payouts & GST Invoices)</span>
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Manage transactions, customer refunds, provider payouts, platform commission rates, and printable PDF GST tax bills.
+                    Review-only ledger and settings. No payment, refund, payout, settlement or fee status is verified or mutable here.
                   </p>
                 </div>
 
@@ -2107,6 +2155,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ))}
                 </div>
               </div>
+
+              <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950" role="status">Financial controls are locked because this admin console has no verified transaction, refund or settlement workflow with server authorization and audit logging. Values shown may come from local legacy storage and are not proof of payment.</p>
 
               {/* Payment KPIs */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -2154,6 +2204,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {/* SUB-TAB 2A: TRANSACTIONS & GST INVOICES */}
               {paymentSubTab === 'transactions' && (
                 <div className="space-y-4">
+                  <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950" role="status">Financial actions are read-only here. Manual transactions, payment status changes, refunds and settlements require verified backend workflows and audit logging.</p>
                   {/* Quick Record Payment Form */}
                   <form
                     onSubmit={handleRecordNewTransaction}
@@ -2166,6 +2217,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <input
                         type="text"
                         required
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         value={newTxDesc}
                         onChange={(e) => setNewTxDesc(e.target.value)}
                         className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
@@ -2176,6 +2228,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <input
                         type="number"
                         required
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         value={newTxAmount}
                         onChange={(e) => setNewTxAmount(e.target.value)}
                         className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 font-bold"
@@ -2184,6 +2237,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div>
                       <label className="font-bold block mb-1">Method</label>
                       <select
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         value={newTxMethod}
                         onChange={(e) => setNewTxMethod(e.target.value)}
                         className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
@@ -2195,7 +2249,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-pointer"
+                      disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-not-allowed disabled:opacity-40"
                     >
                       + Record & Bill
                     </button>
@@ -2336,14 +2391,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleRefundAction(ref, 'processed')}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-bold cursor-pointer"
+                                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                                title="Disabled until an audited refund workflow is connected"
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-bold cursor-not-allowed disabled:opacity-40"
                               >
                                 Approve & Refund
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleRefundAction(ref, 'rejected')}
-                                className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-700 text-[11px] font-bold cursor-pointer"
+                                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                                title="Disabled until an audited refund workflow is connected"
+                                className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-700 text-[11px] font-bold cursor-not-allowed disabled:opacity-40"
                               >
                                 Reject
                               </button>
@@ -2408,14 +2467,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handlePayoutAction(pay, 'paid')}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-bold cursor-pointer"
+                                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                                title="Disabled until a verified settlement workflow is connected"
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-bold cursor-not-allowed disabled:opacity-40"
                               >
                                 Release Payout
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handlePayoutAction(pay, 'on_hold')}
-                                className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 text-[11px] font-bold cursor-pointer"
+                                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                                title="Disabled until a verified settlement workflow is connected"
+                                className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 text-[11px] font-bold cursor-not-allowed disabled:opacity-40"
                               >
                                 Hold
                               </button>
@@ -2457,7 +2520,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => setEditingPlan(plan)}
-                        className="w-full py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:border-purple-500 cursor-pointer"
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                        className="w-full py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:border-purple-500 cursor-not-allowed disabled:opacity-40"
                       >
                         Edit Plan & Fee
                       </button>
@@ -2476,6 +2540,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </label>
                       <input
                         type="number"
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         value={paymentSettings.platformCommissionPercent}
                         onChange={(e) =>
                           setPaymentSettings({
@@ -2490,6 +2555,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <label className="font-bold block mb-1">GST Tax Rate (%)</label>
                       <input
                         type="number"
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         value={paymentSettings.gstPercent}
                         onChange={(e) =>
                           setPaymentSettings({
@@ -2506,6 +2572,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </label>
                       <input
                         type="number"
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         value={paymentSettings.minimumPayoutAmount}
                         onChange={(e) =>
                           setPaymentSettings({
@@ -2528,6 +2595,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       >
                         <input
                           type="checkbox"
+                          disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                           checked={paymentSettings.supportedMethods[m]}
                           onChange={(e) =>
                             setPaymentSettings({
@@ -2549,14 +2617,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       type="button"
                       onClick={() => handleSavePaymentSettings('draft')}
-                      className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 font-bold cursor-pointer"
+                      disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                      className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 font-bold cursor-not-allowed disabled:opacity-40"
                     >
                       Save as Draft
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSavePaymentSettings('published')}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-pointer"
+                      disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-not-allowed disabled:opacity-40"
                     >
                       Publish Payment Settings
                     </button>
@@ -3995,7 +4065,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               SECTION 6: LISTINGS & VENUES (Approvals, Edits, Reports, Featured, Venue Status)
              ===================================================================== */}
           {activeSection === 'listings_venues' && (
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-5">
+            <div className="space-y-5">
+              <AdminStayInventory />
+              <AdminMarketplaceListings />
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-wider text-amber-600">
@@ -4031,8 +4104,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="space-y-3">
                 {filteredModerationListings.slice(0, 25).map((listing) => {
                   const isEditingThis = editingListingId === listing.id;
-                  const venueState =
-                    venueStatuses[listing.id] || 'Available';
                   return (
                     <div
                       key={listing.id}
@@ -4057,8 +4128,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             >
                               {listing.status}
                             </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
-                              Venue Status: {venueState}
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                              Inventory status is not configured
                             </span>
                             {listing.reported && (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
@@ -4087,12 +4158,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               />
                               <button
                                 type="button"
-                                onClick={() => {
-                                  updateListing(listing.id, {
+                                onClick={async () => {
+                                  const updates = {
                                     title: editListingTitle.trim() || listing.title,
                                     price:
                                       Number(editListingPrice) || listing.price,
-                                  });
+                                  };
+                                  const saved = await persistAdminListingPatch(
+                                    listing,
+                                    updates,
+                                    'Listing details saved to Supabase.'
+                                  );
+                                  if (!saved) return;
                                   logAction(
                                     'Listings & Venues',
                                     'Edited Listing Details',
@@ -4100,9 +4177,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     'published'
                                   );
                                   setEditingListingId(null);
-                                  showAdminNotification(
-                                    '✅ Listing updated in live database!'
-                                  );
                                 }}
                                 className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold cursor-pointer"
                               >
@@ -4123,28 +4197,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                        <select
-                          value={venueState}
-                          onChange={(e) => {
-                            const nextState = e.target.value as any;
-                            setVenueStatuses({
-                              ...venueStatuses,
-                              [listing.id]: nextState,
-                            });
-                            logAction(
-                              'Listings & Venues',
-                              'Updated Venue Status',
-                              `Set "${listing.title}" status to ${nextState}`,
-                              'published'
-                            );
-                          }}
-                          className="px-2 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-bold"
-                        >
-                          <option value="Available">Available</option>
-                          <option value="Booked">Booked Full</option>
-                          <option value="Maintenance">Maintenance</option>
-                        </select>
-
                         <button
                           type="button"
                           onClick={() => {
@@ -4170,8 +4222,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         ) : (
                           <button
                             type="button"
-                            onClick={() => {
-                              toggleFeaturedListing(listing.id);
+                            onClick={async () => {
+                              const saved = await persistAdminListingPatch(
+                                listing,
+                                { isFeatured: !listing.isFeatured },
+                                'Featured status saved to Supabase.'
+                              );
+                              if (!saved) return;
                               logAction(
                                 'Listings & Venues',
                                 'Toggled Featured Listing',
@@ -4192,7 +4249,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {listing.reported && (
                           <button
                             type="button"
-                            onClick={() => dismissReport(listing.id)}
+                            onClick={async () => {
+                              await persistAdminListingPatch(
+                                listing,
+                                { reported: false, reportReason: undefined },
+                                'Listing report cleared in Supabase.'
+                              );
+                            }}
                             className="px-2.5 py-1.5 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold cursor-pointer"
                           >
                             Dismiss Report
@@ -4202,6 +4265,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   );
                 })}
+              </div>
               </div>
             </div>
           )}
@@ -4271,7 +4335,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         onClick={() => {
+                          if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+                            showAdminNotification('Refunding a dispute is disabled until an audited refund workflow is available.');
+                            return;
+                          }
                           const updated = disputes.map((item) =>
                             item.id === d.id
                               ? { ...item, status: 'resolved_refund' as const }
@@ -4289,7 +4358,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             `✅ Dispute ${d.id} resolved with customer refund.`
                           );
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold cursor-not-allowed disabled:opacity-40"
                       >
                         Resolve & Refund
                       </button>
@@ -4459,6 +4528,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
              ===================================================================== */}
           {activeSection === 'feature_management' && (
             <div className="space-y-5">
+              <AdminPlatformModuleSettings />
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-4">
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-wider text-purple-600">
@@ -5292,6 +5362,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <input
                 type="number"
                 required
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                 value={editingPlan.price}
                 onChange={(e) =>
                   setEditingPlan({
@@ -5312,7 +5383,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 bg-purple-600 text-white rounded-xl font-bold"
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                className="px-5 py-2 bg-purple-600 text-white rounded-xl font-bold cursor-not-allowed disabled:opacity-40"
               >
                 Save Plan
               </button>

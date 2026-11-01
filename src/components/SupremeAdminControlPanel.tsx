@@ -48,6 +48,7 @@ interface ManagedUserRecord {
 }
 
 const USERS_STORAGE_KEY = 'bos_supreme_users_payments_v1';
+const FINANCIAL_ADMIN_MUTATIONS_READY = false;
 
 const DEFAULT_MANAGED_USERS: ManagedUserRecord[] = [
   {
@@ -288,6 +289,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
 
   // Create new user & payment with instant GST receipt
   const handleAddUserPayment = () => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) return;
     if (!newUserName.trim()) return;
     const amt = Math.max(1, Number(newUserAmount) || 499);
     const created: ManagedUserRecord = {
@@ -678,6 +680,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
       {/* TAB 2: HIGH-SECURITY PAYMENT, USER MANAGEMENT & PRINT/PDF GST BILL */}
       {activeSubTab === 'payments_users' && (
         <div className="p-5 space-y-5">
+          <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950" role="status">This legacy panel uses local demo records. It cannot verify payments or issue authoritative GST invoices; creation, role changes and receipt generation are disabled.</p>
           <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-4">
             <h4 className="text-sm font-black text-emerald-950 dark:text-emerald-200 flex items-center gap-2 mb-1">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
@@ -690,6 +693,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
               <input
                 type="text"
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                 value={newUserName}
                 onChange={(e) => setNewUserName(e.target.value)}
                 placeholder="Customer / Business Name"
@@ -697,6 +701,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               />
               <input
                 type="text"
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                 value={newUserPhone}
                 onChange={(e) => setNewUserPhone(e.target.value)}
                 placeholder="Phone (+91...)"
@@ -704,6 +709,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               />
               <input
                 type="text"
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                 value={newUserGstin}
                 onChange={(e) => setNewUserGstin(e.target.value)}
                 placeholder="GSTIN (Optional)"
@@ -711,6 +717,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               />
               <input
                 type="number"
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                 value={newUserAmount}
                 onChange={(e) => setNewUserAmount(e.target.value)}
                 placeholder="Amount (₹)"
@@ -719,6 +726,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={handleAddUserPayment}
+                disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer shadow-xs"
               >
                 + Record & Bill
@@ -754,6 +762,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                     <td className="py-3 px-3">
                       <select
                         value={u.role}
+                        disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                         onChange={(e) => {
                           const updated = managedUsers.map((item) =>
                             item.id === u.id
@@ -785,6 +794,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                       <div className="inline-flex items-center gap-1.5">
                         <button
                           type="button"
+                          disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                           onClick={() =>
                             printGSTInvoiceReceipt(buildPayloadFromUser(u))
                           }
@@ -795,6 +805,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                         </button>
                         <button
                           type="button"
+                          disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                           onClick={() =>
                             downloadGSTInvoicePDF(buildPayloadFromUser(u))
                           }

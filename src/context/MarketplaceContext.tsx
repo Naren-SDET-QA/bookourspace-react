@@ -109,8 +109,9 @@ interface MarketplaceContextType {
   // Listing Actions
   addListing: (listing: Omit<MarketplaceListing, 'id' | 'createdAt' | 'viewsCount' | 'enquiriesCount' | 'reported'>) => MarketplaceListing;
   updateListing: (id: string, updates: Partial<MarketplaceListing>) => void;
-  deleteListing: (id: string) => void;
-  updateListingStatus: (id: string, status: ListingStatus) => void;
+  deleteListing: (id: string) => Promise<boolean>;
+  updateListingStatus: (id: string, status: ListingStatus) => Promise<boolean>;
+  applyListingUpdateLocal: (id: string, updates: Partial<MarketplaceListing>) => void;
   toggleFeaturedListing: (id: string) => void;
   reportListing: (id: string, reason: string) => void;
   dismissReport: (id: string) => void;
@@ -887,30 +888,56 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     });
   };
 
-  const deleteListing = (id: string) => {
-    setListings(prev => prev.filter(l => l.id !== id));
-    void syncServerProviderListing('delete', id);
-    if (isSupabaseConfigured) {
-      void deleteRlsListing(id);
-    }
+  // Admin screens call this only after their own RLS-protected Supabase write
+  // has returned a matching row. It updates the in-memory view without issuing
+  // a second, fire-and-forget database request.
+  const applyListingUpdateLocal = (id: string, updates: Partial<MarketplaceListing>) => {
+    setListings((prev) => prev.map((listing) => listing.id === id ? { ...listing, ...updates } : listing));
   };
 
-  const updateListingStatus = (id: string, status: ListingStatus) => {
+  const deleteListing = async (id: string): Promise<boolean> => {
+    const target = listings.find((listing) => listing.id === id);
+    if (!target) return false;
+    if (isSupabaseConfigured) {
+      const saved = await deleteRlsListing(id);
+      if (!saved) return false;
+      void syncServerProviderListing('update', id, { status: 'expired' });
+    } else {
+      const saved = await syncServerProviderListing('update', id, { status: 'expired' });
+      if (!saved.ok) return false;
+    }
+    setListings((prev) => prev.filter((listing) => listing.id !== id));
+    return true;
+  };
+
+  const updateListingStatus = async (id: string, status: ListingStatus): Promise<boolean> => {
     const target = listings.find(l => l.id === id);
-    setListings(prev => {
-      const next = prev.map(l => l.id === id ? {
-        ...l,
+    if (!target) return false;
+    const updated: MarketplaceListing = {
+      ...target,
+      status,
+      isVerified: status === 'active' ? true : target.isVerified,
+      approvedAt: status === 'active' ? new Date().toLocaleTimeString() : target.approvedAt,
+    };
+
+    // Do not show a listing change as saved until the configured authoritative
+    // backend confirms it. Database RLS, not the browser role, authorizes writes.
+    if (isSupabaseConfigured) {
+      const saved = await updateRlsListing(id, updated, updated);
+      if (!saved) return false;
+      void syncServerProviderListing('update', id, {
         status,
-        isVerified: status === 'active' ? true : l.isVerified,
-        approvedAt: status === 'active' ? new Date().toLocaleTimeString() : l.approvedAt
-      } : l);
-      const updated = next.find(l => l.id === id);
-      void syncServerProviderListing('update', id, { status, isVerified: updated?.isVerified });
-      if (isSupabaseConfigured && updated) {
-        void updateRlsListing(id, { status, isVerified: updated.isVerified }, updated);
-      }
-      return next;
-    });
+        isVerified: updated.isVerified,
+      });
+    } else {
+      const saved = await syncServerProviderListing('update', id, {
+        status,
+        isVerified: updated.isVerified,
+      });
+      if (!saved.ok) return false;
+    }
+
+    setListings(prev => prev.map(l => l.id === id ? updated : l));
     setNotifications(prev => [
       {
         id: `notif-${Date.now()}`,
@@ -919,15 +946,14 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
           : status === 'rejected'
           ? '❌ Provider Request Rejected by Admin'
           : '⚠️ Post Status Updated',
-        message: target
-          ? `"${target.title}" by ${target.providerName} is now ${status === 'active' ? 'APPROVED & DISPLAYED IN APPLICATION' : status.toUpperCase()}`
-          : `Listing status changed to ${status.toUpperCase()}`,
+        message: `"${target.title}" by ${target.providerName} is now ${status === 'active' ? 'APPROVED & DISPLAYED IN APPLICATION' : status.toUpperCase()}`,
         time: 'Just now',
         type: 'approval',
         read: false
       },
       ...prev
     ]);
+    return true;
   };
 
   const toggleFeaturedListing = (id: string) => {
@@ -1436,6 +1462,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         updateListing,
         deleteListing,
         updateListingStatus,
+        applyListingUpdateLocal,
         toggleFeaturedListing,
         reportListing,
         dismissReport,

@@ -38,6 +38,16 @@ exception when others then
   end if;
 end $$;
 
+create or replace function pg_temp.ok_rowcount(label text, stmt text, expected integer)
+returns void language plpgsql as $$
+declare affected integer;
+begin
+  execute stmt;
+  get diagnostics affected = row_count;
+  if affected = expected then raise notice 'PASS  %', label;
+  else raise notice 'FAIL  % (expected % affected row(s), got %)', label, expected, affected; end if;
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- Fixtures (development data only)
 -- ---------------------------------------------------------------------------
@@ -45,7 +55,10 @@ end $$;
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'owner@example.test'),
   ('22222222-2222-2222-2222-222222222222', 'guest@example.test'),
-  ('33333333-3333-3333-3333-333333333333', 'other@example.test');
+  ('33333333-3333-3333-3333-333333333333', 'other@example.test'),
+  ('44444444-4444-4444-4444-444444444444', 'admin@bookourspace.in');
+update public.profiles set role = 'provider'
+ where id = '11111111-1111-1111-1111-111111111111';
 
 insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
 values ('listing-fixture-001',
@@ -195,12 +208,12 @@ select pg_temp.ok_raises('movie checkout cannot be enabled without approval',
   $q$update public.platform_module_flags set allow_online_booking = true where module_key = 'movies'$q$,
   'MOVIE_BOOKING_NOT_APPROVED');
 
+update public.platform_module_flags
+   set allow_online_booking = true, booking_approved_at = now()
+ where module_key = 'movies';
 select pg_temp.ok('movie checkout can be enabled once approval is recorded',
-  (with upd as (
-     update public.platform_module_flags
-        set allow_online_booking = true, booking_approved_at = now()
-      where module_key = 'movies' returning 1
-   ) select count(*) from upd) = 1);
+  (select allow_online_booking and booking_approved_at is not null
+     from public.platform_module_flags where module_key = 'movies'));
 
 update public.platform_module_flags
    set allow_online_booking = false, booking_approved_at = null
@@ -228,6 +241,119 @@ set role authenticated;
 select pg_temp.ok_raises('a guest cannot write module flags directly',
   $q$insert into public.platform_module_flags (module_key, allow_online_booking) values ('ecommerce', true)$q$,
   'row-level security');
+select pg_temp.ok_raises('a guest cannot use the admin stay inventory transaction',
+  $q$select public.admin_upsert_stay_inventory('invalid-listing', '11111111-1111-1111-1111-111111111111', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)$q$,
+  'ACTIVE_ADMIN_REQUIRED');
+update public.platform_module_flags set is_enabled = false where module_key = 'services';
+reset role;
+select pg_temp.ok('a guest cannot update published module settings',
+  (select is_enabled from public.platform_module_flags where module_key = 'services'));
+
+set test.uid = '44444444-4444-4444-4444-444444444444';
+set role authenticated;
+update public.platform_module_flags
+   set is_enabled = false,
+       allow_contact_owner = false,
+       updated_by = '44444444-4444-4444-4444-444444444444'
+ where module_key = 'services';
+select pg_temp.ok('an active admin can persist module visibility and contact settings',
+  (select not is_enabled and not allow_contact_owner
+       from public.platform_module_flags where module_key = 'services'));
+select pg_temp.ok('admin module changes persist with the admin actor recorded',
+  (select is_enabled = false and allow_contact_owner = false
+       and updated_by = '44444444-4444-4444-4444-444444444444'
+     from public.platform_module_flags where module_key = 'services'));
+select pg_temp.ok_rowcount('an active admin can persist marketplace listing edits',
+  $q$update public.listings set title = 'Admin-updated fixture listing' where id = 'listing-fixture-001'$q$, 1);
+select public.admin_upsert_stay_inventory(
+  'admin-created-stay-001', '11111111-1111-1111-1111-111111111111',
+  '{"title":"Admin-created stay","category_id":"hotels","subcategory":"hotel","price":7500,"price_unit":"per night","status":"pending_approval","payload":{}}'::jsonb,
+  '{"name":"Admin-created stay","property_type":"hotel","city":"Bengaluru","base_price_paise":750000,"tax_percent":12,"is_active":true}'::jsonb,
+  '[{"name":"Standard","max_adults":2,"max_children":1,"base_price_paise":750000,"is_active":true,"units":[{"label":"B-301","is_active":true},{"label":"B-302","is_active":true}]}]'::jsonb
+);
+select pg_temp.ok('an active admin can create a stay listing and property atomically',
+  exists (select 1 from public.stay_properties where listing_id = 'admin-created-stay-001'));
+select pg_temp.ok('the newly created stay room type was persisted',
+  (select count(*) = 1 from public.stay_room_types rt join public.stay_properties p on p.id = rt.property_id where p.listing_id = 'admin-created-stay-001'));
+select pg_temp.ok('the newly created physical stay units were persisted',
+  (select count(*) = 2 from public.stay_units u join public.stay_room_types rt on rt.id = u.room_type_id join public.stay_properties p on p.id = rt.property_id where p.listing_id = 'admin-created-stay-001'));
+select pg_temp.ok('an active admin can atomically edit property, room type and unit inventory',
+  public.admin_upsert_stay_inventory(
+    'listing-fixture-001', '11111111-1111-1111-1111-111111111111',
+    '{"title":"Admin Stay Fixture","category_id":"hotels","subcategory":"hotel","price":4500,"price_unit":"per night","status":"active","payload":{}}'::jsonb,
+    '{"name":"Admin Stay Fixture","property_type":"hotel","city":"Bengaluru","area":"Admin-reviewed area","base_price_paise":450000,"tax_percent":12,"is_active":true}'::jsonb,
+    '[{"id":"11111111-0000-0000-0000-000000000002","name":"Admin-reviewed room","max_adults":2,"max_children":0,"base_price_paise":450000,"is_active":true,"units":[{"id":"11111111-0000-0000-0000-00000000000a","label":"A-101","is_active":true},{"id":"11111111-0000-0000-0000-00000000000b","label":"A-102","is_active":true}]}]'::jsonb
+  )->>'listing_id' = 'listing-fixture-001'
+);
+select pg_temp.ok('stay inventory transaction records an immutable admin audit event',
+  exists (select 1 from public.stay_audit_events
+    where event = 'admin_inventory_saved'
+      and actor = '44444444-4444-4444-4444-444444444444'
+      and detail->>'listing_id' = 'listing-fixture-001'));
+select pg_temp.ok_raises('failed stay inventory transaction rejects duplicate unit labels atomically',
+  $q$select public.admin_upsert_stay_inventory(
+    'listing-fixture-001', '11111111-1111-1111-1111-111111111111',
+    '{"title":"Should Roll Back","category_id":"hotels","subcategory":"hotel","price":4500,"status":"active"}'::jsonb,
+    '{"name":"Should Roll Back","property_type":"hotel","city":"Bengaluru","base_price_paise":450000}'::jsonb,
+    '[{"id":"11111111-0000-0000-0000-000000000002","name":"Room","max_adults":2,"base_price_paise":450000,"units":[{"id":"11111111-0000-0000-0000-00000000000a","label":"duplicate","is_active":true},{"id":"11111111-0000-0000-0000-00000000000b","label":"duplicate","is_active":true}]}]'::jsonb
+  )$q$,
+  'stay_units_room_type_id_label_key');
+select pg_temp.ok('failed stay edit left the prior listing and property values intact',
+  (select title = 'Admin Stay Fixture' from public.listings where id = 'listing-fixture-001')
+  and (select name = 'Admin Stay Fixture' from public.stay_properties where id = '11111111-0000-0000-0000-000000000001'));
+select pg_temp.ok_rowcount('an active admin can update stay property fields',
+  $q$update public.stay_properties set area = 'Admin-reviewed area' where id = '11111111-0000-0000-0000-000000000001'$q$, 1);
+select pg_temp.ok_rowcount('an active admin can update room type fields',
+  $q$update public.stay_room_types set name = 'Admin-reviewed room' where id = '11111111-0000-0000-0000-000000000002'$q$, 1);
+select pg_temp.ok_rowcount('an active admin can safely deactivate a unit',
+  $q$update public.stay_units set is_active = false where id = '11111111-0000-0000-0000-00000000000b'$q$, 1);
+select pg_temp.ok_rowcount('an active admin cannot physically delete a property',
+  $q$delete from public.stay_properties where id = '11111111-0000-0000-0000-000000000001'$q$, 0);
+select pg_temp.ok('admin deactivation preserves the booking-linked stay inventory rows',
+  (select count(*) = 1 from public.stay_properties where id = '11111111-0000-0000-0000-000000000001')
+  and (select count(*) = 1 from public.stay_allocations where booking_id = 'booking-verified-001'));
+reset role;
+update public.stay_units set is_active = true
+ where id = '11111111-0000-0000-0000-00000000000b';
+update public.profiles set account_status = 'suspended'
+ where id = '44444444-4444-4444-4444-444444444444';
+set test.uid = '44444444-4444-4444-4444-444444444444';
+set role authenticated;
+update public.platform_module_flags set is_enabled = true where module_key = 'services';
+select pg_temp.ok_raises('a suspended admin cannot call the stay inventory transaction',
+  $q$select public.admin_upsert_stay_inventory('invalid-listing', '11111111-1111-1111-1111-111111111111', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)$q$,
+  'ACTIVE_ADMIN_REQUIRED');
+select pg_temp.ok_rowcount('a suspended admin cannot update marketplace listings',
+  $q$update public.listings set title = 'Should not persist' where id = 'listing-fixture-001'$q$, 0);
+select pg_temp.ok_rowcount('a suspended admin cannot update stay properties',
+  $q$update public.stay_properties set area = 'Should not persist' where id = '11111111-0000-0000-0000-000000000001'$q$, 0);
+select pg_temp.ok_rowcount('a suspended admin cannot update stay inventory',
+  $q$update public.stay_units set label = 'Should not persist' where id = '11111111-0000-0000-0000-00000000000a'$q$, 0);
+reset role;
+select pg_temp.ok('a suspended admin cannot update module settings',
+  (select not is_enabled and not allow_contact_owner
+     from public.platform_module_flags where module_key = 'services'));
+select pg_temp.ok('the suspended admin listing edit did not persist',
+  (select title = 'Admin Stay Fixture'
+     from public.listings where id = 'listing-fixture-001'));
+update public.profiles set account_status = 'active'
+ where id = '44444444-4444-4444-4444-444444444444';
+update public.platform_module_flags
+   set is_enabled = true, allow_contact_owner = true, updated_by = null
+ where module_key = 'services';
+update public.profiles set account_status = 'pending_verification'
+ where id = '44444444-4444-4444-4444-444444444444';
+set test.uid = '44444444-4444-4444-4444-444444444444';
+set role authenticated;
+update public.platform_module_flags set is_enabled = false where module_key = 'services';
+reset role;
+select pg_temp.ok('a pending-verification admin cannot update module settings',
+  (select is_enabled and allow_contact_owner
+     from public.platform_module_flags where module_key = 'services'));
+update public.profiles set account_status = 'active'
+ where id = '44444444-4444-4444-4444-444444444444';
+set test.uid = '22222222-2222-2222-2222-222222222222';
+set role authenticated;
 
 select pg_temp.ok_raises('a guest cannot insert allocations directly',
   $q$insert into public.stay_allocations (unit_id, status, stay_dates, expires_at)

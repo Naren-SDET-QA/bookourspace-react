@@ -117,6 +117,8 @@ export interface MarketplaceListing {
   providerAvatar: string;
   providerRating: number;
   reviewCount: number;
+  /** Optional legacy merchant VPA; payment is never considered verified from this value. */
+  upiId?: string;
   isVerified: boolean;
   isFeatured: boolean;
   status: ListingStatus;

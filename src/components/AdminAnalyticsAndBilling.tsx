@@ -73,6 +73,7 @@ export interface AutomatedBillingRecord {
 }
 
 const BILLING_STORAGE_KEY = 'bos_automated_billing_records_v1';
+const FINANCIAL_ADMIN_MUTATIONS_READY = false;
 
 const SEEDED_BILLING_RECORDS: AutomatedBillingRecord[] = [
   {
@@ -652,6 +653,10 @@ export const AutomatedBillingEnginePanel: React.FC<
   }, [billingRecords, statusFilter, typeFilter]);
 
   const handleTriggerEndOfCycleBilling = async () => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      onNotify('Automated billing is disabled until a verified server-side billing workflow is connected.');
+      return;
+    }
     setIsRunningCycle(true);
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const sampleListing = listings[0];
@@ -751,6 +756,10 @@ export const AutomatedBillingEnginePanel: React.FC<
   };
 
   const handleResendInvoiceEmail = (rec: AutomatedBillingRecord) => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      onNotify('Invoice dispatch is disabled until a verified billing workflow is connected.');
+      return;
+    }
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const updated = billingRecords.map((r) =>
       r.id === rec.id
@@ -778,6 +787,10 @@ export const AutomatedBillingEnginePanel: React.FC<
     rec: AutomatedBillingRecord,
     nextStatus: AutomatedBillingRecord['paymentStatus']
   ) => {
+    if (!FINANCIAL_ADMIN_MUTATIONS_READY) {
+      onNotify('Billing status is read-only until a verified backend workflow is connected.');
+      return;
+    }
     const updated = billingRecords.map((r) =>
       r.id === rec.id ? { ...r, paymentStatus: nextStatus } : r
     );
@@ -810,6 +823,7 @@ export const AutomatedBillingEnginePanel: React.FC<
 
   return (
     <div className="space-y-4">
+      <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950" role="status">Billing controls are read-only. This panel has no verified payment, email-dispatch or settlement backend.</p>
       {/* Engine Configuration & Trigger Banner */}
       <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-950 text-white p-4 sm:p-5 rounded-2xl border border-emerald-700/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1">
@@ -828,6 +842,7 @@ export const AutomatedBillingEnginePanel: React.FC<
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <select
             value={cycleFrequency}
+            disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
             onChange={(e) => setCycleFrequency(e.target.value as any)}
             className="px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-bold"
           >
@@ -838,7 +853,7 @@ export const AutomatedBillingEnginePanel: React.FC<
 
           <button
             type="button"
-            disabled={isRunningCycle}
+            disabled={isRunningCycle || !FINANCIAL_ADMIN_MUTATIONS_READY}
             onClick={handleTriggerEndOfCycleBilling}
             className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition"
           >
@@ -859,6 +874,7 @@ export const AutomatedBillingEnginePanel: React.FC<
             <input
               type="checkbox"
               checked={autoEmailEnabled}
+              disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
               onChange={(e) => setAutoEmailEnabled(e.target.checked)}
               className="rounded text-emerald-600"
             />
@@ -868,6 +884,7 @@ export const AutomatedBillingEnginePanel: React.FC<
             <input
               type="checkbox"
               checked={autoAttachGstPdf}
+              disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
               onChange={(e) => setAutoAttachGstPdf(e.target.checked)}
               className="rounded text-emerald-600"
             />
@@ -977,6 +994,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                 <td className="py-3 px-3">
                   <select
                     value={rec.paymentStatus}
+                    disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
                     onChange={(e) =>
                       handleUpdateBillingStatus(rec, e.target.value as any)
                     }
@@ -1001,7 +1019,8 @@ export const AutomatedBillingEnginePanel: React.FC<
                     <button
                       type="button"
                       onClick={() => handleResendInvoiceEmail(rec)}
-                      className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] hover:bg-indigo-100 cursor-pointer"
+                      disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
+                      className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] hover:bg-indigo-100 cursor-not-allowed disabled:opacity-40"
                       title="Send / Resend Automated Invoice Email"
                     >
                       ✉️ Email
