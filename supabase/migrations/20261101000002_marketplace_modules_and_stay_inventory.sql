@@ -97,7 +97,8 @@ create trigger trg_enforce_movie_booking_approval
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.provider_contact_settings (
-  listing_id            uuid primary key references public.listings(id) on delete cascade,
+  -- public.listings.id is TEXT in the existing schema (not uuid).
+  listing_id            text primary key references public.listings(id) on delete cascade,
   -- Which module this listing belongs to. Kept here because public.listings
   -- has no module column of its own (only category_id/entity_type).
   module_key            text not null default 'services'
@@ -125,7 +126,7 @@ create policy "Owners manage their contact settings"
 
 create table if not exists public.provider_contact_events (
   id            bigserial primary key,
-  listing_id    uuid not null references public.listings(id) on delete cascade,
+  listing_id    text not null references public.listings(id) on delete cascade,
   channel       text not null check (channel in ('call','whatsapp')),
   actor_user_id uuid references auth.users(id) on delete set null,
   created_at    timestamptz not null default now()
@@ -223,7 +224,7 @@ grant execute on function public.record_contact_click(uuid, text) to authenticat
 
 create table if not exists public.stay_properties (
   id            uuid primary key default gen_random_uuid(),
-  listing_id    uuid unique references public.listings(id) on delete cascade,
+  listing_id    text unique references public.listings(id) on delete cascade,
   owner_user_id uuid not null references auth.users(id) on delete cascade,
   name          text not null,
   property_type text not null default 'hotel'
@@ -293,7 +294,8 @@ create table if not exists public.stay_blocks (
 create table if not exists public.stay_allocations (
   id            uuid primary key default gen_random_uuid(),
   unit_id       uuid not null references public.stay_units(id) on delete cascade,
-  booking_id    uuid references public.bookings(id) on delete set null,
+  -- public.bookings.id is TEXT in the existing schema (not uuid).
+  booking_id    text references public.bookings(id) on delete set null,
   status        text not null default 'held'
                 check (status in ('held','confirmed','released','expired')),
   stay_dates    daterange not null,
@@ -446,11 +448,14 @@ security definer
 set search_path = public
 as $$
 declare
-  v_range daterange := daterange(p_from, p_to, '[)');
+  v_range daterange;
 begin
+  -- Validate BEFORE building the daterange: constructing daterange() with a
+  -- reversed bound raises its own error and would mask the real contract.
   if p_from >= p_to then
     raise exception 'INVALID_STAY_RANGE' using errcode = '22023';
   end if;
+  v_range := daterange(p_from, p_to, '[)');
 
   perform public.sweep_expired_stay_holds();
 
@@ -492,7 +497,7 @@ declare
   v_module public.platform_module_flags;
   v_property public.stay_properties;
   v_free uuid[];
-  v_range daterange := daterange(p_from, p_to, '[)');
+  v_range daterange;
   v_expires timestamptz := now() + make_interval(mins => greatest(1, least(p_hold_minutes, 30)));
   v_token uuid := gen_random_uuid();
 begin
@@ -507,6 +512,8 @@ begin
   if p_units is null or p_units < 1 then
     raise exception 'INVALID_UNIT_COUNT' using errcode = '22023';
   end if;
+
+  v_range := daterange(p_from, p_to, '[)');
 
   select p.* into v_property
     from public.stay_room_types rt
@@ -554,7 +561,7 @@ $$;
 -- browser cannot turn its own hold into a paid stay.
 create or replace function public.stay_confirm_booking(
   p_hold_token uuid,
-  p_booking_id uuid
+  p_booking_id text
 )
 returns int
 language plpgsql
@@ -617,11 +624,25 @@ begin
 end;
 $$;
 
-revoke all on function public.stay_confirm_booking(uuid, uuid) from anon, authenticated;
-grant execute on function public.stay_availability(uuid, date, date) to anon, authenticated;
-grant execute on function public.stay_hold_units(uuid, date, date, int, int) to authenticated;
-grant execute on function public.stay_release_hold(uuid) to authenticated;
-grant execute on function public.sweep_expired_stay_holds() to authenticated;
+-- New functions are EXECUTE-able by PUBLIC by default in PostgreSQL, so
+-- revoking from anon/authenticated alone would leave them world-callable.
+-- Strip the implicit PUBLIC grant first, then grant deliberately.
+revoke all on function public.stay_confirm_booking(uuid, text) from public, anon, authenticated;
+-- Only the server may turn a hold into a paid stay. Never the browser.
+grant execute on function public.stay_confirm_booking(uuid, text) to service_role;
+revoke all on function public.stay_hold_units(uuid, date, date, int, int) from public;
+revoke all on function public.stay_release_hold(uuid) from public;
+revoke all on function public.stay_availability(uuid, date, date) from public;
+revoke all on function public.sweep_expired_stay_holds() from public;
+revoke all on function public.provider_contact_details(uuid) from public;
+revoke all on function public.record_contact_click(uuid, text) from public;
+
+grant execute on function public.stay_availability(uuid, date, date) to anon, authenticated, service_role;
+-- service_role is the server: it places holds for owner-created/offline bookings
+-- and confirms them after verified payment.
+grant execute on function public.stay_hold_units(uuid, date, date, int, int) to authenticated, service_role;
+grant execute on function public.stay_release_hold(uuid) to authenticated, service_role;
+grant execute on function public.sweep_expired_stay_holds() to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. Audit trail for inventory changes
