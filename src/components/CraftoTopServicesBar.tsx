@@ -106,6 +106,7 @@ interface CraftoTopServicesBarProps {
   onExternalLoginModalClose?: () => void;
   selectedArea?: string;
   onSelectArea?: (area: string) => void;
+  onUseCurrentLocation?: () => Promise<void>;
   popularAreas?: string[];
   unreadNotificationsCount?: number;
   onOpenNotifications?: () => void;
@@ -154,6 +155,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   onExternalLoginModalClose,
   selectedArea = 'all',
   onSelectArea,
+  onUseCurrentLocation,
   popularAreas = [
     'All Areas in City',
     'Madhapur',
@@ -215,6 +217,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   const [oauthAuthError, setOauthAuthError] = useState<string | null>(null);
   const [oauthAuthSuccess, setOauthAuthSuccess] = useState<string | null>(null);
   const [oauthLoading, setOauthLoading] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   React.useEffect(() => {
     if (authUser) {
@@ -624,15 +627,29 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  const nextArea = selectedArea === 'Madhapur' ? 'Hitech City' : 'Madhapur';
-                  onSelectArea?.(nextArea);
+                onClick={async () => {
+                  if (!onUseCurrentLocation || isLocating) return;
+                  setIsLocating(true);
+                  try {
+                    await onUseCurrentLocation();
+                  } finally {
+                    setIsLocating(false);
+                  }
                 }}
+                disabled={!onUseCurrentLocation || isLocating}
+                aria-busy={isLocating}
+                title={isLocating ? 'Detecting your location' : 'Use your current location'}
                 className="flex items-center gap-1 text-[11px] sm:text-xs font-extrabold text-[#6D28D9] dark:text-purple-300 hover:text-[#4C1D95] dark:hover:text-purple-200 shrink-0 cursor-pointer"
               >
                 <LocateFixed className="w-3.5 h-3.5 text-[#6D28D9] dark:text-purple-400 shrink-0" />
                 <span className="whitespace-nowrap">
-                  {currentLang === 'te' ? 'ప్రస్తుత లొకేషన్' : 'Use current location'}
+                  {isLocating
+                    ? currentLang === 'te'
+                      ? 'లొకేషన్ వెతుకుతోంది…'
+                      : 'Locating…'
+                    : currentLang === 'te'
+                      ? 'ప్రస్తుత లొకేషన్'
+                      : 'Use current location'}
                 </span>
               </button>
             </div>
@@ -1678,7 +1695,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 const ProfileSavedAndWalletPanel: React.FC<{ currentLang: AppLanguage }> = ({
   currentLang,
 }) => {
-  const { listings, favoriteIds, toggleFavorite } = useMarketplace();
+  const { publicListings: listings, favoriteIds, toggleFavorite } = useMarketplace();
   const [activeTab, setActiveTab] = useState<'wallet' | 'favorites'>('wallet');
 
   const savedListings = listings.filter((l) => favoriteIds.includes(l.id));

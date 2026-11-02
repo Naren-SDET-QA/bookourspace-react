@@ -746,7 +746,7 @@ export const SectionSpotlightShowcase: React.FC<SectionSpotlightShowcaseProps> =
 
     if (matchingSectionListings.length > 0) {
       const topItem =
-        matchingSectionListings.find((i) => i.isFeatured || i.featured) ||
+        matchingSectionListings.find((i) => i.isFeatured) ||
         matchingSectionListings[0];
       if (
         card.section === 'classes' &&

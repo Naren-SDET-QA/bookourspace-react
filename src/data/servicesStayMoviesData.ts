@@ -1,5 +1,6 @@
 import { MarketplaceListing } from '../types/marketplace';
 import { VenueCategoryInfo } from './venueData';
+import { additionalServiceCategories } from './additionalServiceCategories';
 
 export type MarketSectionType =
   | 'pg_hostels'
@@ -150,6 +151,9 @@ export const servicesCategories: VenueCategoryInfo[] = [
     ],
   },
 ];
+
+// Extend the shared catalog for customer browsing and provider onboarding.
+servicesCategories.push(...additionalServiceCategories);
 
 // 2. HOTEL & STAY CATEGORIES
 export const hotelStayCategories: VenueCategoryInfo[] = [

@@ -3,10 +3,26 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
+import { evaluateStayCancellation } from './src/features/stays/stayCancellation';
+import { isSimulatedPaymentSettlementAllowed } from './src/lib/paymentSecurity';
+import { isCapturedRazorpayPayment, isValidRazorpayPaymentSignature } from './src/lib/razorpaySecurity';
+import { createMovieRouter } from './src/server/movieRoutes';
+import { localDemoMiddleware } from './src/server/localDemo';
+import { assertLocalHttpUrl } from './src/lib/localDemoSafety';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const localDemo = process.env.BOS_LOCAL_DEMO === 'true';
+if (localDemo) {
+  if (process.env.NODE_ENV === 'production') throw new Error('Local demo cannot run in production.');
+  assertLocalHttpUrl(process.env.VITE_SUPABASE_URL || '');
+  assertLocalHttpUrl(process.env.VITE_MOVIES_SUPABASE_URL || '');
+  if (!process.env.BOS_AUTH_STORE_FILE_PATH || !process.env.BOS_DEMO_ENV_DIR) throw new Error('Use npm run demo:start for an isolated runtime.');
+} else {
+  dotenv.config({ path: path.join(__dirname, '.env.local') });
+}
 
 const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
 
@@ -208,6 +224,8 @@ function saveServerStore(data: ServerStoreData) {
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
+  if (localDemo) app.use(localDemoMiddleware(process.env.VITE_SUPABASE_URL!));
+  app.use(createMovieRouter());
 
   // 1. GET Live Page Config (OTA endpoint consumed by Web, Android, and iOS clients)
   app.get('/api/live-page-config', (_req, res) => {
@@ -831,9 +849,33 @@ Task:
   // - Customer / Provider / Admin Role Isolation
   // ============================================================================
 
-  const AUTH_STORE_FILE_PATH = path.join(__dirname, 'authoritative-marketplace-store.json');
+  const AUTH_STORE_FILE_PATH =
+    process.env.BOS_AUTH_STORE_FILE_PATH || path.join(__dirname, 'authoritative-marketplace-store.json');
   const SERVER_HMAC_SECRET =
     process.env.BOS_SERVER_HMAC_SECRET || 'bos-production-hmac-secret-2026-v1-a9f8e7d6c5b4';
+  const RAZORPAY_KEY_ID = String(process.env.RAZORPAY_KEY_ID || '').trim();
+  const RAZORPAY_KEY_SECRET = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+
+  const razorpayApiRequest = async <T>(endpoint: string, init: RequestInit = {}): Promise<T> => {
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      throw new Error('RAZORPAY_NOT_CONFIGURED');
+    }
+
+    const authorization = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+    const response = await fetch(`https://api.razorpay.com/v1/${endpoint.replace(/^\//, '')}`, {
+      ...init,
+      headers: {
+        Authorization: `Basic ${authorization}`,
+        'content-type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+    const data = (await response.json().catch(() => ({}))) as T & { error?: { description?: string } };
+    if (!response.ok) {
+      throw new Error(data?.error?.description || 'RAZORPAY_API_ERROR');
+    }
+    return data;
+  };
 
   interface SeatLockEntry {
     key: string; // `${listingId}::${dateIso}::${showtime}::${seatId}`
@@ -859,6 +901,10 @@ Task:
     utrNumber?: string;
     gatewaySignature?: string;
     paymentVerificationToken?: string;
+    provider?: 'upi' | 'razorpay';
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
     createdAt: string;
     updatedAt: string;
   }
@@ -887,7 +933,7 @@ Task:
     discountAmount?: number;
     promoCode?: string;
     totalAmount: number;
-    paymentMode: 'pay_later' | 'pay_qr';
+    paymentMode: 'pay_later' | 'pay_qr' | 'razorpay';
     paymentStatus: 'pay_later' | 'pending_verification' | 'verified' | 'refunded' | 'failed';
     paymentIntentId?: string;
     paymentUtr?: string;
@@ -2479,8 +2525,187 @@ Task:
     });
   });
 
+  // 5B. RAZORPAY TEST/LIVE ORDER CREATION (SECRET STAYS SERVER-SIDE)
+  app.post('/api/payments/razorpay/order', async (req, res) => {
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      res.status(503).json({ ok: false, error: 'RAZORPAY_NOT_CONFIGURED' });
+      return;
+    }
+
+    const { amount, planOrListing, userId } = req.body || {};
+    const numericAmount = Number(amount);
+    const amountInPaise = Math.round(numericAmount * 100);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || amountInPaise < 100) {
+      res.status(400).json({ ok: false, error: 'INVALID_AMOUNT' });
+      return;
+    }
+
+    const intentId = `RZP-INT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const nowIso = new Date().toISOString();
+    const store = loadAuthoritativeStore();
+
+    try {
+      const order = await razorpayApiRequest<{
+        id: string;
+        amount: number;
+        currency: string;
+        status: string;
+        receipt?: string;
+      }>('orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: amountInPaise,
+          currency: 'INR',
+          receipt: intentId.slice(0, 40),
+          notes: {
+            bookourspace_intent_id: intentId,
+            plan_or_listing: String(planOrListing || 'BookOurSpace Stay').slice(0, 200),
+          },
+        }),
+      });
+
+      if (!order.id || order.amount !== amountInPaise || order.currency !== 'INR') {
+        res.status(502).json({ ok: false, error: 'RAZORPAY_ORDER_INVALID' });
+        return;
+      }
+
+      store.paymentIntents[intentId] = {
+        intentId,
+        userId: String(userId || 'guest'),
+        amount: numericAmount,
+        merchantVpa: '',
+        planOrListing: String(planOrListing || 'BookOurSpace Stay').trim(),
+        status: 'created',
+        provider: 'razorpay',
+        razorpayOrderId: order.id,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      saveAuthoritativeStore(store);
+
+      res.json({
+        ok: true,
+        keyId: RAZORPAY_KEY_ID,
+        intentId,
+        orderId: order.id,
+        amount: numericAmount,
+        amountInPaise,
+        currency: order.currency,
+        status: order.status,
+      });
+    } catch (error: any) {
+      console.error('Razorpay order creation failed:', error?.message || 'RAZORPAY_API_ERROR');
+      res.status(502).json({ ok: false, error: 'RAZORPAY_ORDER_FAILED' });
+    }
+  });
+
+  // 5C. RAZORPAY CHECKOUT SIGNATURE + CAPTURE VALIDATION
+  app.post('/api/payments/razorpay/verify', async (req, res) => {
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      res.status(503).json({ ok: false, verified: false, error: 'RAZORPAY_NOT_CONFIGURED' });
+      return;
+    }
+
+    const { intentId, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body || {};
+    const cleanIntentId = String(intentId || '').trim();
+    const cleanOrderId = String(razorpayOrderId || '').trim();
+    const cleanPaymentId = String(razorpayPaymentId || '').trim();
+    const cleanSignature = String(razorpaySignature || '').trim();
+    if (!cleanIntentId || !cleanOrderId || !cleanPaymentId || !cleanSignature) {
+      res.status(400).json({ ok: false, verified: false, error: 'INVALID_RAZORPAY_PAYLOAD' });
+      return;
+    }
+
+    const store = loadAuthoritativeStore();
+    const intent = store.paymentIntents[cleanIntentId];
+    if (!intent || intent.provider !== 'razorpay' || intent.razorpayOrderId !== cleanOrderId) {
+      res.status(404).json({ ok: false, verified: false, error: 'RAZORPAY_INTENT_NOT_FOUND' });
+      return;
+    }
+
+    if (
+      !isValidRazorpayPaymentSignature(
+        cleanOrderId,
+        cleanPaymentId,
+        cleanSignature,
+        RAZORPAY_KEY_SECRET
+      )
+    ) {
+      res.status(400).json({ ok: false, verified: false, error: 'RAZORPAY_SIGNATURE_INVALID' });
+      return;
+    }
+
+    if (intent.status === 'verified') {
+      if (intent.razorpayPaymentId === cleanPaymentId) {
+        res.json({
+          ok: true,
+          verified: true,
+          status: 'verified',
+          intentId: cleanIntentId,
+          paymentId: cleanPaymentId,
+          paymentVerificationToken: intent.paymentVerificationToken,
+          idempotentReplay: true,
+        });
+      } else {
+        res.status(409).json({ ok: false, verified: false, error: 'RAZORPAY_PAYMENT_REPLAY' });
+      }
+      return;
+    }
+
+    try {
+      const payment = await razorpayApiRequest<{
+        id: string;
+        order_id?: string;
+        amount: number;
+        currency: string;
+        status: string;
+      }>(`payments/${encodeURIComponent(cleanPaymentId)}`);
+      const expectedAmountInPaise = Math.round(intent.amount * 100);
+      if (!isCapturedRazorpayPayment(payment, {
+        paymentId: cleanPaymentId,
+        orderId: cleanOrderId,
+        amountInPaise: expectedAmountInPaise,
+      })) {
+        res.status(409).json({ ok: false, verified: false, error: 'RAZORPAY_PAYMENT_NOT_CAPTURED' });
+        return;
+      }
+
+      const verificationToken = computeHmac(
+        `${intent.intentId}|${cleanPaymentId}|RAZORPAY|VERIFIED|${intent.amount.toFixed(2)}`,
+        'RAZORPAY_PAYMENT_VERIFIED'
+      );
+      intent.status = 'verified';
+      intent.razorpayPaymentId = cleanPaymentId;
+      intent.razorpaySignature = cleanSignature;
+      intent.paymentVerificationToken = verificationToken;
+      intent.updatedAt = new Date().toISOString();
+      saveAuthoritativeStore(store);
+
+      res.json({
+        ok: true,
+        verified: true,
+        status: 'verified',
+        intentId: cleanIntentId,
+        paymentId: cleanPaymentId,
+        paymentVerificationToken: verificationToken,
+      });
+    } catch (error: any) {
+      console.error('Razorpay payment validation failed:', error?.message || 'RAZORPAY_API_ERROR');
+      res.status(502).json({ ok: false, verified: false, error: 'RAZORPAY_PAYMENT_LOOKUP_FAILED' });
+    }
+  });
+
   // 6. SIMULATED / GATEWAY NPCI WEBHOOK SETTLEMENT (Generates Authoritative Server Gateway Signature)
   app.post('/api/payments/webhook-settle', (req, res) => {
+    if (!isSimulatedPaymentSettlementAllowed(process.env)) {
+      res.status(403).json({
+        ok: false,
+        error: 'SIMULATED_SETTLEMENT_DISABLED',
+        message: 'Simulated settlement is disabled. Only a real provider webhook can mark a payment verified.',
+      });
+      return;
+    }
+
     const { intentId, utrNumber, amount } = req.body || {};
     const cleanIntentId = String(intentId || '').trim();
     const cleanUtr = String(utrNumber || '').trim().replace(/\s+/g, '');
@@ -2753,16 +2978,18 @@ Task:
     }
 
     // 8D. SERVER-SIDE PAYMENT STATUS RESOLUTION (Never trust client 'paid' boolean without intent verification)
-    const paymentMode: 'pay_later' | 'pay_qr' = body.paymentMode === 'pay_qr' ? 'pay_qr' : 'pay_later';
+    const paymentMode: 'pay_later' | 'pay_qr' | 'razorpay' =
+      body.paymentMode === 'razorpay' ? 'razorpay' : body.paymentMode === 'pay_qr' ? 'pay_qr' : 'pay_later';
     let paymentStatus: 'pay_later' | 'pending_verification' | 'verified' = 'pay_later';
     const paymentIntentId = body.paymentIntentId ? String(body.paymentIntentId).trim() : undefined;
     const paymentUtr = body.paymentUtr ? String(body.paymentUtr).trim() : undefined;
 
-    if (paymentMode === 'pay_qr') {
+    if (paymentMode === 'pay_qr' || paymentMode === 'razorpay') {
       const intent = paymentIntentId ? store.paymentIntents[paymentIntentId] : undefined;
       if (
         intent &&
         intent.status === 'verified' &&
+        (paymentMode === 'pay_qr' ? !intent.provider || intent.provider === 'upi' : intent.provider === 'razorpay') &&
         (!body.paymentVerificationToken ||
           intent.paymentVerificationToken === String(body.paymentVerificationToken))
       ) {
@@ -2882,6 +3109,116 @@ Task:
       ok: true,
       idempotentReplay: false,
       booking: newBooking,
+    });
+  });
+
+  // 8E. AUTHORITATIVE STAY CANCELLATION & REFUND INITIATION
+  // Refunds remain initiated until a real payment-provider reconciliation marks them complete.
+  app.post('/api/bookings/:id/cancel', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'Sign in to cancel a stay booking.' });
+      return;
+    }
+
+    const store = loadAuthoritativeStore();
+    const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
+    if (blocked) {
+      res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
+      return;
+    }
+
+    const bookingId = String(req.params.id || '').trim();
+    const booking = store.bookings.find((candidate) => candidate.id === bookingId);
+    if (!booking) {
+      res.status(404).json({ ok: false, error: 'BOOKING_NOT_FOUND', message: `Booking "${bookingId}" was not found.` });
+      return;
+    }
+
+    if (Array.isArray(booking.seats) && booking.seats.length > 0) {
+      res.status(409).json({
+        ok: false,
+        error: 'USE_MOVIE_CANCELLATION_ENDPOINT',
+        message: 'Movie seat bookings must use the cinema cancellation workflow.',
+      });
+      return;
+    }
+
+    const isOwner = booking.customerUserId === claims.userId;
+    const isProviderOrAdmin = claims.role === 'provider' || claims.role === 'admin';
+    if (!isOwner && !isProviderOrAdmin) {
+      res.status(403).json({
+        ok: false,
+        error: 'FORBIDDEN_NOT_BOOKING_OWNER',
+        message: 'You can only cancel your own stay bookings unless you are an authorized provider or admin.',
+      });
+      return;
+    }
+
+    if (booking.status === 'cancelled') {
+      res.status(409).json({
+        ok: false,
+        error: 'ALREADY_CANCELLED',
+        booking,
+        message: 'This stay booking has already been cancelled.',
+      });
+      return;
+    }
+
+    const checkInDate = booking.checkInDate || booking.scheduledDate;
+    const cancellation = evaluateStayCancellation({
+      totalAmount: booking.totalAmount,
+      checkInAt: `${checkInDate}T12:00:00.000Z`,
+      cancellationAllowed: true,
+      cancellationCutoffMinutes: 1440,
+      refundPercent: 80,
+      paymentStatus: booking.paymentStatus,
+    });
+
+    if (!cancellation.allowed) {
+      res.status(409).json({
+        ok: false,
+        error: 'CANCELLATION_NOT_ALLOWED',
+        refund: cancellation,
+        message: cancellation.reason || 'This stay can no longer be cancelled under its policy.',
+      });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    booking.status = 'cancelled';
+    booking.cancelledAt = nowIso;
+    booking.cancellationReason = String(req.body?.reason || 'Customer requested cancellation').slice(0, 240);
+    booking.refundAmount = cancellation.refundAmount;
+    booking.refundStatus = cancellation.refundStatus;
+
+    appendAuthoritativeNotification(store, {
+      recipientUserId: booking.customerUserId,
+      targetRole: 'all_users',
+      title: cancellation.refundStatus === 'initiated' ? '↩️ Stay Cancelled · Refund Initiated' : '⚠️ Stay Booking Cancelled',
+      message:
+        cancellation.refundStatus === 'initiated'
+          ? `Booking ${booking.passCode} was cancelled. ₹${cancellation.refundAmount} refund is pending payment-provider reconciliation.`
+          : `Booking ${booking.passCode} was cancelled. ${cancellation.reason || 'No online refund is due.'}`,
+      type: 'payment',
+      linkId: booking.id,
+    });
+
+    saveAuthoritativeStore(store);
+
+    res.json({
+      ok: true,
+      booking,
+      refund: {
+        refundAmount: cancellation.refundAmount,
+        refundPercent: cancellation.refundPercent,
+        status: cancellation.refundStatus,
+        message:
+          cancellation.refundStatus === 'initiated'
+            ? 'Refund initiated and awaiting payment-provider reconciliation.'
+            : cancellation.reason || 'No online refund is due.',
+      },
+      message: `Stay booking ${booking.passCode} cancelled successfully.`,
     });
   });
 
@@ -4401,10 +4738,16 @@ Task:
 
 
   // Vite dev middleware or production static serving
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      ...(localDemo ? { envDir: process.env.BOS_DEMO_ENV_DIR } : {}),
+      server: {
+        middlewareMode: true,
+        // Payment/order writes are authoritative runtime state, not source changes.
+        // Watching this file would reload the SPA in the middle of checkout.
+        watch: { ignored: ['**/authoritative-marketplace-store.json'] },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -4417,7 +4760,7 @@ Task:
   }
 
   const PORT = Number(process.env.PORT) || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, localDemo ? '127.0.0.1' : '0.0.0.0', () => {
     console.log(`BookOurSpace Full-Stack Server running on http://0.0.0.0:${PORT}`);
   });
 }

@@ -8,6 +8,8 @@ import {
   UserRole,
 } from '../types/marketplace';
 import { ensureListingPriceBreakdown } from '../data/seedData';
+import { assertLocalHttpUrl } from './localDemoSafety';
+export const isLocalDemo = import.meta.env.VITE_LOCAL_DEMO === 'true';
 
 // Configured for BookOurSpace Supabase Project: ezrxykyocgbolpaebnqx
 // Read strictly from Vite frontend environment variables.
@@ -16,7 +18,7 @@ export const SUPABASE_PROJECT_ID = 'ezrxykyocgbolpaebnqx';
 
 const envSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 export const SUPABASE_PROJECT_URL =
-  envSupabaseUrl && envSupabaseUrl.includes(SUPABASE_PROJECT_ID)
+  isLocalDemo ? assertLocalHttpUrl(envSupabaseUrl) : envSupabaseUrl && envSupabaseUrl.includes(SUPABASE_PROJECT_ID)
     ? envSupabaseUrl.replace(/\/+$/, '')
     : `https://${SUPABASE_PROJECT_ID}.supabase.co`;
 
@@ -59,7 +61,7 @@ function isSafePublishableKey(key: string): boolean {
         );
         return false;
       }
-      if (payload.ref && payload.ref !== SUPABASE_PROJECT_ID) {
+      if (!isLocalDemo && payload.ref && payload.ref !== SUPABASE_PROJECT_ID) {
         return false;
       }
     } catch {
@@ -81,7 +83,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true,
+        detectSessionInUrl: !isLocalDemo,
       },
     })
   : null;
@@ -1466,7 +1468,7 @@ export async function createAuthoritativeBookingAtomic(params: {
   discountAmount?: number;
   promoCode?: string;
   totalAmount: number;
-  paymentMode?: 'pay_later' | 'pay_qr';
+  paymentMode?: 'pay_later' | 'pay_qr' | 'razorpay';
   requireVerifiedPayment?: boolean;
   paymentIntentId?: string;
   paymentUtr?: string;
@@ -1583,6 +1585,121 @@ export async function createServerPaymentIntent(params: {
     };
   } catch {
     return { ok: false };
+  }
+}
+
+export interface RazorpayCheckoutOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: { name?: string; email?: string; contact?: string };
+  notes?: Record<string, string>;
+  theme?: { color?: string };
+  handler: (response: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }) => void;
+  modal?: { ondismiss?: () => void };
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => { open: () => void };
+  }
+}
+
+export async function loadRazorpayCheckout(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (window.Razorpay) return true;
+
+  const existing = document.querySelector('script[data-bookourspace-razorpay]') as HTMLScriptElement | null;
+  if (existing) {
+    await new Promise<void>((resolve) => {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => resolve(), { once: true });
+    });
+    return Boolean(window.Razorpay);
+  }
+
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.dataset.bookourspaceRazorpay = 'true';
+    script.onload = () => resolve(Boolean(window.Razorpay));
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+  });
+}
+
+export async function createRazorpayOrder(params: {
+  amount: number;
+  planOrListing: string;
+  userId?: string;
+}): Promise<{
+  ok: boolean;
+  keyId?: string;
+  intentId?: string;
+  orderId?: string;
+  amount?: number;
+  amountInPaise?: number;
+  currency?: string;
+  error?: string;
+}> {
+  try {
+    const response = await fetch('/api/payments/razorpay/order', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(params),
+    });
+    const data = await response.json().catch(() => ({}));
+    return {
+      ok: response.ok && Boolean(data.ok),
+      keyId: data.keyId,
+      intentId: data.intentId,
+      orderId: data.orderId,
+      amount: data.amount,
+      amountInPaise: data.amountInPaise,
+      currency: data.currency,
+      error: data.error,
+    };
+  } catch {
+    return { ok: false, error: 'RAZORPAY_ORDER_NETWORK_ERROR' };
+  }
+}
+
+export async function verifyRazorpayPayment(params: {
+  intentId: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+}): Promise<{
+  ok: boolean;
+  verified: boolean;
+  status?: string;
+  paymentVerificationToken?: string;
+  error?: string;
+}> {
+  try {
+    const response = await fetch('/api/payments/razorpay/verify', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(params),
+    });
+    const data = await response.json().catch(() => ({}));
+    return {
+      ok: response.ok && Boolean(data.ok),
+      verified: Boolean(data.verified),
+      status: data.status,
+      paymentVerificationToken: data.paymentVerificationToken,
+      error: data.error,
+    };
+  } catch {
+    return { ok: false, verified: false, error: 'RAZORPAY_VERIFY_NETWORK_ERROR' };
   }
 }
 
@@ -1835,6 +1952,70 @@ export async function cancelMovieBookingAtomic(params: {
       ok: false,
       status: 500,
       message: err?.message || 'Failed to cancel movie booking.',
+    };
+  }
+}
+
+export async function cancelStayBookingAtomic(params: {
+  bookingId: string;
+  reason: string;
+}): Promise<{
+  ok: boolean;
+  status: number;
+  booking?: any;
+  refund?: {
+    refundAmount: number;
+    refundPercent: number;
+    status: 'none' | 'initiated';
+    message: string;
+  };
+  error?: string;
+  message?: string;
+  supabaseSync?: 'synced' | 'skipped' | 'failed';
+}> {
+  try {
+    const resp = await fetch(`/api/bookings/${encodeURIComponent(params.bookingId)}/cancel`, {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify({ reason: params.reason }),
+    });
+    const data = await resp.json();
+    let supabaseSync: 'synced' | 'skipped' | 'failed' = 'skipped';
+    const supabaseSession = supabase ? await getCurrentSupabaseSession() : null;
+    if (resp.ok && data.ok && data.booking && supabase && supabaseSession) {
+      try {
+        const { data: syncResult, error: syncError } = await supabase.rpc('cancel_booking_atomic', {
+          p_booking_id: params.bookingId,
+          p_reason: params.reason,
+          p_refund_amount: data.refund?.refundAmount || 0,
+          p_refund_status: data.refund?.status || 'none',
+        });
+        if (syncError || !syncResult?.ok) {
+          supabaseSync = 'failed';
+        } else {
+          supabaseSync = 'synced';
+        }
+      } catch {
+        supabaseSync = 'failed';
+      }
+    }
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      status: resp.status,
+      booking: data.booking,
+      refund: data.refund,
+      error: data.error,
+      message:
+        supabaseSync === 'failed'
+          ? `${data.message || 'Stay cancellation completed.'} Supabase sync needs attention; no refund success was recorded.`
+          : data.message,
+      supabaseSync,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err?.message || 'Failed to cancel stay booking.',
     };
   }
 }

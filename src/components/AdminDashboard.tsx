@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import {
   Layers,
   ShieldCheck,
@@ -134,8 +134,10 @@ interface AdminDashboardProps {
   onApprovedNavigateToApp?: (listing: MarketplaceListing) => void;
   onOpenLivePageEditor?: () => void;
 }
+const AdminTheatreManagement=lazy(()=>import('./AdminTheatreManagement').then(module=>({default:module.AdminTheatreManagement})));
 
 export type SuperAdminSectionId =
+  | 'theatre_management'
   | 'user_management'
   | 'payment_management'
   | 'ad_management'
@@ -1235,6 +1237,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       badge: listings.length,
       icon: Building2,
     },
+    { id:'theatre_management', label:'Theatre Management', badge:'AP · TS · KA', priority:true, icon:Building2 },
     {
       id: 'bookings_events',
       label: 'Bookings & Events',
@@ -1667,6 +1670,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* RIGHT WORKSPACE: INDEPENDENT SECTION SCREENS */}
         <div className="lg:col-span-9 space-y-6">
+          {activeSection==='theatre_management' && <Suspense fallback={<p>Loading theatre management…</p>}><AdminTheatreManagement/></Suspense>}
           {/* =====================================================================
               SECTION 1: USER MANAGEMENT (Customers, Providers, KYC, Suspensions, Roles)
              ===================================================================== */}

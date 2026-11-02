@@ -196,6 +196,8 @@ export function buildComprehensiveListings(): MarketplaceListing[] {
 
   // 1. Generate Category-Specific Listings for all 10 Service Categories in `servicesCategories`
   servicesCategories.forEach((cat, cIdx) => {
+    // New catalog sections require real provider onboarding; do not fabricate providers.
+    if (!serviceProvidersByCat[cat.id]) return;
     const provMeta = serviceProvidersByCat[cat.id] || serviceProvidersByCat['cat-4'];
     const photos = serviceCategoryPhotos[cat.id] || serviceCategoryPhotos['cat-4'];
 

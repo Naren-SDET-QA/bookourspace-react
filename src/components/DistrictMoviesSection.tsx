@@ -47,6 +47,8 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { MarketplaceListing } from '../types/marketplace';
+import { filterMovieListings } from '../lib/sectionListingFilters';
+import { CATEGORY_PAGE_PRESENTATION } from '../lib/categoryPagePresentation';
 import { localizeAreaName } from '../utils/i18nEngine';
 import { AppLanguage, getListingTitle } from '../utils/translations';
 import { useMarketplace } from '../context/MarketplaceContext';
@@ -224,13 +226,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
 
   // Strictly use existing movie listings & their existing images
   const movieListings = useMemo(() => {
-    const filtered = listings.filter(
-      (item) =>
-        item.categoryId.startsWith('movie-') ||
-        item.entityType === 'event' ||
-        item.customFieldValues?.sectionType === 'movies'
-    );
-    return filtered.length > 0 ? filtered : listings;
+    return filterMovieListings(listings);
   }, [listings]);
 
   // Theme mode: 'light' crisp white aesthetic; 'dark' cinema mode
@@ -256,7 +252,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   const [trailerProgress, setTrailerProgress] = useState(18);
   const trailerCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Hero Spotlight Carousel
+  // Hero Spotlight Carousel (retained in code for compatibility, disabled in the UI)
   const [spotlightIndex, setSpotlightIndex] = useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
 
@@ -533,7 +529,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   }, [movieListings]);
 
   useEffect(() => {
-    if (!isAutoPlaying || spotlightMovies.length <= 1) return;
+    if (!CATEGORY_PAGE_PRESENTATION.showSpotlights || !isAutoPlaying || spotlightMovies.length <= 1) return;
     const timer = window.setInterval(() => {
       setSpotlightIndex((prev) => (prev + 1) % spotlightMovies.length);
     }, 5500);
@@ -627,9 +623,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       if (activePillar === 'private' && item.categoryId !== 'movie-private') return false;
 
       if (selectedCityArea !== 'All Hyderabad') {
+        const searchableLocation = `${item.location.area} ${item.location.city} ${item.location.pincode || ''}`.toLowerCase();
         const areaMatch =
-          item.location.area.toLowerCase().includes(selectedCityArea.toLowerCase()) ||
-          item.location.address.toLowerCase().includes(selectedCityArea.toLowerCase());
+          searchableLocation.includes(selectedCityArea.toLowerCase());
         if (!areaMatch) return false;
       }
 
@@ -968,7 +964,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
 
     const intentRes = await createServerPaymentIntent({
       amount: grandTotal,
-      merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
+      merchantVpa: String(bookingModalListing.customFieldValues?.upiId || 'bookourspace.movies@okaxis'),
       planOrListing: `Movie Ticket: ${bookingModalListing.title} (${selectedShowtime} · ${selectedSeats.join(', ')})`,
       userId: authUser?.id || supabaseUser?.id || getOrCreateClientSessionId(),
     });
@@ -1018,7 +1014,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       if (!currentIntentId) {
         const created = await createServerPaymentIntent({
           amount: grandTotal,
-          merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
+          merchantVpa: String(bookingModalListing.customFieldValues?.upiId || 'bookourspace.movies@okaxis'),
           planOrListing: `Movie Ticket: ${bookingModalListing.title}`,
           userId: authUser?.id || supabaseUser?.id || getOrCreateClientSessionId(),
         });
@@ -1037,7 +1033,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
         intentId: currentIntentId,
         utrNumber: cleanUtr,
         amount: grandTotal,
-        merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
+        merchantVpa: String(bookingModalListing.customFieldValues?.upiId || 'bookourspace.movies@okaxis'),
         simulateBankWebhookSettlement,
       });
 
@@ -1539,7 +1535,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       {/* =====================================================================
           2. FULL-WIDTH BLURRED-BACKDROP HERO CAROUSEL (1:1 DISTRICT.IN/MOVIES)
          ===================================================================== */}
-      {activePillar === 'movies' && (
+      {CATEGORY_PAGE_PRESENTATION.showSpotlights && activePillar === 'movies' && (
         <div
           className="relative overflow-hidden border-b border-black/5"
           onMouseEnter={() => setIsAutoPlaying(false)}
@@ -3531,7 +3527,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                     <div className="p-3 bg-white rounded-2xl shrink-0">
                       <QRCodeSVG
                         value={`upi://pay?pa=${encodeURIComponent(
-                          bookingModalListing.upiId || 'bookourspace.movies@okaxis'
+                          String(bookingModalListing.customFieldValues?.upiId || 'bookourspace.movies@okaxis')
                         )}&pn=${encodeURIComponent(bookingModalListing.providerName)}&am=${grandTotal}&cu=INR`}
                         size={112}
                         level="M"

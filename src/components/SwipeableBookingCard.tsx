@@ -1,16 +1,16 @@
 import React, { useRef, useState } from 'react';
 import { Trash2, Ban, ChevronLeft, Download, Printer } from 'lucide-react';
-import { Booking, Listing } from '../types/marketplace';
+import { Booking, MarketplaceListing } from '../types/marketplace';
 import { UniversalBarcode } from './UniversalBarcode';
 
 interface SwipeableBookingCardProps {
   booking: Booking;
-  matchedListing?: Listing;
+  matchedListing?: MarketplaceListing;
   bookingCode: string;
   barcodeLabel: string;
   moduleTag: string;
   currentLang: string;
-  onOpenDetails: (listing: Listing) => void;
+  onOpenDetails: (listing: MarketplaceListing) => void;
   onCancelBooking: (booking: Booking) => void;
   onDeleteBooking: (booking: Booking) => void;
   onDownloadReceipt: (booking: Booking) => void;
@@ -226,6 +226,11 @@ export const SwipeableBookingCard: React.FC<SwipeableBookingCardProps> = ({
             <div className="text-[11px] font-bold text-[#4338CA] dark:text-indigo-400">
               ₹{booking.totalAmount.toLocaleString('en-IN')} • {booking.customerName}
             </div>
+            {booking.status === 'cancelled' && booking.refundStatus === 'initiated' && (
+              <div className="text-[10px] font-black text-amber-700 dark:text-amber-300">
+                ↩️ ₹{(booking.refundAmount || 0).toLocaleString('en-IN')} refund initiated · awaiting provider reconciliation
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">

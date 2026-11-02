@@ -32,6 +32,7 @@ import {
   getPriceUnitDisplayName 
 } from '../utils/translations';
 import { UniversalBarcode, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
+import { StayAirbnbDetails } from './StayAirbnbDetails';
 
 interface ListingDetailModalProps {
   listing: MarketplaceListing | null;
@@ -51,6 +52,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const { reviews, addReview } = useMarketplace();
   const [activeImageIdx, setActiveImageIdx] = useState(0);
   const [justShared, setJustShared] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [showAllPhotos, setShowAllPhotos] = useState(false);
 
   // Review submission state
   const [newRating, setNewRating] = useState(5);
@@ -116,6 +119,11 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const displayProviderName = getProviderDisplayName(listing.providerNameTe || listing.providerName, currentLang, distKm);
   const displayPriceUnit = getPriceUnitDisplayName(listing.priceUnitTe || listing.priceUnit, currentLang);
   const displaySubcategory = getSubcategoryDisplayName(listing.subcategory, currentLang);
+  const isStay = listing.categoryId.startsWith('hotel-') || listing.customFieldValues?.sectionType === 'hotel_stay';
+
+  const scrollToStaySection = (sectionId: string) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const handleShare = async () => {
     const shareUrl = window.location.href;
@@ -151,18 +159,18 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-3xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-4 max-h-[90vh] flex flex-col">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs sm:p-4 ${isStay ? 'p-0' : 'p-3'} overflow-y-auto`}>
+      <div className={`relative flex w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-900 ${isStay ? 'my-0 max-h-[100dvh] rounded-none border-0 sm:my-4 sm:max-h-[94vh] sm:rounded-3xl sm:border sm:border-slate-200 dark:sm:border-slate-800' : 'my-4 max-h-[90vh] rounded-3xl border border-slate-200 dark:border-slate-800'}`}>
         {/* Modal Top Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
+        <div className={`flex items-center justify-between border-b px-4 py-3 sm:p-5 ${isStay ? 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50'}`}>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 uppercase tracking-wider">
-              {displaySubcategory}
+            <span className={isStay ? 'text-xs font-black text-slate-900 dark:text-white' : 'rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-purple-700 dark:bg-purple-950 dark:text-purple-300'}>
+              {isStay ? 'BookOurSpace Stays' : displaySubcategory}
             </span>
             {listing.isFeatured && (
-              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 flex items-center gap-1">
+              <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
                 <Sparkles className="w-3 h-3 fill-current" />
-                <span>{currentLang === 'te' ? 'ఫీచర్డ్' : 'Featured'}</span>
+                <span>{isStay ? (currentLang === 'te' ? 'గెస్ట్ ఫేవరెట్' : 'Guest favourite') : (currentLang === 'te' ? 'ఫీచర్డ్' : 'Featured')}</span>
               </span>
             )}
           </div>
@@ -171,10 +179,12 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
             {/* Native Web Share API Button with Feedback */}
             <button
               onClick={handleShare}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs ${
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-all ${
                 justShared
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-purple-50 hover:bg-purple-100 dark:bg-purple-950 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                  : isStay
+                  ? 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                  : 'border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300 dark:hover:bg-purple-900'
               }`}
               title={currentLang === 'te' ? 'షేర్ చేయండి' : 'Share'}
             >
@@ -182,9 +192,20 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
               <span>{justShared ? (currentLang === 'te' ? 'కాపీ అయింది!' : 'Copied!') : (currentLang === 'te' ? 'షేర్ చేయండి' : 'Share')}</span>
             </button>
 
+            {isStay && (
+              <button
+                type="button"
+                onClick={() => setIsSaved((saved) => !saved)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${isSaved ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200' : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'}`}
+              >
+                {isSaved ? '♥ Saved' : '♡ Save'}
+              </button>
+            )}
+
             <button
               onClick={onClose}
-              className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 transition-colors"
+              aria-label="Close property details"
+              className="rounded-full p-1.5 text-slate-500 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700"
             >
               <X className="w-5 h-5" />
             </button>
@@ -192,18 +213,30 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+        <div className={`flex-1 space-y-6 overflow-y-auto sm:p-6 ${isStay ? 'p-4' : 'p-4'}`}>
           {/* Image Showcase */}
           <div className="space-y-2">
-            <div className="w-full h-64 sm:h-80 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800">
+            <div className={`w-full overflow-hidden bg-slate-100 dark:bg-slate-800 ${isStay ? 'h-[42dvh] min-h-64 rounded-xl sm:h-80 sm:rounded-2xl' : 'h-64 rounded-2xl sm:h-80'}`}>
               <img
                 src={listing.images[activeImageIdx] || listing.images[0]}
                 alt={listing.title}
                 className="w-full h-full object-cover"
               />
             </div>
+            {isStay && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-500">{activeImageIdx + 1} / {listing.images.length} photos</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAllPhotos((shown) => !shown)}
+                  className="rounded-full border border-slate-300 px-3 py-1.5 text-[11px] font-black text-slate-700 dark:border-slate-700 dark:text-slate-200"
+                >
+                  {showAllPhotos ? 'Hide photos' : 'Show all photos'}
+                </button>
+              </div>
+            )}
             {listing.images.length > 1 && (
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className={`${showAllPhotos && isStay ? 'grid grid-cols-2 sm:grid-cols-3' : 'flex items-center overflow-x-auto'} gap-2 pb-1`}>
                 {listing.images.map((img, idx) => (
                   <button
                     key={idx}
@@ -253,15 +286,30 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
             </div>
           </div>
 
+          {isStay && (
+            <nav className="sticky top-0 z-[1] flex gap-1 overflow-x-auto border-y border-slate-100 bg-white/95 py-2 text-[11px] font-black backdrop-blur dark:border-slate-800 dark:bg-slate-900/95" aria-label="Stay details sections">
+              {[
+                ['Photos', 'stay-summary'],
+                ['Amenities', 'stay-amenities'],
+                ['Reviews', 'stay-reviews'],
+                ['Location', 'stay-location'],
+              ].map(([label, target]) => (
+                <button key={target} type="button" onClick={() => scrollToStaySection(target)} className="shrink-0 rounded-full border border-slate-200 px-3 py-1.5 text-slate-700 dark:border-slate-700 dark:text-slate-200">{label}</button>
+              ))}
+            </nav>
+          )}
+
           {/* Description */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              {currentLang === 'te' ? 'వివరాలు & సర్వీస్ సమాచారం' : 'Description & Details'}
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              {isStay ? (currentLang === 'te' ? 'ది స్పేస్' : 'The space') : (currentLang === 'te' ? 'వివరాలు & సర్వీస్ సమాచారం' : 'Description & Details')}
             </h4>
             <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
               {displayDescription}
             </p>
           </div>
+
+          {isStay && <StayAirbnbDetails listing={listing} currentLang={currentLang} />}
 
           {/* PG & Hostel Accommodation Comprehensive Specifications */}
           {(listing.categoryId.startsWith('pg-') || listing.customFieldValues?.roomTypesAvailable || listing.customFieldValues?.genderPolicy) && (
@@ -1000,29 +1048,47 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
         </div>
 
         {/* Modal Fixed Footer CTA */}
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-white dark:bg-slate-900">
-          <button
-            onClick={() => {
-              onClose();
-              onEnquire(listing);
-            }}
-            className="flex-1 py-3 rounded-2xl border border-slate-300 dark:border-slate-700 text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center gap-2 transition-colors"
-          >
-            <MessageSquare className="w-4 h-4 text-purple-600" />
-            <span>{t.chat}</span>
-          </button>
+        {isStay ? (
+          <div className="sticky bottom-0 flex items-center justify-between gap-4 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 sm:px-6">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black text-slate-900 dark:text-white">{listing.currency}{listing.price.toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">{displayPriceUnit}</span></p>
+              <p className="text-[11px] font-bold text-slate-500">{currentLang === 'te' ? 'తేదీలను ఎంచుకున్న తర్వాత తుది ధర' : 'Final price after selecting dates'}</p>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                onBookNow(listing);
+              }}
+              className="shrink-0 rounded-xl bg-[#FF385C] px-7 py-3 text-sm font-black text-white shadow-sm transition hover:bg-rose-700 active:scale-95"
+            >
+              {currentLang === 'te' ? 'రిజర్వ్ / Reserve' : 'Reserve'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <button
+              onClick={() => {
+                onClose();
+                onEnquire(listing);
+              }}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 py-3 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 sm:text-sm"
+            >
+              <MessageSquare className="h-4 w-4 text-purple-600" />
+              <span>{t.chat}</span>
+            </button>
 
-          <button
-            onClick={() => {
-              onClose();
-              onBookNow(listing);
-            }}
-            className="flex-1 py-3 rounded-2xl bg-[#4A148C] hover:bg-purple-900 active:scale-95 text-white text-xs sm:text-sm font-black shadow-lg shadow-purple-950/20 flex items-center justify-center gap-2 transition-all"
-          >
-            <Calendar className="w-4 h-4 text-amber-300" />
-            <span>{t.bookNow}</span>
-          </button>
-        </div>
+            <button
+              onClick={() => {
+                onClose();
+                onBookNow(listing);
+              }}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#4A148C] py-3 text-xs font-black text-white shadow-lg shadow-purple-950/20 transition-all hover:bg-purple-900 active:scale-95 sm:text-sm"
+            >
+              <Calendar className="h-4 w-4 text-amber-300" />
+              <span>{t.bookNow}</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -709,6 +709,65 @@ BEGIN
 END;
 $$;
 
+-- 9E. ATOMIC STAY CANCELLATION (RLS-SAFE, NO REFUND SUCCESS CLAIM)
+-- The provider webhook/reconciliation job must update payment_status to 'refunded'
+-- after settlement. This function only records the customer-owned cancellation and
+-- the refund initiation metadata in the existing booking payload JSONB.
+CREATE OR REPLACE FUNCTION public.cancel_booking_atomic(
+  p_booking_id TEXT,
+  p_reason TEXT DEFAULT 'Customer requested cancellation',
+  p_refund_amount NUMERIC DEFAULT 0,
+  p_refund_status TEXT DEFAULT 'none'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  v_booking RECORD;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'UNAUTHORIZED_SESSION');
+  END IF;
+
+  UPDATE public.bookings
+  SET
+    status = 'cancelled',
+    payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object(
+      'cancelledAt', NOW(),
+      'cancellationReason', LEFT(COALESCE(p_reason, 'Customer requested cancellation'), 240),
+      'refundAmount', GREATEST(0, COALESCE(p_refund_amount, 0)),
+      'refundStatus', CASE
+        WHEN p_refund_status IN ('none', 'initiated', 'completed') THEN p_refund_status
+        ELSE 'none'
+      END
+    )
+  WHERE id = p_booking_id
+    AND user_id = auth.uid()
+    AND status <> 'cancelled'
+  RETURNING id, status, payment_status, payload INTO v_booking;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object(
+      'ok', false,
+      'error', 'BOOKING_NOT_FOUND_OR_NOT_OWNED'
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'bookingId', v_booking.id,
+    'status', v_booking.status,
+    'paymentStatus', v_booking.payment_status,
+    'payload', v_booking.payload
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.cancel_booking_atomic(TEXT, TEXT, NUMERIC, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cancel_booking_atomic(TEXT, TEXT, NUMERIC, TEXT) TO authenticated;
+
 
 -- ============================================================================
 -- 10. GOOGLE-ONLY OAUTH, ACCOUNT BLOCKING, NOTIFICATIONS & REALTIME MIGRATION
@@ -1032,6 +1091,25 @@ CREATE POLICY "Providers and admins can resolve movie support tickets"
       SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'provider'
     )
   );
+
+-- Preserve cinema visibility if this legacy schema is installed after the standalone
+-- Movies migration. The new feed never falls back to these legacy records.
+DO $visibility_guard$
+BEGIN
+  IF to_regprocedure('cinema_private.is_public(text,text)') IS NOT NULL THEN
+    DROP POLICY IF EXISTS movie_listing_visibility_guard ON public.listings;
+    CREATE POLICY movie_listing_visibility_guard ON public.listings AS RESTRICTIVE
+      FOR SELECT TO anon, authenticated USING (
+        (category_id NOT LIKE 'movie-%' AND COALESCE(payload->'customFieldValues'->>'sectionType','') <> 'movies')
+        OR cinema_private.is_admin()
+      );
+    DROP POLICY IF EXISTS movie_screen_visibility_guard ON public.cinema_screens;
+    CREATE POLICY movie_screen_visibility_guard ON public.cinema_screens AS RESTRICTIVE
+      FOR SELECT TO anon, authenticated USING (
+        cinema_private.is_admin()
+      );
+  END IF;
+END $visibility_guard$;
 
 
 

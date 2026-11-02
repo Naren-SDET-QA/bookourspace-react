@@ -14,6 +14,7 @@ import {
   CustomerAction
 } from '../types/marketplace';
 import { all44Categories } from '../data/categoriesData';
+import { nonCinemaPublicListings } from '../features/movies/publicListings';
 import { 
   initialListings, 
   initialPostingPlans, 
@@ -28,6 +29,7 @@ import { User, Session } from '@supabase/supabase-js';
 import {
   supabase,
   isSupabaseConfigured,
+  isLocalDemo,
   SupabaseProfile,
   fetchRlsProfile,
   upsertRlsProfile,
@@ -98,6 +100,7 @@ interface MarketplaceContextType {
   userRole: UserRole;
   setUserRole: (role: UserRole) => void;
   listings: MarketplaceListing[];
+  publicListings: MarketplaceListing[];
   categories: CategoryDef[];
   postingPlans: PostingPlan[];
   enquiries: Enquiry[];
@@ -132,7 +135,7 @@ interface MarketplaceContextType {
   sendEnquiry: (listingId: string, message: string, customerName: string, customerPhone: string) => void;
   createBooking: (booking: Omit<Booking, 'id' | 'createdAt' | 'status'>) => void;
   deleteBooking: (bookingId: string) => void;
-  cancelBooking: (bookingId: string) => void;
+  cancelBooking: (bookingId: string, updates?: Partial<Booking>) => void;
   restoreBooking: (booking: Booking) => void;
   addReview: (review: Omit<Review, 'id' | 'date'>) => { newRating: number; newCount: number };
   recordPayment: (type: PaymentTransaction['type'], amount: number, planName: string, method: string) => PaymentTransaction;
@@ -203,6 +206,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Load state with fallback to seed data
   const [listings, setListings] = useState<MarketplaceListing[]>(() => {
+    if (isLocalDemo) return []; // DB visibility is authoritative; never merge the large legacy seed.
     try {
       const saved = localStorage.getItem('marketplace_listings_v17');
       if (saved) {
@@ -237,6 +241,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [enquiries, setEnquiries] = useState<Enquiry[]>(() => {
+    if (isLocalDemo) return [];
     try {
       const saved = localStorage.getItem('marketplace_enquiries');
       return saved ? JSON.parse(saved) : initialEnquiries;
@@ -246,6 +251,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [bookings, setBookings] = useState<Booking[]>(() => {
+    if (isLocalDemo) return [];
     try {
       const saved = localStorage.getItem('marketplace_bookings');
       return saved ? JSON.parse(saved) : initialBookings;
@@ -255,6 +261,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [reviews, setReviews] = useState<Review[]>(() => {
+    if (isLocalDemo) return [];
     try {
       const saved = localStorage.getItem('marketplace_reviews');
       return saved ? JSON.parse(saved) : initialReviews;
@@ -264,6 +271,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [transactions, setTransactions] = useState<PaymentTransaction[]>(() => {
+    if (isLocalDemo) return [];
     try {
       const saved = localStorage.getItem('marketplace_transactions');
       return saved ? JSON.parse(saved) : initialTransactions;
@@ -272,7 +280,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   });
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
+  const [notifications, setNotifications] = useState<NotificationItem[]>(isLocalDemo ? [] : [
     {
       id: 'notif-1',
       title: '⚡ New Enquiry Received',
@@ -340,7 +348,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         fetchRlsReviews(),
       ]);
 
-      if (mounted && remoteListings && remoteListings.length > 0) {
+      if (mounted && isLocalDemo) setListings(remoteListings || []);
+      if (mounted && !isLocalDemo && remoteListings && remoteListings.length > 0) {
         setListings((prev) => {
           const existingIds = new Set(remoteListings.map((r) => r.id));
           return [...remoteListings, ...prev.filter((p) => !existingIds.has(p.id))];
@@ -1145,10 +1154,10 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
-  const cancelBooking = (bookingId: string) => {
+  const cancelBooking = (bookingId: string, updates: Partial<Booking> = {}) => {
     const target = bookings.find(b => b.id === bookingId);
     setBookings(prev =>
-      prev.map(b => (b.id === bookingId ? { ...b, status: 'cancelled' } : b))
+      prev.map(b => (b.id === bookingId ? { ...b, ...updates, status: 'cancelled' } : b))
     );
     if (target && target.status !== 'cancelled') {
       setNotifications(prev => [
@@ -1262,6 +1271,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Favorites persisted in localStorage
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
+    if (isLocalDemo) return [];
     try {
       const saved = localStorage.getItem('bos_saved_favorites_v1');
       if (saved) {
@@ -1425,6 +1435,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         userRole,
         setUserRole,
         listings,
+        publicListings: nonCinemaPublicListings(listings),
         categories,
         postingPlans,
         enquiries,

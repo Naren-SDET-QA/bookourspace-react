@@ -28,6 +28,7 @@ import { getUILabels, transliterateLatinToScript } from '../utils/i18nEngine';
 import { pg29Categories } from '../data/pgHostelData';
 import { classCategories } from '../data/classesData';
 import { venue12Categories } from '../data/venueData';
+import { additionalServiceCategories, dailyEssentialsCategoryIds } from '../data/additionalServiceCategories';
 import {
   MarketSectionType,
   servicesCategories,
@@ -188,6 +189,8 @@ const SECTION_PRICE_UNITS: Record<
     { value: '/hr', labelEn: 'Per Hour Turf / Hall Slot', labelTe: 'గంటకు స్లాట్ ధర', labelHi: 'प्रति घंटा स्लॉट' },
   ],
   services: [
+    { value: '/delivery', labelEn: 'Per Delivery (Included Quantity)', labelTe: 'ఒక్కో డెలివరీకి', labelHi: 'प्रति डिलीवरी' },
+    { value: '/service', labelEn: 'Per Service', labelTe: 'ఒక్కో సేవకు', labelHi: 'प्रति सेवा' },
     { value: '/visit', labelEn: 'Per Visit / Standard Service', labelTe: 'ఒక్కో సర్వీస్ విజిట్‌కు', labelTeShort: '/విజిట్', labelHi: 'प्रति विजिट / सर्विस' } as any,
     { value: '/job', labelEn: 'Per Job / Repair Task', labelTe: 'ఒక్కో పనికి / రిపేర్‌కు', labelHi: 'प्रति कार्य / रिपेयर' },
     { value: '/sq.ft', labelEn: 'Per Sq.Ft (Painting / Woodwork)', labelTe: 'చదరపు అడుగుకు (Sq.Ft)', labelHi: 'प्रति वर्ग फुट' },
@@ -564,6 +567,29 @@ function buildCategorySpecificProviderConfig(
 
   // 4. HOME & URBAN SERVICES SECTION — tailored to each specific Service Category (`cat-4` Appliance, `cat-5` Carpenter, `cat-1` Cleaning, `cat-2` Electrician, `cat-3` Plumber, `cat-6` Painting, `srv-salon`, `srv-packers`, `srv-pest`, `srv-cctv`)
   if (section === 'services') {
+    if (additionalServiceCategories.some((category) => category.id === categoryId)) {
+      const isDelivery = dailyEssentialsCategoryIds.has(categoryId);
+      return {
+        providerNameEn: `${catNameEn} Provider`,
+        providerNameTe: `${catNameTe} ప్రొవైడర్`,
+        providerNameHi: `${catNameHi} प्रदाता`,
+        titlePlaceholderEn: `Your business name — ${subcategoryEn}`,
+        titlePlaceholderTe: `మీ వ్యాపారం పేరు — ${subcategoryEn}`,
+        titlePlaceholderHi: `आपके व्यवसाय का नाम — ${subcategoryEn}`,
+        descPlaceholderEn: 'Describe what you offer, your service areas, pricing, schedule and cancellation terms.',
+        descPlaceholderTe: 'మీ సేవలు, ప్రాంతాలు, ధర, సమయాలు మరియు రద్దు నిబంధనలను వివరించండి.',
+        descPlaceholderHi: 'अपनी सेवाएं, क्षेत्र, कीमत, समय और रद्द करने की शर्तें बताएं।',
+        coverImageUrl: '',
+        defaultPrice: '',
+        defaultPriceUnit: isDelivery ? '/delivery' : '/service',
+        fields: [
+          { key: 'serviceArea', labelEn: 'Delivery / service areas *', labelTe: 'డెలివరీ / సేవా ప్రాంతాలు *', labelHi: 'डिलीवरी / सेवा क्षेत्र *', type: 'text', placeholder: 'Areas you actually serve' },
+          { key: 'serviceSchedule', labelEn: 'Working hours / delivery window *', labelTe: 'పని వేళలు / డెలివరీ సమయం *', labelHi: 'काम के घंटे / डिलीवरी समय *', type: 'text', placeholder: 'e.g. 6–8 AM; booking cutoff 8 PM' },
+          { key: 'unitDescription', labelEn: 'Unit, quantity & included items *', labelTe: 'యూనిట్, పరిమాణం & వస్తువులు *', labelHi: 'इकाई, मात्रा और शामिल सामान *', type: 'text', placeholder: isDelivery ? 'e.g. 500 ml milk per delivery; include delivery charge' : 'Describe the included work or equipment hire period' },
+          { key: 'cancellationTerms', labelEn: 'Cancellation / refund terms *', labelTe: 'రద్దు / రీఫండ్ నిబంధనలు *', labelHi: 'रद्द / रिफंड शर्तें *', type: 'text', placeholder: 'Provide your cancellation cutoff and refund terms' },
+        ],
+      };
+    }
     const isAppliance = categoryId === 'cat-4';
     const isCarpenter = categoryId === 'cat-5';
     const isCleaning = categoryId === 'cat-1';
@@ -1043,13 +1069,13 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   }, [selectedSection]);
 
   // All-Format Listing Images State
-  const [imageItems, setImageItems] = useState<{ url: string; format: string; name: string }[]>([
+  const [imageItems, setImageItems] = useState<{ url: string; format: string; name: string }[]>(categoryConfig.coverImageUrl ? [
     {
       url: categoryConfig.coverImageUrl,
       format: 'JPG',
       name: 'category-cover.jpg',
     },
-  ]);
+  ] : []);
   const [newImageUrl, setNewImageUrl] = useState('');
   const [isDraggingImages, setIsDraggingImages] = useState(false);
 
@@ -1075,12 +1101,12 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
     setPriceUnit(cfg.defaultPriceUnit);
     const nextFields: Record<string, string> = {};
     cfg.fields.forEach((f) => {
-      nextFields[f.key] = f.options && f.options.length > 0 ? f.options[0] : f.placeholder || '';
+      nextFields[f.key] = cfg.coverImageUrl === '' ? '' : f.options && f.options.length > 0 ? f.options[0] : f.placeholder || '';
     });
     setCustomFieldValues(nextFields);
     setImageItems((prev) => {
-      if (prev.length === 1 && prev[0].name === 'category-cover.jpg') {
-        return [{ url: cfg.coverImageUrl, format: 'JPG', name: 'category-cover.jpg' }];
+      if (prev.length === 0 || (prev.length === 1 && prev[0].name === 'category-cover.jpg')) {
+        return cfg.coverImageUrl ? [{ url: cfg.coverImageUrl, format: 'JPG', name: 'category-cover.jpg' }] : [];
       }
       return prev;
     });
@@ -1341,7 +1367,7 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
         ))}
 
         {/* Dynamic Plug-and-Play Web Elements scoped strictly to selectedSection (e.g. Movies only shows Movie elements) */}
-        {dynamicWebElements.map((el) => (
+        {dynamicWebElements.filter((el) => !additionalServiceCategories.some((category) => category.id === selectedCategoryId) || !/warranty|background.checked|verified/i.test(`${el.key} ${el.label} ${el.defaultValue}`)).map((el) => (
           <div key={el.id} className="space-y-1">
             <label className="font-bold text-indigo-800 dark:text-indigo-300 flex items-center justify-between text-[11px]">
               <span>
@@ -1493,8 +1519,8 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
         providerAvatar:
           allListingImages[0] ||
           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-        providerRating: 4.9,
-        reviewCount: 1,
+        providerRating: additionalServiceCategories.some((category) => category.id === selectedCategoryId) ? 0 : 4.9,
+        reviewCount: additionalServiceCategories.some((category) => category.id === selectedCategoryId) ? 0 : 1,
         isVerified: false,
         isFeatured: selectedPlan.isFeaturedIncluded,
         status: 'pending_approval',
@@ -1561,6 +1587,7 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 rounded-full hover:bg-white/20 text-white cursor-pointer"
+            aria-label="Close provider registration"
           >
             <X className="w-5 h-5" />
           </button>

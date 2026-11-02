@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { 
   Sparkles, 
   MapPin, 
@@ -67,6 +67,11 @@ import {
 } from './data/servicesStayMoviesData';
 import { playAlertChime } from './utils/audio';
 import { popularAreasList, distanceRadiuses } from './data/comprehensiveListings';
+import {
+  findNearestHyderabadArea,
+  getCurrentBrowserPosition,
+  getGeolocationErrorMessage,
+} from './lib/currentLocation';
 
 // Flipkart Styled Components
 import { CraftoTopServicesBar } from './components/CraftoTopServicesBar';
@@ -74,7 +79,6 @@ import { FlipkartBannerSlider } from './components/FlipkartBannerSlider';
 import { FlipkartFilterSidebar } from './components/FlipkartFilterSidebar';
 import { TrendingNearMeSection } from './components/TrendingNearMeSection';
 import { SectionSpotlightShowcase } from './components/SectionSpotlightShowcase';
-import { DistrictMoviesSection } from './components/DistrictMoviesSection';
 
 // Universal Marketplace Components
 import { ListingCard } from './components/ListingCard';
@@ -134,6 +138,15 @@ import {
   getBarcodePassTitle,
 } from './components/UniversalBarcode';
 import { SwipeableBookingCard } from './components/SwipeableBookingCard';
+import { CATEGORY_PAGE_PRESENTATION } from './lib/categoryPagePresentation';
+
+const StaysExplorer = lazy(() =>
+  import('./components/StaysExplorer').then((module) => ({ default: module.StaysExplorer }))
+);
+const ServicesExplorer = lazy(() =>
+  import('./components/ServicesExplorer').then((module) => ({ default: module.ServicesExplorer }))
+);
+const MoviesNowShowing = lazy(() => import('./components/MoviesNowShowing').then(module => ({default:module.MoviesNowShowing})));
 import {
   loadAdminThemeSettings,
   saveAdminThemeSettings,
@@ -170,7 +183,7 @@ const popularCities = [
 
 function MarketplaceAppContent() {
   const { 
-    listings, 
+    publicListings: listings,
     categories, 
     bookings,
     deleteBooking,
@@ -600,6 +613,7 @@ function MarketplaceAppContent() {
 
   // Auto-advance Spotlight & Platform Fee showcase one-by-one across all 6 categories
   useEffect(() => {
+    if (!CATEGORY_PAGE_PRESENTATION.showSpotlights) return;
     if (isSpotlightPaused) return;
     const timer = window.setInterval(() => {
       setSpotlightHeroSlideIndex((prev) => (prev + 1) % 6);
@@ -610,6 +624,47 @@ function MarketplaceAppContent() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleUseCurrentLocation = async () => {
+    try {
+      const coordinates = await getCurrentBrowserPosition();
+      const nearestArea = findNearestHyderabadArea(coordinates);
+
+      if (!nearestArea) {
+        setSelectedArea('all');
+        setSelectedRadius('all');
+        showToast(
+          currentLang === 'te'
+            ? 'లొకేషన్ గుర్తించబడింది. హైదరాబాద్ ప్రాంతాన్ని ఎంచుకోండి.'
+            : 'Location detected. Choose a Hyderabad area from the location menu.',
+        );
+        return;
+      }
+
+      setSelectedArea(nearestArea);
+      setSelectedRadius(5);
+      showToast(
+        currentLang === 'te'
+          ? `📍 ${nearestArea} దగ్గర 5 కి.మీ లోపు చూపిస్తోంది`
+          : `📍 Showing listings within 5 km of ${nearestArea}`,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === 'GEOLOCATION_UNSUPPORTED') {
+        showToast(
+          currentLang === 'te'
+            ? 'ఈ బ్రౌజర్‌లో లొకేషన్ అందుబాటులో లేదు. ప్రాంతాన్ని మాన్యువల్‌గా ఎంచుకోండి.'
+            : 'Location is not supported by this browser. Choose an area manually.',
+        );
+        return;
+      }
+
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? Number((error as { code?: unknown }).code)
+          : 0;
+      showToast(getGeolocationErrorMessage({ code }));
+    }
   };
 
   const unreadNotificationsCount = notifications.filter(n => !n.read).length;
@@ -1250,6 +1305,7 @@ function MarketplaceAppContent() {
     activeView === 'marketplace' &&
     homeScreenStyle === 'bento_landing_hub' &&
     isBentoLandingActive;
+  const renderActiveMarketSection = activeMarketSection as MarketSectionType;
 
   return (
     <div
@@ -1257,6 +1313,10 @@ function MarketplaceAppContent() {
         isBentoHomeScreen
           ? 'h-[100dvh] max-h-[100dvh] overflow-hidden pb-0'
           : 'min-h-screen pb-20'
+      } ${
+        activeView === 'marketplace' && !isBentoHomeScreen && !CATEGORY_PAGE_PRESENTATION.enableAnimations
+          ? 'category-page-static'
+          : ''
       } w-full max-w-full overflow-x-hidden bg-[#F5F4FB] dark:bg-[#0A0C20] text-slate-900 dark:text-slate-100 transition-colors duration-200 flex flex-col box-border`}
     >
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
@@ -1578,6 +1638,7 @@ function MarketplaceAppContent() {
                   : `Location set to ${area === 'all' ? 'All Areas in Hyderabad' : area}`
               );
             }}
+            onUseCurrentLocation={handleUseCurrentLocation}
             popularAreas={popularAreasList}
             unreadNotificationsCount={unreadNotificationsCount}
             onOpenNotifications={() => setShowNotificationsDropdown(true)}
@@ -1630,7 +1691,60 @@ function MarketplaceAppContent() {
           />
 
           {/* SCHEDULED BELOW-HEADER ANNOUNCEMENTS FROM SUPER ADMIN */}
-          <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-2.5 space-y-2.5">
+          {activeMarketSection === 'hotel_stay' && (
+            <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4">
+              <SelfHealingBoundary moduleId="stays_explorer" moduleName="BookOurSpace Stays Explorer">
+                <Suspense
+                  fallback={
+                    <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                      Loading BookOurSpace Stays…
+                    </div>
+                  }
+                >
+                  <StaysExplorer
+                    listings={filteredListings}
+                    currentLang={currentLang}
+                    onSelectListing={handleSelectListing}
+                    onBookListing={(listing) => setBookingListing(listing)}
+                  />
+                </Suspense>
+              </SelfHealingBoundary>
+            </main>
+          )}
+
+          {activeMarketSection === 'services' && (
+            <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4">
+              <SelfHealingBoundary moduleId="services_explorer" moduleName="BookOurSpace Services Explorer">
+                <Suspense
+                  fallback={
+                    <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                      Loading BookOurSpace Services…
+                    </div>
+                  }
+                >
+                  <ServicesExplorer
+                    listings={listings}
+                    currentLang={currentLang}
+                    onSelectListing={handleSelectListing}
+                    onBookListing={(listing, date) => {
+                      setFilterStartDate(date);
+                      setFilterEndDate(date);
+                      setBookingListing(listing);
+                    }}
+                    onRegisterProvider={(categoryId) => {
+                      setSelectedCategory(categoryId);
+                      setSelectedSubcategory('all');
+                      setIsPostWizardOpen(true);
+                    }}
+                  />
+                </Suspense>
+              </SelfHealingBoundary>
+            </main>
+          )}
+
+          {activeMarketSection === 'movies' && <main className="mx-auto w-full max-w-7xl px-3 py-4 sm:px-6 lg:px-8"><SelfHealingBoundary moduleId="movies_now_showing" moduleName="Movies Now Showing"><Suspense fallback={<p className="p-6 text-sm text-slate-500">Loading Now Showing…</p>}><MoviesNowShowing searchQuery={searchQuery}/></Suspense></SelfHealingBoundary></main>}
+
+          <div className={`${activeMarketSection === 'hotel_stay' || activeMarketSection === 'services' || activeMarketSection === 'movies' ? 'hidden' : ''} max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-2.5 space-y-2.5`}>
             <LiveScheduledAnnouncementsBanner
               placement="below_header"
               userRole={userRole}
@@ -1639,7 +1753,7 @@ function MarketplaceAppContent() {
             />
 
             {/* 1A. DYNAMIC ONE-BY-ONE SPOTLIGHT DEAL 6-CATEGORY CAROUSEL WITH DISTINCT COLOR PALETTES & MULTI-COLORED FRAMED IMAGERY */}
-            {(() => {
+            {CATEGORY_PAGE_PRESENTATION.showSpotlights && (() => {
               const spotlightSlides = [
                 {
                   id: 'spot-pg',
@@ -2050,7 +2164,7 @@ function MarketplaceAppContent() {
           </div>
 
           {/* Main Content Area */}
-          <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 space-y-5">
+          <main className={`${activeMarketSection === 'hotel_stay' || activeMarketSection === 'services' || activeMarketSection === 'movies' ? 'hidden' : ''} flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 space-y-5`}>
         
         {/* VIEW 1: PROVIDER PORTAL */}
         {activeView === 'provider_portal' && (
@@ -2378,7 +2492,7 @@ function MarketplaceAppContent() {
 
               {/* Secondary Contextual Row: Admin-Controlled Date-Range Filter Pill, Hotel Hourly Booking Toggle, or Reset */}
               {(isTemplateEnabled('search_date_range_filter') ||
-                activeMarketSection === 'hotel_stay' ||
+                renderActiveMarketSection === 'hotel_stay' ||
                 selectedRadius !== 'all' ||
                 selectedPriceRange !== 'all' ||
                 selectedRating !== 'all' ||
@@ -2418,7 +2532,7 @@ function MarketplaceAppContent() {
                     </button>
                   )}
 
-                  {activeMarketSection === 'hotel_stay' && (
+                  {renderActiveMarketSection === 'hotel_stay' && (
                     <button
                       type="button"
                       onClick={() => setHourlyBookingOnly((prev) => !prev)}
@@ -2750,7 +2864,7 @@ function MarketplaceAppContent() {
                   listings={filteredListings}
                   currentLang={currentLang}
                   verifiedOnly={verifiedOnly}
-                  onToggleVerifiedOnly={() => setVerifiedOnly((prev) => !prev)}
+                  onToggleVerifiedOnly={() => setVerifiedOnly(!verifiedOnly)}
                   sortBy={sortBy}
                   onChangeSortBy={(s) => setSortBy(s)}
                   searchQuery={searchQuery}
@@ -2759,7 +2873,10 @@ function MarketplaceAppContent() {
                   favoriteIds={favoriteIds}
                   onToggleFavorite={toggleFavorite}
                   comparedListingIds={comparedListingIds}
-                  onToggleCompare={handleToggleCompare}
+                  onToggleCompare={(id) => {
+                    const listing = listings.find((item) => item.id === id);
+                    if (listing) handleToggleCompare(listing);
+                  }}
                   onSelectListing={handleSelectListing}
                   onBookNow={(l) => setBookingListing(l)}
                   onEnquire={(l) => setChatListing(l)}
@@ -2773,7 +2890,10 @@ function MarketplaceAppContent() {
                       : undefined
                   }
                   onSwitchToClassicFeed={() => setIsRailStreamExplorerOpen(false)}
-                  isSpotlightSubcategoriesEnabled={isPageSectionVisible('spotlight_subcategories')}
+                  isSpotlightSubcategoriesEnabled={
+                    CATEGORY_PAGE_PRESENTATION.showSpotlights &&
+                    isPageSectionVisible('spotlight_subcategories')
+                  }
                   onNotify={(msg) => showToast(msg)}
                 />
               ) : (
@@ -2797,7 +2917,7 @@ function MarketplaceAppContent() {
               ))}
 
             {/* REDESIGNED HOME SCREEN SHOWCASE SECTIONS (DYNAMIC ONE-BY-ONE SPOTLIGHT 3-CARDS + INTERACTIVE MAP BANNER + POPULAR CATEGORIES) */}
-            {(() => {
+            {CATEGORY_PAGE_PRESENTATION.showSpotlights && (() => {
               const spotlightRotationSequence: {
                 section: MarketSectionType;
                 labelEn: string;
@@ -2931,8 +3051,8 @@ function MarketplaceAppContent() {
               );
 
               const topFeaturedThree = (
-                sectionSpecificPool.filter((l) => l.featured).length >= 3
-                  ? sectionSpecificPool.filter((l) => l.featured)
+                sectionSpecificPool.filter((l) => l.isFeatured).length >= 3
+                  ? sectionSpecificPool.filter((l) => l.isFeatured)
                   : sectionSpecificPool.length > 0
                   ? sectionSpecificPool
                   : filteredListings
@@ -4383,15 +4503,17 @@ function MarketplaceAppContent() {
 
 
             {/* SCHEDULED SPOTLIGHT STRIP ANNOUNCEMENTS */}
-            <LiveScheduledAnnouncementsBanner
-              placement="spotlight_strip"
-              userRole={userRole}
-              currentLang={currentLang}
-              activeSection={activeMarketSection}
-            />
+            {CATEGORY_PAGE_PRESENTATION.showSpotlights && (
+              <LiveScheduledAnnouncementsBanner
+                placement="spotlight_strip"
+                userRole={userRole}
+                currentLang={currentLang}
+                activeSection={activeMarketSection}
+              />
+            )}
 
             {/* 3. COMPACT 3-IMAGE RIGHT-TO-LEFT ANIMATED SPOTLIGHT SHOWCASE (STRICTLY MATCHING ACTIVE SECTION & CATEGORY) */}
-            {isTemplateEnabled('spotlight_showcase') && (
+            {CATEGORY_PAGE_PRESENTATION.showSpotlights && isTemplateEnabled('spotlight_showcase') && (
               <SelfHealingBoundary moduleId="spotlight_showcase" moduleName="Spotlight Showcase">
                 <SectionSpotlightShowcase
                   activeMarketSection={activeMarketSection}
@@ -4439,31 +4561,8 @@ function MarketplaceAppContent() {
               </SelfHealingBoundary>
             )}
 
-            {/* 4B. BOOKOURSPACE MOVIES & GOING-OUT SECTION (SHOWN IN MOVIES SECTION USING EXISTING IMAGES & DB ONLY) */}
-            {activeMarketSection === 'movies' && (
-              <SelfHealingBoundary moduleId="district_movies_section" moduleName="BookOurSpace Movies Section">
-                <DistrictMoviesSection
-                  listings={filteredListings.length > 0 ? filteredListings : listings}
-                  currentLang={currentLang}
-                  activeAreaName={activeAreaDisplayName}
-                  onSelectListing={handleSelectListing}
-                  onBookListing={(item) => setBookingListing(item)}
-                  showClassicGridBelow={showMoviesClassicGrid}
-                  onToggleClassicGrid={() => setShowMoviesClassicGrid((prev) => !prev)}
-                  onOpenDirectUpi={(planName, amount) =>
-                    setPaymentModalState({
-                      isOpen: true,
-                      planName,
-                      amount,
-                      defaultOneRupeeTest: false,
-                    })
-                  }
-                />
-              </SelfHealingBoundary>
-            )}
-
             {/* LISTINGCARD SEARCH RESULTS VIEW — DATE-RANGE AVAILABILITY FILTER & RESULTS HEADER (ADMIN ENABLE/DISABLE • PRESENT DISABLED) */}
-            {isPageSectionVisible('search_date_range_filter') && (
+            {renderActiveMarketSection !== 'hotel_stay' && isPageSectionVisible('search_date_range_filter') && (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-purple-200/80 dark:border-slate-800 p-3 sm:p-4 shadow-xs space-y-3">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                   {/* Left: Search Results Title & Live Availability Count */}
@@ -4638,7 +4737,7 @@ function MarketplaceAppContent() {
             )}
 
             {/* LISTINGS FEED GRID (SHOWN FOR ALL SECTIONS, OR WHEN CLASSIC CARDS TOGGLED ON IN MOVIES) */}
-            {isTemplateEnabled('listings_grid') && (activeMarketSection !== 'movies' || showMoviesClassicGrid) && (
+            {isTemplateEnabled('listings_grid') && renderActiveMarketSection !== 'hotel_stay' && (activeMarketSection !== 'movies' || showMoviesClassicGrid) && (
               filteredListings.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 text-center border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="w-14 h-14 bg-purple-50 dark:bg-purple-950/50 rounded-2xl mx-auto flex items-center justify-center text-purple-600 dark:text-purple-400">

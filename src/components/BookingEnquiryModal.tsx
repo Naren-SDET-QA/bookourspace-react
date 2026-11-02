@@ -22,7 +22,8 @@ import {
   ArrowRight,
   Star,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  CreditCard,
 } from 'lucide-react';
 import { MarketplaceListing, CustomerAction } from '../types/marketplace';
 import { getActionForListing, customerActionList } from '../data/customerActions';
@@ -41,9 +42,13 @@ import { triggerGlobalGlobeLoader } from './BOSBrandLogo';
 import {
   createAuthoritativeBookingAtomic,
   createServerPaymentIntent,
+  createRazorpayOrder,
+  loadRazorpayCheckout,
+  verifyRazorpayPayment,
   verifyServerUpiPayment,
   getOrCreateClientSessionId,
 } from '../lib/supabaseClient';
+import { isAuthoritativeBookingAccepted } from '../lib/bookingValidation';
 
 interface BookingEnquiryModalProps {
   listing: MarketplaceListing | null;
@@ -77,21 +82,26 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   const [selectedSlotType, setSelectedSlotType] = useState<'urgent' | 'today_morning' | 'today_afternoon' | 'today_evening' | 'tomorrow'>('urgent');
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [submittedPaymentStatus, setSubmittedPaymentStatus] = useState<
+    'pay_later' | 'pending_verification' | 'verified'
+  >('pay_later');
 
   // Dynamic Pay via QR State
-  const [paymentMode, setPaymentMode] = useState<'pay_later' | 'pay_qr'>('pay_later');
+  const [paymentMode, setPaymentMode] = useState<'pay_later' | 'pay_qr' | 'razorpay'>('pay_later');
   const [copiedUpi, setCopiedUpi] = useState(false);
   const [isVerifyingQr, setIsVerifyingQr] = useState(false);
   const [qrVerified, setQrVerified] = useState(false);
   const [qrTxId, setQrTxId] = useState('');
   const [paymentIntentId, setPaymentIntentId] = useState('');
   const [paymentVerificationToken, setPaymentVerificationToken] = useState('');
+  const [isRazorpayProcessing, setIsRazorpayProcessing] = useState(false);
   const [signedQrPassToken, setSignedQrPassToken] = useState('');
   const [bookingConflictError, setBookingConflictError] = useState<string | null>(null);
 
   // Voice input support for easy speech filling
   const [activeVoiceField, setActiveVoiceField] = useState<'name' | 'address' | null>(null);
   const recognitionRef = useRef<any>(null);
+  const bookingFormRef = useRef<HTMLFormElement>(null);
 
   const [hotelStayMode, setHotelStayMode] = useState<'hourly' | 'daily' | 'weekly' | 'monthly'>('daily');
 
@@ -115,14 +125,16 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
 
   const [selectedBookingDate, setSelectedBookingDate] = useState<string>(todayIso);
   const [selectedCheckoutDate, setSelectedCheckoutDate] = useState<string>(tomorrowIso);
-  const [hotelCheckInTime, setHotelCheckInTime] = useState<string>('14:00');
-  const [hotelCheckOutTime, setHotelCheckOutTime] = useState<string>('12:00');
+  // Keep the provider's standard times in the booking payload while the UI
+  // presents one stay date range and one preferred check-in slot.
+  const [hotelCheckInTime] = useState<string>('14:00');
+  const [hotelCheckOutTime] = useState<string>('12:00');
   const [activeRangeEdge, setActiveRangeEdge] = useState<'checkIn' | 'checkOut'>('checkIn');
   const [calendarMonth, setCalendarMonth] = useState<{ year: number; month: number }>(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
   });
-  const [showCalendarGrid, setShowCalendarGrid] = useState<boolean>(true);
+  const [showCalendarGrid, setShowCalendarGrid] = useState<boolean>(false);
 
   useEffect(() => {
     if (listing) {
@@ -132,6 +144,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
         (listing.categoryId === 'hotel-hourly' ? 'hourly' : 'daily');
       setHotelStayMode(nextMode);
       setSubmitted(false);
+      setSubmittedPaymentStatus('pay_later');
       setQrVerified(false);
       setActiveRangeEdge('checkIn');
 
@@ -392,6 +405,84 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   const upiUri = `upi://pay?pa=${encodeURIComponent(providerVpa)}&pn=${encodeURIComponent(cleanProviderName)}&am=${totalBookingAmount}&cu=INR&tn=${encodeURIComponent(upiTxnNote)}`;
   const bookingPassBarcodeId = generateBosBarcodeId('TKT', `${listing.id}-${customerPhone.slice(-4)}`, listing.categoryId);
 
+  const continueToBookingAfterVerifiedPayment = () => {
+    // Allow the verification state to commit before native form validation and
+    // the existing authoritative booking submission run.
+    window.setTimeout(() => bookingFormRef.current?.requestSubmit(), 0);
+  };
+
+  const handleRazorpayPayment = async () => {
+    setIsRazorpayProcessing(true);
+    setBookingConflictError(null);
+
+    try {
+      const order = await createRazorpayOrder({
+        amount: totalBookingAmount,
+        planOrListing: displayTitle,
+        userId: getOrCreateClientSessionId(),
+      });
+      if (!order.ok || !order.keyId || !order.orderId || !order.intentId || !order.amountInPaise) {
+        throw new Error(order.error || 'RAZORPAY_ORDER_FAILED');
+      }
+
+      const checkoutLoaded = await loadRazorpayCheckout();
+      if (!checkoutLoaded || !window.Razorpay) {
+        throw new Error('RAZORPAY_CHECKOUT_UNAVAILABLE');
+      }
+
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amountInPaise,
+        currency: order.currency || 'INR',
+        name: 'BookOurSpace',
+        description: `${displayTitle} booking`,
+        order_id: order.orderId,
+        prefill: {
+          name: customerName,
+          contact: customerPhone,
+        },
+        notes: {
+          bookourspace_intent_id: order.intentId,
+          listing_id: listing.id,
+        },
+        theme: { color: '#4A148C' },
+        handler: async (response) => {
+          const verification = await verifyRazorpayPayment({
+            intentId: order.intentId!,
+            razorpayOrderId: response.razorpay_order_id,
+            razorpayPaymentId: response.razorpay_payment_id,
+            razorpaySignature: response.razorpay_signature,
+          });
+          if (!verification.ok || !verification.verified) {
+            setBookingConflictError(
+              verification.error || 'Razorpay payment could not be server-verified. No booking was confirmed.'
+            );
+            setIsRazorpayProcessing(false);
+            return;
+          }
+
+          setPaymentIntentId(order.intentId!);
+          setPaymentVerificationToken(verification.paymentVerificationToken || '');
+          setQrTxId(`RZP-${response.razorpay_payment_id}`);
+          setQrVerified(true);
+          setIsRazorpayProcessing(false);
+          continueToBookingAfterVerifiedPayment();
+        },
+        modal: {
+          ondismiss: () => setIsRazorpayProcessing(false),
+        },
+      });
+      checkout.open();
+    } catch (error: any) {
+      setBookingConflictError(
+        error?.message === 'RAZORPAY_CHECKOUT_UNAVAILABLE'
+          ? 'Razorpay Checkout could not load. Check network access and try again.'
+          : 'Razorpay test order could not be created. No booking or payment was confirmed.'
+      );
+      setIsRazorpayProcessing(false);
+    }
+  };
+
   const handleVerifyQrPayment = async () => {
     setIsVerifyingQr(true);
     setBookingConflictError(null);
@@ -422,6 +513,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
         setQrTxId(`UTR-${generatedUtr}`);
         setPaymentVerificationToken(verifyRes.paymentVerificationToken || '');
         setQrVerified(true);
+        continueToBookingAfterVerifiedPayment();
       } else {
         setQrTxId(`PENDING-UTR-${generatedUtr}`);
         setQrVerified(false);
@@ -535,7 +627,16 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
     setBookingConflictError(null);
     triggerGlobalGlobeLoader('Confirming Booking & Generating GST Invoice...', 650);
 
-    const finalTxId = qrVerified ? qrTxId : (paymentMode === 'pay_qr' ? `PENDING-RECON-${Date.now().toString().slice(-6)}` : undefined);
+    if (paymentMode === 'razorpay' && (!qrVerified || !paymentVerificationToken || !paymentIntentId)) {
+      setBookingConflictError('Complete and verify the Razorpay checkout before confirming this booking.');
+      return;
+    }
+
+    const finalTxId = qrVerified
+      ? qrTxId
+      : paymentMode !== 'pay_later'
+      ? `PENDING-RECON-${Date.now().toString().slice(-6)}`
+      : undefined;
     const effectiveCheckOut = isRangeBooking ? selectedCheckoutDate : selectedBookingDate;
     const checkInDateTimeVal = isHotel ? `${selectedBookingDate}T${hotelCheckInTime}` : undefined;
     const checkOutDateTimeVal = isHotel ? `${effectiveCheckOut}T${hotelCheckOutTime}` : undefined;
@@ -581,8 +682,23 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
       return;
     }
 
+    if (!isAuthoritativeBookingAccepted(atomicRes)) {
+      setBookingConflictError(
+        atomicRes.message ||
+          'The server could not validate this booking. No confirmation or payment success was recorded.'
+      );
+      return;
+    }
+
     const issuedPassToken = atomicRes.booking?.qrPassToken || bookingPassBarcodeId;
     const resolvedPayStatus = atomicRes.booking?.paymentStatus || (qrVerified ? 'verified' : 'pending_verification');
+    setSubmittedPaymentStatus(
+      paymentMode !== 'pay_later'
+        ? resolvedPayStatus === 'verified'
+          ? 'verified'
+          : 'pending_verification'
+        : 'pay_later'
+    );
     setSignedQrPassToken(issuedPassToken);
 
     // Idempotency / concurrency guard on local UI cache
@@ -597,6 +713,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
 
     if (!isDuplicateConcurrentBooking && !atomicRes.idempotentReplay) {
       createBooking({
+        authoritativeBookingId: atomicRes.booking?.id,
         listingId: listing.id,
         listingTitle: displayTitle,
         providerId: listing.providerId,
@@ -612,53 +729,65 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
         invoiceNumber: `BOS-GST-2026-${Date.now().toString().slice(-4)}`,
         timeSlot: computedTimeSlot,
         totalAmount: totalBookingAmount,
-        notes: paymentMode === 'pay_qr'
-          ? `[Pass Barcode: ${issuedPassToken}] [Check-in: ${checkInDateTimeVal || selectedBookingDate}] [Check-out: ${checkOutDateTimeVal || effectiveCheckOut}] ${isHotel ? `[Stay Mode: ${hotelStayMode}] ` : ''}[Payment: ${resolvedPayStatus === 'verified' ? 'SERVER VERIFIED' : 'PENDING UTR RECONCILIATION'} via Dynamic QR (₹${totalBookingAmount}, Ref: ${finalTxId})] [Time: ${selectedSlotObj.labelTe}] ${notes}`
+        paymentStatus: atomicRes.booking?.paymentStatus || resolvedPayStatus,
+        notes: paymentMode !== 'pay_later'
+          ? `[Pass Barcode: ${issuedPassToken}] [Check-in: ${checkInDateTimeVal || selectedBookingDate}] [Check-out: ${checkOutDateTimeVal || effectiveCheckOut}] ${isHotel ? `[Stay Mode: ${hotelStayMode}] ` : ''}[Payment: ${resolvedPayStatus === 'verified' ? 'SERVER VERIFIED' : 'PENDING RECONCILIATION'} via ${paymentMode === 'razorpay' ? 'Razorpay' : 'Dynamic QR'} (₹${totalBookingAmount}, Ref: ${finalTxId})] [Time: ${selectedSlotObj.labelTe}] ${notes}`
           : `[Pass Barcode: ${issuedPassToken}] [Check-in: ${checkInDateTimeVal || selectedBookingDate}] [Check-out: ${checkOutDateTimeVal || effectiveCheckOut}] ${isHotel ? `[Stay Mode: ${hotelStayMode}] ` : ''}[Payment: Pay at Venue/Hotel / After Service] [Time: ${selectedSlotObj.labelTe}] ${notes ? notes : 'బుకింగ్'}`
       });
     }
 
-    if (paymentMode === 'pay_qr' && resolvedPayStatus === 'verified') {
+    if (paymentMode !== 'pay_later' && resolvedPayStatus === 'verified') {
       recordPayment(
         'plan_subscription',
         totalBookingAmount,
         `Booking: ${displayTitle} (${issuedPassToken})`,
-        `UPI QR Verified (${providerVpa})`
+        paymentMode === 'razorpay' ? 'Razorpay Verified' : `UPI QR Verified (${providerVpa})`
       );
     }
 
     sendEnquiry(
       listing.id,
-      `Action: ${t.bookNow}. Dates: ${dateRangeSummary}. Barcode Pass: ${issuedPassToken}. ${isHotel ? `Stay Mode: ${hotelStayMode} (₹${totalBookingAmount}). ` : ''}Mode: ${paymentMode === 'pay_qr' ? (resolvedPayStatus === 'verified' ? 'Server-Verified Dynamic QR' : 'QR Pending Bank Reconciliation') : 'Pay After Work'}. Slot: ${selectedSlotObj.labelTe}. చిరునామా: ${customerAddress}`,
+      `Action: ${t.bookNow}. Dates: ${dateRangeSummary}. Barcode Pass: ${issuedPassToken}. ${isHotel ? `Stay Mode: ${hotelStayMode} (₹${totalBookingAmount}). ` : ''}Mode: ${paymentMode === 'razorpay' ? (resolvedPayStatus === 'verified' ? 'Server-Verified Razorpay' : 'Razorpay Pending Verification') : paymentMode === 'pay_qr' ? (resolvedPayStatus === 'verified' ? 'Server-Verified Dynamic QR' : 'QR Pending Bank Reconciliation') : 'Pay After Work'}. Slot: ${selectedSlotObj.labelTe}. చిరునామా: ${customerAddress}`,
       customerName,
       customerPhone
     );
 
-    if (paymentMode === 'pay_qr' && !qrTxId) {
+    if (paymentMode !== 'pay_later' && !qrTxId) {
       setQrTxId(finalTxId || `PENDING-RECON-${Date.now().toString().slice(-6)}`);
     }
 
     setSubmitted(true);
   };
 
+  const isSubmittedPaymentVerified = submittedPaymentStatus === 'verified';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-4 max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-2.5 backdrop-blur-sm sm:p-4">
+      <div className="relative my-2 flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         
         {/* Header - 100% Telugu with clear icons */}
-        <div className="p-4 sm:p-5 text-white bg-gradient-to-r from-[#4A148C] via-purple-900 to-indigo-900 flex items-center justify-between">
-          <div className="flex-1 pr-2">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-[10px] sm:text-xs font-black uppercase tracking-wider text-amber-300">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{displaySubcategory} · {t.bookNow}</span>
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-3 bg-gradient-to-r from-[#4A148C] via-purple-900 to-indigo-900 p-3.5 text-white sm:p-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <img
+              src={listing.images?.[0]}
+              alt=""
+              className="h-12 w-16 shrink-0 rounded-xl border border-white/30 object-cover sm:h-14 sm:w-20"
+            />
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-amber-200">
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>{displaySubcategory} · {t.bookNow}</span>
+              </div>
+              <h3 className="mt-1 line-clamp-2 text-sm font-black leading-tight text-white sm:text-base">
+                {displayTitle}
+              </h3>
+              <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-purple-100 sm:text-xs">
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                <span>{t.verifiedPro}:</span>
+                <strong className="truncate font-bold text-white">{displayProviderName}</strong>
+                <span className="shrink-0 text-purple-200">· {distKm} km</span>
+              </p>
             </div>
-            <h3 className="font-black text-base sm:text-lg mt-1 line-clamp-1 text-white">
-              {displayTitle}
-            </h3>
-            <p className="text-xs text-purple-200 flex items-center gap-1 mt-0.5">
-              <span>{t.verifiedPro}:</span>
-              <strong className="text-white font-bold">{displayProviderName}</strong>
-            </p>
           </div>
 
           <button
@@ -671,29 +800,33 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
+        <div className="flex-1 space-y-4 overflow-y-auto p-3 text-xs sm:p-5">
           {submitted ? (
             <div className="py-8 text-center space-y-4 animate-in zoom-in-95 duration-200">
               <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-md">
                 <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
               </div>
               <div className="space-y-1.5">
-                {paymentMode === 'pay_qr' && (
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-extrabold text-[11px] border border-emerald-300 dark:border-emerald-800">
-                    <QrCode className="w-3.5 h-3.5" />
-                    <span>{currentLang === 'te' ? 'క్యూఆర్ పేమెంట్ విజయవంతమైంది' : 'UPI QR Payment Success'}</span>
+                {paymentMode !== 'pay_later' && (
+                  <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-extrabold text-[11px] border ${isSubmittedPaymentVerified ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'}`}>
+                    {paymentMode === 'razorpay' ? <CreditCard className="w-3.5 h-3.5" /> : <QrCode className="w-3.5 h-3.5" />}
+                    <span>{isSubmittedPaymentVerified ? (paymentMode === 'razorpay' ? 'Razorpay Payment Verified' : currentLang === 'te' ? 'క్యూఆర్ పేమెంట్ వెరిఫై అయింది' : 'UPI QR Payment Verified') : (paymentMode === 'razorpay' ? 'Razorpay Payment Pending Verification' : currentLang === 'te' ? 'క్యూఆర్ పేమెంట్ రీకన్సిలియేషన్‌లో ఉంది' : 'UPI Payment Pending Reconciliation')}</span>
                   </div>
                 )}
                 <h4 className="font-black text-xl text-slate-900 dark:text-white">
-                  {paymentMode === 'pay_qr'
-                    ? (currentLang === 'te' ? '🎉 బుకింగ్ & పేమెంట్ పూర్తయింది!' : '🎉 Booking & Payment Confirmed!')
+                  {paymentMode !== 'pay_later'
+                    ? (isSubmittedPaymentVerified ? (currentLang === 'te' ? '🎉 బుకింగ్ & పేమెంట్ పూర్తయింది!' : '🎉 Booking & Payment Confirmed!') : (currentLang === 'te' ? '✅ బుకింగ్ అందింది — పేమెంట్ వెరిఫికేషన్ పెండింగ్' : '✅ Booking Received — Payment Verification Pending'))
                     : (currentLang === 'te' ? '🎉 బుకింగ్ విజయవంతమైంది!' : '🎉 Booking Confirmed Successfully!')}
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                  {paymentMode === 'pay_qr'
-                    ? (currentLang === 'te'
+                  {paymentMode !== 'pay_later'
+                    ? (isSubmittedPaymentVerified ? (paymentMode === 'razorpay'
+                        ? `₹${effectivePrice.toLocaleString('en-IN')} was verified by Razorpay. ${displayProviderName} has received your booking.`
+                        : currentLang === 'te'
                         ? `₹${effectivePrice.toLocaleString('en-IN')} విజయవంతంగా చెల్లించబడింది. ${displayProviderName} గారికి మీ సమాచారం పంపబడింది.`
-                        : `₹${effectivePrice.toLocaleString('en-IN')} received via UPI QR. ${displayProviderName} will arrive at ${customerAddress}.`)
+                        : `₹${effectivePrice.toLocaleString('en-IN')} received via UPI QR. ${displayProviderName} will arrive at ${customerAddress}.`) : (currentLang === 'te'
+                        ? 'మీ బుకింగ్ అభ్యర్థన అందింది. బ్యాంక్ రీకన్సిలియేషన్ పూర్తయ్యే వరకు పేమెంట్‌ను విజయవంతమైనదిగా పరిగణించవద్దు.'
+                        : 'Your booking request was received. Do not treat the payment as successful until provider reconciliation is complete.'))
                     : (currentLang === 'te' 
                         ? `${displayProviderName} గారికి మీ సమాచారం పంపబడింది. కొద్ది సేపట్లో మీ ఫోన్ నంబర్ (${customerPhone}) కి కాల్ చేస్తారు.`
                         : `${displayProviderName} has been notified and will call you shortly at ${customerPhone}.`)}
@@ -701,7 +834,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
               </div>
 
               {/* Receipt Reference for QR payment */}
-              {paymentMode === 'pay_qr' && (
+              {paymentMode !== 'pay_later' && (
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 max-w-xs mx-auto text-left text-xs space-y-1.5 shadow-2xs">
                   <div className="flex justify-between text-slate-500 text-[11px]">
                     <span>{currentLang === 'te' ? 'ట్రాన్సాక్షన్ ID:' : 'Txn ID:'}</span>
@@ -719,7 +852,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
               )}
 
               {/* Official Invoice Bill & Movie Ticket Barcode (Displayed ONLY for Movie Tickets & Invoice Bills) */}
-              {(isMovie || paymentMode === 'pay_qr') && (
+              {(isMovie || paymentMode !== 'pay_later') && (
                 <div className="text-left">
                   <UniversalBarcode
                     value={signedQrPassToken || bookingPassBarcodeId}
@@ -814,19 +947,19 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
               </div>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form ref={bookingFormRef} onSubmit={handleSubmit} className="space-y-4">
               
               {/* DIRECT 1-TAP INSTANT CALL BANNER (NO TYPING NEEDED FOR UNEDUCATED USERS) */}
-              <div className="p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/50 dark:to-teal-950/50 border border-emerald-300 dark:border-emerald-800 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-950/40">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <PhoneCall className="w-5 h-5 animate-pulse" />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
+                    <PhoneCall className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
-                    <span className="text-[10px] uppercase tracking-wider font-extrabold text-emerald-800 dark:text-emerald-300 block">
+                    <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-emerald-800 dark:text-emerald-300">
                       {currentLang === 'te' ? 'రాయడం కష్టంగా ఉందా? నేరుగా కాల్ చేయండి' : 'Need help? Direct Phone Call'}
                     </span>
-                    <span className="font-black text-sm text-emerald-950 dark:text-white truncate block">
+                    <span className="block max-w-[48vw] truncate text-xs font-black text-emerald-950 dark:text-white sm:max-w-none sm:text-sm">
                       {displayProviderName} ({listing.providerPhone})
                     </span>
                   </div>
@@ -834,7 +967,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
 
                 <a
                   href={`tel:${listing.providerPhone}`}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs flex items-center gap-1.5 shadow-xs shrink-0 transition-transform"
+                  className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-2 text-xs font-black text-white shadow-sm transition-transform hover:bg-emerald-700 active:scale-95"
                 >
                   <Phone className="w-3.5 h-3.5" />
                   <span>{t.callNow}</span>
@@ -843,18 +976,18 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
 
               {/* 4-WAY HOTEL STAY DURATION SWITCHER (గంటల వారీ | రోజు వారీ | వారం | నెల) */}
               {isHotel && (
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-black text-purple-900 dark:text-purple-200 flex items-center justify-between">
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                  <label className="flex items-center justify-between gap-3 text-[11px] font-black text-slate-800 dark:text-slate-100">
                     <span>
                       {currentLang === 'te'
                         ? '🏨 స్టే ప్యాకేజీ ఎంచుకోండి (గంటల వారీ / రోజు వారీ / వారం / నెల):'
                         : '🏨 Choose Stay Duration (Hourly / Daily / Weekly / Monthly):'}
                     </span>
-                    <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
                       15% OFF
                     </span>
                   </label>
-                  <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl grid grid-cols-4 gap-1 border border-purple-200 dark:border-purple-800">
+                  <div className="grid grid-cols-4 gap-1 rounded-full border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
                     {[
                       { id: 'hourly' as const, label: currentLang === 'te' ? 'గంటల వారీ' : 'Hourly' },
                       { id: 'daily' as const, label: currentLang === 'te' ? 'రోజు వారీ' : 'Daily' },
@@ -869,7 +1002,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                           onClick={() => setHotelStayMode(tab.id)}
                           className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                             active
-                              ? 'bg-[#4A148C] text-white shadow-sm'
+                            ? 'bg-[#FF385C] text-white shadow-sm'
                               : 'text-slate-600 dark:text-slate-300 hover:text-[#4A148C]'
                           }`}
                         >
@@ -882,12 +1015,12 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
               )}
 
               {/* Price Banner with Quick Pay via QR shortcut */}
-              <div className="p-3 bg-purple-50 dark:bg-purple-950/40 rounded-2xl flex flex-wrap items-center justify-between gap-2 border border-purple-200 dark:border-purple-800">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50/70 p-3 dark:border-rose-900/60 dark:bg-rose-950/30">
                 <div>
-                  <span className="text-[10px] text-purple-700 dark:text-purple-300 font-extrabold uppercase tracking-wider block">
+                  <span className="block text-[10px] font-extrabold uppercase tracking-wider text-rose-700 dark:text-rose-300">
                     {t.pricing} ({currentLang === 'te' ? 'పన్నులతో కలిపి' : 'Inclusive of taxes'})
                   </span>
-                  <div className="font-black text-base text-purple-950 dark:text-white tabular-nums flex items-baseline gap-1">
+                  <div className="flex items-baseline gap-1 font-black text-base tabular-nums text-slate-950 dark:text-white">
                     <span>{listing.currency}{effectivePrice.toLocaleString('en-IN')}</span>
                     <span className="text-xs font-normal text-slate-500"> {displayPriceUnit}</span>
                   </div>
@@ -898,7 +1031,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPaymentMode(paymentMode === 'pay_qr' ? 'pay_later' : 'pay_qr')}
-                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border ${
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
                       paymentMode === 'pay_qr'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                         : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50'
@@ -929,7 +1062,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                       {isRangeBooking
                         ? currentLang === 'te'
                           ? 'చెక్-ఇన్ & చెక్-అవుట్ తేదీలను ఎంచుకోండి (క్యాలెండర్):'
-                          : 'Select Check-in & Check-out Dates (Calendar):'
+                          : 'Select Check-in & Check-out Dates:'
                         : currentLang === 'te'
                         ? 'బుకింగ్ తేదీ & సమయం ఎంచుకోండి (క్యాలెండర్):'
                         : 'Select Booking Date & Time (Calendar):'}
@@ -1085,47 +1218,6 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                     </div>
                   )}
                 </div>
-
-                {/* HOTEL_STAY SPECIFIC CHECK-IN & CHECK-OUT DATE-TIME PICKER */}
-                {isHotel && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-2xl bg-indigo-50/70 dark:bg-slate-800/80 border border-indigo-200 dark:border-slate-700">
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-indigo-900 dark:text-indigo-300 block mb-1">
-                        {currentLang === 'te'
-                          ? '🕒 హోటల్ చెక్-ఇన్ తేదీ & సమయం (Date-Time):'
-                          : '🕒 Hotel Check-in Date & Time:'}
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={`${selectedBookingDate}T${hotelCheckInTime}`}
-                        onChange={(e) => {
-                          const [dtPart, tmPart] = e.target.value.split('T');
-                          if (dtPart) setSelectedBookingDate(dtPart);
-                          if (tmPart) setHotelCheckInTime(tmPart.slice(0, 5));
-                        }}
-                        className="w-full bg-white dark:bg-slate-900 border border-indigo-300 dark:border-slate-600 rounded-xl px-2.5 py-1.5 font-black text-xs text-slate-900 dark:text-white outline-hidden"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-purple-900 dark:text-purple-300 block mb-1">
-                        {currentLang === 'te'
-                          ? '🕒 హోటల్ చెక్-అవుట్ తేదీ & సమయం (Date-Time):'
-                          : '🕒 Hotel Check-out Date & Time:'}
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={`${selectedCheckoutDate}T${hotelCheckOutTime}`}
-                        onChange={(e) => {
-                          const [dtPart, tmPart] = e.target.value.split('T');
-                          if (dtPart) setSelectedCheckoutDate(dtPart);
-                          if (tmPart) setHotelCheckOutTime(tmPart.slice(0, 5));
-                        }}
-                        className="w-full bg-white dark:bg-slate-900 border border-purple-300 dark:border-slate-600 rounded-xl px-2.5 py-1.5 font-black text-xs text-slate-900 dark:text-white outline-hidden"
-                      />
-                    </div>
-                  </div>
-                )}
 
                 {/* INTERACTIVE VISUAL MONTH CALENDAR GRID */}
                 {showCalendarGrid && (
@@ -1405,7 +1497,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   <span>{currentLang === 'te' ? 'చెల్లింపు విధానం (Payment Option):' : 'Select Payment Option:'}</span>
                 </label>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {/* Option 1: Pay After Service */}
                   <button
                     type="button"
@@ -1451,6 +1543,31 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                       </div>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
                         {currentLang === 'te' ? 'Google Pay, PhonePe, Paytm తో నేరుగా స్కాన్ చేయండి.' : 'Scan with GPay, PhonePe, Paytm & BHIM.'}
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Option 3: Razorpay test-mode checkout */}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('razorpay')}
+                    className={`p-3 rounded-2xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                      paymentMode === 'razorpay'
+                        ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-600 text-indigo-950 dark:text-white ring-2 ring-indigo-400/40 shadow-xs'
+                        : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-xl shrink-0 ${paymentMode === 'razorpay' ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}`}>
+                      <CreditCard className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-black text-xs flex items-center gap-1">
+                        <span>Razorpay</span>
+                        <span className="text-[9px] font-black bg-indigo-600 text-white px-1.5 py-0.2 rounded-full uppercase">Test</span>
+                        {paymentMode === 'razorpay' && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 ml-auto" />}
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                        Secure card, UPI, and netbanking checkout with server verification.
                       </p>
                     </div>
                   </button>
@@ -1578,6 +1695,32 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
 
                   </div>
                 )}
+
+                {paymentMode === 'razorpay' && (
+                  <div className="mt-3 p-4 rounded-3xl bg-gradient-to-b from-indigo-50/90 via-white to-indigo-50/40 dark:from-indigo-950/50 dark:via-slate-900 dark:to-indigo-950/30 border-2 border-indigo-500/50 dark:border-indigo-500/40 space-y-3 shadow-md">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-black text-sm text-slate-900 dark:text-white">Razorpay Secure Checkout</h4>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                          Test mode only. Your payment is accepted only after server-side signature and capture validation.
+                        </p>
+                      </div>
+                      <ShieldCheck className="w-6 h-6 text-indigo-600 shrink-0" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRazorpayPayment}
+                      disabled={isRazorpayProcessing || qrVerified}
+                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-xs font-black text-white shadow-md transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {qrVerified
+                        ? 'Razorpay payment verified ✓'
+                        : isRazorpayProcessing
+                        ? 'Opening secure checkout…'
+                        : `Pay ₹${totalBookingAmount.toLocaleString('en-IN')} with Razorpay`}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Extra Instructions (Optional) */}
@@ -1604,20 +1747,24 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                 <button
                   type="submit"
                   className={`w-full py-4 rounded-2xl active:scale-[0.98] text-white font-black text-sm sm:text-base shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                    paymentMode === 'pay_qr'
+                    paymentMode !== 'pay_later'
                       ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 shadow-emerald-950/25'
                       : 'bg-[#4A148C] hover:bg-purple-900 shadow-purple-950/25'
                   }`}
                 >
-                  {paymentMode === 'pay_qr' ? (
-                    <QrCode className="w-5 h-5 text-amber-300" />
+                  {paymentMode !== 'pay_later' ? (
+                    paymentMode === 'razorpay' ? <CreditCard className="w-5 h-5 text-amber-300" /> : <QrCode className="w-5 h-5 text-amber-300" />
                   ) : (
                     <ShieldCheck className="w-5 h-5 text-amber-300" />
                   )}
                   <span>
-                    {paymentMode === 'pay_qr'
+                    {paymentMode !== 'pay_later'
                       ? (currentLang === 'te'
-                          ? `📱 క్యూఆర్ ద్వారా చెల్లించి బుక్ చేయండి (₹${totalBookingAmount.toLocaleString('en-IN')})`
+                          ? paymentMode === 'razorpay'
+                            ? `💳 Razorpay ధృవీకరణ తర్వాత బుక్ చేయండి (₹${totalBookingAmount.toLocaleString('en-IN')})`
+                            : `📱 క్యూఆర్ ద్వారా చెల్లించి బుక్ చేయండి (₹${totalBookingAmount.toLocaleString('en-IN')})`
+                          : paymentMode === 'razorpay'
+                          ? `💳 Confirm Razorpay Booking (₹${totalBookingAmount.toLocaleString('en-IN')})`
                           : `📱 Confirm Booking with QR Payment (₹${totalBookingAmount.toLocaleString('en-IN')})`)
                       : (currentLang === 'te' 
                           ? `✅ ఉచితంగా బుక్ చేయండి (మొత్తం: ₹${totalBookingAmount.toLocaleString('en-IN')})`
@@ -1625,9 +1772,13 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   </span>
                 </button>
                 <p className="text-[10px] text-center text-slate-400 mt-1.5 font-medium">
-                  {paymentMode === 'pay_qr'
+                  {paymentMode !== 'pay_later'
                     ? (currentLang === 'te'
-                        ? '🔒 తక్షణ యూపీఐ రక్షణ. నిపుణుడు నిర్ధారించబడతారు మరియు రసీదు జారీ చేయబడుతుంది.'
+                        ? paymentMode === 'razorpay'
+                          ? '🔒 Razorpay సర్వర్ ధృవీకరణ తర్వాత మాత్రమే బుకింగ్ నిర్ధారించబడుతుంది.'
+                          : '🔒 తక్షణ యూపీఐ రక్షణ. నిపుణుడు నిర్ధారించబడతారు మరియు రసీదు జారీ చేయబడుతుంది.'
+                        : paymentMode === 'razorpay'
+                        ? '🔒 Booking confirmation requires server-side Razorpay verification.'
                         : '🔒 Instant UPI protection with automated digital receipt generation.')
                     : (currentLang === 'te' 
                         ? '🔒 సర్వీస్ పూర్తయిన తర్వాత మాత్రమే పేమెంట్ చేయండి. 100% నమ్మకమైన నిపుణులు.'

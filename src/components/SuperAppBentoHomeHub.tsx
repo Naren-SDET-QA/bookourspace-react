@@ -30,6 +30,7 @@ import { venue12Categories } from '../data/venueData';
 import { AppLanguage, allIndianLanguages } from '../utils/translations';
 import { getUILabels } from '../utils/i18nEngine';
 import { HomeScreenLayoutStyle } from './ModularSystemEngine';
+import { CATEGORY_PAGE_PRESENTATION } from '../lib/categoryPagePresentation';
 
 interface SuperAppBentoHomeHubProps {
   activeMarketSection: MarketSectionType;
@@ -282,6 +283,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
 
   // Auto-advance Spotlight & Platform Fee showcase one-by-one every 3.5 seconds
   useEffect(() => {
+    if (!CATEGORY_PAGE_PRESENTATION.showSpotlights) return;
     if (isHeroPaused) return;
     const timer = window.setInterval(() => {
       setActiveHeroSlide((prev) => (prev + 1) % heroSpotlightSlides.length);
@@ -556,6 +558,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
       {/* MAIN MOBILE-LOCKED SUPER-APP BODY (FITS 100% WITHIN VIEWPORT WITH ZERO VERTICAL OR HORIZONTAL SCROLL) */}
       <div className="max-w-md sm:max-w-3xl mx-auto w-full flex-1 min-h-0 px-3 sm:px-5 py-1.5 sm:py-2.5 flex flex-col justify-between gap-1.5 sm:gap-2.5 overflow-hidden box-border">
         {/* 2. TOP SPOTLIGHT HERO CARD WITH DISTINCT COLOR PALETTES & FRAMED MULTI-COLOR IMAGERY PER ANIMATION */}
+        {CATEGORY_PAGE_PRESENTATION.showSpotlights && (
         <div
           onMouseEnter={() => setIsHeroPaused(true)}
           onMouseLeave={() => setIsHeroPaused(false)}
@@ -716,6 +719,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* 3. ROUNDED SOFT-LAVENDER SUPER-APP BENTO CONTAINER (2 WIDE + 8 SQUARE CARDS, FLEX-SCALED FOR ZERO SCROLL) */}
         <div className="flex-1 min-h-0 w-full rounded-[22px] bg-[#EAEEF8] dark:bg-[#131836] px-2.5 py-1.5 sm:p-3.5 shadow-2xs border border-indigo-100/80 dark:border-indigo-900/50 flex flex-col justify-between overflow-hidden box-border">
@@ -873,6 +877,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
         </div>
 
         {/* 4. BOTTOM PROMOTIONAL CARDS STRIP (DYNAMIC ONE-BY-ONE CATEGORY UPDATE) */}
+        {CATEGORY_PAGE_PRESENTATION.showSpotlights && (
         <div className="shrink-0 grid grid-cols-12 gap-2 sm:gap-3 w-full overflow-hidden">
           {/* Left Wide VIP Verified Offer Card (8 cols) */}
           <div
@@ -931,6 +936,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* ALL CATEGORIES & SUBCATEGORIES SHEET (OPENS WHEN USER CLICKS "MORE" OR 4-DOT GRID ICON) */}
