@@ -56,6 +56,8 @@ interface LiveAdminPageEditorProps {
   activePageId: CustomerPageId;
   onSelectPageId: (pageId: CustomerPageId) => void;
   isOpenExternal?: boolean;
+  /** Open directly in element-pick mode so every page element exposes an edit action. */
+  initialInspectMode?: boolean;
   onCloseExternal?: () => void;
   onConfigUpdated?: (activeConfig: LivePageEditorConfig, isDraftPreview: boolean) => void;
   onNotify?: (msg: string) => void;
@@ -83,6 +85,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   activePageId,
   onSelectPageId,
   isOpenExternal,
+  initialInspectMode = false,
   onCloseExternal,
   onConfigUpdated,
   onNotify,
@@ -129,6 +132,14 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       setIsDrawerOpen(true);
     }
   }, [isOpenExternal]);
+
+  useEffect(() => {
+    if (isOpenExternal && initialInspectMode && userRole === 'admin') {
+      setIsDrawerOpen(false);
+      setInspectMode(true);
+      notify('🎯 Edit mode: hover any element and click the ✏️ Edit badge (or the element) to change it.');
+    }
+  }, [isOpenExternal, initialInspectMode, userRole]);
 
   // Initial fetch from backend
   useEffect(() => {
@@ -196,11 +207,42 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   useEffect(() => {
     if (userRole !== 'admin' || !inspectMode) return;
 
+    // A floating pencil badge makes the edit affordance visible on every
+    // hovered element, not just an outline.
+    const chip = document.createElement('div');
+    chip.id = 'bos-inline-edit-chip';
+    chip.textContent = '\u270F\uFE0F Edit';
+    chip.setAttribute('aria-hidden', 'true');
+    Object.assign(chip.style, {
+      position: 'fixed',
+      zIndex: '2147483000',
+      display: 'none',
+      pointerEvents: 'none',
+      padding: '2px 7px',
+      borderRadius: '999px',
+      background: '#f59e0b',
+      color: '#111827',
+      fontSize: '10px',
+      fontWeight: '900',
+      lineHeight: '16px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+    });
+    document.body.appendChild(chip);
+    const cursorStyle = document.createElement('style');
+    cursorStyle.id = 'bos-inline-edit-cursor';
+    cursorStyle.textContent = 'body[data-bos-inline-edit="1"] { cursor: crosshair; }';
+    document.head.appendChild(cursorStyle);
+    document.body.dataset.bosInlineEdit = '1';
+
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target || target.closest('[data-bos-live-editor-ui="true"]')) return;
       target.style.outline = '2px dashed #F59E0B';
       target.style.outlineOffset = '2px';
+      const rect = target.getBoundingClientRect();
+      chip.style.display = 'block';
+      chip.style.top = `${Math.max(2, rect.top + 3)}px`;
+      chip.style.left = `${Math.max(2, rect.right - 58)}px`;
     };
 
     const handleMouseOut = (e: MouseEvent) => {
@@ -208,6 +250,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       if (!target || target.closest('[data-bos-live-editor-ui="true"]')) return;
       target.style.outline = '';
       target.style.outlineOffset = '';
+      chip.style.display = 'none';
     };
 
     const handleClick = (e: MouseEvent) => {
@@ -260,6 +303,9 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       document.removeEventListener('mouseover', handleMouseOver, true);
       document.removeEventListener('mouseout', handleMouseOut, true);
       document.removeEventListener('click', handleClick, true);
+      chip.remove();
+      cursorStyle.remove();
+      delete document.body.dataset.bosInlineEdit;
     };
   }, [userRole, inspectMode, activePageId, draftConfig.domOverrides]);
 

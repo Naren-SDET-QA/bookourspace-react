@@ -51,7 +51,8 @@ import {
   Wallet,
   Sliders,
   Printer,
-  Download
+  Download,
+  Pencil
 } from 'lucide-react';
 
 import { MarketplaceProvider, useMarketplace } from './context/MarketplaceContext';
@@ -691,6 +692,7 @@ function MarketplaceAppContent() {
     loadPublishedLivePageConfig()
   );
   const [isLivePageEditorOpen, setIsLivePageEditorOpen] = useState<boolean>(false);
+  const [adminInlineEdit, setAdminInlineEdit] = useState<boolean>(false);
   const [adminSection, setAdminSection] = useState<SuperAdminSectionId>('dashboard');
   const [isUniversalBuilderOpen, setIsUniversalBuilderOpen] = useState<boolean>(false);
 
@@ -6278,6 +6280,23 @@ function MarketplaceAppContent() {
         </button>
       )}
 
+      {/* ADMIN INLINE EDIT: one tap puts the live page into element-pick mode. */}
+      {isAdminSession && activeView !== 'admin_console' && !isLivePageEditorOpen && (
+        <button
+          type="button"
+          data-testid="admin-inline-edit"
+          onClick={() => {
+            setAdminInlineEdit(true);
+            setIsLivePageEditorOpen(true);
+          }}
+          className="fixed right-4 top-24 z-[60] inline-flex min-h-[40px] items-center gap-1.5 rounded-full bg-slate-950/95 px-4 text-[11px] font-black text-white shadow-xl ring-1 ring-amber-400/70 backdrop-blur transition hover:bg-slate-800"
+          title="Show edit controls on every element of this page"
+        >
+          <Pencil className="h-3.5 w-3.5 text-amber-400" aria-hidden="true" />
+          Edit page
+        </button>
+      )}
+
       {/* SECURE LIVE ADMIN PAGE EDITOR (OTA SYNC FOR WEB, ANDROID & IOS) */}
       <Suspense fallback={null}>
         {isLivePageEditorOpen && (
@@ -6291,7 +6310,11 @@ function MarketplaceAppContent() {
               setActiveView('marketplace');
             }}
             isOpenExternal
-            onCloseExternal={() => setIsLivePageEditorOpen(false)}
+            initialInspectMode={adminInlineEdit}
+            onCloseExternal={() => {
+              setIsLivePageEditorOpen(false);
+              setAdminInlineEdit(false);
+            }}
             onConfigUpdated={(nextCfg) => setLivePageConfig(nextCfg)}
             onNotify={(msg) => showToast(msg)}
           />
