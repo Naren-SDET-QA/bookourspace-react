@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, CheckCircle2, Copy, Loader2, MapPin, RefreshCw, ShieldCheck, Smartphone, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarDays, CheckCircle2, Loader2, MapPin, RefreshCw, ShieldCheck, Smartphone, X } from 'lucide-react';
+import { CopyButton } from './ui/CopyButton';
+import { FormStatus } from './ui/FormStatus';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   createServiceBooking,
@@ -54,7 +56,7 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
   const [created, setCreated] = useState<ServiceBooking | null>(null);
   const [intent, setIntent] = useState<ServicePaymentIntent | null>(null);
   const [intentStatus, setIntentStatus] = useState<string>('');
-  const [copied, setCopied] = useState(false);
+
 
   useEffect(() => {
     let active = true;
@@ -156,17 +158,6 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
     }
   };
 
-  const copyReference = async () => {
-    if (!created) return;
-    try {
-      await navigator.clipboard.writeText(created.bookingRef);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   const paid = intentStatus === 'verified';
 
   return (
@@ -199,10 +190,7 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
                 <dt className="text-slate-500 dark:text-slate-400">Reference</dt>
                 <dd className="flex items-center gap-2 font-mono font-bold">
                   {created.bookingRef}
-                  <button type="button" onClick={() => void copyReference()} className="rounded p-1 text-violet-700 hover:bg-violet-50 dark:text-violet-300 dark:hover:bg-violet-950" aria-label="Copy booking reference">
-                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                  {copied && <span className="text-[10px] font-semibold text-emerald-700">Copied</span>}
+                  <CopyButton value={created.bookingRef} label="Copy" />
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">When</dt><dd className="font-semibold">{created.scheduledDate} · {created.timeSlot}{selectedSlot ? `–${selectedSlot.end}` : ''}</dd></div>
@@ -326,7 +314,7 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
               </div>
             </fieldset>
 
-            {error && <p role="alert" className="rounded-2xl border border-rose-300 bg-rose-50 p-3 text-xs font-semibold text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">{error}</p>}
+            {error && <FormStatus tone="error">{error}</FormStatus>}
 
             <button type="submit" disabled={submitting || !selectedSlot} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-violet-700 text-sm font-extrabold text-white shadow-lg shadow-violet-900/20 transition hover:bg-violet-800 disabled:opacity-60">
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ShieldCheck className="h-4 w-4" aria-hidden="true" />}

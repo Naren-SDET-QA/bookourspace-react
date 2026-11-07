@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { fetchPgAdminBookings } from '../lib/pgBookingClient';
+import { LastUpdated } from './ui/LastUpdated';
 import { PostingPlan, MarketplaceListing } from '../types/marketplace';
 const SupremeAdminControlPanel = lazy(() => import('./SupremeAdminControlPanel').then((module) => ({ default: module.SupremeAdminControlPanel })));
 const PgAdminWorkspace = lazy(() => import('./PgAdminWorkspace').then((module) => ({ default: module.PgAdminWorkspace })));
@@ -1389,6 +1390,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <p className="text-xs text-indigo-200">
             Dedicated independent sections for Users, Payments, Ads, Reports & Analytics, Theme Management, Content, Listings, Bookings & Feature Builder
           </p>
+          <LastUpdated at={auditLogs[0]?.timestamp} label="Latest audit" className="mt-1 block text-[11px] font-semibold text-indigo-200" />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

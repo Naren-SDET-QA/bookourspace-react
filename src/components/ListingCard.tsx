@@ -31,7 +31,8 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { MarketplaceListing, PriceBreakdown } from '../types/marketplace';
-import { buildDefaultPriceBreakdown } from '../data/seedData';
+import { LastUpdated } from './ui/LastUpdated';
+import { buildDefaultPriceBreakdown } from '../data/listingPrice';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { 
   AppLanguage, 
@@ -807,6 +808,8 @@ export const ListingCard: React.FC<ListingCardProps> = ({
             </div>
           </div>
 
+          <LastUpdated at={listing.createdAt} label="Listed" className="block text-[10px] font-semibold text-slate-400" />
+
           {/* Row 9: Bottom 4-Action Bar (Call, WhatsApp/Chat, Visit, Online Booking ->) */}
           <div
             className="pt-1 flex items-center gap-2"
@@ -1021,6 +1024,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
               {displayPriceUnit}
             </span>
           </div>
+          <LastUpdated at={listing.createdAt} label="Listed" className="mt-1 block text-[10px] font-semibold text-slate-400" />
 
           {showPriceBreakdown &&
             listing.price > 0 &&
