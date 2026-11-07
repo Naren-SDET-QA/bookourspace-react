@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { applyLivePageOverrides, buildStableDomKey } from '../lib/livePageOverrides';
 import SafeImage from './SafeImage';
 import UniversalMediaManager from './UniversalMediaManager';
 import {
@@ -177,30 +178,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   useEffect(() => {
     const activeCfg =
       userRole === 'admin' && previewMode === 'draft' ? draftConfig : publishedConfig;
-    const overrides = activeCfg.domOverrides || {};
-    Object.values(overrides).forEach((ov) => {
-      if (ov.pageId !== activePageId) return;
-      try {
-        const el = document.querySelector<HTMLElement>(`[data-bos-dom-key="${ov.selectorKey}"]`);
-        if (!el) return;
-        if (ov.hidden !== undefined) {
-          el.style.display = ov.hidden ? 'none' : '';
-        }
-        if (ov.customBgColor) {
-          el.style.backgroundColor = ov.customBgColor;
-        }
-        if (ov.customTextColor) {
-          el.style.color = ov.customTextColor;
-        }
-        if (el.tagName === 'IMG' && ov.customImageUrl) {
-          (el as HTMLImageElement).src = ov.customImageUrl;
-        } else if (ov.customText && el.childNodes.length <= 2) {
-          el.textContent = ov.customText;
-        }
-      } catch {
-        // Ignore invalid selector
-      }
-    });
+    applyLivePageOverrides(activeCfg as LivePageEditorConfig, activePageId);
   }, [draftConfig, publishedConfig, previewMode, activePageId, userRole]);
 
   // Click-to-Select Page Element Inspector (Only active when Admin explicitly turns on Inspect Mode)
@@ -261,11 +239,11 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       e.stopPropagation();
       target.style.outline = '';
 
-      let domKey = target.getAttribute('data-bos-dom-key');
-      if (!domKey) {
-        domKey = `el-${activePageId}-${target.tagName.toLowerCase()}-${Date.now().toString().slice(-4)}`;
-        target.setAttribute('data-bos-dom-key', domKey);
-      }
+      const existingKey = target.getAttribute('data-bos-dom-key');
+      const domKey = existingKey && !/^el-/.test(existingKey)
+        ? existingKey
+        : buildStableDomKey(activePageId, target);
+      target.setAttribute('data-bos-dom-key', domKey);
 
       const existing = draftConfig.domOverrides[domKey];
       const textSample = (target.textContent || '').trim().slice(0, 120);

@@ -2,6 +2,76 @@ import { MarketSectionType } from '../data/servicesStayMoviesData';
 import { appendAdminAuditLog } from './adminAuditStore';
 import { supabase } from '../lib/supabaseClient';
 
+
+// ---------------------------------------------------------------------------
+// PostgreSQL-backed live page configuration (works without Supabase).
+// The server exposes /api/live-page-config with public published config and
+// admin-only draft/publish/rollback endpoints.
+// ---------------------------------------------------------------------------
+const LOCAL_LIVE_PAGE_API = '/api/live-page-config';
+
+function localLivePageHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  try {
+    const token = window.localStorage.getItem('bos_session_token_v1');
+    if (token) headers['x-bos-session-token'] = token;
+  } catch { /* storage unavailable */ }
+  return headers;
+}
+
+async function callLocalLivePageApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${LOCAL_LIVE_PAGE_API}${path}`, {
+    ...init,
+    headers: { ...localLivePageHeaders(), ...(init?.headers || {}) },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String((data as { message?: string; error?: string }).message || (data as { error?: string }).error || 'LIVE_PAGE_CONFIG_REQUEST_FAILED'));
+  }
+  return data as T;
+}
+
+function mergeLocalConfig(value: unknown): LivePageEditorConfig {
+  const candidate = (value && typeof value === 'object' ? value : {}) as Partial<LivePageEditorConfig>;
+  return {
+    ...DEFAULT_LIVE_PAGE_CONFIG,
+    ...candidate,
+    pages: ensurePageSectionsMerged((candidate.pages || DEFAULT_LIVE_PAGE_CONFIG.pages) as LivePageEditorConfig['pages']),
+    domOverrides: candidate.domOverrides || {},
+  };
+}
+
+function displayVersion(row: any): string {
+  return row?.versionNumber ? `v1.${row.versionNumber}.0` : String(row?.versionId || 'v1.0.0');
+}
+
+function localVersionFromServer(row: any): LivePageVersionSnapshot {
+  return {
+    versionId: displayVersion(row),
+    recordId: String(row?.versionId || ''),
+    status: row?.publishedAt ? 'published' : 'draft',
+    versionNumber: Number(row?.versionNumber || 0),
+    publishedAt: row?.publishedAt || null,
+    publishedBy: row?.publishedBy || null,
+    summary: String(row?.summary || ''),
+    platforms: Array.isArray(row?.platforms) ? row.platforms : ['React web clients'],
+    configSnapshot: mergeLocalConfig(row?.configSnapshot),
+  };
+}
+
+function localAuditFromServer(row: any): LivePageAuditEntry {
+  return {
+    id: String(row?.id || `audit-${Date.now()}`),
+    timestamp: String(row?.timestamp || new Date().toISOString()),
+    actor: String(row?.actor || 'Administrator'),
+    role: 'admin',
+    action: String(row?.action || 'Published live page configuration'),
+    pageId: String(row?.pageId || 'all_pages'),
+    details: String(row?.details || ''),
+    versionId: row?.versionNumber ? `v1.${row.versionNumber}.0` : undefined,
+  } as LivePageAuditEntry;
+}
+
 export type CustomerPageId = MarketSectionType; // 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies'
 
 export interface EditablePageSectionItem {
@@ -676,7 +746,22 @@ export async function fetchLivePageConfigFromBackend(): Promise<{
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  if (!supabase) {
+  if (!supabase || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
+    try {
+      const data = await callLocalLivePageApi<{ ok?: boolean; published?: unknown }>('');
+      if (data?.published) {
+        const published = mergeLocalConfig(data.published);
+        safeWriteLocal(STORAGE_KEYS.PUBLISHED, published);
+        return {
+          published,
+          draft: loadDraftLivePageConfig(),
+          versions: loadLivePageVersions(),
+          auditLogs: loadLivePageAuditLogs(),
+        };
+      }
+    } catch {
+      // Fall back to the last local cache when the API is unreachable.
+    }
     return {
       published: loadPublishedLivePageConfig(),
       draft: loadDraftLivePageConfig(),
@@ -756,7 +841,20 @@ export async function saveLivePageDraftToBackend(
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  if (!supabase) throw new Error('APP_CONFIG_SUPABASE_NOT_CONFIGURED');
+  if (!supabase || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
+    const data = await callLocalLivePageApi<{ ok?: boolean; draft?: unknown; versions?: unknown[]; auditLogs?: unknown[] }>('/draft', {
+      method: 'POST',
+      body: JSON.stringify({ config: draftConfig, summary: `${pageId}: ${summary}`.slice(0, 500) }),
+    });
+    const savedDraft = mergeLocalConfig(data.draft);
+    safeWriteLocal(STORAGE_KEYS.DRAFT, savedDraft);
+    const versions = (data.versions || []).map(localVersionFromServer).slice(0, 50);
+    const auditLogs = (data.auditLogs || []).map(localAuditFromServer).slice(0, 200);
+    safeWriteLocal(STORAGE_KEYS.VERSIONS, versions);
+    safeWriteLocal(STORAGE_KEYS.AUDIT, auditLogs);
+    window.dispatchEvent(new CustomEvent('bos-live-page-config-updated', { detail: { mode: 'draft', config: savedDraft } }));
+    return { draft: savedDraft, versions, auditLogs };
+  }
   const { data, error } = await supabase.rpc('save_app_builder_config_draft', {
     p_config: draftConfig,
     p_summary: `${pageId}: ${summary}`.slice(0, 500),
@@ -820,7 +918,21 @@ export async function publishLivePageConfigToBackend(
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  if (!supabase) throw new Error('APP_CONFIG_SUPABASE_NOT_CONFIGURED');
+  if (!supabase || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
+    const data = await callLocalLivePageApi<{ ok?: boolean; published?: unknown; versions?: unknown[]; auditLogs?: unknown[] }>('/publish', {
+      method: 'POST',
+      body: JSON.stringify({ config: configToPublish, summary: `${pageId}: ${summary}`.slice(0, 500) }),
+    });
+    const published = mergeLocalConfig(data.published);
+    safeWriteLocal(STORAGE_KEYS.PUBLISHED, published);
+    safeWriteLocal(STORAGE_KEYS.DRAFT, published);
+    const versions = (data.versions || []).map(localVersionFromServer).slice(0, 50);
+    const auditLogs = (data.auditLogs || []).map(localAuditFromServer).slice(0, 200);
+    safeWriteLocal(STORAGE_KEYS.VERSIONS, versions);
+    safeWriteLocal(STORAGE_KEYS.AUDIT, auditLogs);
+    window.dispatchEvent(new CustomEvent('bos-live-page-config-updated', { detail: { mode: 'published', config: published } }));
+    return { published, versions, auditLogs };
+  }
   const saved = await supabase.rpc('save_app_builder_config_draft', {
     p_config: configToPublish,
     p_summary: `${pageId}: ${summary}`.slice(0, 500),
