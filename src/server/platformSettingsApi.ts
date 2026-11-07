@@ -3,6 +3,7 @@ import type express from 'express';
 import { getSharedPostgresPool } from './postgresPool';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { BuilderError, type BuilderActor } from './platformBuilderRepository';
+import type { ModuleFlagRow } from './moduleGate';
 import { normalizePolicies, PolicyValidationError, type PolicyDocument } from '../lib/builder/policies';
 import { findEmbeddedDataUrl } from './mediaInputGuard';
 
@@ -29,6 +30,11 @@ export interface LivePageVersion {
   summary: string;
   platforms: string[];
   configSnapshot: Record<string, unknown>;
+}
+
+interface MarketplaceVisibilityPatch {
+  popularCategoriesDisabledCities?: string[];
+  disabledSubcategories?: string[];
 }
 
 function mapVersion(row: Record<string, any>): LivePageVersion {
@@ -198,6 +204,106 @@ export class PlatformSettingsRepository {
     }
   }
 
+  /** Merge and publish a narrow visibility patch in one DB transaction. */
+  async publishLiveVisibility(actor: BuilderActor, patch: MarketplaceVisibilityPatch) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query("select pg_advisory_xact_lock(hashtext('live_page_config')::bigint)");
+      const current = await client.query(
+        `select config from public.platform_live_page_config
+          where state = 'published' order by version_number desc limit 1 for update`,
+      );
+      const base = record(current.rows[0]?.config);
+      const visibility = {
+        ...record(base.visibility),
+        ...patch,
+      };
+      const config = { ...base, visibility };
+      const draft = await client.query(
+        `select public.platform_live_page_save_draft($1,$2::jsonb,$3) as result`,
+        [actor.id, JSON.stringify(config), 'Super Admin marketplace visibility'],
+      );
+      const draftRow = draft.rows[0]?.result as Record<string, any> | undefined;
+      if (!draftRow?.id) throw new BuilderError('LIVE_PAGE_CONFIG_INVALID', 400);
+      const published = await client.query(
+        `select public.platform_live_page_publish($1,$2::uuid) as result`,
+        [actor.id, String(draftRow.id)],
+      );
+      const state = await client.query(
+        `select id, published_at, published_by, config
+           from public.platform_live_page_config where id = $1 and state = 'published'`,
+        [String(draftRow.id)],
+      );
+      await client.query('commit');
+      return {
+        version: mapVersion(published.rows[0].result),
+        published: mapPublished(state.rows[0]),
+        visibility,
+      };
+    } catch (error) {
+      await client.query('rollback').catch(() => undefined);
+      throw this.translate(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Update only public module visibility/contact fields after a fresh DB role check. */
+  async updateModuleFlag(actor: BuilderActor, moduleKey: string, patch: {
+    is_enabled?: boolean;
+    allow_contact_owner?: boolean;
+  }): Promise<ModuleFlagRow> {
+    const allowed = new Set(['services', 'hotels', 'pg', 'function_hall', 'classes', 'movies', 'ecommerce']);
+    if (!allowed.has(moduleKey)) throw new BuilderError('MODULE_FLAG_UNKNOWN', 404);
+    const entries = Object.entries(patch);
+    if (!entries.length || entries.some(([key, value]) => (
+      !['is_enabled', 'allow_contact_owner'].includes(key) || typeof value !== 'boolean'
+    ))) throw new BuilderError('MODULE_FLAG_PATCH_INVALID', 400);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const profile = await client.query(
+        `select role, account_status, is_super_admin
+           from public.profiles where id = $1 for share`,
+        [actor.id],
+      );
+      const row = profile.rows[0];
+      if (!row || row.account_status !== 'active' || row.is_super_admin !== true) {
+        throw new BuilderError('BUILDER_SUPER_ADMIN_REQUIRED', 403);
+      }
+      const old = await client.query(
+        `select * from public.platform_module_flags where module_key = $1 for update`,
+        [moduleKey],
+      );
+      if (!old.rows[0]) throw new BuilderError('MODULE_FLAG_UNKNOWN', 404);
+      const columns = entries.map(([key], index) => `${key} = $${index + 1}`).join(', ');
+      const values = entries.map(([, value]) => value);
+      const update = await client.query(
+        `update public.platform_module_flags
+            set ${columns}, updated_by = $${values.length + 1}, updated_at = now()
+          where module_key = $${values.length + 2}
+          returning module_key, is_enabled, allow_contact_owner, allow_online_booking,
+                    requires_owner_approval, booking_approved_at`,
+        [...values, actor.id, moduleKey],
+      );
+      await client.query(
+        `insert into public.platform_builder_audit
+          (actor_id, actor_role, action, target_kind, target_key, summary, detail)
+         values ($1,'super_admin','module_visibility_updated','settings','platform_module_flags',$2,$3::jsonb)`,
+        [actor.id, `Updated ${moduleKey} visibility/contact settings`, JSON.stringify({ moduleKey, patch })],
+      );
+      await client.query('commit');
+      return update.rows[0] as ModuleFlagRow;
+    } catch (error) {
+      await client.query('rollback').catch(() => undefined);
+      throw this.translate(error);
+    } finally {
+      client.release();
+    }
+  }
+
   // -- admin module settings ----------------------------------------------
 
   async moduleSettings() {
@@ -280,6 +386,27 @@ export interface PlatformSettingsApiDependencies {
 function actorIdFromClaims(claims: { userId?: string; supabaseUserId?: string } | null): string {
   const candidate = String(claims?.supabaseUserId || claims?.userId || '').trim();
   return UUID.test(candidate) ? candidate : '';
+}
+
+function validateVisibilityPatch(value: unknown): MarketplaceVisibilityPatch {
+  const input = record(value);
+  const allowed = new Set(['popularCategoriesDisabledCities', 'disabledSubcategories']);
+  if (Object.keys(input).length === 0 || Object.keys(input).some((key) => !allowed.has(key))) {
+    throw new BuilderError('MARKETPLACE_VISIBILITY_INVALID', 400);
+  }
+  const result: MarketplaceVisibilityPatch = {};
+  for (const key of allowed) {
+    if (!(key in input)) continue;
+    const values = input[key];
+    const maxItems = key === 'disabledSubcategories' ? 300 : 100;
+    if (!Array.isArray(values) || values.length > maxItems || values.some((item) => (
+      typeof item !== 'string' || item.trim().length === 0 || item.trim().length > 100
+    ))) throw new BuilderError('MARKETPLACE_VISIBILITY_INVALID', 400);
+    const normalized = [...new Set((values as string[]).map((item) => item.trim()))];
+    if (key === 'popularCategoriesDisabledCities') result.popularCategoriesDisabledCities = normalized;
+    else result.disabledSubcategories = normalized;
+  }
+  return result;
 }
 
 /**
@@ -412,6 +539,61 @@ export function registerPlatformSettingsApi(
         auditLogs: state.auditLogs,
         versionId: version.versionId,
         publishedAt: version.publishedAt,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+
+  app.get('/api/platform-settings/access', async (request, response) => {
+    try {
+      const actor = await actorFrom(request);
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, canManage: actor?.role === 'super_admin' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.patch('/api/platform-settings/module-flags/:moduleKey', async (request, response) => {
+    try {
+      const actor = await requireSuperAdmin(request);
+      const body = record(request.body);
+      const allowed = new Set(['is_enabled', 'allow_contact_owner']);
+      if (Object.keys(body).length === 0 || Object.keys(body).some((key) => !allowed.has(key))) {
+        throw new BuilderError('MODULE_FLAG_PATCH_INVALID', 400);
+      }
+      const patch: { is_enabled?: boolean; allow_contact_owner?: boolean } = {};
+      if ('is_enabled' in body) {
+        if (typeof body.is_enabled !== 'boolean') throw new BuilderError('MODULE_FLAG_PATCH_INVALID', 400);
+        patch.is_enabled = body.is_enabled;
+      }
+      if ('allow_contact_owner' in body) {
+        if (typeof body.allow_contact_owner !== 'boolean') throw new BuilderError('MODULE_FLAG_PATCH_INVALID', 400);
+        patch.allow_contact_owner = body.allow_contact_owner;
+      }
+      const saved = await repositoryOrFail().updateModuleFlag(actor, String(request.params.moduleKey), patch);
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, module: saved });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/live-page-config/visibility', async (request, response) => {
+    try {
+      const actor = await requireSuperAdmin(request);
+      const body = record(request.body);
+      const patch = validateVisibilityPatch(body.visibility);
+      const result = await repositoryOrFail().publishLiveVisibility(actor, patch);
+      response.setHeader('cache-control', 'no-store');
+      response.json({
+        ok: true,
+        visibility: result.visibility,
+        versionId: result.version.versionId,
+        versionNumber: result.version.versionNumber,
+        publishedAt: result.version.publishedAt,
       });
     } catch (error) {
       sendError(response, error);
