@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
 import { 
   UserRole, 
   MarketplaceListing, 
@@ -17,15 +16,15 @@ import {
 } from '../types/marketplace';
 import { all44Categories } from '../data/categoriesData';
 import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
+import { initialPostingPlans } from '../data/postingPlans';
+import { ensureListingPriceBreakdown } from '../data/listingPrice';
 import { launchGoogleOAuthWindow } from '../lib/googleOAuthLauncher';
 import { 
   initialListings, 
-  initialPostingPlans, 
   initialEnquiries, 
   initialBookings, 
   initialReviews, 
   initialTransactions,
-  ensureListingPriceBreakdown
 } from '../data/seedData';
 import { saveMarketplaceToCache, useOnlineStatus } from '../utils/marketplaceCache';
 import { listingImageSources } from '../lib/media/signedStorageUrl';
@@ -459,7 +458,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       ]);
 
       if (mounted && remoteListings !== null) {
-        const fixtureIds = new Set(initialListings.map((listing) => listing.id));
+        const fixtureIds = DEMO_DATA_ENABLED
+          ? new Set(initialListings.map((listing) => listing.id))
+          : new Set<string>();
         const customerListings = DEMO_DATA_ENABLED
           ? remoteListings
           : remoteListings.filter((listing) => !fixtureIds.has(listing.id));
@@ -863,6 +864,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       return { ok: false, error: oauth.error || 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'Secure Google sign-in is unavailable. Configure Supabase Auth and try again.' };
     }
     if (isNative) {
+      const { Browser } = await import('@capacitor/browser');
       await Browser.open({ url: oauth.url });
     } else {
       launchGoogleOAuthWindow({
@@ -992,7 +994,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const syncAccountData = async (): Promise<number> => {
     if (!isSupabaseConfigured) return 0;
-    const seedIds = new Set(initialListings.map((l) => l.id));
+    const seedIds = DEMO_DATA_ENABLED
+      ? new Set(initialListings.map((l) => l.id))
+      : new Set<string>();
     const customListings = listings.filter((l) => !seedIds.has(l.id));
     const { syncedCount } = await syncLocalAccountDataToSupabase({
       customListings,

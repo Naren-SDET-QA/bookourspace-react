@@ -21,7 +21,7 @@ import { AppLanguage, translations } from '../utils/translations';
 import { pg29Categories } from '../data/pgHostelData';
 import { classCategories } from '../data/classesData';
 import { venue12Categories } from '../data/venueData';
-import { popularAreasList } from '../data/comprehensiveListings';
+import { popularAreasList } from '../data/filterOptions';
 
 interface FlipkartFilterSidebarProps {
   currentLang?: AppLanguage;

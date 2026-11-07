@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
 import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
 import {
   isSupabaseConfigured,
   SUPABASE_PROJECT_ID,
@@ -233,6 +232,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         return;
       }
       if (isNative) {
+        const { Browser } = await import('@capacitor/browser');
         await Browser.open({ url: oauth.url });
         setInfoMsg('Complete Google sign-in in the browser. You will return to BookOurSpace automatically.');
         return;
