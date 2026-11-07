@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
+import { debounceMsForQuery, searchIndiaLocations, type IndiaLocationSuggestion } from '../../lib/indiaLocationSearch';
 import { localDateInputValue } from '../../lib/stayFilters';
 
 export interface StaySearchValue {
@@ -74,7 +75,10 @@ export function StaySearchBar({
   const [infants, setInfants] = useState(0);
   const [pets, setPets] = useState(initial.petsAllowed);
   const [whoOpen, setWhoOpen] = useState(false);
+  const [whereOpen, setWhereOpen] = useState(false);
+  const [whereHits, setWhereHits] = useState<IndiaLocationSuggestion[]>([]);
   const whoRef = useRef<HTMLDivElement>(null);
+  const whereRef = useRef<HTMLLabelElement>(null);
 
   useEffect(() => {
     setWhere(initial.destination);
@@ -83,6 +87,26 @@ export function StaySearchBar({
     setAdults(Math.max(1, initial.guests));
     setPets(initial.petsAllowed);
   }, [initial.destination, initial.checkIn, initial.checkOut, initial.guests, initial.petsAllowed]);
+
+  useEffect(() => {
+    const needle = where.trim();
+    if (!needle) {
+      setWhereHits([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        setWhereHits(await searchIndiaLocations(needle, controller.signal));
+      } catch (error) {
+        if ((error as { name?: string })?.name !== 'AbortError') setWhereHits([]);
+      }
+    }, debounceMsForQuery(needle));
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [where]);
 
   useEffect(() => {
     if (!whoOpen) return;
@@ -121,16 +145,46 @@ export function StaySearchBar({
       }}
       className="grid w-full grid-cols-2 gap-0 overflow-visible rounded-2xl border border-[#dddddd] bg-white shadow-sm transition hover:shadow-md sm:h-16 sm:grid-cols-[minmax(0,1fr)_100px_100px_112px_44px] sm:items-center sm:rounded-full dark:border-slate-700 dark:bg-slate-900"
     >
-      <label className="col-span-2 flex min-w-0 cursor-pointer flex-col justify-center px-4 py-2.5 sm:col-auto sm:h-full sm:flex-1 sm:rounded-l-full sm:px-6 sm:py-0 sm:hover:bg-[#f7f7f7] dark:sm:hover:bg-slate-800">
+      <label ref={whereRef} className="relative col-span-2 flex min-w-0 cursor-pointer flex-col justify-center px-4 py-2.5 sm:col-auto sm:h-full sm:flex-1 sm:rounded-l-full sm:px-6 sm:py-0 sm:hover:bg-[#f7f7f7] dark:sm:hover:bg-slate-800">
         <span className="block text-[11px] font-bold text-[#222222] dark:text-slate-100">Where</span>
         <input
           value={where}
-          onChange={(event) => setWhere(event.target.value)}
-          placeholder="Search destinations"
-          autoComplete="address-level2"
+          onChange={(event) => {
+            setWhere(event.target.value);
+            setWhereOpen(true);
+          }}
+          onFocus={() => setWhereOpen(true)}
+          placeholder="City, village or PIN"
+          autoComplete="off"
           aria-label="Destination"
           className="h-5 w-full bg-transparent text-sm text-[#222222] outline-none placeholder:text-[#717171] dark:text-slate-100 dark:placeholder:text-slate-400"
         />
+        {whereOpen && whereHits.length > 0 && (
+          <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-auto rounded-2xl border border-[#dddddd] bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+            {whereHits.map((hit) => (
+              <li key={`${hit.kind}|${hit.name}|${hit.state}|${hit.pincode ?? ''}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWhere(hit.name);
+                    setWhereOpen(false);
+                    onSearch({
+                      destination: hit.name,
+                      checkIn,
+                      checkOut,
+                      guests: Math.max(1, guestCount),
+                      petsAllowed: pets,
+                    });
+                  }}
+                  className="flex w-full flex-col px-4 py-2 text-left hover:bg-[#f7f7f7] dark:hover:bg-slate-800"
+                >
+                  <span className="text-sm font-semibold text-[#222222] dark:text-slate-100">{hit.name}</span>
+                  <span className="text-[11px] text-[#717171] dark:text-slate-400">{hit.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </label>
       <span className="hidden h-8 w-px shrink-0 bg-[#dddddd] dark:bg-slate-700" aria-hidden="true" />
       <label className="min-w-0 cursor-pointer border-t border-[#ebebeb] px-4 py-2.5 sm:flex sm:h-full sm:flex-col sm:justify-center sm:border-t-0 sm:px-4 sm:py-0 sm:hover:bg-[#f7f7f7] dark:border-slate-800 dark:sm:hover:bg-slate-800">

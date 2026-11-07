@@ -48,7 +48,7 @@ export function SimpleLoginPage({
           <button type="button" onClick={onClose} aria-label="Back" className="flex h-10 w-10 items-center justify-center rounded-full border border-[#dddddd] dark:border-slate-700">
             <ArrowLeft className="h-5 w-5" aria-hidden="true" />
           </button>
-          <img src="/assets/brand/bos-logo-lockup.webp" alt="BookOurSpace" className="h-8 w-auto" />
+          <img src="/assets/brand/bos-logo-lockup.webp" srcSet="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" sizes="160px" width="1560" height="320" decoding="async" alt="BookOurSpace" className="h-8 w-auto" />
           <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" /> Server-verified
           </span>

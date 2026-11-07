@@ -41,6 +41,89 @@ interface ClassesTimingsExperienceProps {
   listings?: MarketplaceListing[];
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
+  /** 'cards' keeps the course-card grid; 'timetable' renders a weekly schedule. */
+  style?: 'cards' | 'timetable';
+}
+
+const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function ClassTimetable({ courses, onOpen }: { courses: CourseListing[]; onOpen: (course: CourseListing) => void }) {
+  const buckets = new Map<string, Array<{ course: CourseListing; slot: string }>>(
+    WEEK_DAYS.map((day) => [day, []]),
+  );
+  const flexible: CourseListing[] = [];
+  for (const course of courses) {
+    if (course.batches.length === 0) {
+      flexible.push(course);
+      continue;
+    }
+    for (const batch of course.batches) {
+      const labels = String(batch.days || '').toLowerCase();
+      for (const day of WEEK_DAYS) {
+        if (labels.includes(day.toLowerCase())) {
+          buckets.get(day)!.push({ course, slot: batch.slot || batch.label || 'Timing on request' });
+        }
+      }
+    }
+  }
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-[#ece8fb] bg-white p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-[14px] font-black text-[#1e1b4b]">Weekly timetable</h3>
+            <p className="text-[11px] text-[#64748b]">Batches grouped by day. Click a batch to open the course and enroll.</p>
+          </div>
+          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10.5px] font-bold text-violet-700">{courses.length} courses</span>
+        </div>
+      </div>
+      <div className="grid gap-2 overflow-x-auto sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        {WEEK_DAYS.map((day) => {
+          const items = buckets.get(day)!;
+          return (
+            <section key={day} className="min-w-0 rounded-2xl border border-[#ece8fb] bg-white">
+              <header className="flex items-center justify-between rounded-t-2xl bg-[#f5f3ff] px-3 py-2">
+                <h4 className="text-[12px] font-black text-[#4c1d95]">{day}</h4>
+                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-[#64748b]">{items.length}</span>
+              </header>
+              <div className="space-y-1.5 p-2">
+                {items.length === 0 ? (
+                  <p className="rounded-lg bg-slate-50 px-2 py-3 text-center text-[10.5px] text-slate-400">No batches</p>
+                ) : (
+                  items.map((item, index) => (
+                    <button
+                      key={`${item.course.id}-${index}`}
+                      type="button"
+                      onClick={() => onOpen(item.course)}
+                      className="w-full rounded-xl border border-[#ece8fb] bg-white p-2 text-left transition hover:border-violet-400 hover:bg-violet-50/60"
+                    >
+                      <span className="block text-[11px] font-black leading-4 text-[#1e1b4b]">{item.course.title}</span>
+                      <span className="mt-0.5 block text-[10px] font-semibold text-violet-700">{item.slot}</span>
+                      <span className="mt-0.5 block truncate text-[10px] text-[#64748b]">{item.course.provider}</span>
+                      <span className="mt-1 block text-[10px] font-bold text-[#1e1b4b]">{item.course.free ? 'Free' : `${formatINR(item.course.fee)} ${unitLabel(item.course.feeUnit)}`}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      {flexible.length > 0 && (
+        <div className="rounded-2xl border border-[#ece8fb] bg-white p-3">
+          <h4 className="text-[12px] font-black text-[#1e1b4b]">Flexible / schedule on request</h4>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {flexible.map((course) => (
+              <button key={course.id} type="button" onClick={() => onOpen(course)} className="rounded-xl border border-[#ece8fb] px-3 py-2 text-left text-[11px] font-bold text-[#1e1b4b] hover:border-violet-400">
+                {course.title}
+                <span className="block text-[10px] font-semibold text-[#64748b]">{course.provider}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const NEW_COURSES_KEY = 'bos_demo_courses_v1';
@@ -366,7 +449,7 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
   };
 }
 
-export function ClassesTimingsExperience({ onClose, inline = false, listings = [] }: ClassesTimingsExperienceProps) {
+export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
   const [mode, setMode] = useState<'All' | CourseMode>('All');
   const [timing, setTiming] = useState<'All' | TimingSlot>('All');
   const [feeBand, setFeeBand] = useState<'All' | 'Free' | 'Under3k' | '3k8k' | '8kPlus'>('All');
@@ -526,6 +609,8 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
               <p className="mt-2 text-[13px] font-bold text-[#1e1b4b]">No courses match these filters</p>
               <p className="mt-0.5 text-[11px] text-[#64748b]">{DEMO_DATA_ENABLED ? 'Try clearing a filter or searching a different area.' : 'No admin-approved courses match these filters. Enrollment and payment are not available.'}</p>
             </div>
+          ) : style === 'timetable' ? (
+            <ClassTimetable courses={results} onOpen={setSelected} />
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {results.map((c) => (

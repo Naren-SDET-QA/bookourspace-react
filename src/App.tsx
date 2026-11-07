@@ -72,6 +72,7 @@ import { playAlertChime } from './utils/audio';
 import { canAccessAdminConsole } from './lib/accessControl';
 import type { SuperAdminSectionId } from './components/AdminDashboard';
 import { applyLivePageOverrides } from './lib/livePageOverrides';
+import { applyRemoteSectionStyles, loadSectionStyles, SECTION_STYLES_EVENT, type SectionStyles } from './lib/sectionStyleSettings';
 const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
   { id: 'dashboard', label: 'Overview' },
   { id: 'data_management', label: 'Data Management' },
@@ -89,6 +90,29 @@ const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
   { id: 'app_settings', label: 'Settings' },
 ];
 
+// `React.lazy` downloads a chunk as soon as the component is rendered, even
+// when that component's `isOpen` prop is false. Keep modal chunks out of the
+// cold-start graph, then retain them after first use so closing a modal never
+// discards its internal draft state.
+function useLazyAfterOpen(open: boolean): boolean {
+  const mounted = useRef(open);
+  if (open) mounted.current = true;
+  return mounted.current;
+}
+
+function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!enabled) {
+      setReady(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setReady(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [enabled, delayMs]);
+  return ready;
+}
+
 
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
 import { supabase } from './lib/supabaseClient';
@@ -100,7 +124,7 @@ import { popularAreasList, distanceRadiuses } from './data/comprehensiveListings
 // Route- and modal-specific surfaces stay out of the initial customer bundle.
 const CraftoTopServicesBar = lazy(() => import('./components/CraftoTopServicesBar').then((module) => ({ default: module.CraftoTopServicesBar })));
 import { LocationSelector, loadPersistedLocation, persistLocation, type SelectedLocation } from './components/LocationSelector';
-import { filterListingsByCity } from './lib/locationCityFilter';
+import { filterListingsByLocation, matchesSelectedLocation } from './lib/locationCityFilter';
 import { isPopularCategoriesVisible } from './lib/homeVisibilitySettings';
 const FlipkartBannerSlider = lazy(() => import('./components/FlipkartBannerSlider').then((module) => ({ default: module.FlipkartBannerSlider })));
 const FlipkartFilterSidebar = lazy(() => import('./components/FlipkartFilterSidebar').then((module) => ({ default: module.FlipkartFilterSidebar })));
@@ -111,13 +135,13 @@ const VenueDetailModal = lazy(() => import('./components/VenueDetailModal').then
 const VenueBookingModal = lazy(() => import('./components/VenueBookingModal').then((module) => ({ default: module.VenueBookingModal })));
 const VenueOwnerWorkspace = lazy(() => import('./components/VenueOwnerWorkspace').then((module) => ({ default: module.VenueOwnerWorkspace })));
 const VenueAdminWorkspace = lazy(() => import('./components/VenueAdminWorkspace').then((module) => ({ default: module.VenueAdminWorkspace })));
-const MoviesAppExperience = lazy(() => import('./components/MoviesAppExperience').then((module) => ({ default: module.MoviesAppExperience })));
+const MoviesShowtimes = lazy(() => import('./components/MoviesShowtimes').then((module) => ({ default: module.MoviesShowtimes })));
 const ServicesDiscoverySection = lazy(() => import('./components/ServicesDiscoverySection').then((module) => ({ default: module.ServicesDiscoverySection })));
 const FormerLocalServicesSection = lazy(() => import('./components/FormerLocalServicesSection').then((module) => ({ default: module.FormerLocalServicesSection })));
 const HotelsStayExperience = lazy(() => import('./components/HotelsStayExperience').then((module) => ({ default: module.HotelsStayExperience })));
 const PGSectionExperience = lazy(() => import('./components/PGSectionExperience').then((module) => ({ default: module.PGSectionExperience })));
 const PgMyBookingsPanel = lazy(() => import('./components/PgBookingPanel').then((module) => ({ default: module.PgMyBookingsPanel })));
-import { fetchLivePageConfig, resolvePublishedPresentation } from './modules/moduleConfigStore';
+import { resolvePublishedPresentation } from './modules/moduleConfigStore';
 import type { ModuleConfigResolution } from './modules/registry';
 const HomeServicesSection = lazy(() => import('./components/HomeServicesSection').then((module) => ({ default: module.HomeServicesSection })));
 const ClassesTimingsExperience = lazy(() => import('./components/ClassesTimingsExperience').then((module) => ({ default: module.ClassesTimingsExperience })));
@@ -141,6 +165,7 @@ const VoiceSearchModal = lazy(() => import('./components/VoiceSearchModal').then
 const ReviewSubmissionModal = lazy(() => import('./components/ReviewSubmissionModal').then((module) => ({ default: module.ReviewSubmissionModal })));
 const RunningBatchesModal = lazy(() => import('./components/RunningBatchesModal').then((module) => ({ default: module.RunningBatchesModal })));
 import { SimpleLoginPage } from './components/SimpleLoginPage';
+import { VenueAgendaView } from './components/VenueAgendaView';
 
 const SupabaseAuthModal = lazy(() => import('./components/SupabaseAuthModal').then((module) => ({ default: module.SupabaseAuthModal })));
 const ProfileScreen = lazy(() => import('./components/ProfileScreen').then((module) => ({ default: module.ProfileScreen })));
@@ -316,6 +341,7 @@ function MarketplaceAppContent() {
   // Premium location selector (state → district → city) shared by all modules
   const [isLocationSelectorOpen, setIsLocationSelectorOpen] = useState<boolean>(false);
   const [selectedLocationLabel, setSelectedLocationLabel] = useState<string>('');
+  const [selectedPincode, setSelectedPincode] = useState<string | null>(null);
   const sharedSelectedCity = (() => {
     const selected = selectedCity.trim();
     if (!['all', 'all cities', 'all locations'].includes(selected.toLowerCase())) return selected;
@@ -328,6 +354,7 @@ function MarketplaceAppContent() {
     setSelectedLocationLabel(saved.label ?? saved.city);
     setSelectedCity(saved.city);
     if (saved.area && saved.area !== saved.city) setSelectedArea(saved.area);
+    if (saved.pincode) setSelectedPincode(saved.pincode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -343,9 +370,18 @@ function MarketplaceAppContent() {
   const [isQuickBookOpen, setIsQuickBookOpen] = useState<boolean>(false);
   const [showMoviesClassicGrid, setShowMoviesClassicGrid] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const shouldLoadAuthModal = useLazyAfterOpen(isAuthModalOpen);
   const [isLoginPageOpen, setIsLoginPageOpen] = useState<boolean>(() => window.location.hash.replace('#', '').toLowerCase() === 'login');
   const [isProviderOnboardingOpen, setIsProviderOnboardingOpen] = useState(false);
-  const [entryExperience, setEntryExperience] = useState<'loading' | 'welcome' | 'ready'>('loading');
+  const [entryExperience, setEntryExperience] = useState<'loading' | 'welcome' | 'ready'>(() => {
+    try {
+      const choice = localStorage.getItem('bos_entry_choice_v1');
+      return choice === 'guest' || choice === 'signed-in' ? 'ready' : 'welcome';
+    } catch {
+      return 'welcome';
+    }
+  });
+  const homeEnhancementsReady = useIdleReady(entryExperience === 'ready', 1200);
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
   const { favoriteIds, toggleFavorite, supabaseUser, authUser, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
@@ -362,8 +398,13 @@ function MarketplaceAppContent() {
   // Leaving the console must clear the #admin hash; otherwise the hash router
   // reopens the console on the next render and the admin can never browse the
   // marketplace. The header button acts as the Admin <-> Marketplace toggle.
+  const previousActiveViewRef = useRef(activeView);
   useEffect(() => {
-    if (activeView === 'admin_console') return;
+    const previous = previousActiveViewRef.current;
+    previousActiveViewRef.current = activeView;
+    // Only clear the deep link when actually leaving the console; clearing it
+    // on first mount would erase a valid /#admin link before auth hydrates.
+    if (activeView === 'admin_console' || previous !== 'admin_console') return;
     if (window.location.hash.toLowerCase().startsWith('#admin')) {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     }
@@ -512,38 +553,20 @@ function MarketplaceAppContent() {
   }, [listings]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const config = await fetchLivePageConfig();
-        if (!cancelled) setModulePresentation(resolvePublishedPresentation(config.published));
-      } catch {
-        // Presentation overrides are optional; registry defaults keep the sections usable.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
     let mounted = true;
     document.getElementById('bos-prelaunch-screen')?.remove();
-    const startupDelay = new Promise<void>((resolve) => window.setTimeout(resolve, 1300));
-    const sessionReady = supabase
-      ? Promise.race([
-        supabase.auth.getSession().then(({ data }) => Boolean(data.session?.user)).catch(() => false),
-        // A stalled native WebView request must not pin a cold launch on the splash.
-        new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 3500)),
-      ])
-      : Promise.resolve(false);
-    void Promise.all([startupDelay, sessionReady]).then(([, hasSession]) => {
-      if (!mounted) return;
-      let guestChoice = false;
-      try {
-        guestChoice = localStorage.getItem('bos_entry_choice_v1') === 'guest';
-      } catch {
-        // Private browsing may disable storage; guest browsing still works for this launch.
-      }
-      setEntryExperience(hasSession || guestChoice || serverAuthReady.current ? 'ready' : 'welcome');
+    const bootWindow = window as Window & { __bosBootEntryAction?: 'guest' | 'google' };
+    const bootAction = bootWindow.__bosBootEntryAction;
+    delete bootWindow.__bosBootEntryAction;
+    if (bootAction === 'guest') setEntryExperience('ready');
+    if (bootAction === 'google') setIsAuthModalOpen(true);
+
+    // Session restoration runs in the background; it does not gate the public
+    // entry screen or the six-module marketplace.
+    void supabase?.auth.getSession().then(({ data }) => {
+      if (mounted && data.session?.user) setEntryExperience('ready');
+    }).catch(() => {
+      // Showing the public welcome screen does not depend on Supabase availability.
     });
     const entryAuthSubscription = supabase?.auth.onAuthStateChange((_event, session) => {
       if (session?.user) setEntryExperience('ready');
@@ -703,14 +726,31 @@ function MarketplaceAppContent() {
   const [isLivePageEditorOpen, setIsLivePageEditorOpen] = useState<boolean>(false);
   const [adminInlineEdit, setAdminInlineEdit] = useState<boolean>(false);
   const [adminSection, setAdminSection] = useState<SuperAdminSectionId>('dashboard');
+  const [sectionStyles, setSectionStylesState] = useState<SectionStyles>(() => loadSectionStyles());
   const [isUniversalBuilderOpen, setIsUniversalBuilderOpen] = useState<boolean>(false);
 
   useEffect(() => {
+    const syncSectionStyles = () => setSectionStylesState(loadSectionStyles());
+    window.addEventListener(SECTION_STYLES_EVENT, syncSectionStyles);
+    return () => window.removeEventListener(SECTION_STYLES_EVENT, syncSectionStyles);
+  }, []);
+
+  useEffect(() => {
+    setShowMoviesClassicGrid(sectionStyles.movies === 'classic');
+  }, [sectionStyles.movies]);
+
+  useEffect(() => {
+    if (!homeEnhancementsReady) return;
     let mounted = true;
     const refreshPublishedConfig = () => {
       void fetchLivePageConfigFromBackend()
         .then((result) => {
-          if (mounted) setLivePageConfig(result.published);
+          if (!mounted) return;
+          setLivePageConfig(result.published);
+          setModulePresentation(resolvePublishedPresentation(result.published));
+          const remoteStyles = (result.published as { sectionStyles?: unknown } | null)?.sectionStyles;
+          const applied = remoteStyles ? applyRemoteSectionStyles(remoteStyles) : null;
+          if (applied) setSectionStylesState(applied);
         })
         .catch(() => {
           // Keep the last known local cache/default when the dev backend is unavailable.
@@ -736,7 +776,7 @@ function MarketplaceAppContent() {
       window.removeEventListener('bos-live-page-config-refresh', refreshPublishedConfig);
       window.removeEventListener('bos-live-page-config-updated', handleLivePageSync);
     };
-  }, []);
+  }, [homeEnhancementsReady]);
 
   // Apply the published inline overrides to every visitor's page. React may
   // re-render the text later, so a debounced observer re-applies them.
@@ -986,6 +1026,19 @@ function MarketplaceAppContent() {
     defaultOneRupeeTest: false
   });
 
+  const showVoiceRegistrationModule = useLazyAfterOpen(isVoiceRegisterOpen);
+  const showPostListingModule = useLazyAfterOpen(isPostWizardOpen);
+  const showListingDetailModule = useLazyAfterOpen(Boolean(selectedDetailListing) && !selectedDetailListing?.categoryId.startsWith('venue-'));
+  const showVenueDetailModule = useLazyAfterOpen(Boolean(selectedDetailListing?.categoryId.startsWith('venue-')));
+  const showRunningBatchesModule = useLazyAfterOpen(Boolean(runningBatchesListing));
+  const showBookingEnquiryModule = useLazyAfterOpen(Boolean(bookingListing && !bookingListing.categoryId.startsWith('venue-')));
+  const showVenueBookingModule = useLazyAfterOpen(Boolean(bookingListing?.categoryId.startsWith('venue-')));
+  const showReviewModule = useLazyAfterOpen(Boolean(reviewListing));
+  const showChatModule = useLazyAfterOpen(Boolean(chatListing));
+  const showPaymentModule = useLazyAfterOpen(paymentModalState.isOpen);
+  const showVoiceSearchModule = useLazyAfterOpen(isVoiceSearchOpen);
+  const showCompareModule = useLazyAfterOpen(isCompareModalOpen);
+
   // Toast indicator
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [spotlightHeroSlideIndex, setSpotlightHeroSlideIndex] = useState<number>(0);
@@ -1010,7 +1063,10 @@ function MarketplaceAppContent() {
     setSelectedLocationLabel(loc.label ?? loc.city);
     setSelectedCity(loc.city);
     setSelectedArea(loc.area && loc.area !== loc.city ? loc.area : 'all');
-    persistLocation(loc);
+    setSelectedPincode(loc.pincode || null);
+    // Google Places content is transient under its usage terms; keep external
+    // selections in memory for this session only, never in browser storage.
+    persistLocation(loc.source === 'external' ? null : loc);
     showToast(
       currentLang === 'te'
         ? `లొకేషన్: ${loc.label ?? loc.city}`
@@ -1260,11 +1316,9 @@ function MarketplaceAppContent() {
         }
       }
 
-      // City filter
-      if (sharedSelectedCity !== 'all' && sharedSelectedCity !== 'All Cities' && sharedSelectedCity !== 'All Locations') {
-        if (!item.location.city.toLowerCase().includes(sharedSelectedCity.toLowerCase())) {
-          return false;
-        }
+      // City / PIN filter from the shared India location picker
+      if (!matchesSelectedLocation(item.location, { city: sharedSelectedCity, pincode: selectedPincode })) {
+        return false;
       }
 
       // Area / Locality filter (e.g. "Madhapur / Hitech City", "Gachibowli", "Kukatpally", etc.)
@@ -1430,6 +1484,7 @@ function MarketplaceAppContent() {
     selectedPriceRange,
     selectedRating,
     sharedSelectedCity,
+    selectedPincode,
     selectedArea,
     filterStartDate,
     filterEndDate,
@@ -1441,8 +1496,8 @@ function MarketplaceAppContent() {
   // Share the selected header city with experiences that maintain their own
   // category-level filtering and data loading.
   const locationFilteredListings = useMemo(
-    () => filterListingsByCity(listings, sharedSelectedCity),
-    [listings, sharedSelectedCity],
+    () => filterListingsByLocation(listings, { city: sharedSelectedCity, pincode: selectedPincode }),
+    [listings, sharedSelectedCity, selectedPincode],
   );
 
   // Reset all filters including subcategory, distance radius, price, rating, area, date range, PG, and class-specific filters
@@ -1453,6 +1508,7 @@ function MarketplaceAppContent() {
     setSelectedPriceRange('all');
     setSelectedRating('all');
     setSelectedArea('all');
+    setSelectedPincode(null);
     setFilterStartDate('');
     setFilterEndDate('');
     setShowDateRangePopup(false);
@@ -1742,6 +1798,7 @@ function MarketplaceAppContent() {
   }>>>({});
 
   const sharedMarketplaceHeader = (
+          <Suspense fallback={<div aria-hidden="true" className="h-11 shrink-0" />}>
           <CraftoTopServicesBar
             activeMarketSection={activeMarketSection}
             onSelectMarketSection={(sec) => {
@@ -1915,7 +1972,7 @@ function MarketplaceAppContent() {
             activeView={activeView}
             comparedCount={comparedListingIds.length}
             onOpenCompareModal={() => setIsCompareModalOpen(true)}
-            onOpenGoogleSignIn={() => { window.location.hash = 'login'; }}
+            onOpenGoogleSignIn={() => setIsAuthModalOpen(true)}
             onExitAdminConsole={() => setActiveView('marketplace')}
             externalLoginModalOpen={false}
             selectedArea={selectedArea}
@@ -1985,6 +2042,7 @@ function MarketplaceAppContent() {
             }}
             hideCategoryRibbon={activeMarketSection === 'movies' || isHotelsStayExperienceOpen}
           />
+          </Suspense>
   );
 
   return (
@@ -2092,13 +2150,15 @@ function MarketplaceAppContent() {
       )}
 
       {/* SCHEDULED TOP BANNER ANNOUNCEMENTS FROM SUPER ADMIN */}
-      {!isBentoHomeScreen && (
+      {homeEnhancementsReady && !isBentoHomeScreen && (
+        <Suspense fallback={null}>
         <LiveScheduledAnnouncementsBanner
           placement="top_banner"
           userRole={userRole}
           currentLang={currentLang}
           activeSection={activeMarketSection}
         />
+        </Suspense>
       )}
 
       {/* SUPER-APP BENTO HOME & LANDING HUB (WHEN ENABLED BY ADMIN & USER IS ON HOME LANDING VIEW) */}
@@ -2221,12 +2281,12 @@ function MarketplaceAppContent() {
             <>
           {/* SCHEDULED BELOW-HEADER ANNOUNCEMENTS FROM SUPER ADMIN */}
           <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-2.5 space-y-2.5">
-            <LiveScheduledAnnouncementsBanner
+            {homeEnhancementsReady && <Suspense fallback={null}><LiveScheduledAnnouncementsBanner
               placement="below_header"
               userRole={userRole}
               currentLang={currentLang}
               activeSection={activeMarketSection}
-            />
+            /></Suspense>}
 
             {/* 1A. DYNAMIC ONE-BY-ONE SPOTLIGHT DEAL 6-CATEGORY CAROUSEL WITH DISTINCT COLOR PALETTES & MULTI-COLORED FRAMED IMAGERY */}
             {false && (() => {
@@ -2673,16 +2733,19 @@ function MarketplaceAppContent() {
               )}
 
               {activeSectionExperience === 'classes' && (
-                <Suspense fallback={<SectionScreenFallback label="Loading classes…" />}>
-                  <ClassesTimingsExperience
-                    inline
-                    listings={locationFilteredListings}
-                    onClose={() => {
-                      setIsClassesTimingsOpen(false);
-                      clearSectionHash();
-                    }}
-                  />
-                </Suspense>
+                <div data-bos-category-style={`classes-${sectionStyles.classes}`}>
+                  <Suspense fallback={<SectionScreenFallback label="Loading classes…" />}>
+                    <ClassesTimingsExperience
+                      inline
+                      style={sectionStyles.classes}
+                      listings={locationFilteredListings}
+                      onClose={() => {
+                        setIsClassesTimingsOpen(false);
+                        clearSectionHash();
+                      }}
+                    />
+                  </Suspense>
+                </div>
               )}
 
               {activeSectionExperience === 'services' && (
@@ -2726,7 +2789,7 @@ function MarketplaceAppContent() {
 
               {activeSectionExperience === 'movies' && (
                 <Suspense fallback={<SectionScreenFallback label="Loading movies…" />}>
-                  <MoviesAppExperience inline selectedCity={sharedSelectedCity} />
+                  <MoviesShowtimes inline selectedCity={sharedSelectedCity} />
                 </Suspense>
               )}
             </section>
@@ -2909,7 +2972,10 @@ function MarketplaceAppContent() {
 
         {/* VIEW 3: BOOKOURSPACE MARKETPLACE FEED */}
         {activeView === 'marketplace' && (
-          <div className="space-y-4 animate-in fade-in duration-200">
+          <div
+            className="space-y-4 animate-in fade-in duration-200"
+            data-bos-category-style={activeMarketSection === 'venues' ? `venues-${sectionStyles.venues}` : undefined}
+          >
 
             {/* ADMIN APPROVAL WORKFLOW BANNER WHEN PROVIDER REQUESTS ARE PENDING (DISPLAY ONLY FOR ADMIN) */}
             {userRole === 'admin' && pendingAdminListings.length > 0 && (
@@ -4959,8 +5025,9 @@ function MarketplaceAppContent() {
               ))}
 
             {/* LIVE SPONSORED ADS & PUBLISHED ADMIN CAMPAIGNS STRIP */}
-            {activeMarketSection !== 'movies' && (
+            {homeEnhancementsReady && activeMarketSection !== 'movies' && (
               <SelfHealingBoundary moduleId="live_sponsored_ads" moduleName="Sponsored Campaigns Strip">
+                <Suspense fallback={null}>
                 <LiveSponsoredAdsStrip
                   activeMarketSection={activeMarketSection}
                   onSelectQuery={(q) => setSearchQuery(q)}
@@ -4979,6 +5046,7 @@ function MarketplaceAppContent() {
                     }
                   }}
                 />
+                </Suspense>
               </SelfHealingBoundary>
             )}
 
@@ -5162,22 +5230,22 @@ function MarketplaceAppContent() {
             <PublishedBuilderRegion pageKey={activeMarketSection} />
 
             {/* SCHEDULED SPOTLIGHT STRIP ANNOUNCEMENTS */}
-            <LiveScheduledAnnouncementsBanner
+            {homeEnhancementsReady && <Suspense fallback={null}><LiveScheduledAnnouncementsBanner
               placement="spotlight_strip"
               userRole={userRole}
               currentLang={currentLang}
               activeSection={activeMarketSection}
-            />
+            /></Suspense>}
 
             {/* SPOTLIGHT SHOWCASE (3-image animated banner) — REMOVED per product request */}
 
             {/* SCHEDULED SECTION CARD ANNOUNCEMENTS */}
-            <LiveScheduledAnnouncementsBanner
+            {homeEnhancementsReady && <Suspense fallback={null}><LiveScheduledAnnouncementsBanner
               placement="section_card"
               userRole={userRole}
               currentLang={currentLang}
               activeSection={activeMarketSection}
-            />
+            /></Suspense>}
 
             {/* 4. VENUE TRENDING NEAR ME SECTION (SHOWN FOR FUNCTIONAL HALLS & VENUES) */}
             {activeMarketSection === 'venues' && isTemplateEnabled('trending_near_me') && (
@@ -5196,7 +5264,7 @@ function MarketplaceAppContent() {
             {activeMarketSection === 'movies' && (
               <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading movies…</p>}>
                 <SelfHealingBoundary moduleId="district_movies_section" moduleName="BookOurSpace Movies Section">
-                  <MoviesAppExperience inline selectedCity={sharedSelectedCity} />
+                  <MoviesShowtimes inline selectedCity={sharedSelectedCity} />
                 </SelfHealingBoundary>
               </Suspense>
             )}
@@ -5386,10 +5454,16 @@ function MarketplaceAppContent() {
                   onSelectType={setHallsVenueType}
                   onOpenListing={handleSelectListing}
                 />
+                {sectionStyles.venues === 'agenda' && (
+                  <VenueAgendaView
+                    listings={locationFilteredListings.filter((l) => l.categoryId.startsWith('venue-'))}
+                    onOpen={handleSelectListing}
+                  />
+                )}
               </div>
             )}
 
-            {isTemplateEnabled('listings_grid') && (activeMarketSection !== 'movies' || showMoviesClassicGrid) && (
+            {isTemplateEnabled('listings_grid') && activeMarketSection !== 'movies' && !(activeMarketSection === 'venues' && sectionStyles.venues === 'agenda') && (
               filteredListings.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 text-center border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="w-14 h-14 bg-purple-50 dark:bg-purple-950/50 rounded-2xl mx-auto flex items-center justify-center text-purple-600 dark:text-purple-400">
@@ -5549,12 +5623,12 @@ function MarketplaceAppContent() {
 
       {/* SCHEDULED FOOTER ANNOUNCEMENTS */}
       <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 mt-4">
-        <LiveScheduledAnnouncementsBanner
+        {homeEnhancementsReady && <Suspense fallback={null}><LiveScheduledAnnouncementsBanner
           placement="footer_notice"
           userRole={userRole}
           currentLang={currentLang}
           activeSection={activeMarketSection}
-        />
+        /></Suspense>}
       </div>
 
       {/* DESKTOP / SECONDARY LINKS FOOTER */}
@@ -5656,7 +5730,7 @@ function MarketplaceAppContent() {
         className="fixed bottom-0 left-0 right-0 z-40 w-full max-w-full overflow-hidden bg-white dark:bg-slate-900 rounded-t-3xl border-t border-slate-200/90 dark:border-slate-800 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] box-border"
         style={{ height: 'calc(56px + env(safe-area-inset-bottom))' }}
       >
-        <div className={`max-w-md sm:max-w-2xl mx-auto h-[56px] px-1.5 sm:px-6 grid grid-cols-6 items-center`}>
+        <div className={`max-w-md sm:max-w-2xl mx-auto h-[56px] px-1.5 sm:px-6 grid ${isAdminSession ? 'grid-cols-6' : 'grid-cols-5'} items-center`}>
           {/* 1. Home */}
           <button
             type="button"
@@ -5852,7 +5926,7 @@ function MarketplaceAppContent() {
               <span className="mt-0.5 w-8 h-0.5 sm:h-1 rounded-full bg-[#3730A3] dark:bg-indigo-400" />
             )}
           </button>
-          <button
+          {isAdminSession && <button
             type="button"
             data-testid="admin-console-tab"
             aria-current={activeView === 'admin_console' ? 'page' : undefined}
@@ -5907,7 +5981,7 @@ function MarketplaceAppContent() {
             {(activeBottomTab === 'admin' || activeView === 'admin_console') && (
               <span className="mt-0.5 w-8 h-0.5 sm:h-1 rounded-full bg-[#3730A3] dark:bg-indigo-400" />
             )}
-          </button>
+          </button>}
         </div>
       </nav>
 
@@ -6062,15 +6136,15 @@ function MarketplaceAppContent() {
       )}
 
       {/* EASY VOICE REGISTRATION & POST MODAL */}
-      <VoiceRegistrationModal
+      {showVoiceRegistrationModule && <VoiceRegistrationModal
         isOpen={isVoiceRegisterOpen}
         onClose={() => setIsVoiceRegisterOpen(false)}
         currentLang={currentLang}
         onRegisterSuccess={handleVoiceRegisterSuccess}
-      />
+      />}
 
       {/* POST LISTING WIZARD (CUSTOMER -> PROVIDER REGISTRATION & ADMIN REVIEW REQUEST) */}
-      <PostListingWizard
+      {showPostListingModule && <PostListingWizard
         isOpen={isPostWizardOpen}
         onClose={() => setIsPostWizardOpen(false)}
         currentLang={currentLang}
@@ -6106,10 +6180,10 @@ function MarketplaceAppContent() {
               : '🛡️ Switched to Admin Console — Review & Approve the Provider Request below!'
           );
         }}
-      />
+      />}
 
       {/* LISTING DETAIL MODAL */}
-      {selectedDetailListing && selectedDetailListing.categoryId.startsWith('venue-') ? (
+      {showVenueDetailModule && selectedDetailListing?.categoryId.startsWith('venue-') ? (
         <VenueDetailModal
           listing={selectedDetailListing}
           onClose={() => setSelectedDetailListing(null)}
@@ -6124,7 +6198,7 @@ function MarketplaceAppContent() {
             setBookingListing(current);
           }}
         />
-      ) : (
+      ) : showListingDetailModule && selectedDetailListing ? (
         <ListingDetailModal
           listing={selectedDetailListing}
           currentLang={currentLang}
@@ -6138,10 +6212,10 @@ function MarketplaceAppContent() {
             setChatListing(l);
           }}
         />
-      )}
+      ) : null}
 
       {/* CURRENT RUNNING BATCHES MODAL (CONFIGURABLE SCHEDULE LINK & ALL-FORMAT IMAGES) */}
-      <RunningBatchesModal
+      {showRunningBatchesModule && <RunningBatchesModal
         listing={runningBatchesListing}
         onClose={() => setRunningBatchesListing(null)}
         onUpdateBatchUrl={(listingId, newUrl, batchImages) => {
@@ -6173,10 +6247,10 @@ function MarketplaceAppContent() {
         onBookBatch={(l) => {
           setBookingListing(l);
         }}
-      />
+      />}
 
       {/* UNIVERSAL BOOKING & APPLICATION MODAL */}
-      <BookingEnquiryModal
+      {showBookingEnquiryModule && <BookingEnquiryModal
         listing={bookingListing && !bookingListing.categoryId.startsWith('venue-') ? bookingListing : null}
         currentLang={currentLang}
         initialDateRange={
@@ -6186,14 +6260,14 @@ function MarketplaceAppContent() {
         }
         onClose={() => setBookingListing(null)}
         onOpenReview={(l) => setReviewListing(l)}
-      />
-      <VenueBookingModal
+      />}
+      {showVenueBookingModule && <VenueBookingModal
         listing={bookingListing?.categoryId.startsWith('venue-') ? bookingListing : null}
         onClose={() => setBookingListing(null)}
-      />
+      />}
 
       {/* DYNAMIC REVIEW & RATING SUBMISSION MODAL */}
-      <ReviewSubmissionModal
+      {showReviewModule && <ReviewSubmissionModal
         listing={reviewListing}
         isOpen={!!reviewListing}
         currentLang={currentLang}
@@ -6205,10 +6279,10 @@ function MarketplaceAppContent() {
               : `⭐ Thank you! Average rating updated to ${newRating}★ (${newCount} reviews)!`
           );
         }}
-      />
+      />}
 
       {/* CHAT MODAL */}
-      <ChatModal
+      {showChatModule && <ChatModal
         listing={chatListing}
         currentLang={currentLang}
         onClose={() => setChatListing(null)}
@@ -6216,10 +6290,10 @@ function MarketplaceAppContent() {
           setChatListing(null);
           setBookingListing(l);
         }}
-      />
+      />}
 
       {/* PAYMENT & SUBSCRIPTION CHECKOUT MODAL */}
-      <PaymentModal
+      {showPaymentModule && <PaymentModal
         isOpen={paymentModalState.isOpen}
         planName={paymentModalState.planName}
         amount={paymentModalState.amount}
@@ -6229,27 +6303,27 @@ function MarketplaceAppContent() {
         onSuccess={() => {
           showToast(`🎉 Payment & GST Invoice for "${paymentModalState.planName}" verified!`);
         }}
-      />
+      />}
 
       {/* VOICE SEARCH MODAL (TELUGU / MULTILINGUAL) */}
-      <VoiceSearchModal
+      {showVoiceSearchModule && <VoiceSearchModal
         isOpen={isVoiceSearchOpen}
         onClose={() => setIsVoiceSearchOpen(false)}
         onSearch={handleVoiceSearchResult}
         currentLang={currentLang}
-      />
+      />}
 
       {/* CLASS & PG COMPARE FLOATING DOCK */}
-      <CompareFloatingBar
+      {comparedListingIds.length > 0 && <CompareFloatingBar
         comparedListings={comparedListings}
         onOpenCompareModal={() => setIsCompareModalOpen(true)}
         onRemoveListing={handleRemoveComparedListing}
         onClearAll={handleClearAllCompared}
         currentLang={currentLang}
-      />
+      />}
 
       {/* SIDE-BY-SIDE CLASS & PG COMPARISON MODAL (UP TO 3 ITEMS) */}
-      <ClassCompareModal
+      {showCompareModule && <ClassCompareModal
         isOpen={isCompareModalOpen}
         onClose={() => setIsCompareModalOpen(false)}
         comparedListings={comparedListings}
@@ -6265,7 +6339,7 @@ function MarketplaceAppContent() {
           setChatListing(l);
         }}
         currentLang={currentLang}
-      />
+      />}
 
       {/* QUICK ACTION MODALS (MY FAVORITES, WALLET & LEDGER, SUPPORT, REFER & EARN, HELP CENTRE) */}
       <Suspense fallback={null}>
@@ -6433,7 +6507,7 @@ function MarketplaceAppContent() {
       )}
 
       {/* SUPABASE AUTHENTICATION MODAL */}
-      <SupabaseAuthModal
+      {shouldLoadAuthModal && <Suspense fallback={null}><SupabaseAuthModal
         isOpen={isAuthModalOpen}
         forceDark={entryExperience !== 'ready'}
         onClose={() => setIsAuthModalOpen(false)}
@@ -6441,7 +6515,7 @@ function MarketplaceAppContent() {
         returnSection={activeMarketSection}
         onAuthSuccess={(msg) => showToast(msg)}
         onNavigateView={(target) => setActiveView(target)}
-      />
+      /></Suspense>}
 
       {isProviderOnboardingOpen && <Suspense fallback={null}><ProviderOnboardingForm
         authUser={authUser ? { name: authUser.name, email: authUser.email, role: authUser.role } : null}

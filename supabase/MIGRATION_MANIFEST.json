@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 67,
+  "migrationCount": 71,
   "migrations": [
     {
       "order": 2,
@@ -545,17 +545,49 @@
     },
     {
       "order": 68,
+      "version": "20261107183158",
+      "name": "india_location_catalog_search",
+      "file": "supabase/migrations/20261107183158_india_location_catalog_search.sql",
+      "bytes": 13138,
+      "sha256": "36c0a70277bd1cf843c85a4ab8da281b28d7aa385a2b73b50b10965c53a157eb"
+    },
+    {
+      "order": 69,
       "version": "20261107201500",
       "name": "allow_demo_booking_preview",
       "file": "supabase/migrations/20261107201500_allow_demo_booking_preview.sql",
       "bytes": 2777,
       "sha256": "01359ed201ef0622d0f0b8aad2214fcad2d67cf6d0eeaf919ab32f0c39185561"
+    },
+    {
+      "order": 70,
+      "version": "20261108090000",
+      "name": "india_location_directory",
+      "file": "supabase/migrations/20261108090000_india_location_directory.sql",
+      "bytes": 6228,
+      "sha256": "148ea0abb9bf9435fabf76404e4dc2d73c1a8df1d0fb79006f707200bdc0ccd8"
+    },
+    {
+      "order": 71,
+      "version": "20261108120000",
+      "name": "movies_showtimes_only",
+      "file": "supabase/migrations/20261108120000_movies_showtimes_only.sql",
+      "bytes": 735,
+      "sha256": "cd4210181be86d38ae8d731b2f861d89b13cd7096ae88f99ecf20b3d93213595"
+    },
+    {
+      "order": 72,
+      "version": "20261108130000",
+      "name": "movies_showtimes_dates",
+      "file": "supabase/migrations/20261108130000_movies_showtimes_dates.sql",
+      "bytes": 454,
+      "sha256": "c2b2fcf806f1dbe440e3113d47325b6a6ecb23380b3bdc66036b900b8540f600"
     }
   ],
   "review": {
-    "at": "2026-11-07T15:21:16.357Z",
-    "note": "Reviewed 20261107201500_allow_demo_booking_preview: demo stays stay unbookable by default; the SQL gate allows them only when the transaction-local setting bos.allow_demo_booking=on is set by the local server preview (BOS_STAY_ALLOW_DEMO_BOOKING=1 outside production). Production never sets it. All other publication rules still apply.",
-    "migrationCount": 67,
+    "at": "2026-11-07T19:03:38.768Z",
+    "note": "Add show_date and public completeness/expiry index for Movies showtimes-only; no applied migration rewritten.",
+    "migrationCount": 71,
     "baselineSha256": "f37bdbcaf1870a05fe8f45acbf2ec17f0cc99162cd7e60270d5f8d5fabe412c2"
   }
 }

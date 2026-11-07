@@ -19,13 +19,21 @@
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="preload" as="image" href="/assets/brand/bos-logo-lockup-1120-bea9629c0067.webp" imagesrcset="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" imagesizes="(max-width: 622px) 90vw, 560px" fetchpriority="high">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
     <style>
       #bos-prelaunch-screen{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:linear-gradient(160deg,#f7f8fc,#f3f7fa 52%,#f7f5ff);color:#0b1f33;font:800 32px 'Plus Jakarta Sans',Inter,sans-serif;letter-spacing:-.055em}
-      #bos-prelaunch-screen .bos-prelaunch-inner{display:flex;flex-direction:column;align-items:center;gap:8px}
+      #bos-prelaunch-screen .bos-prelaunch-inner{display:flex;flex-direction:column;align-items:center;gap:8px;width:min(92vw,560px)}
       #bos-prelaunch-screen .bos-prelaunch-logo{display:block;width:min(90vw,560px);height:auto;aspect-ratio:1560/320}
       #bos-prelaunch-screen .bos-prelaunch-logo img{display:block;width:100%;height:100%;object-fit:contain}
       #bos-prelaunch-screen small{margin-top:4px;color:#475569;font:400 14px Inter,sans-serif;letter-spacing:normal}
+      #bos-prelaunch-actions{display:flex;flex-direction:column;gap:10px;width:min(100%,360px);margin-top:20px}
+      #bos-prelaunch-actions button{min-height:48px;border:0;border-radius:999px;padding:12px 18px;font:700 15px Inter,system-ui,sans-serif;cursor:pointer}
+      #bos-prelaunch-google{background:#fff;color:#172033;box-shadow:0 8px 24px #17203322}
+      #bos-prelaunch-guest{background:#172033;color:#fff;border:1px solid #62748d!important}
+      #bos-prelaunch-actions button:focus-visible{outline:3px solid #4f46e5;outline-offset:3px}
+      #bos-prelaunch-actions button:disabled{opacity:.78;cursor:wait}
     </style>
     <script>
       window.__swReady = (async function () {
@@ -52,15 +60,41 @@
     </script>
   </head>
   <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-purple-500 selection:text-white">
-    <div id="bos-prelaunch-screen" aria-label="Loading BookOurSpace" role="status">
+    <div id="bos-prelaunch-screen" aria-label="Start using BookOurSpace">
       <div class="bos-prelaunch-inner">
         <picture class="bos-prelaunch-logo" role="img" aria-label="BookOurSpace — Find, Book, Enjoy">
-          <img src="/assets/brand/bos-logo-lockup.webp" width="1560" height="320" alt="" fetchpriority="high" />
+          <img src="/assets/brand/bos-logo-lockup.webp" srcset="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" sizes="(max-width: 622px) 90vw, 560px" width="1560" height="320" alt="" fetchpriority="high" decoding="async" />
         </picture>
-        <small>Getting things ready…</small>
+        <small id="bos-prelaunch-status">Sign in with Google or browse as a guest.</small>
+        <div id="bos-prelaunch-actions" aria-label="Choose how to continue">
+          <button id="bos-prelaunch-google" type="button">Continue with Google</button>
+          <button id="bos-prelaunch-guest" type="button">Explore Spaces as Guest</button>
+        </div>
       </div>
     </div>
     <div id="root"></div>
+    <script>
+      (function () {
+        var actions = document.getElementById('bos-prelaunch-actions');
+        var status = document.getElementById('bos-prelaunch-status');
+        var google = document.getElementById('bos-prelaunch-google');
+        var guest = document.getElementById('bos-prelaunch-guest');
+        function choose(action) {
+          if (!actions || !status || !google || !guest) return;
+          google.disabled = true;
+          guest.disabled = true;
+          actions.setAttribute('aria-busy', 'true');
+          status.textContent = action === 'guest' ? 'Opening BookOurSpace…' : 'Opening secure Google sign-in…';
+          window.__bosBootEntryAction = action;
+          try {
+            if (action === 'guest') localStorage.setItem('bos_entry_choice_v1', 'guest');
+            else sessionStorage.setItem('bos_boot_auth_requested_v1', '1');
+          } catch (e) {}
+        }
+        google.addEventListener('click', function () { choose('google'); });
+        guest.addEventListener('click', function () { choose('guest'); });
+      })();
+    </script>
     <script type="module" src="/src/entry.tsx"></script>
   </body>
 </html>

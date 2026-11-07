@@ -14,12 +14,14 @@ import {
 import { assertProductionPersistenceReady } from './src/server/persistencePolicy';
 import { closeSharedPostgresPool, initializePostgresRuntime } from './src/server/postgresPool';
 import { registerPlatformApi } from './src/server/platformApi';
+import { registerMoviesShowtimesApi } from './src/server/moviesShowtimesApi';
 import { PlatformSettingsRepository, registerPlatformSettingsApi } from './src/server/platformSettingsApi';
 import { registerStayApi } from './src/server/stayApi';
 import { registerStayHostApi } from './src/server/stayHostApi';
 import { registerStayAdminApi } from './src/server/stayAdminApi';
 import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
 import { registerStaySearchApi } from './src/server/staySearchApi';
+import { registerLocationSearchApi } from './src/server/locationSearchApi';
 import { registerStayPayments } from './src/server/stayPayments';
 import { ProviderListingRepository, type CinemaScreenRecord } from './src/server/providerListingRepository';
 import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/server/liveEditValidation';
@@ -2316,6 +2318,14 @@ Task:
     pool: pgRuntimePool,
   });
 
+  // Compact India location catalog autocomplete and nearest-city lookup. The
+  // Google Places fallback is server-only and remains unavailable until a
+  // restricted server credential is explicitly configured.
+  registerLocationSearchApi(app, {
+    env: process.env,
+    pool: pgRuntimePool || undefined,
+  });
+
   // Host-owned stay inventory, blocks, bookings and payout status.
   registerStayHostApi(app, {
     verifySession: verifySessionTokenFromRequest,
@@ -4412,6 +4422,13 @@ Task:
     });
   });
 
+  // Showtimes-only Movies directory (no seats, booking, payments or tickets).
+  registerMoviesShowtimesApi(app, {
+    pool: pgRuntimePool,
+    verifySession: (request) => verifySessionTokenFromRequest(request),
+    env: process.env,
+  });
+
   // ============================================================================
   // 15. AUTHORITATIVE MOVIES & CINEMA ENGINE (/api/movies/*)
   //     - Screens, Seat Layouts, Showtimes & Cinema-Specific Cancellation Policies
@@ -5290,8 +5307,23 @@ Task:
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (response, filePath) => {
+        const relativePath = path.relative(distPath, filePath).split(path.sep).join('/');
+        const fileName = path.basename(filePath);
+        if (fileName === 'index.html') {
+          response.setHeader('Cache-Control', 'no-cache');
+        } else if (/^assets\/.*-[a-f0-9_-]{8,}\.[a-z0-9]+$/i.test(relativePath)) {
+          response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          // Public, unhashed brand/media files revalidate daily. Authenticated
+          // APIs are registered before static serving and set their own policy.
+          response.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        }
+      },
+    }));
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

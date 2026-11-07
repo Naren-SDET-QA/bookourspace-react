@@ -288,3 +288,30 @@
     outline-offset: 3px;
   }
 }
+
+
+/* Admin-selected category styles (Classes / Venues). */
+[data-bos-category-style="classes-compact"] article,
+[data-bos-category-style="classes-compact"] .rounded-2xl,
+[data-bos-category-style="classes-compact"] .rounded-3xl {
+  border-radius: 0.75rem;
+}
+[data-bos-category-style="classes-compact"] article {
+  padding: 0.65rem;
+}
+[data-bos-category-style="classes-compact"] .grid {
+  gap: 0.5rem;
+}
+[data-bos-category-style="classes-compact"] h2,
+[data-bos-category-style="classes-compact"] h3 {
+  font-size: 0.95rem;
+  line-height: 1.25rem;
+}
+[data-bos-category-style="venues-list"] .grid {
+  grid-template-columns: 1fr !important;
+}
+[data-bos-category-style="venues-list"] article {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+}

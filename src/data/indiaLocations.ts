@@ -213,23 +213,90 @@ export const POPULAR_CITIES: IndiaCity[] = [
   .map((n) => ALL_CITIES.find((ci) => ci.name === n))
   .filter((ci): ci is IndiaCity => Boolean(ci));
 
+/** First-3 PIN digits (India Post sorting district) → real city. Used for instant 6-digit PIN. */
+export const INDIA_PIN_PREFIXES: Array<{ prefix: string; name: string; district: string; state: string }> = [
+  { prefix: '110', name: 'New Delhi', district: 'New Delhi', state: 'Delhi' },
+  { prefix: '122', name: 'Gurugram', district: 'Gurugram', state: 'Haryana' },
+  { prefix: '121', name: 'Faridabad', district: 'Faridabad', state: 'Haryana' },
+  { prefix: '201', name: 'Noida', district: 'Gautam Buddha Nagar', state: 'Uttar Pradesh' },
+  { prefix: '226', name: 'Lucknow', district: 'Lucknow', state: 'Uttar Pradesh' },
+  { prefix: '208', name: 'Kanpur', district: 'Kanpur', state: 'Uttar Pradesh' },
+  { prefix: '221', name: 'Varanasi', district: 'Varanasi', state: 'Uttar Pradesh' },
+  { prefix: '282', name: 'Agra', district: 'Agra', state: 'Uttar Pradesh' },
+  { prefix: '380', name: 'Ahmedabad', district: 'Ahmedabad', state: 'Gujarat' },
+  { prefix: '395', name: 'Surat', district: 'Surat', state: 'Gujarat' },
+  { prefix: '390', name: 'Vadodara', district: 'Vadodara', state: 'Gujarat' },
+  { prefix: '400', name: 'Mumbai', district: 'Mumbai Suburban', state: 'Maharashtra' },
+  { prefix: '411', name: 'Pune', district: 'Pune', state: 'Maharashtra' },
+  { prefix: '440', name: 'Nagpur', district: 'Nagpur', state: 'Maharashtra' },
+  { prefix: '422', name: 'Nashik', district: 'Nashik', state: 'Maharashtra' },
+  { prefix: '500', name: 'Hyderabad', district: 'Hyderabad', state: 'Telangana' },
+  { prefix: '530', name: 'Visakhapatnam', district: 'Visakhapatnam', state: 'Andhra Pradesh' },
+  { prefix: '520', name: 'Vijayawada', district: 'NTR', state: 'Andhra Pradesh' },
+  { prefix: '522', name: 'Guntur', district: 'Guntur', state: 'Andhra Pradesh' },
+  { prefix: '517', name: 'Tirupati', district: 'Tirupati', state: 'Andhra Pradesh' },
+  { prefix: '560', name: 'Bengaluru', district: 'Bengaluru Urban', state: 'Karnataka' },
+  { prefix: '570', name: 'Mysuru', district: 'Mysuru', state: 'Karnataka' },
+  { prefix: '575', name: 'Mangaluru', district: 'Dakshina Kannada', state: 'Karnataka' },
+  { prefix: '580', name: 'Hubballi', district: 'Dharwad', state: 'Karnataka' },
+  { prefix: '600', name: 'Chennai', district: 'Chennai', state: 'Tamil Nadu' },
+  { prefix: '641', name: 'Coimbatore', district: 'Coimbatore', state: 'Tamil Nadu' },
+  { prefix: '625', name: 'Madurai', district: 'Madurai', state: 'Tamil Nadu' },
+  { prefix: '682', name: 'Kochi', district: 'Ernakulam', state: 'Kerala' },
+  { prefix: '695', name: 'Thiruvananthapuram', district: 'Thiruvananthapuram', state: 'Kerala' },
+  { prefix: '673', name: 'Kozhikode', district: 'Kozhikode', state: 'Kerala' },
+  { prefix: '700', name: 'Kolkata', district: 'Kolkata', state: 'West Bengal' },
+  { prefix: '302', name: 'Jaipur', district: 'Jaipur', state: 'Rajasthan' },
+  { prefix: '342', name: 'Jodhpur', district: 'Jodhpur', state: 'Rajasthan' },
+  { prefix: '313', name: 'Udaipur', district: 'Udaipur', state: 'Rajasthan' },
+  { prefix: '141', name: 'Ludhiana', district: 'Ludhiana', state: 'Punjab' },
+  { prefix: '143', name: 'Amritsar', district: 'Amritsar', state: 'Punjab' },
+  { prefix: '160', name: 'Chandigarh', district: 'Chandigarh', state: 'Punjab' },
+];
+
+export const INDIA_PIN_PATTERN = /^[1-9][0-9]{5}$/;
+
+export function isIndiaPin(value: string): boolean {
+  return INDIA_PIN_PATTERN.test(value.trim());
+}
+
+export function cityForPin(value: string): IndiaCity | null {
+  const pin = value.trim();
+  if (!isIndiaPin(pin)) return null;
+  const prefix = INDIA_PIN_PREFIXES.find((row) => pin.startsWith(row.prefix));
+  if (!prefix) return null;
+  return ALL_CITIES.find((city) => city.name === prefix.name && city.state === prefix.state)
+    ?? ALL_CITIES.find((city) => city.name === prefix.name)
+    ?? null;
+}
+
 /** Deduplicate by name+state+district so duplicate city names stay distinguishable. */
 export function locationKey(loc: { name: string; state: string; district: string }): string {
   return `${loc.name}|${loc.state}|${loc.district}`.toLowerCase();
 }
 
-export function searchLocations(query: string, limit = 40): IndiaCity[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return ALL_CITIES.slice(0, limit);
+function foldLocationQuery(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9\u0c00-\u0c7f]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function searchLocations(query: string, limit = 10): IndiaCity[] {
+  const raw = query.trim();
+  const cap = Math.min(Math.max(limit, 1), 10);
+  if (!raw) return ALL_CITIES.filter((city) => city.popular).slice(0, cap);
+  const pinCity = cityForPin(raw);
+  if (pinCity) return [pinCity];
+  const q = foldLocationQuery(raw);
+  if (!q) return [];
   const scored = ALL_CITIES.map((loc) => {
-    const hay = `${loc.name} ${loc.district} ${loc.state} ${(loc.aliases ?? []).join(' ')}`.toLowerCase();
-    if (hay.includes(q)) {
-      const starts = loc.name.toLowerCase().startsWith(q) ? 0 : 1;
-      return { loc, score: starts };
-    }
+    const name = loc.name.toLowerCase();
+    const aliases = (loc.aliases ?? []).map((alias) => alias.toLowerCase());
+    if (name === q || aliases.includes(q)) return { loc, score: 0 };
+    if (name.startsWith(q) || aliases.some((alias) => alias.startsWith(q))) return { loc, score: 1 };
+    const hay = `${name} ${loc.district.toLowerCase()} ${loc.state.toLowerCase()} ${aliases.join(' ')}`;
+    if (hay.includes(q)) return { loc, score: name.includes(q) ? 2 : 3 };
     return null;
   }).filter((x): x is { loc: IndiaCity; score: number } => Boolean(x));
-  return scored.sort((a, b) => a.score - b.score || a.loc.name.localeCompare(b.loc.name)).slice(0, limit).map((s) => s.loc);
+  return scored.sort((a, b) => a.score - b.score || a.loc.name.localeCompare(b.loc.name)).slice(0, cap).map((s) => s.loc);
 }
 
 export function nearestCity(lat: number, lng: number): IndiaCity {

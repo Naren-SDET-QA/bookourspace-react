@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterListingsByCity } from '../src/lib/locationCityFilter.ts';
+import { filterListingsByCity, filterListingsByLocation } from '../src/lib/locationCityFilter.ts';
 
 const listings = [
   { id: 'pg', module: 'PGs', location: { city: 'Hyderabad' } },
@@ -25,4 +25,13 @@ test('All Cities and legacy All Locations values do not apply a city filter', ()
 
 test('a selected city with no matching rows stays empty', () => {
   assert.deepEqual(filterListingsByCity(listings, 'Visakhapatnam'), []);
+});
+
+test('PIN and area filters keep only real matching listings', () => {
+  const detailed = [
+    { id: 'pg', module: 'PGs', location: { city: 'Hyderabad', area: 'Madhapur', pincode: '500081' } },
+    { id: 'stay', module: 'Stays', location: { city: 'Hyderabad', area: 'Banjara Hills', pincode: '500034' } },
+  ];
+  assert.deepEqual(filterListingsByLocation(detailed, { pincode: '500081' }).map((item) => item.id), ['pg']);
+  assert.deepEqual(filterListingsByLocation(detailed, { area: 'Madhapur' }).map((item) => item.id), ['pg']);
 });

@@ -987,6 +987,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   void homeVisibilityVersion;
   const [sectionStyles, setSectionStylesState] = useState<SectionStyles>(() => loadSectionStyles());
 
+  const commitSectionStyles = async (next: SectionStyles) => {
+    const result = await saveSectionStyles(next);
+    if (result === 'failed') {
+      showAdminNotification('Could not publish the style. Sign in as Super Admin and retry.');
+      return result;
+    }
+    setSectionStylesState(next);
+    showAdminNotification(result === 'published'
+      ? 'Section style published for all visitors.'
+      : 'Development preview saved on this device only; it is not published.');
+    return result;
+  };
+
   // Custom Field Form
   const [isAddingField, setIsAddingField] = useState(false);
   const [fieldLabel, setFieldLabel] = useState('');
@@ -3229,8 +3242,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           type="button"
                           onClick={() => {
                             const next = { ...sectionStyles, pg: val as SectionStyles['pg'] };
-                            setSectionStylesState(next);
-                            saveSectionStyles(next);
+                            void commitSectionStyles(next);
                           }}
                           className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.pg === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
                         >
@@ -3248,8 +3260,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           type="button"
                           onClick={() => {
                             const next = { ...sectionStyles, stay: val as SectionStyles['stay'] };
-                            setSectionStylesState(next);
-                            saveSectionStyles(next);
+                            void commitSectionStyles(next);
                           }}
                           className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.stay === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
                         >
@@ -3267,8 +3278,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           type="button"
                           onClick={() => {
                             const next = { ...sectionStyles, services: val as SectionStyles['services'] };
-                            setSectionStylesState(next);
-                            saveSectionStyles(next);
+                            void commitSectionStyles(next);
                           }}
                           className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.services === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
                         >
@@ -3276,6 +3286,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </button>
                       ))}
                     </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace Classes</span>
+                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                      {[['cards', 'Cards'],['timetable', 'Weekly timetable']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            const next = { ...sectionStyles, classes: val as SectionStyles['classes'] };
+                            void commitSectionStyles(next).then((result) => {
+                              if (result === 'published') logAction('Content Management', `BookOurSpace Classes style: ${label}`, 'Updated the BookOurSpace Classes discovery style', 'published');
+                            });
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.classes === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace Venues</span>
+                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                      {[['showcase', 'Showcase'],['agenda', 'Agenda list']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            const next = { ...sectionStyles, venues: val as SectionStyles['venues'] };
+                            void commitSectionStyles(next).then((result) => {
+                              if (result === 'published') logAction('Content Management', `BookOurSpace Venues style: ${label}`, 'Updated the BookOurSpace Venues discovery style', 'published');
+                            });
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.venues === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+
                   </div>
                 </div>
               </div>

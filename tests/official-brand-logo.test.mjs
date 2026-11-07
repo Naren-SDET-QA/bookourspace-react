@@ -37,7 +37,7 @@ test('the rotating front and back faces reuse the tricolor pin from the supplied
   assert.ok(chakraBlue > 50, 'supplied pin retains Chakra blue');
   assert.match(component, /bos-official-logo__face--front/);
   assert.match(component, /bos-official-logo__face--back/);
-  assert.equal((component.match(/<image[^>]*href=\{BOS_OFFICIAL_LOGO_STATIC\}/g) || []).length, 2);
+  assert.equal((component.match(/<image[^>]*href=\{BOS_OFFICIAL_LOGO_(?:STATIC|ANIMATED)\}/g) || []).length, 2);
   const css = await fs.readFile(path.join(root, 'src/index.css'), 'utf8');
   assert.match(css, /animation: bos-logo-pin-spinner 2s linear infinite/);
   assert.match(css, /transform-origin: 16\.603% 54\.531%/);

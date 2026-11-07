@@ -18,20 +18,15 @@ test.describe('signed-out Google sign-in entry points', () => {
     const logo = page.locator('[aria-label="BookOurSpace Google sign-in"] img');
     await expect(logo).toBeVisible();
     await expect.poll(async () => new URL(await logo.evaluate((image: HTMLImageElement) => image.currentSrc)).pathname)
-      .toContain('bos-logo-lockup.webp');
+      .toMatch(/bos-logo-lockup(?:-(?:560|1120)-[a-f0-9]+)?\.webp$/);
     await expect(page.getByTestId('bos-logo-pin-rotor')).toBeHidden();
   });
 
-  test('Flutter-matched launch splash hands off to Google welcome, and Guest choice persists', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.removeItem('bos_entry_choice_v1');
-      const originalSetTimeout = window.setTimeout.bind(window);
-      window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
-        originalSetTimeout(handler, timeout === 1300 ? 3500 : timeout, ...args)) as typeof window.setTimeout;
-    });
+  test('lightweight boot welcome is immediately usable and Guest choice persists', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('bookourspace-splash')).toBeVisible();
-    const officialLogo = page.locator('[data-testid="bookourspace-splash"] .bos-entry-official-logo');
+    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
+    const officialLogo = page.locator('[data-testid="bookourspace-welcome"] .bos-entry-official-logo');
     await expect(officialLogo.locator('img')).toHaveAttribute('src', /bos-logo-lockup\.webp$/);
     await expect(page.getByTestId('bos-logo-pin-rotor')).toBeVisible();
     const pinRotor = page.locator('.bos-official-logo__spin');
@@ -48,8 +43,8 @@ test.describe('signed-out Google sign-in entry points', () => {
     await page.waitForTimeout(350);
     const laterTransform = await pinRotor.evaluate((element) => getComputedStyle(element).transform);
     expect(laterTransform).not.toBe(initialTransform);
-    await expect(officialLogo.locator('img')).toHaveJSProperty('naturalWidth', 1560);
-    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible({ timeout: 10_000 });
+    await expect.poll(async () => officialLogo.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth))
+      .toBeGreaterThanOrEqual(560);
     await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true })).toBeVisible();
 

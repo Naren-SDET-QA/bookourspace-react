@@ -448,6 +448,11 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     let mounted = true;
 
     const loadRlsData = async (activeUser: User | null) => {
+      // Public inventory is hydrated by /api/marketplace/listings. Avoid
+      // duplicate anonymous Supabase listings/reviews requests; RLS hydration
+      // here is for the signed-in account's protected data.
+      if (!activeUser) return;
+
       const [remoteListings, remoteReviews] = await Promise.all([
         fetchRlsListings(),
         fetchRlsReviews(),
@@ -772,9 +777,12 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         } else {
           setAuthUser(null);
           setUserRoleState('customer');
+          return;
         }
       }
-      await refreshServerNotifications();
+      window.setTimeout(() => {
+        if (mounted) void refreshServerNotifications();
+      }, 1200);
     };
 
     void verifySessionAndSync();
