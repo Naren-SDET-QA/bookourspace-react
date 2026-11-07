@@ -324,7 +324,7 @@ test.describe('module deep links', () => {
     await profile.getByRole('button', { name: 'Close Profile' }).click();
 
     await nav.getByRole('button', { name: 'Search' }).click();
-    await expect(page.locator('input[type="text"]').first()).toBeFocused();
+    await expect(page.locator('input[type="text"], input[type="search"]').first()).toBeFocused();
 
     await nav.getByRole('button', { name: 'My Bookings' }).click();
     await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
