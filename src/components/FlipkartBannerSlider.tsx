@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  ShieldCheck, 
-  Sparkles, 
-  ArrowRight, 
-  MapPin, 
-  CheckCircle2, 
-  Clock, 
-  Tag, 
+import SafeImage from './SafeImage';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  Sparkles,
+  ArrowRight,
+  MapPin,
+  CheckCircle2,
+  Clock,
+  Tag,
   Zap,
   Home,
   GraduationCap,
@@ -117,31 +118,31 @@ export const FlipkartBannerSlider: React.FC<FlipkartBannerSliderProps> = ({
   const activeSlideData = slides[currentSlide];
 
   return (
-    <div 
+    <div
       className="relative w-full overflow-hidden bg-[#172337] rounded-sm sm:rounded-md shadow-md border border-slate-200 dark:border-slate-800"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
       {/* Background Banner Container */}
       <div className={`relative min-h-[220px] sm:min-h-[260px] md:min-h-[280px] bg-gradient-to-r ${activeSlideData.bgGradient} text-white flex items-center transition-all duration-700`}>
-        
+
         {/* Subtle decorative mesh overlay */}
         <div className="absolute inset-0 bg-black/20 pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-8 py-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          
+
           {/* Left Text Block */}
           <div className="flex-1 space-y-2.5 max-w-2xl text-left">
-            
+
             {/* Flipkart Assured Badge Tag */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-xs bg-[#2874F0] text-white text-[11px] font-black uppercase tracking-wider shadow-xs border border-blue-400">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#FFE500]" />
                 <span>
-                  {currentLang === 'te' 
-                    ? activeSlideData.badgeTe 
-                    : currentLang === 'hi' 
-                    ? activeSlideData.badgeHi 
+                  {currentLang === 'te'
+                    ? activeSlideData.badgeTe
+                    : currentLang === 'hi'
+                    ? activeSlideData.badgeHi
                     : activeSlideData.badge}
                 </span>
               </span>
@@ -155,27 +156,27 @@ export const FlipkartBannerSlider: React.FC<FlipkartBannerSliderProps> = ({
             {/* Title & Highlight */}
             <div>
               <h1 className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight text-white leading-tight">
-                {currentLang === 'te' 
-                  ? activeSlideData.titleTe 
-                  : currentLang === 'hi' 
-                  ? activeSlideData.titleHi 
+                {currentLang === 'te'
+                  ? activeSlideData.titleTe
+                  : currentLang === 'hi'
+                  ? activeSlideData.titleHi
                   : activeSlideData.title}
               </h1>
               <p className={`text-base sm:text-xl font-black ${activeSlideData.accentColor} mt-0.5`}>
-                {currentLang === 'te' 
-                  ? activeSlideData.highlightTe 
-                  : currentLang === 'hi' 
-                  ? activeSlideData.highlightHi 
+                {currentLang === 'te'
+                  ? activeSlideData.highlightTe
+                  : currentLang === 'hi'
+                  ? activeSlideData.highlightHi
                   : activeSlideData.highlight}
               </p>
             </div>
 
             {/* Description */}
             <p className="text-xs sm:text-sm text-slate-200 line-clamp-2 max-w-xl leading-relaxed">
-              {currentLang === 'te' 
-                ? activeSlideData.descriptionTe 
-                : currentLang === 'hi' 
-                ? activeSlideData.descriptionHi 
+              {currentLang === 'te'
+                ? activeSlideData.descriptionTe
+                : currentLang === 'hi'
+                ? activeSlideData.descriptionHi
                 : activeSlideData.description}
             </p>
 
@@ -186,10 +187,10 @@ export const FlipkartBannerSlider: React.FC<FlipkartBannerSliderProps> = ({
                 className="bg-[#FF9F00] hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs sm:text-sm px-5 py-2.5 rounded-xs shadow-md flex items-center gap-2 transition-all cursor-pointer"
               >
                 <span>
-                  {currentLang === 'te' 
-                    ? activeSlideData.ctaTe 
-                    : currentLang === 'hi' 
-                    ? activeSlideData.ctaHi 
+                  {currentLang === 'te'
+                    ? activeSlideData.ctaTe
+                    : currentLang === 'hi'
+                    ? activeSlideData.ctaHi
                     : activeSlideData.ctaText}
                 </span>
                 <ArrowRight className="w-4 h-4 stroke-[2.5]" />
@@ -207,10 +208,10 @@ export const FlipkartBannerSlider: React.FC<FlipkartBannerSliderProps> = ({
 
           {/* Right Product Image Showcase (Flipkart Big Visual) */}
           <div className="hidden sm:block shrink-0 relative w-64 md:w-80 h-44 md:h-52 rounded-sm overflow-hidden shadow-2xl border-2 border-white/20">
-            <img 
-              src={activeSlideData.image} 
+            <SafeImage category="general"
+              src={activeSlideData.image}
               alt={activeSlideData.title}
-              className="w-full h-full object-cover transform hover:scale-105 transition-transform duration-500" 
+              className="w-full h-full object-cover transform hover:scale-105 transition-transform duration-500"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-3">
               <div className="text-white text-xs font-bold flex items-center gap-1.5">

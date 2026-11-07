@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SafeImage, { imageCategoryFor } from './SafeImage';
 import { MarketplaceListing } from '../types/marketplace';
 import { MarketSectionType } from '../data/servicesStayMoviesData';
 import { AppLanguage } from '../utils/translations';
@@ -213,7 +214,7 @@ const SECTION_DEFAULT_SPOTLIGHT_CARDS: Record<MarketSectionType, SpotlightSlideI
       priceHighlightTe: 'నెలకు ₹8,500 నుండి',
       rating: '4.9',
       image:
-        'https://images.unsplash.com/photo-1540518614846-7ede433c4576?auto=format&fit=crop&w=1000&q=85',
+        'https://images.unsplash.com/photo-1560185008-b033106af5c3?auto=format&fit=crop&w=1000&q=85',
       accentBg: 'from-blue-950/95 via-indigo-900/55 to-transparent',
       pillTheme: 'bg-sky-100 text-sky-950 border-sky-400',
       ctaTheme: 'bg-blue-600 group-hover:bg-amber-400 text-white group-hover:text-slate-950',
@@ -909,10 +910,12 @@ export const SectionSpotlightShowcase: React.FC<SectionSpotlightShowcaseProps> =
                 className={`animate-bos-card-cascade group relative w-[260px] sm:w-[330px] md:w-[365px] h-28 sm:h-32 rounded-xl overflow-hidden shrink-0 cursor-pointer border ring-2 ${activeCategoryMeta.cardBorderClass} transition-all duration-300 hover:scale-[1.02] hover:shadow-md`}
               >
                 {/* Background Image */}
-                <img
+                <SafeImage
                   src={card.image}
                   alt={titleText}
                   className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                  category={imageCategoryFor(activeCategoryMeta.section)}
+                  sizes="365px"
                 />
 
                 {/* Distinct Category Color Gradient Overlay */}

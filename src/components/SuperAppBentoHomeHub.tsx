@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import SafeImage from './SafeImage';
 import {
   Search,
   Bell,
@@ -16,6 +17,8 @@ import {
   Sliders,
   Users,
   Briefcase,
+  MapPin,
+  ChevronDown,
 } from 'lucide-react';
 import { BOSBrandLogo } from './BOSBrandLogo';
 import {
@@ -32,6 +35,7 @@ import { getUILabels } from '../utils/i18nEngine';
 import { HomeScreenLayoutStyle } from './ModularSystemEngine';
 
 interface SuperAppBentoHomeHubProps {
+  sharedHeader?: React.ReactNode;
   activeMarketSection: MarketSectionType;
   onSelectCategoryAndAdvance: (
     section: MarketSectionType,
@@ -50,6 +54,8 @@ interface SuperAppBentoHomeHubProps {
   onToggleDarkMode: () => void;
   verifiedOnly: boolean;
   onToggleVerifiedOnly: () => void;
+  selectedLocationLabel?: string;
+  onOpenLocationSelector?: () => void;
   userRole: 'customer' | 'provider' | 'admin';
   onSelectRole: (role: 'customer' | 'provider' | 'admin') => void;
   userInitials?: string;
@@ -60,6 +66,7 @@ interface SuperAppBentoHomeHubProps {
 }
 
 export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
+  sharedHeader,
   onSelectCategoryAndAdvance,
   currentLang,
   onChangeLang,
@@ -73,6 +80,8 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
   onToggleDarkMode,
   verifiedOnly,
   onToggleVerifiedOnly,
+  selectedLocationLabel,
+  onOpenLocationSelector,
   userRole,
   onSelectRole,
   userInitials = 'BS',
@@ -307,8 +316,9 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
       : moviesCategories;
 
   return (
-    <div className="h-[calc(100dvh-56px)] max-h-[calc(100dvh-56px)] w-full max-w-full overflow-hidden bg-white dark:bg-[#0A0C20] text-slate-900 dark:text-white transition-colors duration-200 flex flex-col justify-between box-border select-none">
+    <div className="min-h-[calc(100dvh-56px)] w-full max-w-full overflow-visible bg-white dark:bg-[#0A0C20] text-slate-900 dark:text-white transition-colors duration-200 flex flex-col box-border select-none">
       {/* 1. CLEAN MOBILE-FITTED TOP HEADER BAR (NO DUPLICATE TOP SEARCH ICON — SEARCH IS IN BOTTOM NAV) */}
+      {sharedHeader ?? (
       <header className="relative z-30 shrink-0 w-full bg-white/95 dark:bg-[#0A0C20]/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800/80 px-3 sm:px-5 py-1.5 box-border">
         <div className="max-w-md sm:max-w-3xl mx-auto w-full flex items-center justify-between gap-1.5 min-w-0">
           {/* Left: BOS Brand Logo with 360° Rotating Middle 'O' & Interactive VERIFIED Pill */}
@@ -320,6 +330,16 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               onVerifiedClick={onToggleVerifiedOnly}
               onClick={() => setShowMoreCategoriesDrawer(false)}
             />
+            <button
+              type="button"
+              onClick={() => onOpenLocationSelector?.()}
+              aria-label="Select city or locality"
+              className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border border-purple-300 bg-purple-50 px-3 py-1 text-[11.5px] font-extrabold text-[#5B21B6] shadow-sm transition hover:border-[#7C3AED] hover:bg-purple-100 dark:border-purple-500/40 dark:bg-purple-500/15 dark:text-purple-300"
+            >
+              <MapPin className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{selectedLocationLabel || 'All Cities'}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+            </button>
           </div>
 
           {/* Right: Compact Action Icons (4-Dot Grid, QR/Post, Dark Mode, Bell with Red Badge, User Initials) */}
@@ -552,10 +572,12 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
           </div>
         )}
       </header>
+      )}
 
       {/* MAIN MOBILE-LOCKED SUPER-APP BODY (FITS 100% WITHIN VIEWPORT WITH ZERO VERTICAL OR HORIZONTAL SCROLL) */}
-      <div className="max-w-md sm:max-w-3xl mx-auto w-full flex-1 min-h-0 px-3 sm:px-5 py-1.5 sm:py-2.5 flex flex-col justify-between gap-1.5 sm:gap-2.5 overflow-hidden box-border">
-        {/* 2. TOP SPOTLIGHT HERO CARD WITH DISTINCT COLOR PALETTES & FRAMED MULTI-COLOR IMAGERY PER ANIMATION */}
+      <div className="max-w-md sm:max-w-3xl mx-auto w-full flex-1 min-h-0 px-3 sm:px-5 py-1.5 sm:py-2.5 flex flex-col justify-between gap-1.5 sm:gap-2.5 overflow-visible box-border">
+        {/* 2. TOP SPOTLIGHT HERO CARD — REMOVED (banner animation disabled per product request) */}
+        {false && (
         <div
           onMouseEnter={() => setIsHeroPaused(true)}
           onMouseLeave={() => setIsHeroPaused(false)}
@@ -565,7 +587,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
           className="shrink-0 group relative w-full overflow-hidden rounded-[20px] bg-slate-900 text-white border border-white/20 dark:border-indigo-500/40 px-3 py-2 sm:p-3.5 shadow-sm cursor-pointer transition-all duration-500 hover:shadow-md box-border"
         >
           {/* Ambient Category Background Photo + Distinct Multi-Color Gradient Overlay */}
-          <img
+          <SafeImage category="general"
             key={`bg-${currentHero.id}`}
             src={currentHero.image}
             alt={currentHero.title}
@@ -694,7 +716,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
 
             {/* Right Framed Colorful Showcase Image + Price Pill + BOS Emblem */}
             <div className="relative shrink-0 w-28 h-21 sm:w-40 sm:h-26 rounded-2xl overflow-hidden border-2 border-white/80 shadow-lg bg-slate-950 mt-3 sm:mt-2">
-              <img
+              <SafeImage category="general"
                 src={currentHero.framedPhoto}
                 alt={currentHero.shortTab}
                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
@@ -716,6 +738,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* 3. ROUNDED SOFT-LAVENDER SUPER-APP BENTO CONTAINER (2 WIDE + 8 SQUARE CARDS, FLEX-SCALED FOR ZERO SCROLL) */}
         <div className="flex-1 min-h-0 w-full rounded-[22px] bg-[#EAEEF8] dark:bg-[#131836] px-2.5 py-1.5 sm:p-3.5 shadow-2xs border border-indigo-100/80 dark:border-indigo-900/50 flex flex-col justify-between overflow-hidden box-border">

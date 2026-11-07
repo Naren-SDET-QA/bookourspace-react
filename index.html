@@ -2,8 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Zoom is deliberately not blocked: pinch-zoom is required for WCAG 1.4.4 on mobile. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BookOurSpace" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/assets/brand/bos-favicon-v2.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/bos-apple-touch-icon-v2.png" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#4f46e5" />
     <title>Universal Services & Listings Marketplace</title>
@@ -14,7 +19,14 @@
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      #bos-prelaunch-screen{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:linear-gradient(160deg,#f7f8fc,#f3f7fa 52%,#f7f5ff);color:#0b1f33;font:800 32px 'Plus Jakarta Sans',Inter,sans-serif;letter-spacing:-.055em}
+      #bos-prelaunch-screen .bos-prelaunch-inner{display:flex;flex-direction:column;align-items:center;gap:8px}
+      #bos-prelaunch-screen .bos-prelaunch-logo{display:block;width:min(90vw,560px);height:auto;aspect-ratio:1560/320}
+      #bos-prelaunch-screen .bos-prelaunch-logo img{display:block;width:100%;height:100%;object-fit:contain}
+      #bos-prelaunch-screen small{margin-top:4px;color:#475569;font:400 14px Inter,sans-serif;letter-spacing:normal}
+    </style>
     <script>
       window.__swReady = (async function () {
         try {
@@ -40,6 +52,14 @@
     </script>
   </head>
   <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-purple-500 selection:text-white">
+    <div id="bos-prelaunch-screen" aria-label="Loading BookOurSpace" role="status">
+      <div class="bos-prelaunch-inner">
+        <picture class="bos-prelaunch-logo" role="img" aria-label="BookOurSpace — Find, Book, Enjoy">
+          <img src="/assets/brand/bos-logo-lockup.webp" width="1560" height="320" alt="" fetchpriority="high" />
+        </picture>
+        <small>Getting things ready…</small>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/entry.tsx"></script>
   </body>

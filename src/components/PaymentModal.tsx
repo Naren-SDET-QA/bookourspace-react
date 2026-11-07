@@ -27,7 +27,7 @@ import {
 } from '../utils/gstInvoiceGenerator';
 import { UniversalBarcode, generateBosBarcodeId } from './UniversalBarcode';
 import { triggerGlobalGlobeLoader } from './BOSBrandLogo';
-import { createServerPaymentIntent, verifyServerUpiPayment } from '../lib/supabaseClient';
+import { createServerPaymentIntent, verifyServerUpiPayment, PAYMENT_VERIFICATION_AVAILABLE } from '../lib/supabaseClient';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -163,6 +163,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [paymentIntentId, setPaymentIntentId] = useState('');
   const [transactionId, setTransactionId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [paidViaLabel, setPaidViaLabel] = useState('Direct 0%-Fee UPI / Google Pay');
@@ -354,9 +355,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         if (canMakePayment) {
           const response = await request.show();
           await response.complete('success');
-          finalizePaymentSuccess(
-            `GPAY-TEZ-${Date.now().toString().slice(-8)}`,
-            `Google Pay Android (${merchantVpa})`
+          setAppLaunchedNotice(
+            'Google Pay returned a payment response. Enter the actual bank UTR below; payment remains unconfirmed until a payment provider verifies settlement.'
           );
           return;
         }
@@ -407,32 +407,45 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     paymentMethod: paidViaLabel,
   });
 
-  const finalizePaymentSuccess = async (
-    customTxId?: string,
-    customMethodLabel?: string,
-    useBankWebhookSettlement: boolean = true
-  ) => {
+  const finalizePaymentSuccess = async () => {
+    if (paymentMethod !== 'upi') {
+      setAppLaunchedNotice('This payment method is unavailable until a real payment provider is configured. No payment was recorded.');
+      return;
+    }
+
+    const cleanUtr = utrReference.trim().replace(/\s+/g, '');
+    if (!/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
+      setAppLaunchedNotice('Enter the actual 12–22 character bank UTR after completing your UPI payment.');
+      return;
+    }
+
     setIsProcessing(true);
     triggerGlobalGlobeLoader('Verifying 0%-Fee Direct Payment & Generating Official GST Invoice...', 750);
 
     try {
-      const cleanUtr = utrReference.trim().replace(/\s+/g, '');
-      const intentRes = await createServerPaymentIntent({
-        amount: totalPayable,
-        merchantVpa,
-        planOrListing: planName,
-      });
-      const activeIntentId = intentRes.intentId || `INT-${Date.now()}`;
+      let activeIntentId = paymentIntentId;
+      if (!activeIntentId) {
+        const intentRes = await createServerPaymentIntent({
+          amount: totalPayable,
+          merchantVpa,
+          planOrListing: planName,
+          purpose: 'subscription',
+        });
+        if (!intentRes.ok || !intentRes.intentId) {
+          setAppLaunchedNotice('Unable to start payment verification. No payment was recorded.');
+          setIsProcessing(false);
+          return;
+        }
+        activeIntentId = intentRes.intentId;
+        setPaymentIntentId(activeIntentId);
+      }
 
       // If user typed a manual UTR, validate format & anti-replay on the server
       // Enforces: UTR alone != verified payment unless accompanied by bank webhook signature
-      if (paymentMethod === 'upi' && cleanUtr.length > 0) {
+      if (paymentMethod === 'upi') {
         const verifyRes = await verifyServerUpiPayment({
           intentId: activeIntentId,
-          utrNumber: cleanUtr.length >= 12 ? cleanUtr : cleanUtr.padEnd(12, '0'),
-          amount: totalPayable,
-          merchantVpa,
-          simulateBankWebhookSettlement: useBankWebhookSettlement,
+          utrNumber: cleanUtr,
         });
 
         if (verifyRes.httpStatus === 409 || verifyRes.error === 'DUPLICATE_UTR_REPLAY') {
@@ -442,44 +455,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           setIsProcessing(false);
           return;
         }
-
         if (!verifyRes.verified) {
           setAppLaunchedNotice(
-            `⏳ ${verifyRes.message || 'UTR recorded for bank reconciliation. UTR alone is not marked as paid until bank webhook confirmation.'}`
+            `⏳ ${verifyRes.message || 'UTR recorded for bank reconciliation. UTR alone is not marked as paid until bank settlement is independently verified.'}`
           );
-          setIsProcessing(false);
-          return;
-        }
-      } else if (paymentMethod === 'upi') {
-        // Verify via simulated bank webhook settlement for 1-tap UPI QR flow
-        const autoUtr = `${Date.now()}${Math.floor(10 + Math.random() * 89)}`.slice(-12);
-        const verifyRes = await verifyServerUpiPayment({
-          intentId: activeIntentId,
-          utrNumber: autoUtr,
-          amount: totalPayable,
-          merchantVpa,
-          simulateBankWebhookSettlement: true,
-        });
-        if (!verifyRes.verified) {
-          setAppLaunchedNotice('⏳ Payment pending bank webhook reconciliation.');
           setIsProcessing(false);
           return;
         }
       }
 
-      const generatedTxId =
-        customTxId ||
-        (cleanUtr.length >= 6 ? `UTR-${cleanUtr}` : `UPI-${Date.now().toString().slice(-8)}`);
+      const generatedTxId = `UTR-${cleanUtr}`;
       const generatedInvNo = `BOS-GST-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-      const methodLabel =
-        customMethodLabel ||
-        (paymentMethod === 'upi'
-          ? `${paidViaLabel} -> ${merchantVpa} (Server Verified)`
-          : paymentMethod === 'gpay_sdk'
-          ? 'Google Pay Official SDK (0% Fee)'
-          : paymentMethod === 'card'
-          ? 'Encrypted Card'
-          : `NetBanking (${selectedBank})`);
+      const methodLabel = `${paidViaLabel} -> ${merchantVpa} (Server Verified)`;
 
       setTransactionId(generatedTxId);
       setInvoiceNumber(generatedInvNo);
@@ -496,6 +483,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       setPaymentSuccess(true);
       if (onSuccess) onSuccess();
     } catch {
+      setAppLaunchedNotice('Payment verification could not be completed. No payment was recorded. Please try again later.');
       setIsProcessing(false);
     }
   };
@@ -507,9 +495,34 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const handleReset = () => {
     setPaymentSuccess(false);
+    setPaymentIntentId('');
+    setUtrReference('');
     setAppLaunchedNotice(null);
     onClose();
   };
+
+  if (!PAYMENT_VERIFICATION_AVAILABLE) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm" role="presentation">
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payment-unavailable-title"
+          className="w-full max-w-md rounded-3xl border border-amber-300 bg-white p-6 shadow-2xl dark:border-amber-800 dark:bg-slate-900"
+        >
+          <h2 id="payment-unavailable-title" className="text-lg font-black text-slate-900 dark:text-white">
+            Online payment unavailable
+          </h2>
+          <p role="status" className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+            BookOurSpace cannot verify payment settlement right now. Do not send funds. No payment or subscription has been recorded.
+          </p>
+          <button type="button" onClick={handleReset} className="mt-5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-slate-900">
+            Close
+          </button>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm overflow-y-auto">
@@ -1186,12 +1199,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                         countryCode: 'IN',
                       },
                     }}
-                    onLoadPaymentData={(paymentData) => {
-                      const desc = paymentData?.paymentMethodData?.description || 'Google Pay';
-                      finalizePaymentSuccess(
-                        `GPAY-${Date.now().toString().slice(-8)}`,
-                        `Google Pay Official (${desc})`
-                      );
+                    onLoadPaymentData={() => {
+                      setAppLaunchedNotice('Google Pay returned payment data. Settlement still needs confirmation from a configured payment provider. No payment was recorded.');
                     }}
                   />
                 </div>

@@ -1,5 +1,6 @@
 import type { MarketplaceListing } from '../types/marketplace';
 import { servicesCategories } from '../data/servicesStayMoviesData';
+import { listingImageSources } from './media/signedStorageUrl';
 
 /**
  * Section view models for the PG and home-services experiences.
@@ -21,7 +22,14 @@ export interface DetailRow {
 
 export type PgGender = 'boys' | 'girls' | 'co-living' | 'unspecified';
 export type PgGenderFilter = 'all' | 'boys' | 'girls' | 'co-living';
-export type PgSharingFilter = 'all' | 'single' | '2' | '3' | '4';
+export type PgSharingFilter = 'all' | 'single' | '2' | '3' | '4' | 'multiple';
+export type PgAcFilter = 'any' | 'ac' | 'non-ac';
+export type PgBathroomFilter = 'any' | 'attached' | 'common';
+export type PgOccupantFilter = 'any' | 'student' | 'working';
+export type PgKindFilter = 'any' | 'pg' | 'hostel';
+export type PgBathroomKind = 'attached' | 'common' | 'mixed' | null;
+export type PgOccupant = 'student' | 'working' | 'mixed' | null;
+export type PgKind = 'pg' | 'hostel' | null;
 
 export interface PgCard {
   id: string;
@@ -37,6 +45,12 @@ export interface PgCard {
   deposit: string | null;
   food: string | null;
   attachedBath: string | null;
+  acText: string;
+  hasAc: boolean;
+  hasNonAc: boolean;
+  bathroomKind: PgBathroomKind;
+  occupant: PgOccupant;
+  kind: PgKind;
   bedsAvailable: number | null;
   verified: boolean;
   photo: string | null;
@@ -55,6 +69,11 @@ export interface PgFilters {
   maxRent: number | null;
   foodOnly: boolean;
   attachedBathOnly: boolean;
+  /** Optional so existing callers keep the documented default of "any". */
+  ac?: PgAcFilter;
+  bathroom?: PgBathroomFilter;
+  occupant?: PgOccupantFilter;
+  kind?: PgKindFilter;
 }
 
 export interface ServiceCard {
@@ -96,6 +115,7 @@ const FACILITY_FIELDS: ReadonlyArray<readonly [string, string]> = [
   ['laundryFacility', 'Laundry'],
   ['powerBackup', 'Power backup'],
   ['attachedWashroom', 'Bathroom'],
+  ['acType', 'Air conditioning'],
 ];
 
 const RULE_FIELDS: ReadonlyArray<readonly [string, string]> = [
@@ -159,13 +179,60 @@ export function pgGenderLabel(gender: PgGender): string {
 export function matchesPgSharing(sharingText: string, filter: PgSharingFilter): boolean {
   if (filter === 'all') return true;
   if (filter === 'single') return /single\s*(room|occupancy|sharing)?/i.test(sharingText);
+  // "Multiple" is the 4+ bucket: dormitory or any 4-or-more sharing label.
+  if (filter === 'multiple') return /multiple|dormitory|[4-9]\s*-?\s*sharing/i.test(sharingText);
   return new RegExp(`${filter}\\s*-?\\s*sharing`, 'i').test(sharingText);
+}
+
+/** AC and Non-AC are independent: "AC & Non-AC" genuinely offers both. */
+function acFlags(rawText: string): { hasAc: boolean; hasNonAc: boolean } {
+  const haystack = rawText.toLowerCase();
+  const hasNonAc = /non[\s-]?ac\b/.test(haystack);
+  const hasAc = /\bac\b/.test(haystack.replace(/non[\s-]?ac\b/g, ' '));
+  return { hasAc, hasNonAc };
+}
+
+/** Bathroom wording comes only from the owner's own field. */
+export function pgBathroomKindOf(value: string): PgBathroomKind {
+  const text = value.toLowerCase();
+  if (!text) return null;
+  const attached = /attached/.test(text);
+  const common = /common|shared|public/.test(text);
+  if (attached && common) return 'mixed';
+  if (attached) return 'attached';
+  if (common) return 'common';
+  return null;
+}
+
+/** Student/working-professional audience, read from owner-supplied wording. */
+export function pgOccupantOf(rawText: string): PgOccupant {
+  const text = rawText.toLowerCase();
+  if (!text) return null;
+  const student = /student|coaching|college|academic/.test(text);
+  const working = /working|professional|employee|corporate|it\s|\bit\b/.test(text);
+  if (student && working) return 'mixed';
+  if (student) return 'student';
+  if (working) return 'working';
+  return null;
+}
+
+/** Hostel versus PG, from the listing's own category/subcategory/type wording. */
+export function pgKindOf(rawText: string): PgKind {
+  const text = rawText.toLowerCase();
+  if (/hostel|dormitory/.test(text)) return 'hostel';
+  if (/paying\s*guest|\bpg\b|pg[-_]/.test(text)) return 'pg';
+  return null;
 }
 
 export function parsePgListing(listing: MarketplaceListing): PgCard {
   const fields = listing.customFieldValues ?? {};
-  const images = Array.isArray(listing.images) ? listing.images.filter((src) => text(src)) : [];
+  const images = listingImageSources(listing.images, listing);
   const sharingText = `${text(fields.roomTypesAvailable)} ${text(fields.sharingHighlight)}`.trim();
+  const acText = `${text(fields.acType)} ${text(fields.roomTypesAvailable)}`.trim();
+  const { hasAc, hasNonAc } = acFlags(acText);
+  // Do not infer a resident audience from a loosely named subcategory. Only
+  // structured owner-provided audience fields are specific enough to filter.
+  const audienceText = `${text(fields.occupantType)} ${text(fields.genderPolicy)}`;
   return {
     id: listing.id,
     title: listing.title,
@@ -180,6 +247,12 @@ export function parsePgListing(listing: MarketplaceListing): PgCard {
     deposit: text(fields.securityDeposit) || null,
     food: text(fields.foodIncluded) || null,
     attachedBath: text(fields.attachedWashroom) || null,
+    acText,
+    hasAc,
+    hasNonAc,
+    bathroomKind: pgBathroomKindOf(text(fields.attachedWashroom)),
+    occupant: pgOccupantOf(audienceText),
+    kind: pgKindOf(`${listing.categoryId} ${listing.subcategory} ${text(fields.propertyType)}`),
     bedsAvailable: typeof fields.bedsAvailable === 'number' ? fields.bedsAvailable : null,
     verified: listing.isVerified === true,
     photo: images[0] ?? null,
@@ -208,6 +281,14 @@ export function filterPgListings(cards: readonly PgCard[], filters: PgFilters): 
     }
     if (filters.foodOnly && !/^\s*yes/i.test(card.food ?? '')) return false;
     if (filters.attachedBathOnly && !/^\s*yes/i.test(card.attachedBath ?? '')) return false;
+    if (filters.ac === 'ac' && !card.hasAc) return false;
+    if (filters.ac === 'non-ac' && !card.hasNonAc) return false;
+    if (filters.bathroom === 'attached' && card.bathroomKind !== 'attached' && card.bathroomKind !== 'mixed') return false;
+    if (filters.bathroom === 'common' && card.bathroomKind !== 'common' && card.bathroomKind !== 'mixed') return false;
+    if (filters.occupant === 'student' && card.occupant !== 'student' && card.occupant !== 'mixed') return false;
+    if (filters.occupant === 'working' && card.occupant !== 'working' && card.occupant !== 'mixed') return false;
+    if (filters.kind === 'pg' && card.kind !== 'pg') return false;
+    if (filters.kind === 'hostel' && card.kind !== 'hostel') return false;
     if (!query) return true;
     return [card.title, card.subcategory, card.locality, card.city, card.providerName]
       .join(' ')
@@ -223,7 +304,7 @@ function quoteUnit(priceUnit: string): boolean {
 export function parseServiceListing(listing: MarketplaceListing): ServiceCard {
   const category = servicesCategories.find((item) => item.id === listing.categoryId);
   const fields = listing.customFieldValues ?? {};
-  const images = Array.isArray(listing.images) ? listing.images.filter((src) => text(src)) : [];
+  const images = listingImageSources(listing.images, listing);
   const priceRupees = isPositiveNumber(listing.price) ? listing.price : null;
   const priceUnit = text(listing.priceUnit);
   const quoteOnly = priceRupees === null || quoteUnit(priceUnit);

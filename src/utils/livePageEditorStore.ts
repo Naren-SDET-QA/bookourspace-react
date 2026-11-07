@@ -1,5 +1,5 @@
 import { MarketSectionType } from '../data/servicesStayMoviesData';
-import { appendAdminAuditLog } from './adminEnterpriseStore';
+import { appendAdminAuditLog } from './adminAuditStore';
 import { supabase } from '../lib/supabaseClient';
 
 export type CustomerPageId = MarketSectionType; // 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies'

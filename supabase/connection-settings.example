@@ -1,0 +1,71 @@
+# =============================================================================
+# Correct-target database connection settings — BookOurSpace React
+#
+# Target project: obkfgxjzlscungkhbyvq  (ap-south-1 / Mumbai, PostgreSQL 17.11)
+# Source of truth: supabase/.temp/project-ref and supabase/.temp/pooler-url,
+# written by the Supabase CLI when it linked project "React".
+#
+# TEMPLATE ONLY — this file is tracked by git and must never contain a
+# credential. Copy the keys you need into the untracked .env (which is
+# gitignored) or load the password from the macOS Keychain service named in
+# BOS_BACKUP_KEYCHAIN_SERVICE.
+#
+# These key names mirror the ones already present in .env so the fix is a
+# value-for-value replacement, not a rename.
+# =============================================================================
+
+# --- Identity -----------------------------------------------------------------
+MUMBAI_PROJECT_REF=obkfgxjzlscungkhbyvq
+VITE_SUPABASE_PROJECT_ID=obkfgxjzlscungkhbyvq
+VITE_SUPABASE_DEVELOPMENT_PROJECT_ID=obkfgxjzlscungkhbyvq
+VITE_SUPABASE_URL=https://obkfgxjzlscungkhbyvq.supabase.co
+
+# --- Direct connection (IPv6-only on many networks; prefer the pooler) --------
+# db.<ref>.supabase.co resolves over IPv6 only for this project. A client
+# network without IPv6 cannot reach it — that failure was already observed and
+# recorded in MUMBAI_AUTH_DIAGNOSTIC_20261104.md.
+MUMBAI_DIRECT_HOST=db.obkfgxjzlscungkhbyvq.supabase.co
+MUMBAI_DIRECT_PORT=5432
+MUMBAI_DIRECT_USER=postgres
+MUMBAI_DIRECT_NAME=postgres
+MUMBAI_DIRECT_SSLMODE=require
+
+# --- Session pooler (Supavisor, port 5432 = session mode) ---------------------
+# The pooler hostname is region-scoped, not project-scoped. The username carries
+# the tenant: postgres.<project-ref>. A wrong ref here authenticates against the
+# wrong tenant or fails with SQLSTATE 28P01.
+MUMBAI_DB_HOST=aws-0-ap-south-1.pooler.supabase.com
+MUMBAI_DB_PORT=5432
+MUMBAI_DB_USER=postgres.obkfgxjzlscungkhbyvq
+MUMBAI_DB_NAME=postgres
+MUMBAI_DB_SSLMODE=require
+
+# --- Credential ---------------------------------------------------------------
+# The database password ONLY — never a URI, never a URL-embedded password.
+# Leave empty in this file. In the real untracked .env, either set it here or
+# omit it and use the Keychain entry read by run_dev_backup.sh
+# (BOS_BACKUP_KEYCHAIN_SERVICE, default service name: bos-production-backup).
+MUMBAI_DB_PASSWORD=
+
+# --- Backup gates (values are supplied at run time, never stored here) --------
+# Exact target confirmation required by the backup scripts.
+BOS_TARGET_REF_CONFIRM=obkfgxjzlscungkhbyvq
+
+# Explicit backup-only authorisation. Set only for the approved run.
+BOS_BACKUP_AUTHORIZED=
+
+# Destination. Must stay outside the repository and stay mode 700.
+BOS_BACKUP_ROOT=~/BookOurSpace_Backups/react
+
+# GPG recovery identity is managed by the canonical guarded profile at
+# supabase/backup/react-target.conf. Do not define recipient/keyring overrides
+# in this template: an empty override masks that verified profile, while a
+# copied fingerprint can silently diverge after an approved key rotation.
+# Keep recipient and keyring variables unset here. Never store private keys or
+# passphrases in this file; use the configured owner keyring + macOS Keychain.
+# BOS_BACKUP_GPG_RECIPIENT=
+# BOS_BACKUP_GNUPGHOME=
+# BOS_BACKUP_GPG_PASSPHRASE_SERVICE=
+
+# Keychain service that stores the read-only backup credential.
+BOS_BACKUP_KEYCHAIN_SERVICE=bos-production-backup

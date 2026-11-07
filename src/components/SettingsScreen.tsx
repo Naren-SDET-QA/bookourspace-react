@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import { 
   ArrowLeft, 
   HelpCircle, 
@@ -75,8 +76,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         {/* User Card matching image_f62ae511.png */}
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center gap-4">
           <div className="relative">
-            <img
-              src={userProfile.avatar || '/public/assets/aistudio/image_13d09e7d.png'}
+            <SafeImage category="general"
+              src={userProfile.avatar || '/assets/optimized/profile-avatar-256.webp'}
               alt={userProfile.name}
               className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover ring-2 ring-purple-100 bg-purple-900"
               onError={(e) => {

@@ -89,11 +89,11 @@ export function resolveModuleAccess(
     requiresOwnerApproval: isTrue(row.requires_owner_approval),
   };
 
-  // Movies are discovery-only until a human records approval. This cannot be
-  // bypassed by a client flag, and the DB trigger enforces the same rule.
-  if (key === 'movies' && (row.booking_approved_at ?? null) === null) {
+  // Movies V1 is location-based discovery and showtimes only. A database flag
+  // or approval timestamp cannot enable ticket sales in this product version.
+  if (key === 'movies') {
     access.onlineBooking = false;
-    if (isTrue(row.allow_online_booking)) access.reason = 'MOVIE_BOOKING_NOT_APPROVED';
+    access.reason = 'MOVIES_V1_DISPLAY_ONLY';
   }
 
   if (!access.onlineBooking && !access.reason) access.reason = 'ONLINE_BOOKING_DISABLED';

@@ -26,6 +26,13 @@ import type { ServiceCard } from '../lib/sectionExperiences';
 import { canContactOwner } from '../lib/servicesStayRules';
 import { useOwnerContact } from '../lib/useOwnerContact';
 import { FilterChip, Pagination, SafeImage, SkeletonGrid, StatePanel } from './sectionChrome';
+import { HomeTriangleExperience } from './HomeTriangleExperience';
+import { NoddyyExperience } from './NoddyyExperience';
+import { ServiceBookingPanel } from './ServiceBookingPanel';
+import { ServiceOperationsWorkspace } from './ServiceOperationsWorkspace';
+import { ServiceCustomerBookings } from './ServiceCustomerBookings';
+import { useMarketplace } from '../context/MarketplaceContext';
+import { getServicesStyle, styleFromHash } from '../lib/sectionStyleSettings';
 
 interface HomeServicesSectionProps {
   listings: MarketplaceListing[];
@@ -35,6 +42,8 @@ interface HomeServicesSectionProps {
   moduleLabel?: string;
   moduleHeadline?: string;
   onClose: () => void;
+  /** Render in the page flow under the common header instead of as a full-screen dialog. */
+  inline?: boolean;
 }
 
 const PRICE_BANDS: Array<{ label: string; value: number }> = [
@@ -43,7 +52,7 @@ const PRICE_BANDS: Array<{ label: string; value: number }> = [
   { label: 'Under ₹5,000', value: 5000 },
 ];
 
-export function HomeServicesSection({ listings, isLoading = false, initialCategoryId, moduleLabel, moduleHeadline, onClose }: HomeServicesSectionProps) {
+export function HomeServicesSection({ listings, isLoading = false, initialCategoryId, moduleLabel, moduleHeadline, onClose, inline = false }: HomeServicesSectionProps) {
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState(initialCategoryId && initialCategoryId !== 'all' ? initialCategoryId : 'all');
@@ -53,6 +62,30 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<ServiceCard | null>(null);
+  const [bookingTarget, setBookingTarget] = useState<ServiceCard | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [customerBookingsOpen, setCustomerBookingsOpen] = useState(false);
+  const { authUser, supabaseProfile } = useMarketplace();
+  const viewerRole = ((supabaseProfile?.role || authUser?.role || 'customer') as 'customer' | 'provider' | 'admin');
+  const canManageJobs = viewerRole === 'provider' || viewerRole === 'admin';
+  const [experienceTab, setExperienceTab] = useState<'old' | 'triangle' | 'noddyy'>(() => {
+    const routeStyle = styleFromHash('services');
+    if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1') return 'old';
+    if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') return 'triangle';
+    if (routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') return 'noddyy';
+    return getServicesStyle();
+  });
+
+  useEffect(() => {
+    const onHash = () => {
+      const routeStyle = styleFromHash('services');
+      if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1') setExperienceTab('old');
+      else if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') setExperienceTab('triangle');
+      else if (routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') setExperienceTab('noddyy');
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const owner = useOwnerContact('services');
 
   useEffect(() => {
@@ -65,15 +98,18 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
   }, [query, categoryId, verifiedOnly, quoteOnly, maxPrice]);
 
   useEffect(() => {
+    if (experienceTab === 'triangle' || experienceTab === 'noddyy') return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (selected) setSelected(null);
       else if (filtersOpen) setFiltersOpen(false);
+      else if (customerBookingsOpen) setCustomerBookingsOpen(false);
+      else if (workspaceOpen) setWorkspaceOpen(false);
       else onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, selected, filtersOpen]);
+  }, [onClose, selected, filtersOpen, customerBookingsOpen, workspaceOpen, experienceTab]);
 
   const cards = useMemo(
     () => listings.filter(isServiceListing).filter((listing) => listing.status === 'active').map(parseServiceListing),
@@ -112,24 +148,98 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       ? 'Provider contact is disabled for this service right now.'
       : owner.message;
 
+  const switchTo = (tab: 'old' | 'triangle' | 'noddyy') => {
+    setExperienceTab(tab);
+    window.location.hash = `services/${tab}`;
+  };
+
   return (
-    <div className="fixed inset-0 z-[71] flex flex-col overflow-y-auto bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="services-section-title">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
+    <div
+      className={
+        inline
+          ? 'w-full bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100'
+          : 'fixed inset-0 z-[71] flex flex-col overflow-y-auto bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100'
+      }
+      role={inline ? undefined : 'dialog'}
+      aria-modal={inline ? undefined : true}
+      aria-labelledby="services-section-title"
+    >
+      {/* Persistent experience switcher — always visible so the Noddyy
+          Helper-On-Demand clone is reachable from every services view. */}
+      <div className="flex shrink-0 items-center justify-center border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
+        <div className="inline-flex items-center rounded-full border border-[#dddddd] bg-white p-1 shadow-sm">
+          {([
+            ['old', 'Services 1'],
+            ['triangle', 'Services 2'],
+            ['noddyy', 'Noddyy'],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => switchTo(value)}
+              className={`inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold transition ${
+                experienceTab === value
+                  ? 'bg-[#222222] text-white'
+                  : 'text-[#717171] hover:bg-[#f7f7f7]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {experienceTab === 'triangle' ? (
+        <HomeTriangleExperience
+          inline={inline}
+          onClose={onClose}
+          onSwitchToOld={() => switchTo('old')}
+        />
+      ) : experienceTab === 'noddyy' ? (
+        <NoddyyExperience
+          inline={inline}
+          onClose={onClose}
+          onSwitchToOld={() => switchTo('old')}
+        />
+      ) : (
+        <>
+      <header
+        className={
+          inline
+            ? 'border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950'
+            : 'sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95'
+        }
+      >
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:border-slate-700 dark:hover:bg-slate-800"
-            aria-label="Back to marketplace"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:border-slate-700 dark:hover:bg-slate-800"
+            aria-label="Back to all sections"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           </button>
-          <span className="text-lg font-black tracking-tight">
-            BookOurSpace <span className="text-orange-600 dark:text-orange-400">Services</span>
+          <span className="text-base font-black tracking-tight">
+            {inline ? (
+              <span className="text-orange-600 dark:text-orange-400">Services</span>
+            ) : (
+              <>
+                BookOurSpace <span className="text-orange-600 dark:text-orange-400">Services</span>
+              </>
+            )}
           </span>
           <span className="ml-auto hidden rounded-full bg-orange-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-orange-800 sm:block dark:bg-orange-950 dark:text-orange-200">
             {moduleLabel || 'Home & local help'}
           </span>
+          {canManageJobs && (
+            <button
+              type="button"
+              onClick={() => setWorkspaceOpen(true)}
+              className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-full border border-violet-300 px-3 text-[11px] font-bold text-violet-800 transition hover:bg-violet-50 sm:ml-0 dark:border-violet-800 dark:text-violet-200 dark:hover:bg-violet-950"
+            >
+              {viewerRole === 'admin' ? 'Service oversight' : 'My service jobs'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -287,7 +397,7 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
                     aria-label={`View details for ${card.title}`}
                   >
                     <div className="relative">
-                      <SafeImage src={card.photo} alt={card.title} className="aspect-[4/3] rounded-2xl" />
+                      <SafeImage category="services" src={card.photo} alt={card.title} className="aspect-[4/3] rounded-2xl" />
                       <span className="absolute left-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-bold text-orange-800 shadow-sm">
                         {card.categoryEmoji} {card.categoryName}
                       </span>
@@ -354,11 +464,12 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
 
           <div className="mx-auto max-w-4xl px-4 pb-20 pt-6">
             <div className="grid gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <SafeImage src={selected.photos[0] ?? null} alt={selected.title} className="aspect-[16/10] rounded-2xl" />
+              <SafeImage category="services" src={selected.photos[0] ?? null} alt={selected.title} className="aspect-[16/10] rounded-2xl" />
               <div className="grid gap-2 sm:grid-rows-2">
                 {[1, 2].map((index) => (
                   <SafeImage
                     key={index}
+                    category="services"
                     src={selected.photos[index] ?? null}
                     alt={selected.photos[index] ? `${selected.title} photo ${index + 1}` : 'No additional photo'}
                     className="aspect-[16/10] rounded-2xl sm:aspect-auto"
@@ -444,13 +555,59 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
                   {owner.state === 'loading' ? 'Checking provider contact permissions…' : contactNote}
                 </p>
               )}
-              <p className="mt-4 rounded-2xl border border-slate-200 p-3 text-xs leading-5 text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                Booking and payment are disabled for home services. Agree timing, scope and price with the provider; BookOurSpace
-                does not take payment here.
+              {viewerRole === 'customer' ? (
+                <button
+                  type="button"
+                  onClick={() => setBookingTarget(selected)}
+                  className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-violet-700 px-5 text-sm font-extrabold text-white shadow-lg shadow-violet-900/20 transition hover:bg-violet-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+                >
+                  Book this service
+                </button>
+              ) : (
+                <p className="mt-4 rounded-2xl border border-slate-200 p-3 text-xs leading-5 text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  {viewerRole === 'provider'
+                    ? 'This is a provider listing. Open My service jobs to manage assigned bookings; customer booking is not offered on your own listing.'
+                    : 'Administrators manage service bookings and payment verification in Service oversight.'}
+                </p>
+              )}
+              <p className="mt-3 rounded-2xl border border-slate-200 p-3 text-xs leading-5 text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                Bookings are requested first and must be accepted by the provider. Cash or UPI paid after the service is recorded
+                as a claim and only counts as settled after administrator verification.
               </p>
             </section>
           </div>
         </div>
+      )}
+
+      {bookingTarget && (
+        <ServiceBookingPanel
+          listing={{ id: bookingTarget.id, title: bookingTarget.title, providerName: bookingTarget.providerName }}
+          onClose={() => setBookingTarget(null)}
+        />
+      )}
+
+      {workspaceOpen && (
+        <ServiceOperationsWorkspace
+          role={viewerRole === 'admin' ? 'admin' : 'provider'}
+          onClose={() => setWorkspaceOpen(false)}
+        />
+      )}
+
+      {viewerRole === 'customer' && !customerBookingsOpen && (
+        <button
+          type="button"
+          onClick={() => setCustomerBookingsOpen(true)}
+          className="fixed bottom-4 right-4 z-[70] inline-flex min-h-12 items-center gap-2 rounded-full bg-violet-700 px-5 text-sm font-bold text-white shadow-lg shadow-violet-900/30 hover:bg-violet-800"
+          style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          My service bookings
+        </button>
+      )}
+
+      {customerBookingsOpen && (
+        <ServiceCustomerBookings onClose={() => setCustomerBookingsOpen(false)} />
+      )}
+        </>
       )}
     </div>
   );

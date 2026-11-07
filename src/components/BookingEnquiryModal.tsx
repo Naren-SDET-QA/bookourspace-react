@@ -1,3 +1,4 @@
+import { RazorpayPayNowButton } from './RazorpayPayNowButton';
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, 
@@ -38,11 +39,15 @@ import {
 import { UniversalBarcode, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
 import { generateBookingGSTReceiptPDF } from '../utils/gstInvoiceGenerator';
 import { triggerGlobalGlobeLoader } from './BOSBrandLogo';
+import { useOwnerContact } from '../lib/useOwnerContact';
+import { buildProviderContactMessage, canContactOwner } from '../lib/servicesStayRules';
+import type { ServicesModuleKey } from '../lib/servicesStayRules';
 import {
   createAuthoritativeBookingAtomic,
   createServerPaymentIntent,
   verifyServerUpiPayment,
   getOrCreateClientSessionId,
+  PAYMENT_VERIFICATION_AVAILABLE,
 } from '../lib/supabaseClient';
 
 interface BookingEnquiryModalProps {
@@ -62,16 +67,24 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   currentLang = 'te',
   initialDateRange,
 }) => {
-  const { bookings, createBooking, sendEnquiry, recordPayment } = useMarketplace();
+  const { bookings, createBooking, sendEnquiry, recordPayment, authUser } = useMarketplace();
+  const contactModuleKey: ServicesModuleKey = listing?.customFieldValues?.sectionType === 'hotel_stay' || listing?.categoryId.startsWith('hotel-')
+    ? 'hotels'
+    : listing?.customFieldValues?.sectionType === 'venues' || listing?.categoryId.startsWith('venue-') || listing?.entityType === 'event'
+      ? 'function_hall'
+      : listing?.customFieldValues?.sectionType === 'pg_hostels' || listing?.categoryId.startsWith('pg-')
+        ? 'pg'
+        : listing?.customFieldValues?.sectionType === 'classes'
+          ? 'classes'
+          : listing?.customFieldValues?.sectionType === 'movies' || listing?.categoryId.startsWith('movie-')
+            ? 'movies'
+            : 'services';
+  const ownerContact = useOwnerContact(contactModuleKey);
 
   // Basic Form State - user friendly defaults
-  const [customerName, setCustomerName] = useState(currentLang === 'te' ? 'రమేష్ కుమార్' : 'Ramesh Kumar');
-  const [customerPhone, setCustomerPhone] = useState('9849012345');
-  const [customerAddress, setCustomerAddress] = useState(
-    listing?.location?.area 
-      ? (currentLang === 'te' ? `${listing.location.area}, హైదరాబాద్` : `${listing.location.area}, Hyderabad`) 
-      : (currentLang === 'te' ? 'మాదాపూర్, హైదరాబాద్' : 'Madhapur, Hyderabad')
-  );
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState(listing?.location?.area || '');
   
   // Quick Slot Selection - super easy for everyone
   const [selectedSlotType, setSelectedSlotType] = useState<'urgent' | 'today_morning' | 'today_afternoon' | 'today_evening' | 'tomorrow'>('urgent');
@@ -84,10 +97,27 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   const [isVerifyingQr, setIsVerifyingQr] = useState(false);
   const [qrVerified, setQrVerified] = useState(false);
   const [qrTxId, setQrTxId] = useState('');
+  const [upiUtrInput, setUpiUtrInput] = useState('');
   const [paymentIntentId, setPaymentIntentId] = useState('');
   const [paymentVerificationToken, setPaymentVerificationToken] = useState('');
   const [signedQrPassToken, setSignedQrPassToken] = useState('');
+  // Server-priced Razorpay checkout for this booking. The id comes back from
+  // /api/bookings/atomic, which binds ownership to the signed-in customer.
+  const [createdBookingId, setCreatedBookingId] = useState('');
+  const [razorpaySettled, setRazorpaySettled] = useState(false);
   const [bookingConflictError, setBookingConflictError] = useState<string | null>(null);
+  const [contactNotice, setContactNotice] = useState('');
+
+  useEffect(() => {
+    if (!authUser) return;
+    setCustomerName((current) => current || authUser.name || '');
+    setCustomerPhone((current) => current || String(authUser.phone || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, ''));
+  }, [authUser?.id]);
+
+  useEffect(() => {
+    if (!listing || !ownerContact.flagsSettled || ownerContact.activeListingId === listing.id) return;
+    void ownerContact.open(listing.id);
+  }, [listing?.id, ownerContact.flagsSettled, ownerContact.activeListingId]);
 
   // Voice input support for easy speech filling
   const [activeVoiceField, setActiveVoiceField] = useState<'name' | 'address' | null>(null);
@@ -132,7 +162,12 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
         (listing.categoryId === 'hotel-hourly' ? 'hourly' : 'daily');
       setHotelStayMode(nextMode);
       setSubmitted(false);
+      setPaymentMode('pay_later');
       setQrVerified(false);
+      setPaymentIntentId('');
+      setPaymentVerificationToken('');
+      setQrTxId('');
+      setUpiUtrInput('');
       setActiveRangeEdge('checkIn');
 
       const freshToday = toLocalIso(new Date());
@@ -393,6 +428,10 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   const bookingPassBarcodeId = generateBosBarcodeId('TKT', `${listing.id}-${customerPhone.slice(-4)}`, listing.categoryId);
 
   const handleVerifyQrPayment = async () => {
+    if (!PAYMENT_VERIFICATION_AVAILABLE) {
+      setBookingConflictError('Online payment verification is unavailable. Do not send funds; choose Pay After Service if offered.');
+      return;
+    }
     setIsVerifyingQr(true);
     setBookingConflictError(null);
     try {
@@ -402,28 +441,38 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
           amount: totalBookingAmount,
           merchantVpa: providerVpa,
           planOrListing: listing.title,
+          purpose: 'booking',
+          listingId: listing.id,
         });
         if (intentRes.ok && intentRes.intentId) {
           activeIntentId = intentRes.intentId;
           setPaymentIntentId(activeIntentId);
+        } else {
+          setBookingConflictError(intentRes.message || 'Online payment verification is unavailable. No payment was recorded.');
+          return;
         }
       }
 
-      const generatedUtr = `${Date.now()}${Math.floor(10 + Math.random() * 89)}`.slice(-12);
+      const cleanUtr = upiUtrInput.trim().replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
+        setBookingConflictError('Enter the actual bank UTR after completing the UPI payment.');
+        return;
+      }
+      if (!activeIntentId) {
+        setBookingConflictError('Unable to start payment verification. No booking or payment was recorded.');
+        return;
+      }
       const verifyRes = await verifyServerUpiPayment({
-        intentId: activeIntentId || `INT-${Date.now()}`,
-        utrNumber: generatedUtr,
-        amount: totalBookingAmount,
-        merchantVpa: providerVpa,
-        simulateBankWebhookSettlement: true,
+        intentId: activeIntentId,
+        utrNumber: cleanUtr,
       });
 
       if (verifyRes.ok && verifyRes.verified) {
-        setQrTxId(`UTR-${generatedUtr}`);
+        setQrTxId(`UTR-${cleanUtr}`);
         setPaymentVerificationToken(verifyRes.paymentVerificationToken || '');
         setQrVerified(true);
       } else {
-        setQrTxId(`PENDING-UTR-${generatedUtr}`);
+        setQrTxId(`PENDING-UTR-${cleanUtr}`);
         setQrVerified(false);
         setBookingConflictError(
           verifyRes.message ||
@@ -533,9 +582,40 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBookingConflictError(null);
-    triggerGlobalGlobeLoader('Confirming Booking & Generating GST Invoice...', 650);
 
-    const finalTxId = qrVerified ? qrTxId : (paymentMode === 'pay_qr' ? `PENDING-RECON-${Date.now().toString().slice(-6)}` : undefined);
+    if (!isMovie) {
+      const normalizedPhone = customerPhone.replace(/\D/g, '');
+      if (!customerName.trim() || normalizedPhone.length < 10 || normalizedPhone.length > 15) {
+        setBookingConflictError('Enter your name and a valid phone number before contacting the provider.');
+        return;
+      }
+      if (!listing) return;
+      const dateRange = isRangeBooking
+        ? `${selectedBookingDate} to ${selectedCheckoutDate}`
+        : undefined;
+      const message = buildProviderContactMessage({
+        listingTitle: displayTitle,
+        customerName,
+        customerPhone,
+        dates: dateRange,
+        notes,
+        kind: isRangeBooking ? 'availability' : 'listing',
+      });
+      const opened = await ownerContact.contact('whatsapp', message);
+      if (!opened) {
+        setBookingConflictError(ownerContact.message || 'Verified WhatsApp contact is unavailable. No request or booking was created.');
+        return;
+      }
+      setContactNotice('WhatsApp opened with a message draft. Review it and tap Send. No booking or payment was created.');
+      return;
+    }
+
+    if (paymentMode === 'pay_qr' && (!PAYMENT_VERIFICATION_AVAILABLE || !qrVerified)) {
+      setBookingConflictError('Online payment verification is unavailable. No QR payment booking can be confirmed; choose Pay After Service if offered.');
+      return;
+    }
+    triggerGlobalGlobeLoader('Confirming Booking & Generating GST Invoice...', 650);
+    const finalTxId = qrVerified ? qrTxId : undefined;
     const effectiveCheckOut = isRangeBooking ? selectedCheckoutDate : selectedBookingDate;
     const checkInDateTimeVal = isHotel ? `${selectedBookingDate}T${hotelCheckInTime}` : undefined;
     const checkOutDateTimeVal = isHotel ? `${effectiveCheckOut}T${hotelCheckOutTime}` : undefined;
@@ -574,9 +654,12 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
       exclusiveSlot: true,
     });
 
-    if (!atomicRes.ok && atomicRes.status === 409) {
+    if (!atomicRes.ok) {
       setBookingConflictError(
-        atomicRes.message || 'This date and time slot was just reserved by another user. Please pick another slot.'
+        atomicRes.message ||
+          (atomicRes.status === 409
+            ? 'This date and time slot was just reserved by another user. Please pick another slot.'
+            : 'The server could not confirm this booking. No confirmation was issued.')
       );
       return;
     }
@@ -584,6 +667,8 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
     const issuedPassToken = atomicRes.booking?.qrPassToken || bookingPassBarcodeId;
     const resolvedPayStatus = atomicRes.booking?.paymentStatus || (qrVerified ? 'verified' : 'pending_verification');
     setSignedQrPassToken(issuedPassToken);
+    setCreatedBookingId(String(atomicRes.booking?.id || ''));
+    setRazorpaySettled(false);
 
     // Idempotency / concurrency guard on local UI cache
     const isDuplicateConcurrentBooking = bookings.some(
@@ -634,11 +719,13 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
       customerPhone
     );
 
-    if (paymentMode === 'pay_qr' && !qrTxId) {
-      setQrTxId(finalTxId || `PENDING-RECON-${Date.now().toString().slice(-6)}`);
-    }
-
     setSubmitted(true);
+  };
+
+  const callProvider = async () => {
+    setBookingConflictError(null);
+    const opened = await ownerContact.contact('call');
+    if (!opened) setBookingConflictError(ownerContact.message || 'Verified phone contact is unavailable. No request or booking was created.');
   };
 
   return (
@@ -650,7 +737,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
           <div className="flex-1 pr-2">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-[10px] sm:text-xs font-black uppercase tracking-wider text-amber-300">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>{displaySubcategory} · {t.bookNow}</span>
+              <span>{displaySubcategory} · {isRangeBooking ? 'Request availability' : isMovie ? t.bookNow : 'Contact provider'}</span>
             </div>
             <h3 className="font-black text-base sm:text-lg mt-1 line-clamp-1 text-white">
               {displayTitle}
@@ -741,7 +828,41 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                 </div>
               )}
 
-              {/* Direct call, GST PDF Invoice & Review actions */}
+
+              {/* Optional online payment for THIS booking. The server prices the order from the
+                  booking row and settles it only from Razorpay's signed confirmation. */}
+              {createdBookingId && !isMovie && totalBookingAmount > 0 && !razorpaySettled && (
+                <div className="mx-auto w-full max-w-xs space-y-1.5 rounded-2xl border border-violet-200 bg-violet-50/70 p-3 text-left dark:border-violet-900 dark:bg-violet-950/30">
+                  <p className="text-[11px] font-black text-violet-900 dark:text-violet-200">Pay online now with Razorpay</p>
+                  <p className="text-[10.5px] leading-4 text-violet-800/80 dark:text-violet-300/90">
+                    Optional. This order is bound to booking <span className="font-mono">{createdBookingId}</span> and priced by the
+                    server. Nothing is marked paid here; the server settles it only after Razorpay&apos;s signed confirmation.
+                  </p>
+                  <RazorpayPayNowButton
+                    bookingId={createdBookingId}
+                    amount={totalBookingAmount}
+                    listingId={listing.id}
+                    listingTitle={displayTitle}
+                    vertical="hotel_stay"
+                    dateIso={selectedBookingDate}
+                    customerName={customerName}
+                    customerPhone={customerPhone}
+                    onPaymentSuccess={() => setRazorpaySettled(true)}
+                    buttonText={`Pay ₹${totalBookingAmount.toLocaleString('en-IN')} now`}
+                  />
+                  <p className="text-[10px] leading-4 text-violet-700/70 dark:text-violet-300/70">
+                    If online payment is unavailable, this booking still stands on its recorded payment mode.
+                  </p>
+                </div>
+              )}
+
+              {razorpaySettled && (
+                <p role="status" className="mx-auto w-full max-w-xs rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-left text-[11px] font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  Razorpay payment verified by the server for booking {createdBookingId}.
+                </p>
+              )}
+
+{/* Direct call, GST PDF Invoice & Review actions */}
               <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
                 <button
                   type="button"
@@ -816,7 +937,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               
-              {/* DIRECT 1-TAP INSTANT CALL BANNER (NO TYPING NEEDED FOR UNEDUCATED USERS) */}
+              {/* Owner contact is revealed only by the authorized contact RPC. */}
               <div className="p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/50 dark:to-teal-950/50 border border-emerald-300 dark:border-emerald-800 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
@@ -824,22 +945,23 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   </div>
                   <div className="min-w-0">
                     <span className="text-[10px] uppercase tracking-wider font-extrabold text-emerald-800 dark:text-emerald-300 block">
-                      {currentLang === 'te' ? 'రాయడం కష్టంగా ఉందా? నేరుగా కాల్ చేయండి' : 'Need help? Direct Phone Call'}
+                      {displayProviderName}
                     </span>
-                    <span className="font-black text-sm text-emerald-950 dark:text-white truncate block">
-                      {displayProviderName} ({listing.providerPhone})
+                    <span className="font-semibold text-xs text-emerald-950 dark:text-white truncate block">
+                      {ownerContact.state === 'loading' ? 'Checking verified contact details…' : ownerContact.state === 'error' ? 'Verified contact could not be loaded.' : ownerContact.state === 'unavailable' ? 'Verified contact is unavailable.' : 'Contact details are verified and owner-authorized.'}
                     </span>
                   </div>
                 </div>
 
-                <a
-                  href={`tel:${listing.providerPhone}`}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs flex items-center gap-1.5 shadow-xs shrink-0 transition-transform"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>{t.callNow}</span>
-                </a>
+                {ownerContact.details?.phone && canContactOwner(ownerContact.access, ownerContact.details, ownerContact.isSignedIn, 'call') && (
+                  <button type="button" disabled={ownerContact.busy} onClick={() => void callProvider()} className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs flex items-center gap-1.5 shadow-xs shrink-0 transition-transform disabled:opacity-50">
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>Call verified provider</span>
+                  </button>
+                )}
               </div>
+              {!ownerContact.isSignedIn && ownerContact.state === 'ready' && <p className="text-xs text-slate-500">Sign in to contact this provider.</p>}
+              {ownerContact.details?.disclaimer && <p className="text-xs text-slate-500">{ownerContact.details.disclaimer}</p>}
 
               {/* 4-WAY HOTEL STAY DURATION SWITCHER (గంటల వారీ | రోజు వారీ | వారం | నెల) */}
               {isHotel && (
@@ -881,31 +1003,31 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                 </div>
               )}
 
-              {/* Price Banner with Quick Pay via QR shortcut */}
+              {/* Listing estimate; the provider confirms the final price directly. */}
               <div className="p-3 bg-purple-50 dark:bg-purple-950/40 rounded-2xl flex flex-wrap items-center justify-between gap-2 border border-purple-200 dark:border-purple-800">
                 <div>
                   <span className="text-[10px] text-purple-700 dark:text-purple-300 font-extrabold uppercase tracking-wider block">
-                    {t.pricing} ({currentLang === 'te' ? 'పన్నులతో కలిపి' : 'Inclusive of taxes'})
+                    {!isMovie ? 'Listed price · confirm final terms with provider' : `${t.pricing} (${currentLang === 'te' ? 'పన్నులతో కలిపి' : 'Inclusive of taxes'})`}
                   </span>
                   <div className="font-black text-base text-purple-950 dark:text-white tabular-nums flex items-baseline gap-1">
-                    <span>{listing.currency}{effectivePrice.toLocaleString('en-IN')}</span>
+                    <span>{listing.currency}{(isMovie ? effectivePrice : listing.price).toLocaleString('en-IN')}</span>
                     <span className="text-xs font-normal text-slate-500"> {displayPriceUnit}</span>
                   </div>
                 </div>
 
-                {/* Quick Action: Pay via QR Pill */}
-                <div className="flex items-center gap-2">
+                {isMovie && <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={!PAYMENT_VERIFICATION_AVAILABLE}
                     onClick={() => setPaymentMode(paymentMode === 'pay_qr' ? 'pay_later' : 'pay_qr')}
-                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border ${
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition border ${!PAYMENT_VERIFICATION_AVAILABLE ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${
                       paymentMode === 'pay_qr'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                         : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50'
                     }`}
                   >
                     <QrCode className="w-3.5 h-3.5" />
-                    <span>{currentLang === 'te' ? 'క్యూఆర్ ద్వారా చెల్లించండి' : 'Pay via QR'}</span>
+                    <span>{PAYMENT_VERIFICATION_AVAILABLE ? (currentLang === 'te' ? 'క్యూఆర్ ద్వారా చెల్లించండి' : 'Pay via QR') : (currentLang === 'te' ? 'ఆన్‌లైన్ చెల్లింపు అందుబాటులో లేదు' : 'Online payment unavailable')}</span>
                   </button>
 
                   <div className="text-right hidden sm:block">
@@ -916,7 +1038,12 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                       📍 {distKm} km {t.away}
                     </span>
                   </div>
-                </div>
+                </div>}
+                {isMovie && !PAYMENT_VERIFICATION_AVAILABLE && (
+                  <p role="status" className="text-xs text-amber-800 dark:text-amber-200">
+                    Payment verification is unavailable. Do not send UPI funds. Pay After Service remains available for eligible listings.
+                  </p>
+                )}
               </div>
 
               {/* STEP 1: INTERACTIVE BOOKING CALENDAR + TIME SLOT SELECTION */}
@@ -1339,7 +1466,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                     maxLength={10}
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, ''))}
-                    placeholder="9849012345"
+                    placeholder="Your phone number"
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl pl-17 pr-3 py-2.5 font-black text-sm tracking-wider text-slate-900 dark:text-white outline-hidden focus:border-purple-600 focus:ring-1 focus:ring-purple-600"
                   />
                 </div>
@@ -1398,6 +1525,8 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                 </div>
               </div>
 
+              {/* In-app payment remains limited to the existing movie flow. */}
+              {isMovie && <>
               {/* STEP 5: PAYMENT OPTION - PAY LATER VS DYNAMIC PAY VIA QR */}
               <div className="space-y-2 pt-1">
                 <label className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
@@ -1433,8 +1562,9 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   {/* Option 2: Pay via QR (Dynamic QR Code) */}
                   <button
                     type="button"
+                    disabled={!PAYMENT_VERIFICATION_AVAILABLE}
                     onClick={() => setPaymentMode('pay_qr')}
-                    className={`p-3 rounded-2xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                    className={`p-3 rounded-2xl border text-left transition flex items-start gap-2.5 ${!PAYMENT_VERIFICATION_AVAILABLE ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${
                       paymentMode === 'pay_qr'
                         ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-600 text-emerald-950 dark:text-white ring-2 ring-emerald-400/40 shadow-xs'
                         : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-300'
@@ -1445,8 +1575,8 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                     </div>
                     <div className="min-w-0">
                       <div className="font-black text-xs flex items-center gap-1">
-                        <span>{currentLang === 'te' ? 'క్యూఆర్ ద్వారా చెల్లించండి' : 'Pay via QR'}</span>
-                        <span className="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full uppercase">Instant</span>
+                        <span>{PAYMENT_VERIFICATION_AVAILABLE ? (currentLang === 'te' ? 'క్యూఆర్ ద్వారా చెల్లించండి' : 'Pay via QR') : (currentLang === 'te' ? 'ఆన్‌లైన్ చెల్లింపు అందుబాటులో లేదు' : 'Online payment unavailable')}</span>
+                        {PAYMENT_VERIFICATION_AVAILABLE && <span className="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full uppercase">Instant</span>}
                         {paymentMode === 'pay_qr' && <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ml-auto" />}
                       </div>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
@@ -1457,7 +1587,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                 </div>
 
                 {/* DYNAMIC PAY VIA QR PANEL (DISPLAYS WHEN PAY VIA QR IS SELECTED) */}
-                {paymentMode === 'pay_qr' && (
+                {PAYMENT_VERIFICATION_AVAILABLE && paymentMode === 'pay_qr' && (
                   <div className="mt-3 p-4 rounded-3xl bg-gradient-to-b from-emerald-50/90 via-white to-emerald-50/40 dark:from-emerald-950/50 dark:via-slate-900 dark:to-emerald-950/30 border-2 border-emerald-500/50 dark:border-emerald-500/40 space-y-3.5 shadow-md animate-in slide-in-from-top-2 duration-200">
                     
                     {/* QR Header */}
@@ -1528,6 +1658,14 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                         </div>
 
                         {/* Direct Open in UPI App Deep Link & Verify Button */}
+                        <input
+                          type="text"
+                          value={upiUtrInput}
+                          onChange={(event) => setUpiUtrInput(event.target.value.replace(/\s+/g, '').slice(0, 22))}
+                          placeholder="Enter actual bank UTR after payment"
+                          aria-label="UPI bank UTR"
+                          className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
+                        />
                         <div className="pt-1 flex items-center gap-2">
                           <a
                             href={upiUri}
@@ -1560,25 +1698,26 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                                 ? (currentLang === 'te' ? 'ధృవీకరించబడింది ✓' : 'Verified ✓')
                                 : isVerifyingQr 
                                 ? (currentLang === 'te' ? 'పరిశీలిస్తున్నాము...' : 'Verifying...') 
-                                : (currentLang === 'te' ? 'నేను చెల్లించాను' : 'Paid')}
+                                : (currentLang === 'te' ? 'UTR సమర్పించండి' : 'Submit UTR')}
                             </span>
                           </button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Escrow Guarantee Note */}
+                    {/* Payment verification status */}
                     <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-emerald-100 dark:border-emerald-900/60">
                       <span className="flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-400">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{currentLang === 'te' ? '100% సురక్షితమైన బుకింగ్ హామీ' : '100% Escrow Protected Booking'}</span>
+                        <span>{currentLang === 'te' ? 'ప్రొవైడర్ ధృవీకరణ తర్వాత చెల్లింపు ఖరారు అవుతుంది' : 'Payment confirmation requires provider verification'}</span>
                       </span>
-                      <span>{currentLang === 'te' ? 'QR చురుకుగా ఉంది' : 'QR Active'}</span>
+                      <span>{currentLang === 'te' ? 'ధృవీకరణ పెండింగ్‌లో ఉంది' : 'Verification pending'}</span>
                     </div>
 
                   </div>
                 )}
               </div>
+              </>}
 
               {/* Extra Instructions (Optional) */}
               <div className="space-y-1">
@@ -1615,7 +1754,9 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                     <ShieldCheck className="w-5 h-5 text-amber-300" />
                   )}
                   <span>
-                    {paymentMode === 'pay_qr'
+                    {!isMovie
+                      ? (isRangeBooking ? 'Open WhatsApp to request availability' : 'Open WhatsApp to contact provider')
+                      : paymentMode === 'pay_qr'
                       ? (currentLang === 'te'
                           ? `📱 క్యూఆర్ ద్వారా చెల్లించి బుక్ చేయండి (₹${totalBookingAmount.toLocaleString('en-IN')})`
                           : `📱 Confirm Booking with QR Payment (₹${totalBookingAmount.toLocaleString('en-IN')})`)
@@ -1624,8 +1765,18 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                           : `✅ Confirm Free Booking (Total: ₹${totalBookingAmount.toLocaleString('en-IN')})`)}
                   </span>
                 </button>
+                {!isMovie && <>
+                  <p role="status" className="text-xs text-center leading-5 text-slate-600 dark:text-slate-300">
+                    {isRangeBooking
+                      ? 'This is an availability request only. No room or venue is reserved. Pay the provider at the property/venue only after they confirm.'
+                      : 'This is a listing enquiry only. No booking or payment is created in BookOurSpace; arrange payment directly with the provider if you proceed.'}
+                  </p>
+                  {contactNotice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">{contactNotice}</p>}
+                </>}
                 <p className="text-[10px] text-center text-slate-400 mt-1.5 font-medium">
-                  {paymentMode === 'pay_qr'
+                  {!isMovie
+                    ? 'Review the prefilled message and tap Send in WhatsApp. The provider must confirm availability and terms.'
+                    : paymentMode === 'pay_qr'
                     ? (currentLang === 'te'
                         ? '🔒 తక్షణ యూపీఐ రక్షణ. నిపుణుడు నిర్ధారించబడతారు మరియు రసీదు జారీ చేయబడుతుంది.'
                         : '🔒 Instant UPI protection with automated digital receipt generation.')

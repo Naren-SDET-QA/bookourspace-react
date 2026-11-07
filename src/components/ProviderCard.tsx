@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import { 
   Star, 
   MapPin, 
@@ -63,7 +64,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
       {/* Top Section: Avatar, Name, Rating, Distance */}
       <div className="flex items-start gap-3.5">
         <div className="relative shrink-0">
-          <img
+          <SafeImage category="general"
             src={provider.avatar}
             alt={provider.name}
             referrerPolicy="no-referrer"

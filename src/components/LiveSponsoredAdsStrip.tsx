@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import SafeImage from './SafeImage';
 import { Sparkles, ExternalLink, Megaphone, ShieldCheck } from 'lucide-react';
 import {
   AdminAdCampaign,
@@ -98,7 +99,7 @@ export const LiveSponsoredAdsStrip: React.FC<LiveSponsoredAdsStripProps> = ({
               className="group bg-white dark:bg-slate-900 border border-indigo-200/80 dark:border-slate-800 hover:border-indigo-500 rounded-2xl p-3 sm:p-3.5 shadow-xs hover:shadow-md transition-all cursor-pointer flex items-center gap-3.5"
             >
               <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800">
-                <img
+                <SafeImage category="general"
                   src={ad.imageUrl}
                   alt={ad.headline}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

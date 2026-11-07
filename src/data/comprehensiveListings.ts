@@ -194,8 +194,9 @@ export function buildComprehensiveListings(): MarketplaceListing[] {
   const generated: MarketplaceListing[] = [];
   let globalIdCounter = 1000;
 
-  // 1. Generate Category-Specific Listings for all 10 Service Categories in `servicesCategories`
+  // Generate demo listings only for categories with illustrative provider data.
   servicesCategories.forEach((cat, cIdx) => {
+    if (cat.generateDemoListings === false) return;
     const provMeta = serviceProvidersByCat[cat.id] || serviceProvidersByCat['cat-4'];
     const photos = serviceCategoryPhotos[cat.id] || serviceCategoryPhotos['cat-4'];
 

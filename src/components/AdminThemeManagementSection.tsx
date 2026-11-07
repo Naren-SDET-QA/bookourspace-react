@@ -1,10 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
+import SafeImage from './SafeImage';
+import UniversalMediaManager from './UniversalMediaManager';
 import {
   Sparkles,
   Sun,
   Moon,
   Monitor,
-  Upload,
   Check,
   Eye,
   RotateCcw,
@@ -113,11 +114,11 @@ const ENTERPRISE_THEME_PRESETS: {
 const BUILTIN_LOGO_EMBLEMS = [
   {
     label: 'Official BOS Globe Map-Pin Emblem',
-    url: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+    url: '/assets/optimized/brand-emblem-512.webp',
   },
   {
     label: 'Classic Golden Pin Emblem',
-    url: '/assets/aistudio/image_c82d47dd.png',
+    url: '/assets/optimized/brand-emblem-512.webp',
   },
 ];
 
@@ -141,7 +142,6 @@ export const AdminThemeManagementSection: React.FC<
     'admin' | 'provider' | 'customer'
   >('admin');
 
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Check role authorization
   const currentRolePerm = rolePerms.find((r) => r.role === activeEditorRole);
@@ -161,29 +161,6 @@ export const AdminThemeManagementSection: React.FC<
     draftTheme.showGlobeAnimation !== savedTheme.showGlobeAnimation ||
     draftTheme.borderRadiusStyle !== savedTheme.borderRadiusStyle ||
     draftTheme.compactDensity !== savedTheme.compactDensity;
-
-  const handleUploadLogoFile = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = String(ev.target?.result || '');
-      if (!dataUrl) return;
-      const updated = {
-        ...draftTheme,
-        brandLogoEmblemUrl: dataUrl,
-      };
-      setDraftTheme(updated);
-      if (isLiveAppPreviewActive) {
-        applyThemeSettingsToDocument(updated);
-        window.dispatchEvent(
-          new CustomEvent('bos-theme-settings-updated', { detail: updated })
-        );
-      }
-      onNotify(`🖼️ Loaded custom brand logo "${file.name}" into Theme Preview!`);
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleToggleLiveDomPreview = () => {
     const nextPreview = !isLiveAppPreviewActive;
@@ -670,27 +647,14 @@ export const AdminThemeManagementSection: React.FC<
                   <span>4. Brand Logo Emblem, Tagline & 360° Globe Spin</span>
                 </label>
 
-                <input
-                  ref={logoFileInputRef}
-                  type="file"
-                  accept="image/*,.png,.jpg,.jpeg,.webp,.svg,.gif,.avif"
-                  onChange={(e) => handleUploadLogoFile(e.target.files)}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => logoFileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-xl bg-[#4338CA] text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>+ Upload Logo Image (All Formats)</span>
-                </button>
               </div>
+
+              <UniversalMediaManager moduleKey="branding" parentType="brand_logo" maxFiles={1} title="Preview a brand mark" />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                    Logo Emblem URL / Data URI
+                    Logo Emblem HTTPS URL
                   </label>
                   <input
                     type="text"
@@ -701,7 +665,7 @@ export const AdminThemeManagementSection: React.FC<
                         brandLogoEmblemUrl: e.target.value,
                       })
                     }
-                    placeholder="/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png"
+                    placeholder="/assets/optimized/brand-emblem-512.webp"
                     className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 font-medium text-xs"
                   />
                 </div>
@@ -744,7 +708,7 @@ export const AdminThemeManagementSection: React.FC<
                           : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
                       }`}
                     >
-                      <img
+                      <SafeImage category="general"
                         src={emb.url}
                         alt=""
                         className="w-4 h-4 rounded-full object-contain"

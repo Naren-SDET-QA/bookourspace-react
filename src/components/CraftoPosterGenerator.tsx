@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import { 
   Sparkles, 
   Share2, 
@@ -176,8 +177,8 @@ export const CraftoPosterGenerator: React.FC<CraftoPosterGeneratorProps> = ({
         <div className="relative z-10 mt-6 pt-3 border-t border-white/20 flex flex-wrap items-center justify-between gap-3 bg-black/40 backdrop-blur-md p-3 rounded-2xl">
           <div className="flex items-center gap-3">
             <div className="relative">
-              <img
-                src={userAvatar || '/public/assets/aistudio/image_13d09e7d.png'}
+              <SafeImage category="general"
+                src={userAvatar || '/assets/optimized/profile-avatar-256.webp'}
                 alt={userName}
                 className="w-11 h-11 sm:w-12 sm:h-12 rounded-full object-cover ring-2 ring-amber-400 bg-purple-900 shadow-md"
                 onError={(e) => {

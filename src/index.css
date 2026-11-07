@@ -3,21 +3,171 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+.bos-entry-screen {
+  isolation: isolate;
+  background-color: #0B0E1A;
+  background-image:
+    radial-gradient(ellipse at 50% -12%, rgba(0, 201, 167, .1), transparent 46%),
+    radial-gradient(ellipse at 92% 88%, rgba(139, 92, 246, .14), transparent 44%),
+    linear-gradient(165deg, #0B0E1A 0%, #0B0F1E 52%, #090C17 100%);
+  padding: max(24px, env(safe-area-inset-top)) clamp(20px, 5vw, 28px) max(28px, env(safe-area-inset-bottom));
+}
+.bos-entry-screen::before { content: ''; position: absolute; inset: 0; z-index: -3; pointer-events: none; opacity: .2; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse at 50% 36%, #000 0%, transparent 72%); }
+.bos-entry-backdrop { position: absolute; inset: 0; z-index: -2; overflow: hidden; pointer-events: none; }
+.bos-entry-aurora { position: absolute; z-index: 0; width: min(70vw, 520px); aspect-ratio: 1; border-radius: 9999px; pointer-events: none; filter: blur(90px); }
+.bos-entry-aurora--teal { top: -30%; left: 50%; background: rgba(0, 201, 167, .14); transform: translateX(-50%); animation: bos-entry-breathe 7s ease-in-out infinite; }
+.bos-entry-aurora--violet { right: -32%; bottom: -36%; background: rgba(139, 92, 246, .14); animation: bos-entry-breathe 9s ease-in-out infinite reverse; }
+.bos-entry-aurora--orange { left: -30%; top: 38%; width: min(40vw, 280px); background: rgba(255, 107, 74, .08); filter: blur(80px); }
+.bos-entry-panel { position: relative; z-index: 1; display: flex; width: min(100%, 420px); flex-direction: column; align-items: center; text-align: center; }
+.bos-entry-logo-stage { position: relative; display: flex; width: 100%; justify-content: center; margin-bottom: clamp(20px, 4vh, 30px); }
+.bos-entry-logo-stage::before { content: ''; position: absolute; bottom: -14px; left: 50%; width: 78%; height: 28%; border-radius: 9999px; background: rgba(255, 107, 74, .22); filter: blur(34px); transform: translateX(-50%); }
+.bos-entry-logo-plate { position: relative; width: min(84vw, 360px); padding: clamp(12px, 3.6vw, 18px); border: 1px solid rgba(255,255,255,.65); border-radius: 24px; background: linear-gradient(145deg, #fff 0%, #f4f7ff 100%); box-shadow: 0 28px 80px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.55) inset; }
+.bos-entry-logo-plate .bos-official-logo { width: 100%; }
+.bos-entry-loading { display: flex; flex-direction: column; align-items: center; }
+.bos-entry-content { width: 100%; animation: bos-entry-reveal .45s cubic-bezier(.22,1,.36,1) both; }
+.bos-entry-subtitle { margin: 0; color: #E2E8F0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.bos-entry-helper { max-width: 340px; margin: 8px auto 0; color: #94A3B8; font-size: 12.5px; line-height: 1.6; }
+.bos-entry-actions { display: grid; width: 100%; gap: 12px; margin-top: 30px; }
+.bos-entry-google, .bos-entry-guest { display: flex; width: 100%; min-height: 56px; align-items: center; justify-content: center; gap: 12px; border-radius: 16px; padding: 0 18px; font-size: 16px; font-weight: 700; line-height: 1.2; touch-action: manipulation; transition: background-color .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.bos-entry-google { border: 1px solid rgba(255,255,255,.1); background: #1A73E8; color: #fff; box-shadow: 0 12px 28px rgba(26,115,232,.28), 0 0 0 1px rgba(255,255,255,.08) inset; }
+.bos-entry-google:hover { background: #1765CC; }
+.bos-entry-google-icon { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 9999px; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.18); }
+.bos-entry-guest { border: 1px solid rgba(0,201,167,.55); background: rgba(0,201,167,.06); color: #CCFBF1; }
+.bos-entry-guest:hover { border-color: rgba(94,234,212,.9); background: rgba(0,201,167,.13); }
+.bos-entry-google:active, .bos-entry-guest:active { transform: scale(.99); }
+.bos-entry-google:focus-visible, .bos-entry-guest:focus-visible { outline: 3px solid #5EEAD4; outline-offset: 3px; }
+.bos-entry-divider { display: flex; align-items: center; gap: 14px; color: #64748B; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.bos-entry-divider::before, .bos-entry-divider::after { content: ''; height: 1px; flex: 1; background: rgba(148,163,184,.18); }
+.bos-entry-trust { display: flex; max-width: 340px; align-items: flex-start; justify-content: center; gap: 8px; margin: 20px auto 0; color: #7C8AA5; font-size: 11.5px; line-height: 1.55; text-align: left; }
+.bos-entry-caption { margin-top: 10px; color: #CBD5E1; font-size: 14px; }
+.bos-entry-progress { overflow: hidden; width: 132px; height: 3px; margin-top: 22px; border-radius: 9999px; background: rgba(255,255,255,.12); }
+.bos-entry-progress span { display: block; width: 42%; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#00C9A7,#FF6B4A,#8B5CF6); animation: bos-entry-progress 1.15s ease-in-out infinite alternate; }
+.bos-entry-demo { margin-top: 20px; border: 1px dashed rgba(148,163,184,.28); border-radius: 14px; padding: 12px; background: rgba(255,255,255,.035); }
+.bos-entry-demo-title { color: #CBD5E1; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.bos-entry-demo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.bos-entry-demo-button { min-height: 40px; border: 1px solid rgba(148,163,184,.32); border-radius: 9px; background: rgba(15,23,42,.55); color: #E2E8F0; font-size: 11px; font-weight: 700; }
+.bos-entry-demo-button:hover { background: rgba(30,41,59,.85); }
+.bos-entry-demo-note { margin-top: 7px; color: #7C8AA5; font-size: 10px; line-height: 1.45; }
+.bos-official-logo { position: relative; display: inline-block; max-width: 100%; aspect-ratio: 1560 / 320; vertical-align: middle; line-height: 0; }
+.bos-official-logo > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.bos-official-logo__pin-rotor { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; perspective: 800px; perspective-origin: 16.603% 54.531%; }
+.bos-official-logo__spin { transform-box: view-box; transform-origin: 16.603% 54.531%; transform-style: preserve-3d; animation: bos-logo-pin-spinner 2s linear infinite; }
+.bos-official-logo__face { transform-box: view-box; transform-origin: 16.603% 54.531%; backface-visibility: hidden; }
+.bos-official-logo__face--back { transform: rotateY(180deg); }
+.bos-location-symbol { display: inline-block; flex: 0 0 auto; aspect-ratio: 170 / 190; overflow: hidden; }
+.bos-location-symbol svg { display: block; width: 100%; height: 100%; overflow: hidden; }
+.bos-location-symbol-rotor { transform-box: view-box; transform-origin: 50% 50%; animation: bos-location-symbol-360 2.4s linear infinite; }
+@keyframes bos-location-symbol-360 { from { transform: perspective(700px) rotateY(0deg); } to { transform: perspective(700px) rotateY(360deg); } }
+@keyframes bos-logo-pin-spinner { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+@keyframes bos-entry-progress { to { transform: translateX(140%); } }
+@keyframes bos-entry-breathe { 0%, 100% { opacity: .75; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.06); } }
+@keyframes bos-entry-reveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-height: 720px) { .bos-entry-logo-stage { margin-bottom: 18px; } .bos-entry-logo-plate { width: min(64vw, 280px); padding: 12px; border-radius: 20px; } .bos-entry-actions { margin-top: 22px; } .bos-entry-subtitle { font-size: 15px; } .bos-entry-trust { margin-top: 14px; } }
+@media (min-width: 768px) { .bos-entry-logo-plate { width: 370px; } }
+@media (prefers-reduced-motion: reduce) { .bos-official-logo__pin-rotor { display: none; } .bos-location-symbol-rotor, .bos-entry-progress span, .bos-entry-aurora, .bos-entry-content { animation: none; } .bos-entry-content { opacity: 1; transform: none; } }
+
 @layer base {
   html,
   body,
   #root {
     max-width: 100vw;
-    overflow-x: hidden;
+    /* `clip` (not `hidden`) so these elements do not become scroll containers —
+       the sticky common header must stick to the viewport. */
+    overflow-x: clip;
   }
   html {
     background-color: #F5F4FB;
     color: #0F172A;
+    scroll-padding-top: 1rem;
+  }
+  #root {
+    padding-top: env(safe-area-inset-top);
   }
   html.dark {
     background-color: #0A0C20;
     color: #F8FAFC;
     color-scheme: dark;
+  }
+}
+
+/* Reserve a real scroll viewport above the fixed navigation so content never sits beneath it. */
+.bos-app-shell:not(.bos-app-shell-bento) {
+  height: calc(100dvh - 56px - env(safe-area-inset-bottom));
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  /* Avoid iOS creating a containing block that displaces fixed bottom navigation. */
+  -webkit-overflow-scrolling: auto;
+  padding-bottom: 0 !important;
+}
+
+@supports not (height: 100dvh) {
+  .bos-app-shell:not(.bos-app-shell-bento) {
+    height: calc(100vh - 56px);
+  }
+}
+
+@layer base {
+  :focus-visible {
+    outline: 3px solid #4F46E5;
+    outline-offset: 3px;
+  }
+
+  button,
+  [role='button'],
+  input,
+  select,
+  textarea {
+    scroll-margin-block: 1rem;
+  }
+
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+}
+
+/* Keep the full mobile action set visible without squeezing the brand row. */
+@media (max-width: 520px) {
+  .bos-brand-actions-row {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+
+  .bos-header-actions {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .bos-header-actions > button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .bos-header-actions > button[aria-label='Continue with Google'] {
+    min-width: 0;
+    padding-inline: 0.75rem;
+    font-size: 0.6875rem;
+  }
+
+  .bos-header-theme-action,
+  .bos-header-notifications-action {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -129,4 +279,12 @@
 .animate-bos-card-cascade {
   animation: bosSpotlightCardCascade 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
   will-change: transform, opacity;
+}
+
+/* Keep keyboard focus visible even on controls using Tailwind outline-hidden. */
+@layer utilities {
+  :where(a, button, input, select, textarea, [role='button'], [tabindex]):focus-visible {
+    outline: 3px solid #4F46E5;
+    outline-offset: 3px;
+  }
 }

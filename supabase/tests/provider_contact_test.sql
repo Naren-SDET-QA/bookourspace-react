@@ -49,6 +49,12 @@ values ('listing-contact-text-001',
         'Text Id Boutique Stay', 'hotel-stay', 'hotel', 'stay', 350000, 'night', 'active', '{}'::jsonb)
 on conflict (id) do nothing;
 
+insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
+values ('listing-contact-draft-001',
+        '44444444-4444-4444-4444-444444444444',
+        'Private Draft Stay', 'hotel-stay', 'hotel', 'stay', 350000, 'night', 'pending_approval', '{}'::jsonb)
+on conflict (id) do nothing;
+
 -- Owner has consented, published both channels, but nothing is verified yet.
 insert into public.provider_contact_settings
   (listing_id, module_key, owner_user_id, business_phone, whatsapp_number,
@@ -60,6 +66,16 @@ on conflict (listing_id) do update
       whatsapp_verified_at = null,
       publish_phone = true,
       publish_whatsapp = true;
+
+insert into public.provider_contact_settings
+  (listing_id, module_key, owner_user_id, business_phone, publish_phone,
+   business_phone_verified_at, consent_recorded_at)
+values ('listing-contact-draft-001', 'hotels', '44444444-4444-4444-4444-444444444444',
+        '+91 98450 33333', true, now(), now())
+on conflict (listing_id) do update
+  set business_phone_verified_at = now(),
+      publish_phone = true,
+      consent_recorded_at = now();
 
 update public.platform_module_flags set allow_contact_owner = true where module_key = 'hotels';
 
@@ -88,6 +104,12 @@ select pg_temp.ok('non-uuid listing id resolves instead of failing the uuid cast
 
 select pg_temp.ok('unknown id returns unavailable rather than erroring',
   (select public.provider_contact_details('listing-does-not-exist') ->> 'available') = 'false');
+
+set role anon;
+select pg_temp.ok('anonymous contact lookup hides a consented verified number for an unpublished listing',
+  (select public.provider_contact_details('listing-contact-draft-001') ->> 'available') = 'false'
+  and (select public.provider_contact_details('listing-contact-draft-001') ->> 'phone') is null);
+reset role;
 
 select pg_temp.ok('uuid-shaped but nonexistent id returns unavailable',
   (select public.provider_contact_details('c0a8012e-0000-4000-8000-000000000000') ->> 'available') = 'false');

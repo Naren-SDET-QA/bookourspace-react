@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage, { imageCategoryFor } from './SafeImage';
 import { 
   Star, 
   MapPin, 
@@ -310,6 +311,11 @@ export const ListingCard: React.FC<ListingCardProps> = ({
   const isMovie =
     listing.categoryId.startsWith('movie-') ||
     listing.customFieldValues?.sectionType === 'movies';
+  const contactActionLabel = isMovie
+    ? t.bookNow
+    : isHotel || isVenue
+      ? currentLang === 'te' ? 'అందుబాటును అడగండి' : 'Request availability'
+      : currentLang === 'te' ? 'ప్రొవైడర్‌ను సంప్రదించండి' : 'Contact provider';
   const isService = !isPG && !isClass && !isVenue && !isHotel && !isMovie;
 
   const handleSaveBatchUrl = (e: React.FormEvent) => {
@@ -498,14 +504,12 @@ export const ListingCard: React.FC<ListingCardProps> = ({
       >
         {/* Top Luxury Hotel Image Carousel (Compact) */}
         <div className="relative h-36 w-full bg-slate-900 overflow-hidden select-none">
-          <img
+          <SafeImage
             src={galleryImages[safeImgIndex]}
             alt={displayTitle}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src =
-                'https://images.unsplash.com/photo-1540541338287-41700207dee6?auto=format&fit=crop&w=1000&q=85';
-            }}
+            category="stays"
+            sizes="(max-width: 640px) 92vw, (max-width: 1024px) 48vw, 360px"
           />
 
           {/* Subtle dark gradient scrim at top and bottom */}
@@ -865,13 +869,12 @@ export const ListingCard: React.FC<ListingCardProps> = ({
     >
       {/* Compact Top Media Thumbnail Container */}
       <div className="relative h-36 w-full bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden mb-2">
-        <img
+        <SafeImage
           src={listing.images[0] || 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=600&q=80'}
           alt={displayTitle}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=600&q=80';
-          }}
+          category={imageCategoryFor(`${listing.categoryId} ${listing.entityType} ${listing.subcategory}`)}
+          sizes="(max-width: 640px) 92vw, (max-width: 1024px) 48vw, 360px"
         />
 
         {/* Multi-image counter badge if listing has multiple images */}
@@ -1380,7 +1383,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
               className="bg-[#FB641B] hover:bg-orange-600 active:scale-95 text-white font-black text-[11px] py-1.5 px-2 rounded-lg shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
             >
               <Zap className="w-3.5 h-3.5 fill-current shrink-0" />
-              <span className="truncate">{isClass ? ui.bookSeat : isPG ? ui.reservePG : ui.bookHall}</span>
+                <span className="truncate">{contactActionLabel}</span>
             </button>
           </div>
 

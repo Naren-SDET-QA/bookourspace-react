@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import SafeImageComponent, { type SafeImageCategory } from './SafeImage';
 import { ChevronLeft, ChevronRight, ImageOff, RefreshCw } from 'lucide-react';
 
 /** Shared chrome for the section experiences: photos, states and paging. */
@@ -8,16 +9,18 @@ export function SafeImage({
   alt,
   className,
   accentClass,
+  category = 'general',
 }: {
   src?: string | null;
   alt: string;
   className?: string;
   accentClass?: string;
+  category?: SafeImageCategory;
 }) {
   return (
     <div className={`relative overflow-hidden bg-slate-100 dark:bg-slate-800 ${className ?? ''}`}>
       {src ? (
-        <img src={src} alt={alt} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        <SafeImageComponent category={category} src={src} alt={alt} loading="lazy" decoding="async" className="h-full w-full object-cover" />
       ) : (
         <div className={`absolute inset-0 flex flex-col items-center justify-center gap-1 ${accentClass ?? 'text-slate-400'}`}>
           <ImageOff className="h-5 w-5" aria-hidden="true" />

@@ -18,6 +18,16 @@
 \set QUIET on
 set client_min_messages to notice;
 
+-- Production stay_hold_units is service-role-only. This helper exists only in
+-- the disposable test database to model the trusted checkout invocation.
+create or replace function pg_temp.bos_test_service_hold_units(
+  p_room_type_id uuid, p_from date, p_to date, p_units integer, p_hold_minutes integer default 10
+)
+returns table(allocation_id uuid, unit_id uuid, hold_token uuid, expires_at timestamptz)
+language sql security definer set search_path = '' as $$
+  select * from public.stay_hold_units($1, $2, $3, $4, $5)
+$$;
+
 create or replace function pg_temp.ok(label text, condition boolean)
 returns void language plpgsql as $$
 begin
@@ -59,11 +69,21 @@ insert into auth.users (id, email) values
   ('44444444-4444-4444-4444-444444444444', 'admin@bookourspace.in');
 update public.profiles set role = 'provider'
  where id = '11111111-1111-1111-1111-111111111111';
+update public.profiles set verified = true
+ where id = '11111111-1111-1111-1111-111111111111';
+-- Test fixture authority is provisioned explicitly by the local database
+-- owner. Never infer an Admin role from this account's email address.
+update public.profiles set role = 'admin', is_super_admin = true
+ where id = '44444444-4444-4444-4444-444444444444';
 
-insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
+-- Test-only owner-controlled lifecycle transition so the customer availability
+-- fixture is genuinely public under the current host approval gate.
+select set_config('bos.stay_lifecycle_transition', 'on', false);
+insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, is_verified, verified_by, payload)
 values ('listing-fixture-001',
         '11111111-1111-1111-1111-111111111111',
-        'Fixture Boutique Stay', 'hotels', 'hotel', 'stay', 450000, 'night', 'active', '{}'::jsonb);
+        'Fixture Boutique Stay', 'hotels', 'hotel', 'stay', 450000, 'night', 'active', true,
+        '44444444-4444-4444-4444-444444444444', '{"stayLifecycle":"approved"}'::jsonb);
 
 insert into public.stay_properties
   (id, listing_id, owner_user_id, name, property_type, city, base_price_paise, tax_percent)
@@ -80,6 +100,31 @@ values ('11111111-0000-0000-0000-000000000002',
 insert into public.stay_units (id, room_type_id, label) values
   ('11111111-0000-0000-0000-00000000000a', '11111111-0000-0000-0000-000000000002', 'A-101'),
   ('11111111-0000-0000-0000-00000000000b', '11111111-0000-0000-0000-000000000002', 'A-102');
+
+-- An unpublished host draft remains available to its active owner, but not to
+-- anonymous discovery callers.
+insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
+values ('listing-private-stay-001', '11111111-1111-1111-1111-111111111111',
+        'Private Draft Stay', 'hotels', 'hotel', 'stay', 250000, 'night', 'pending_approval',
+        '{"stayLifecycle":"draft"}'::jsonb);
+insert into public.stay_properties
+  (id, listing_id, owner_user_id, name, property_type, city, base_price_paise, tax_percent)
+values ('11111111-0000-0000-0000-000000000010', 'listing-private-stay-001',
+        '11111111-1111-1111-1111-111111111111', 'Private Draft Stay', 'hotel', 'Bengaluru', 250000, 12);
+insert into public.stay_room_types (id, property_id, name, max_adults, base_price_paise)
+values ('11111111-0000-0000-0000-000000000011', '11111111-0000-0000-0000-000000000010', 'Draft Room', 2, 250000);
+insert into public.stay_units (id, room_type_id, label)
+values ('11111111-0000-0000-0000-000000000012', '11111111-0000-0000-0000-000000000011', 'D-101');
+
+set role anon;
+select pg_temp.ok('anonymous callers cannot enumerate unpublished stay inventory',
+  (select count(*) = 0 from public.stay_availability('11111111-0000-0000-0000-000000000011','2026-12-10','2026-12-12')));
+reset role;
+set test.uid = '11111111-1111-1111-1111-111111111111';
+set role authenticated;
+select pg_temp.ok('the active owner can inspect private draft stay availability',
+  (select count(*) = 1 from public.stay_availability('11111111-0000-0000-0000-000000000011','2026-12-10','2026-12-12')));
+reset role;
 
 insert into public.bookings
   (id, user_id, listing_id, listing_title, provider_id, customer_name, customer_phone,
@@ -105,19 +150,19 @@ select pg_temp.ok('two units available on a clean calendar',
 
 -- 2. Hold, exhaustion ------------------------------------------------------
 select pg_temp.ok('first hold succeeds for one unit',
-  (select count(*) from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12',1)) = 1);
+  (select count(*) from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12',1)) = 1);
 
 select pg_temp.ok('availability drops to one after a hold',
   (select count(*) from public.stay_availability('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12')) = 1);
 
 select pg_temp.ok('second hold takes the last unit',
-  (select count(*) from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12',1)) = 1);
+  (select count(*) from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12',1)) = 1);
 
 select pg_temp.ok('availability is zero when both units are held',
   (select count(*) from public.stay_availability('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12')) = 0);
 
 select pg_temp.ok_raises('third hold is refused when inventory is exhausted',
-  $q$select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12',1)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12',1)$q$,
   'INSUFFICIENT_AVAILABILITY');
 
 -- 3. Release (staff action, so run as owner-of-data to isolate the RPC logic)
@@ -126,15 +171,22 @@ update public.stay_allocations set status = 'released'
  where status = 'held' and unit_id = '11111111-0000-0000-0000-00000000000a';
 set role authenticated;
 
+select pg_temp.ok_raises('null stay dates are rejected before availability lookup',
+  $q$select * from public.stay_availability('11111111-0000-0000-0000-000000000002',null,'2026-12-12')$q$,
+  'INVALID_STAY_RANGE');
+select pg_temp.ok_raises('availability windows longer than 120 nights are rejected',
+  $q$select * from public.stay_availability('11111111-0000-0000-0000-000000000002','2026-01-01','2026-05-02')$q$,
+  'STAY_RANGE_TOO_WIDE');
+
 select pg_temp.ok('released hold frees exactly one unit',
   (select count(*) from public.stay_availability('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12')) = 1);
 
 -- 4. Checkout-day reuse (half-open daterange) ------------------------------
 select pg_temp.ok('back-to-back stay can start on the previous checkout day',
-  (select count(*) from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-12','2026-12-14',1)) = 1);
+  (select count(*) from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-12','2026-12-14',1)) = 1);
 
 select pg_temp.ok_raises('overlapping nights on a full calendar are refused',
-  $q$select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-13','2026-12-15',2)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-13','2026-12-15',2)$q$,
   'INSUFFICIENT_AVAILABILITY');
 
 -- 5. Hold expiry -----------------------------------------------------------
@@ -145,6 +197,17 @@ set role authenticated;
 
 select pg_temp.ok('expired holds stop blocking availability',
   (select count(*) from public.stay_availability('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-12')) = 2);
+
+select pg_temp.ok('public availability does not mutate expired hold state',
+  (select count(*) from public.stay_allocations where status = 'held' and expires_at <= now()) >= 2);
+
+reset role;
+set test.role = 'service_role';
+set role service_role;
+select public.sweep_expired_stay_holds();
+reset role;
+set test.role = 'authenticated';
+set role authenticated;
 
 select pg_temp.ok('expired holds are swept to status=expired',
   (select count(*) from public.stay_allocations where status = 'expired') >= 2);
@@ -167,7 +230,7 @@ set test.uid = '22222222-2222-2222-2222-222222222222';
 
 select pg_temp.ok('verified booking confirms a live hold',
   (select count(*) from (
-     select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2027-01-10','2027-01-12',1)
+     select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2027-01-10','2027-01-12',1)
    ) h cross join lateral public.stay_confirm_booking(h.hold_token, 'booking-verified-001')) = 1);
 
 select pg_temp.ok('confirmed allocation is linked to the booking',
@@ -177,7 +240,7 @@ select pg_temp.ok('confirmed allocation is linked to the booking',
 select pg_temp.ok_raises('pending_verification payment cannot consume inventory',
   $q$select * from public.stay_confirm_booking(
        (select h.hold_token
-          from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2027-02-10','2027-02-12',1) h),
+          from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2027-02-10','2027-02-12',1) h),
        'booking-pending-001')$q$,
   'BOOKING_NOT_PAID');
 
@@ -186,19 +249,19 @@ reset role;
 set role authenticated;
 
 select pg_temp.ok_raises('zero-night stay is rejected',
-  $q$select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-10',1)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-10','2026-12-10',1)$q$,
   'INVALID_STAY_RANGE');
 
 select pg_temp.ok_raises('reversed dates are rejected',
-  $q$select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-14','2026-12-10',1)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-14','2026-12-10',1)$q$,
   'INVALID_STAY_RANGE');
 
 select pg_temp.ok_raises('zero units requested is rejected',
-  $q$select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-20','2026-12-22',0)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-20','2026-12-22',0)$q$,
   'INVALID_UNIT_COUNT');
 
 select pg_temp.ok_raises('unknown room type is rejected',
-  $q$select * from public.stay_hold_units('99999999-0000-0000-0000-000000000099','2026-12-20','2026-12-22',1)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('99999999-0000-0000-0000-000000000099','2026-12-20','2026-12-22',1)$q$,
   'ROOM_TYPE_NOT_FOUND');
 
 -- 8. Module flag enforcement in the database -------------------------------
@@ -224,7 +287,7 @@ set test.uid = '22222222-2222-2222-2222-222222222222';
 set role authenticated;
 
 select pg_temp.ok_raises('holds are refused when the hotels module disables booking',
-  $q$select * from public.stay_hold_units('11111111-0000-0000-0000-000000000002','2026-12-25','2026-12-27',1)$q$,
+  $q$select * from pg_temp.bos_test_service_hold_units('11111111-0000-0000-0000-000000000002','2026-12-25','2026-12-27',1)$q$,
   'MODULE_BOOKING_DISABLED');
 
 reset role;
@@ -365,6 +428,64 @@ select pg_temp.ok('a guest sees no other guest''s allocations',
   (select count(*) from public.stay_allocations
     where guest_user_id is not null
       and guest_user_id <> '22222222-2222-2222-2222-222222222222') = 0);
+
+-- 9b. Owner calendar controls from the local-only 20261105180000 candidate.
+reset role;
+set test.uid = '11111111-1111-1111-1111-111111111111';
+set role authenticated;
+insert into public.stay_blocks(unit_id, stay_dates, reason, created_by)
+values ('11111111-0000-0000-0000-00000000000b', daterange('2028-01-10','2028-01-12','[)'), 'owner maintenance', '11111111-1111-1111-1111-111111111111');
+select pg_temp.ok('owner blackout reduces available unit count',
+  (select count(*) from public.stay_availability('11111111-0000-0000-0000-000000000002','2028-01-10','2028-01-12')) = 1);
+update public.stay_blocks set is_active = false
+ where unit_id = '11111111-0000-0000-0000-00000000000b' and reason = 'owner maintenance';
+select pg_temp.ok('owner can restore calendar dates without deleting blackout history',
+  (select count(*) from public.stay_availability('11111111-0000-0000-0000-000000000002','2028-01-10','2028-01-12')) = 2
+  and exists (select 1 from public.stay_blocks where reason = 'owner maintenance' and not is_active));
+reset role;
+set test.uid = '33333333-3333-3333-3333-333333333333';
+set role authenticated;
+select pg_temp.ok_rowcount('a non-owner cannot restore another property calendar',
+  $q$update public.stay_blocks set is_active = true where reason = 'owner maintenance'$q$, 0);
+reset role;
+
+-- Owner photo ordering remains a metadata-only update on finalized media.
+-- Restore this disposable listing to an explicitly approved/public state after
+-- the preceding admin inventory test exercised draft/pending transitions.
+select set_config('test.uid', '44444444-4444-4444-4444-444444444444', false);
+select set_config('bos.stay_lifecycle_transition', 'on', false);
+update public.listings
+   set status = 'active', is_verified = true,
+       verified_by = '44444444-4444-4444-4444-444444444444',
+       payload = coalesce(payload, '{}'::jsonb) || '{"stayLifecycle":"approved"}'::jsonb
+ where id = 'listing-fixture-001';
+insert into public.media_assets
+  (id, owner_id, module_key, parent_type, parent_id, bucket_id, object_path,
+   media_kind, media_format, privacy, file_size_bytes, width, height,
+   checksum_sha256, processing_status, display_order)
+values
+  ('11111111-0000-0000-0000-0000000000aa', '11111111-1111-1111-1111-111111111111',
+   'stays', 'provider_listing', 'listing-fixture-001', 'bos-public-media',
+   '11111111-1111-1111-1111-111111111111/stays/provider_listing/e2e-original.jpg',
+   'image', 'jpeg', 'public', 64, 1, 1, repeat('a', 64), 'ready', 0);
+set test.uid = '11111111-1111-1111-1111-111111111111';
+set role authenticated;
+update public.listings set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object(
+  'images', jsonb_build_array('storage://bos-public-media/11111111-1111-1111-1111-111111111111/stays/provider_listing/e2e-original.jpg')
+) where id = 'listing-fixture-001';
+select pg_temp.ok_rowcount('the active owner can reorder their own finalized stay photo',
+  $q$update public.media_assets set display_order = 1 where id = '11111111-0000-0000-0000-0000000000aa'$q$, 1);
+reset role;
+set test.uid = '33333333-3333-3333-3333-333333333333';
+set role authenticated;
+select pg_temp.ok_rowcount('another account cannot reorder the owner''s photo',
+  $q$update public.media_assets set display_order = 0 where id = '11111111-0000-0000-0000-0000000000aa'$q$, 0);
+reset role;
+set role anon;
+select pg_temp.ok('anonymous catalog access sees only finalized media attached to the published listing',
+  (select count(bucket_id) = 1 from public.media_assets where bucket_id = 'bos-public-media'
+    and object_path = '11111111-1111-1111-1111-111111111111/stays/provider_listing/e2e-original.jpg'));
+reset role;
 
 -- 10. Audit trail ---------------------------------------------------------
 reset role;

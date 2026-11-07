@@ -91,6 +91,9 @@ export function buildGSTInvoiceHTML(payload: GSTInvoicePayload): string {
   const hsnSac = payload.hsnSacCode || '998599';
   const qrSeed = `BOS-GST|INV:${payload.invoiceNumber}|TXN:${payload.transactionId}|GSTIN:${companyGstin}|AMT:${totalPayable}`;
   const qrSvg = buildValidationQrSvg(qrSeed);
+  const brandLogoUrl = typeof window !== 'undefined'
+    ? new URL('/assets/brand/bos-logo-lockup.webp', window.location.href).href
+    : '/assets/brand/bos-logo-lockup.webp';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -106,6 +109,7 @@ export function buildGSTInvoiceHTML(payload: GSTInvoicePayload): string {
     .brand-title .our { color: #ea580c; }
     .brand-title .space { color: #1e3a8a; }
     .tagline { font-size: 10px; font-weight: 800; letter-spacing: 3px; color: #64748b; margin-top: 2px; }
+    .brand-logo { display: block; width: 170px; max-width: 100%; height: auto; margin-bottom: 7px; }
     .badge { display: inline-block; background: #15803d; color: #fff; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; }
     .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; background: #f8fafc; padding: 16px; border-radius: 12px; border: 1px solid #e2e8f0; }
     .meta-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.8px; }
@@ -137,8 +141,7 @@ export function buildGSTInvoiceHTML(payload: GSTInvoicePayload): string {
   <div class="invoice-card">
     <div class="header">
       <div>
-        <div class="brand-title">Book<span class="our">Our</span><span class="space">Space</span></div>
-        <div class="tagline">FIND • BOOK • ENJOY</div>
+        <img class="brand-logo" src="${brandLogoUrl}" alt="BookOurSpace — Find, Book, Enjoy" />
         <p style="margin:8px 0 2px 0;font-size:12px;font-weight:700;">${companyName}</p>
         <p style="margin:0;font-size:12px;color:#475569;">Supplier GSTIN: <strong>${companyGstin}</strong> · State: Telangana (36)</p>
         <p style="margin:2px 0 0 0;font-size:11px;color:#64748b;">Regd. Office: HITEC City, Madhapur, Hyderabad - 500081</p>

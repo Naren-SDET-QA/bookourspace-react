@@ -413,7 +413,7 @@ export const initialUserProfile: UserProfile = {
   name: 'NARENDRA',
   phone: '9966191813',
   email: 'narendra.tech@crafto.services',
-  avatar: '/public/assets/aistudio/image_13d09e7d.png',
+  avatar: '/assets/optimized/profile-avatar-256.webp',
   title: 'Local Service Specialist & Technician Hub ⚡ | 10+ Yrs Experience',
   tagline: 'Empowering local blue-collar workers with instant bookings and voice profiles',
   isProvider: true,

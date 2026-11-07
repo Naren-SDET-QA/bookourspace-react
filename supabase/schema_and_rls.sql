@@ -21,7 +21,7 @@ DROP POLICY IF EXISTS "Profiles are viewable by authenticated users" ON public.p
 CREATE POLICY "Profiles are viewable by authenticated users"
   ON public.profiles FOR SELECT
   TO authenticated
-  USING (true);
+  USING (auth.uid() = id);
 
 DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
 CREATE POLICY "Users can insert their own profile"
@@ -48,7 +48,7 @@ BEGIN
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', 'Marketplace User'),
-    COALESCE(NEW.raw_user_meta_data->>'role', 'customer')
+    'customer'
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
@@ -268,6 +268,11 @@ CREATE POLICY "Users can delete their own favorites"
   ON public.user_favorites FOR DELETE
   TO authenticated
   USING (auth.uid() = user_id);
+
+-- RLS policies do not grant table privileges. Without these, signed-in stay
+-- wishlist sync fails with "permission denied for table user_favorites" on a
+-- locally built database that has no Supabase default privileges.
+GRANT SELECT, INSERT, DELETE ON public.user_favorites TO authenticated;
 
 
 -- 8. USER & ADMIN MODULE CONFIGURATIONS TABLE (Strict Owner RLS for All App Modules)
@@ -741,7 +746,15 @@ AS $$
   );
 $$;
 
--- Update handle_new_user() trigger for Supabase project ezrxykyocgbolpaebnqx:
+-- Profile rows contain private contact details. Authenticated users can read
+-- their own row here; the later profile privacy migration adds booking-party
+-- access and a safe public provider projection.
+DROP POLICY IF EXISTS "Profiles are viewable by authenticated users" ON public.profiles;
+CREATE POLICY "Profiles are viewable by authenticated users"
+  ON public.profiles FOR SELECT TO authenticated
+  USING (auth.uid() = id OR (public.is_admin() AND public.is_active_user()));
+
+-- Update handle_new_user() trigger: new Google users always begin as customers.
 -- Automatically creates a Customer profile ('customer') for new Google OAuth users
 -- (unless super admin allowlist) and strictly preserves existing roles and data on conflict.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -767,10 +780,7 @@ BEGIN
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(COALESCE(NEW.email, 'User'), '@', 1)),
     COALESCE(NEW.raw_user_meta_data->>'phone', ''),
-    CASE
-      WHEN LOWER(COALESCE(NEW.email, '')) IN ('admin@bookourspace.in', 'monapatisravya28@gmail.com') THEN 'admin'
-      ELSE 'customer'
-    END,
+    'customer',
     COALESCE(NEW.raw_user_meta_data->>'sub', NEW.raw_user_meta_data->>'provider_id'),
     COALESCE(NEW.raw_user_meta_data->>'avatar_url', NEW.raw_user_meta_data->>'picture'),
     'active',
@@ -817,6 +827,32 @@ CREATE POLICY "Owners can update their own listings"
   TO authenticated
   USING ((auth.uid() = owner_id AND public.is_active_user()) OR public.is_admin())
   WITH CHECK ((auth.uid() = owner_id AND public.is_active_user()) OR public.is_admin());
+
+-- Safe baseline profile permissions. Clients may edit only display name and
+-- phone. Role, verification, account status and identity fields are never
+-- client-writable, including before timestamped migrations are installed.
+REVOKE ALL ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
+GRANT SELECT (id, email, full_name, phone, role, avatar_url, account_status, verified, city, created_at, updated_at)
+  ON TABLE public.profiles TO authenticated;
+GRANT INSERT (id, full_name, phone) ON TABLE public.profiles TO authenticated;
+GRANT UPDATE (full_name, phone, updated_at) ON TABLE public.profiles TO authenticated;
+
+DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can create own customer profile" ON public.profiles;
+CREATE POLICY "Users can create own customer profile"
+  ON public.profiles FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = id AND role = 'customer');
+
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+CREATE POLICY "Users can update their own profile"
+  ON public.profiles FOR UPDATE TO authenticated
+  USING (auth.uid() = id AND public.is_active_user())
+  WITH CHECK (
+    auth.uid() = id
+    AND public.is_active_user()
+    AND role = (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid())
+    AND account_status = (SELECT p.account_status FROM public.profiles p WHERE p.id = auth.uid())
+  );
 
 DROP POLICY IF EXISTS "Owners can delete their own listings" ON public.listings;
 CREATE POLICY "Owners can delete their own listings"

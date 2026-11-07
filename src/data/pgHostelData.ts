@@ -489,7 +489,7 @@ export const initialPGListings: MarketplaceListing[] = [
     },
     images: [
       'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1540518614846-7ede433c4ef0?auto=format&fit=crop&w=1000&q=80'
+      'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=1000&q=80'
     ],
     providerId: 'prov-pg302',
     providerName: 'Smt. Padmavathi (Resident Lady Warden)',

@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { 
   UserRole, 
   MarketplaceListing, 
@@ -14,6 +16,8 @@ import {
   CustomerAction
 } from '../types/marketplace';
 import { all44Categories } from '../data/categoriesData';
+import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
+import { launchGoogleOAuthWindow } from '../lib/googleOAuthLauncher';
 import { 
   initialListings, 
   initialPostingPlans, 
@@ -24,6 +28,57 @@ import {
   ensureListingPriceBreakdown
 } from '../data/seedData';
 import { saveMarketplaceToCache, useOnlineStatus } from '../utils/marketplaceCache';
+import { listingImageSources } from '../lib/media/signedStorageUrl';
+
+/**
+ * Maps the public PostgreSQL feed (approved listings only) onto the UI model.
+ * Contact fields are not part of the public projection, so none are mapped.
+ */
+const EMPTY_PRIVATE_CONTACT = { providerPhone: '', providerEmail: '', providerAvatar: '' };
+
+function mapPostgresPublicListing(entry: any): MarketplaceListing {
+  const attributes =
+    entry?.attributes && typeof entry.attributes === 'object' ? entry.attributes : {};
+  const location = attributes.location && typeof attributes.location === 'object'
+    ? attributes.location
+    : {};
+  const images = listingImageSources(attributes.images, attributes, entry);
+  return {
+    id: String(entry?.id || ''),
+    title: String(entry?.title || ''),
+    description: String(attributes.description || ''),
+    categoryId: String(entry?.categoryId || ''),
+    subcategory: String(entry?.subcategory || ''),
+    entityType: String(entry?.entityType || 'listing') as MarketplaceListing['entityType'],
+    price: Number(entry?.price),
+    priceUnit: String(entry?.priceUnit || ''),
+    currency: '₹',
+    location: {
+      city: String(location.city || attributes.city || ''),
+      area: String(location.area || attributes.area || ''),
+      state: typeof location.state === 'string' ? location.state : undefined,
+      pincode: typeof location.pincode === 'string' ? location.pincode : undefined,
+    },
+    images,
+    providerId: '',
+    providerName: String(entry?.providerName || ''),
+    ...EMPTY_PRIVATE_CONTACT,
+    providerRating: undefined as unknown as number,
+    reviewCount: undefined as unknown as number,
+    status: 'active',
+    isVerified: entry?.isVerified === true,
+    isFeatured: entry?.isFeatured === true,
+    createdAt: String(entry?.createdAt || '').slice(0, 10),
+    viewsCount: 0,
+    enquiriesCount: 0,
+    customFieldValues: attributes.customFieldValues && typeof attributes.customFieldValues === 'object'
+      ? attributes.customFieldValues
+      : {},
+    postingPlanId: '',
+    expiresAt: '',
+    reported: false,
+  };
+}
 import { User, Session } from '@supabase/supabase-js';
 import {
   supabase,
@@ -36,22 +91,21 @@ import {
   updateRlsListing,
   deleteRlsListing,
   fetchRlsBookings,
-  insertRlsBooking,
   fetchRlsEnquiries,
   insertRlsEnquiry,
   fetchRlsReviews,
   insertRlsReview,
   fetchRlsTransactions,
-  insertRlsTransaction,
   fetchRlsFavorites,
   syncRlsFavorite,
   fetchRlsModuleConfigs,
   syncLocalAccountDataToSupabase,
   subscribeToRlsChanges,
   AuthoritativeGoogleUser,
-  getStoredGoogleAuthUser,
   setStoredAuthoritativeSession,
   authenticateWithGoogleServer,
+  signInWithSupabaseGoogleOAuth,
+  fetchGoogleOAuthConfig,
   fetchCurrentAuthSession,
   logoutAuthoritativeSession,
   fetchServerNotifications,
@@ -79,6 +133,8 @@ interface MarketplaceContextType {
     allowRoleChange?: boolean;
   }) => Promise<{
     ok: boolean;
+    /** True while the user is still completing sign-in in the Google window. */
+    pending?: boolean;
     isNewUser?: boolean;
     user?: AuthoritativeGoogleUser;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
@@ -90,10 +146,13 @@ interface MarketplaceContextType {
     sessionToken: string;
     isNewUser?: boolean;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
-  }) => void;
+  }) => Promise<void>;
   logoutGoogleSession: () => Promise<void>;
   refreshServerNotifications: () => Promise<void>;
-  updateUserProfile: (updates: { fullName?: string; phone?: string; role?: UserRole }) => Promise<void>;
+  updateUserProfile: (updates: { fullName?: string; phone?: string; bio?: string }) => Promise<{
+    ok: boolean;
+    persisted: 'profile' | 'account_only' | 'none';
+  }>;
   syncAccountData: () => Promise<number>;
   userRole: UserRole;
   setUserRole: (role: UserRole) => void;
@@ -122,6 +181,7 @@ interface MarketplaceContextType {
   deleteCategory: (id: string) => void;
   addSubcategoryToCategory: (categoryId: string, subcategoryName: string) => void;
   deleteSubcategoryFromCategory: (categoryId: string, subcategoryName: string) => void;
+  toggleSubcategoryEnabled: (categoryId: string, subcategoryName: string) => void;
   addCustomFieldToCategory: (categoryId: string, field: Omit<CustomFieldDef, 'id'>) => void;
   deleteCustomFieldFromCategory: (categoryId: string, fieldId: string) => void;
 
@@ -188,31 +248,41 @@ const MarketplaceContext = createContext<MarketplaceContextType | undefined>(und
 
 export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Google OAuth User & Role
-  const [authUser, setAuthUser] = useState<AuthoritativeGoogleUser | null>(() => getStoredGoogleAuthUser());
+  // Persisted browser identity is only a cache. The signed server session below
+  // must be revalidated before any role is shown or used.
+  const [authUser, setAuthUser] = useState<AuthoritativeGoogleUser | null>(null);
   const [isAccountBlocked, setIsAccountBlocked] = useState<boolean>(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<UserRole>(() => {
-    const stored = getStoredGoogleAuthUser();
-    if (stored && ['customer', 'provider', 'admin'].includes(stored.role)) {
-      return stored.role;
+  const [userRole, setUserRoleState] = useState<UserRole>('customer');
+  // Child components may request a role for navigation, but cannot grant one.
+  // Elevated roles are assigned only from a server-verified session/profile.
+  const setUserRole = (role: UserRole) => {
+    if (role === 'customer') {
+      setUserRoleState('customer');
+      return;
     }
-    return 'customer';
-  });
+    if (!isAccountBlocked && authUser?.role === role) setUserRoleState(role);
+  };
   const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
   const [supabaseSession, setSupabaseSession] = useState<Session | null>(null);
   const [supabaseProfile, setSupabaseProfile] = useState<SupabaseProfile | null>(null);
+  // Guards the authoritative-session revocation so a sign-out event that is
+  // caused by our own revocation cannot start another one.
+  const logoutRevocationInFlight = useRef(false);
 
-  // Load state with fallback to seed data
+  // Browser storage and fixture data are not authoritative inventory. Preserve
+  // existing local values, but show them only in explicit local demo mode.
   const [listings, setListings] = useState<MarketplaceListing[]>(() => {
+    if (!DEMO_DATA_ENABLED) return [];
     try {
-      const saved = localStorage.getItem('marketplace_listings_v17');
+      const saved = localStorage.getItem('marketplace_listings_v18');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 20) {
           return parsed.map(ensureListingPriceBreakdown);
         }
       }
-      localStorage.setItem('marketplace_listings_v17', JSON.stringify(initialListings));
+      localStorage.setItem('marketplace_listings_v18', JSON.stringify(initialListings));
       return initialListings;
     } catch {
       return initialListings;
@@ -238,6 +308,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [enquiries, setEnquiries] = useState<Enquiry[]>(() => {
+    if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_enquiries');
       return saved ? JSON.parse(saved) : initialEnquiries;
@@ -247,6 +318,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [bookings, setBookings] = useState<Booking[]>(() => {
+    if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_bookings');
       return saved ? JSON.parse(saved) : initialBookings;
@@ -256,6 +328,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [reviews, setReviews] = useState<Review[]>(() => {
+    if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_reviews');
       return saved ? JSON.parse(saved) : initialReviews;
@@ -265,6 +338,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   });
 
   const [transactions, setTransactions] = useState<PaymentTransaction[]>(() => {
+    if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_transactions');
       return saved ? JSON.parse(saved) : initialTransactions;
@@ -273,7 +347,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   });
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
+  const [notifications, setNotifications] = useState<NotificationItem[]>(DEMO_DATA_ENABLED ? [
     {
       id: 'notif-1',
       title: '⚡ New Enquiry Received',
@@ -298,7 +372,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       type: 'approval',
       read: true
     }
-  ]);
+  ] : []);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -329,6 +403,44 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setLastCacheTime(new Date().toLocaleTimeString());
   };
 
+  /**
+   * Ask the server to mint an authoritative application session for the
+   * current Supabase session. The server verifies the Supabase access token
+   * itself, so this is the only place a browser session can become a server
+   * session. Caller-supplied identity fields are never trusted.
+   */
+  function mintAuthoritativeSessionFromSupabase(session: Session | null): Promise<{
+    ok: boolean;
+    httpStatus: number;
+    isNewUser?: boolean;
+    user?: AuthoritativeGoogleUser;
+    sessionToken?: string;
+    redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
+    error?: string;
+    message?: string;
+  }> {
+    if (!session?.access_token || !session.user?.email) {
+      return Promise.resolve({
+        ok: false,
+        httpStatus: 401,
+        error: 'VERIFIED_GOOGLE_SESSION_REQUIRED',
+        message: 'Complete Google sign-in before requesting an application session.',
+      });
+    }
+    return authenticateWithGoogleServer({
+      accessToken: session.access_token,
+      email: session.user.email,
+      name:
+        session.user.user_metadata?.full_name ||
+        session.user.user_metadata?.name,
+      googleSub: session.user.user_metadata?.sub || session.user.id,
+      avatarUrl:
+        session.user.user_metadata?.avatar_url ||
+        session.user.user_metadata?.picture,
+      allowRoleChange: false,
+    });
+  }
+
   // Subscribe to Supabase Auth & hydrate RLS-protected user data when authenticated
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -341,18 +453,26 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         fetchRlsReviews(),
       ]);
 
-      if (mounted && remoteListings && remoteListings.length > 0) {
-        setListings((prev) => {
-          const existingIds = new Set(remoteListings.map((r) => r.id));
-          return [...remoteListings, ...prev.filter((p) => !existingIds.has(p.id))];
-        });
+      if (mounted && remoteListings !== null) {
+        const fixtureIds = new Set(initialListings.map((listing) => listing.id));
+        const customerListings = DEMO_DATA_ENABLED
+          ? remoteListings
+          : remoteListings.filter((listing) => !fixtureIds.has(listing.id));
+        setListings(DEMO_DATA_ENABLED
+          ? (prev) => {
+              const existingIds = new Set(customerListings.map((r) => r.id));
+              return [...customerListings, ...prev.filter((p) => !existingIds.has(p.id))];
+            }
+          : customerListings);
       }
 
-      if (mounted && remoteReviews && remoteReviews.length > 0) {
-        setReviews((prev) => {
-          const existingIds = new Set(remoteReviews.map((r) => r.id));
-          return [...remoteReviews, ...prev.filter((p) => !existingIds.has(p.id))];
-        });
+      if (mounted && remoteReviews !== null) {
+        setReviews(DEMO_DATA_ENABLED
+          ? (prev) => {
+              const existingIds = new Set(remoteReviews.map((r) => r.id));
+              return [...remoteReviews, ...prev.filter((p) => !existingIds.has(p.id))];
+            }
+          : remoteReviews);
       }
 
       if (activeUser) {
@@ -396,35 +516,41 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (mounted && remoteProfile) {
           setSupabaseProfile(remoteProfile);
           if (['customer', 'provider', 'admin'].includes(remoteProfile.role)) {
-            setUserRole(remoteProfile.role);
+            setUserRoleState(remoteProfile.role);
           }
         } else if (mounted) {
-          const metaRole = activeUser.user_metadata?.role as UserRole | undefined;
-          if (metaRole && ['customer', 'provider', 'admin'].includes(metaRole)) {
-            setUserRole(metaRole);
-          }
+          // The RLS profile is optional. When it is unavailable the role that
+          // the server verified for this session is kept; it must never be
+          // downgraded or upgraded from a missing row.
+          setSupabaseProfile(null);
         }
 
-        if (mounted && remoteBookings && remoteBookings.length > 0) {
-          setBookings((prev) => {
-            const ids = new Set(remoteBookings.map((b) => b.id));
-            return [...remoteBookings, ...prev.filter((b) => !ids.has(b.id))];
-          });
+        if (mounted && remoteBookings !== null) {
+          setBookings(DEMO_DATA_ENABLED
+            ? (prev) => {
+                const ids = new Set(remoteBookings.map((b) => b.id));
+                return [...remoteBookings, ...prev.filter((b) => !ids.has(b.id))];
+              }
+            : remoteBookings);
         }
-        if (mounted && remoteEnquiries && remoteEnquiries.length > 0) {
-          setEnquiries((prev) => {
-            const ids = new Set(remoteEnquiries.map((e) => e.id));
-            return [...remoteEnquiries, ...prev.filter((e) => !ids.has(e.id))];
-          });
+        if (mounted && remoteEnquiries !== null) {
+          setEnquiries(DEMO_DATA_ENABLED
+            ? (prev) => {
+                const ids = new Set(remoteEnquiries.map((e) => e.id));
+                return [...remoteEnquiries, ...prev.filter((e) => !ids.has(e.id))];
+              }
+            : remoteEnquiries);
         }
         if (mounted && remoteFavorites && remoteFavorites.length > 0) {
           setFavoriteIds((prev) => Array.from(new Set([...remoteFavorites, ...prev])));
         }
-        if (mounted && remoteTransactions && remoteTransactions.length > 0) {
-          setTransactions((prev) => {
-            const ids = new Set(remoteTransactions.map((t) => t.id));
-            return [...remoteTransactions, ...prev.filter((t) => !ids.has(t.id))];
-          });
+        if (mounted && remoteTransactions !== null) {
+          setTransactions(DEMO_DATA_ENABLED
+            ? (prev) => {
+                const ids = new Set(remoteTransactions.map((t) => t.id));
+                return [...remoteTransactions, ...prev.filter((t) => !ids.has(t.id))];
+              }
+            : remoteTransactions);
         }
       } else if (mounted) {
         setSupabaseProfile(null);
@@ -437,21 +563,10 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setSupabaseUser(data.session?.user ?? null);
       void loadRlsData(data.session?.user ?? null);
       if (data.session?.user?.email) {
-        void authenticateWithGoogleServer({
-          email: data.session.user.email,
-          name:
-            data.session.user.user_metadata?.full_name ||
-            data.session.user.user_metadata?.name,
-          googleSub:
-            data.session.user.user_metadata?.sub || data.session.user.id,
-          avatarUrl:
-            data.session.user.user_metadata?.avatar_url ||
-            data.session.user.user_metadata?.picture,
-          allowRoleChange: false,
-        }).then((syncRes) => {
+        void mintAuthoritativeSessionFromSupabase(data.session).then((syncRes) => {
           if (mounted && syncRes.ok && syncRes.user) {
             setAuthUser(syncRes.user);
-            setUserRole(syncRes.user.role);
+            setUserRoleState(syncRes.user.role);
             syncLocalProfileWithGoogleUser(syncRes.user);
           }
         });
@@ -462,25 +577,61 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (!mounted) return;
       setSupabaseSession(session);
       setSupabaseUser(session?.user ?? null);
+      if (event === 'SIGNED_OUT') {
+        // A Supabase sign-out can also happen outside this tab. Revoke the
+        // authoritative session on the server so a token that is still cached
+        // elsewhere cannot keep using the platform.
+        if (!logoutRevocationInFlight.current) {
+          logoutRevocationInFlight.current = true;
+          void logoutAuthoritativeSession().finally(() => {
+            logoutRevocationInFlight.current = false;
+          });
+        }
+        setStoredAuthoritativeSession(null, null);
+        try {
+          localStorage.removeItem('bos_authoritative_session_token');
+          localStorage.removeItem('bos_session_token');
+        } catch {
+          // ignore storage errors
+        }
+        setAuthUser(null);
+        setSupabaseProfile(null);
+        setIsAccountBlocked(false);
+        setBlockedReason(null);
+        setUserRoleState('customer');
+        clearProtectedSessionCaches();
+        try {
+          localStorage.removeItem('bos_user_profile_v1');
+          localStorage.setItem('user_role', 'customer');
+        } catch {
+          // ignore storage errors
+        }
+        window.dispatchEvent(new CustomEvent('bos-google-oauth-logout'));
+        void loadRlsData(null);
+        return;
+      }
       void loadRlsData(session?.user ?? null);
       if (event === 'SIGNED_IN' && session?.user?.email) {
-        void authenticateWithGoogleServer({
-          email: session.user.email,
-          name:
-            session.user.user_metadata?.full_name ||
-            session.user.user_metadata?.name,
-          googleSub: session.user.user_metadata?.sub || session.user.id,
-          avatarUrl:
-            session.user.user_metadata?.avatar_url ||
-            session.user.user_metadata?.picture,
-          allowRoleChange: false,
-        }).then((syncRes) => {
+        void mintAuthoritativeSessionFromSupabase(session).then((syncRes) => {
           if (mounted && syncRes.ok && syncRes.user) {
             setIsAccountBlocked(false);
             setBlockedReason(null);
             setAuthUser(syncRes.user);
-            setUserRole(syncRes.user.role);
+            setUserRoleState(syncRes.user.role);
             syncLocalProfileWithGoogleUser(syncRes.user);
+            if (window.opener && syncRes.sessionToken) {
+              window.opener.postMessage(
+                {
+                  type: 'OAUTH_AUTH_SUCCESS',
+                  isNewUser: syncRes.isNewUser,
+                  user: syncRes.user,
+                  sessionToken: syncRes.sessionToken,
+                  redirectTarget: syncRes.redirectTarget,
+                },
+                window.location.origin
+              );
+              window.close();
+            }
             window.dispatchEvent(
               new CustomEvent('bos-google-oauth-redirect', {
                 detail: {
@@ -490,6 +641,18 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 },
               })
             );
+          } else if (mounted) {
+            const message = syncRes.message || 'Google sign-in could not be verified. Please try again.';
+            if (syncRes.error === 'ACCOUNT_BLOCKED') {
+              setIsAccountBlocked(true);
+              setBlockedReason(message);
+            }
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: syncRes.error, message }, window.location.origin);
+              window.close();
+            } else {
+              window.dispatchEvent(new CustomEvent('bos-google-oauth-error', { detail: { error: syncRes.error, message } }));
+            }
           }
         });
       }
@@ -516,9 +679,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     try {
       const profilePayload = {
         name: user.name,
-        phone: user.phone || '9876543210',
+        phone: user.phone || '',
         email: user.email,
-        address: user.city ? `${user.city}, India` : 'Banjara Hills, Hyderabad',
+        address: user.city ? `${user.city}, India` : '',
         avatarUrl: user.avatarUrl || '',
         googleSub: user.googleSub,
         authProvider: 'google',
@@ -574,7 +737,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
             'Your account has been suspended or blocked by an administrator. Access is denied.'
         );
         setAuthUser(null);
-        setUserRole('customer');
+        setUserRoleState('customer');
         return;
       }
       if (sessionRes.authenticated && sessionRes.user) {
@@ -582,9 +745,34 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setBlockedReason(null);
         setAuthUser(sessionRes.user);
         if (['customer', 'provider', 'admin'].includes(sessionRes.user.role)) {
-          setUserRole(sessionRes.user.role);
+          setUserRoleState(sessionRes.user.role);
         }
         syncLocalProfileWithGoogleUser(sessionRes.user);
+      } else {
+        // The authoritative session can be missing or expired while the
+        // Supabase session is still valid (a cleared cache, an expired server
+        // session, or a reload that raced the first sign-in). Re-mint it from
+        // the verified Supabase session instead of dropping the user.
+        const supabaseSessionNow = supabase ? (await supabase.auth.getSession()).data.session : null;
+        if (!mounted) return;
+        const reminted = await mintAuthoritativeSessionFromSupabase(supabaseSessionNow);
+        if (!mounted) return;
+        if (reminted.ok && reminted.user) {
+          setIsAccountBlocked(false);
+          setBlockedReason(null);
+          setAuthUser(reminted.user);
+          setUserRoleState(reminted.user.role);
+          syncLocalProfileWithGoogleUser(reminted.user);
+        } else if (reminted.error === 'ACCOUNT_BLOCKED') {
+          setIsAccountBlocked(true);
+          setBlockedReason(reminted.message || 'Your account is blocked.');
+          setAuthUser(null);
+          setUserRoleState('customer');
+          return;
+        } else {
+          setAuthUser(null);
+          setUserRoleState('customer');
+        }
       }
       await refreshServerNotifications();
     };
@@ -599,23 +787,12 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const data = event.data;
       if (!data || typeof data !== 'object') return;
       if (data.type === 'OAUTH_AUTH_SUCCESS' && data.user && data.sessionToken) {
-        setStoredAuthoritativeSession(data.sessionToken, data.user);
-        setIsAccountBlocked(false);
-        setBlockedReason(null);
-        setAuthUser(data.user);
-        if (['customer', 'provider', 'admin'].includes(data.user.role)) {
-          setUserRole(data.user.role);
-        }
-        syncLocalProfileWithGoogleUser(data.user);
-        window.dispatchEvent(
-          new CustomEvent('bos-google-oauth-redirect', {
-            detail: {
-              user: data.user,
-              isNewUser: data.isNewUser,
-              redirectTarget: data.redirectTarget,
-            },
-          })
-        );
+        void applyPopupOAuthLogin({
+          user: data.user,
+          sessionToken: data.sessionToken,
+          isNewUser: data.isNewUser,
+          redirectTarget: data.redirectTarget,
+        });
       } else if (data.type === 'OAUTH_AUTH_ERROR') {
         if (data.error === 'ACCOUNT_BLOCKED') {
           setIsAccountBlocked(true);
@@ -624,6 +801,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
           );
           setAuthUser(null);
         }
+        window.dispatchEvent(new CustomEvent('bos-google-oauth-error', {
+          detail: { error: data.error, message: data.message },
+        }));
       }
     };
 
@@ -645,35 +825,49 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     requestedRole?: UserRole;
     allowRoleChange?: boolean;
   }) => {
-    const res = await authenticateWithGoogleServer(params);
-    if (!res.ok) {
-      if (res.error === 'ACCOUNT_BLOCKED') {
-        setIsAccountBlocked(true);
-        setBlockedReason(
-          res.message || 'Your account has been suspended or blocked by an administrator.'
-        );
-        setAuthUser(null);
+    // Caller-supplied identity fields are not authentication. Start the real
+    // Supabase Google OAuth flow; identity is synced only after the SDK returns
+    // a session that the server independently verifies.
+    //
+    // The popup is opened synchronously inside the click gesture so the browser
+    // cannot discard the user activation while the authorize URL is requested.
+    // When the popup is blocked the same authorize URL is used for a full-page
+    // redirect, so a blocked popup never silently drops the sign-in.
+    const isNative = Capacitor.isNativePlatform();
+    const popup = isNative ? null : window.open(
+      'about:blank',
+      'bos_google_oauth_popup',
+      'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
+    );
+    let oauth = await signInWithSupabaseGoogleOAuth(params.requestedRole || 'customer');
+    if (!oauth.ok || !oauth.url) {
+      // The browser bundle can be without a Supabase client while the server
+      // still has the project configured. Ask the server for its authorize URL.
+      if (!isNative) {
+        const serverOAuth = await fetchGoogleOAuthConfig(params.requestedRole || 'customer');
+        if (serverOAuth.ok && serverOAuth.url) {
+          oauth = { ok: true, url: serverOAuth.url };
+        }
       }
-      return {
-        ok: false,
-        error: res.error,
-        message: res.message,
-      };
     }
-    if (res.user) {
-      setIsAccountBlocked(false);
-      setBlockedReason(null);
-      setAuthUser(res.user);
-      setUserRole(res.user.role);
-      syncLocalProfileWithGoogleUser(res.user);
-      await refreshServerNotifications();
+    if (!oauth.ok || !oauth.url) {
+      popup?.close();
+      return { ok: false, error: oauth.error || 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'Secure Google sign-in is unavailable. Configure Supabase Auth and try again.' };
+    }
+    if (isNative) {
+      await Browser.open({ url: oauth.url });
+    } else {
+      launchGoogleOAuthWindow({
+        window: popup,
+        url: oauth.url,
+        redirect: (url) => window.location.assign(url),
+      });
     }
     return {
-      ok: true,
-      isNewUser: res.isNewUser,
-      user: res.user,
-      redirectTarget: res.redirectTarget,
-      message: res.message,
+      ok: false,
+      pending: true,
+      error: 'GOOGLE_OAUTH_PENDING',
+      message: 'Complete Google sign-in to continue. Your account updates after the server verifies it.',
     };
   };
 
@@ -682,27 +876,71 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     sessionToken: string;
     isNewUser?: boolean;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
-  }) => {
+  }): Promise<void> => {
     setStoredAuthoritativeSession(payload.sessionToken, payload.user);
-    setIsAccountBlocked(false);
-    setBlockedReason(null);
-    setAuthUser(payload.user);
-    setUserRole(payload.user.role);
-    syncLocalProfileWithGoogleUser(payload.user);
-    void refreshServerNotifications();
+    setAuthUser(null);
+    setUserRoleState('customer');
+    return fetchCurrentAuthSession().then(async (sessionRes) => {
+      if (sessionRes.blocked) {
+        setIsAccountBlocked(true);
+        setBlockedReason(sessionRes.message || 'Your account is blocked.');
+        setAuthUser(null);
+        setUserRoleState('customer');
+        return;
+      }
+      if (!sessionRes.authenticated || !sessionRes.user) {
+        await logoutAuthoritativeSession();
+        return;
+      }
+      setIsAccountBlocked(false);
+      setBlockedReason(null);
+      setAuthUser(sessionRes.user);
+      setUserRoleState(sessionRes.user.role);
+      syncLocalProfileWithGoogleUser(sessionRes.user);
+      void refreshServerNotifications();
+      window.dispatchEvent(new CustomEvent('bos-google-oauth-redirect', {
+        detail: {
+          user: sessionRes.user,
+          isNewUser: payload.isNewUser,
+          redirectTarget: payload.redirectTarget,
+        },
+      }));
+    });
+  };
+
+  const clearProtectedSessionCaches = () => {
+    setBookings([]);
+    setEnquiries([]);
+    setFavoriteIds([]);
+    setTransactions([]);
+    setNotifications([]);
+    try {
+      localStorage.removeItem('marketplace_bookings');
+      localStorage.removeItem('marketplace_enquiries');
+      localStorage.removeItem('marketplace_transactions');
+      localStorage.removeItem('bos_saved_favorites_v1');
+    } catch { /* Storage can be unavailable in private browsing. */ }
   };
 
   const logoutGoogleSession = async () => {
-    await logoutAuthoritativeSession();
+    logoutRevocationInFlight.current = true;
+    try {
+      await logoutAuthoritativeSession();
+    } finally {
+      logoutRevocationInFlight.current = false;
+    }
     setAuthUser(null);
     setSupabaseUser(null);
     setSupabaseSession(null);
     setSupabaseProfile(null);
     setIsAccountBlocked(false);
     setBlockedReason(null);
-    setUserRole('customer');
+    setUserRoleState('customer');
+    clearProtectedSessionCaches();
     try {
       localStorage.removeItem('bos_user_profile_v1');
+      localStorage.removeItem('bos_authoritative_session_token');
+      localStorage.removeItem('bos_session_token');
       localStorage.setItem('user_role', 'customer');
     } catch {
       // ignore
@@ -710,30 +948,38 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     window.dispatchEvent(new CustomEvent('bos-google-oauth-logout'));
   };
 
-  const updateUserProfile = async (updates: {
-    fullName?: string;
-    phone?: string;
-    role?: UserRole;
-  }) => {
-    if (updates.role) {
-      setUserRole(updates.role);
-    }
+  /**
+   * Save the profile. The result reports where the change was persisted so
+   * the UI never claims a durable profile update that did not happen.
+   */
+  const updateUserProfile = async (updates: { fullName?: string; phone?: string; bio?: string }): Promise<{
+    ok: boolean;
+    persisted: 'profile' | 'account_only' | 'none';
+  }> => {
     if (authUser) {
       const nextAuthUser: AuthoritativeGoogleUser = {
         ...authUser,
         name: updates.fullName ?? authUser.name,
         phone: updates.phone ?? authUser.phone,
-        role: updates.role ?? authUser.role,
+        role: authUser.role,
       };
       setAuthUser(nextAuthUser);
       syncLocalProfileWithGoogleUser(nextAuthUser);
     }
-    if (!isSupabaseConfigured) return;
-    const updated = await upsertRlsProfile(updates);
-    if (updated) {
-      setSupabaseProfile(updated);
-      setUserRole(updated.role);
+    if (!isSupabaseConfigured) {
+      return { ok: false, persisted: 'none' };
     }
+    const updated = await upsertRlsProfile({ fullName: updates.fullName, phone: updates.phone, bio: updates.bio });
+    if (updated.profile) {
+      setSupabaseProfile(updated.profile);
+      if (['customer', 'provider', 'admin'].includes(updated.profile.role)) {
+        setUserRoleState(updated.profile.role);
+      }
+      return { ok: updated.accountUpdated, persisted: 'profile' };
+    }
+    // The account metadata may have been updated, but the durable profile row
+    // could not be written. The caller must report this honestly.
+    return { ok: false, persisted: updated.accountUpdated ? 'account_only' : 'none' };
   };
 
   const syncAccountData = async (): Promise<number> => {
@@ -752,8 +998,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Sync to local storage
   useEffect(() => {
+    if (!DEMO_DATA_ENABLED) return;
     try {
-      localStorage.setItem('marketplace_listings_v17', JSON.stringify(listings));
+      localStorage.setItem('marketplace_listings_v18', JSON.stringify(listings));
     } catch {}
   }, [listings]);
 
@@ -770,35 +1017,92 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [postingPlans]);
 
   useEffect(() => {
+    if (!DEMO_DATA_ENABLED) return;
     try {
       localStorage.setItem('marketplace_enquiries', JSON.stringify(enquiries));
     } catch {}
   }, [enquiries]);
 
   useEffect(() => {
+    if (!DEMO_DATA_ENABLED) return;
     try {
       localStorage.setItem('marketplace_bookings', JSON.stringify(bookings));
     } catch {}
   }, [bookings]);
 
   useEffect(() => {
+    if (!DEMO_DATA_ENABLED) return;
     try {
       localStorage.setItem('marketplace_reviews', JSON.stringify(reviews));
     } catch {}
   }, [reviews]);
 
   useEffect(() => {
+    if (!DEMO_DATA_ENABLED) return;
     try {
       localStorage.setItem('marketplace_transactions', JSON.stringify(transactions));
     } catch {}
   }, [transactions]);
+
+  // One PostgreSQL source: hydrate approved listings from the public feed.
+  // Only a `postgresql` response is trusted, so local JSON/demo data can never
+  // be mistaken for database-backed inventory.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch('/api/marketplace/listings', {
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data || data.source !== 'postgresql' || !Array.isArray(data.listings)) return;
+        const mapped = data.listings.map(mapPostgresPublicListing);
+        if (cancelled) return;
+        setListings(DEMO_DATA_ENABLED
+          ? (previous) => {
+              const remoteIds = new Set(mapped.map((listing: MarketplaceListing) => listing.id));
+              return [...mapped, ...previous.filter((listing: MarketplaceListing) => !remoteIds.has(listing.id))];
+            }
+          : mapped);
+      } catch {
+        // Offline or JSON mode: keep the existing local state.
+      }
+    })();
+    const refresh = () => {
+      void (async () => {
+        try {
+          const response = await fetch('/api/marketplace/listings', { headers: { Accept: 'application/json' } });
+          if (!response.ok) return;
+          const data = await response.json();
+          if (cancelled || data?.source !== 'postgresql' || !Array.isArray(data.listings)) return;
+          const mapped = data.listings.map(mapPostgresPublicListing);
+          setListings(DEMO_DATA_ENABLED
+            ? (previous) => {
+                const remoteIds = new Set(mapped.map((listing: MarketplaceListing) => listing.id));
+                return [...mapped, ...previous.filter((listing: MarketplaceListing) => !remoteIds.has(listing.id))];
+              }
+            : mapped);
+        } catch { /* Keep the current view on transient network failures. */ }
+      })();
+    };
+    const interval = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('bos-marketplace-listings-updated', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('bos-marketplace-listings-updated', refresh);
+    };
+  }, []);
 
   // Cross-tab real-time state synchronization for concurrent bookings, seat locks, enquiries & admin updates
   useEffect(() => {
     const handleStorageSync = (e: StorageEvent) => {
       if (!e.newValue) return;
       try {
-        if (e.key === 'marketplace_listings_v17') {
+        if (e.key === 'marketplace_listings_v18') {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setListings(parsed.map((item) => ensureListingPriceBreakdown(item)));
         } else if (e.key === 'marketplace_bookings') {
@@ -858,14 +1162,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       },
       ...prev
     ]);
-
-    // Customer registers as a provider upon submitting their provider request form
-    if (userRole === 'customer') {
-      setUserRole('provider');
-      try {
-        localStorage.setItem('user_role', 'provider');
-      } catch {}
-    }
 
     // Persist to authoritative server & Supabase
     void syncServerProviderListing('create', newListing);
@@ -1046,6 +1342,17 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }));
   };
 
+  const toggleSubcategoryEnabled = (categoryId: string, subcategoryName: string) => {
+    setCategories(prev => prev.map(c => {
+      if (c.id !== categoryId) return c;
+      const disabled = c.disabledSubcategories ?? [];
+      const next = disabled.includes(subcategoryName)
+        ? disabled.filter(s => s !== subcategoryName)
+        : [...disabled, subcategoryName];
+      return { ...c, disabledSubcategories: next };
+    }));
+  };
+
   const addCustomFieldToCategory = (categoryId: string, fieldData: Omit<CustomFieldDef, 'id'>) => {
     const newField: CustomFieldDef = {
       ...fieldData,
@@ -1135,10 +1442,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
 
     setBookings(prev => [newBooking, ...prev]);
-
-    if (isSupabaseConfigured) {
-      void insertRlsBooking(newBooking);
-    }
 
     setNotifications(prev => [
       {
@@ -1266,10 +1569,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
 
     setTransactions(prev => [newTx, ...prev]);
-
-    if (isSupabaseConfigured) {
-      void insertRlsTransaction(newTx);
-    }
 
     setNotifications(prev => [
       {
@@ -1471,6 +1770,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         deleteCategory,
         addSubcategoryToCategory,
         deleteSubcategoryFromCategory,
+        toggleSubcategoryEnabled,
         addCustomFieldToCategory,
         deleteCustomFieldFromCategory,
         updatePostingPlan,

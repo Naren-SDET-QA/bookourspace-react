@@ -37,6 +37,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { 
     userRole, 
     setUserRole, 
+    authUser,
+    isAccountBlocked,
     notifications, 
     markNotificationRead, 
     clearAllNotifications,
@@ -48,6 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleRoleChange = (role: UserRole) => {
+    if (role !== 'customer' && (isAccountBlocked || authUser?.role !== role)) return;
     setUserRole(role);
     if (role === 'admin') {
       setActiveView('admin_console');
@@ -57,6 +60,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       setActiveView('marketplace');
     }
   };
+
+  const canUseRole = (role: UserRole) =>
+    role === 'customer' || (!isAccountBlocked && authUser?.role === role);
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
@@ -79,6 +85,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => handleRoleChange('provider')}
+              disabled={!canUseRole('provider')}
+              aria-disabled={!canUseRole('provider')}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                 userRole === 'provider'
                   ? 'bg-emerald-600 text-white shadow-xs'
@@ -91,6 +99,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => handleRoleChange('admin')}
+              disabled={!canUseRole('admin')}
+              aria-disabled={!canUseRole('admin')}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                 userRole === 'admin'
                   ? 'bg-amber-500 text-slate-950 shadow-xs'

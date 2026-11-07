@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   preflightDevelopmentSupabaseConfig,
+  resolveSupabaseEnvironment,
   resolveSupabaseConfig as resolveRawSupabaseConfig,
 } from '../src/lib/supabaseConfig.ts';
 
@@ -143,6 +145,52 @@ test('the previously hard-coded project ref is accepted when explicitly designat
   assert.equal(result.isConfigured, true);
   assert.equal(result.projectId, TEST_REASSIGNED_PROJECT_ID);
   assert.deepEqual(result.errors, []);
+});
+
+test('browser environment resolver accepts the explicitly allowlisted development target', () => {
+  const result = resolveSupabaseEnvironment({
+    VITE_SUPABASE_URL: `https://${TEST_REASSIGNED_PROJECT_ID}.supabase.co`,
+    VITE_SUPABASE_PROJECT_ID: TEST_REASSIGNED_PROJECT_ID,
+    VITE_SUPABASE_DEVELOPMENT_PROJECT_ID: TEST_REASSIGNED_PROJECT_ID,
+    VITE_SUPABASE_PUBLISHABLE_KEY: anonKeyFor(TEST_REASSIGNED_PROJECT_ID),
+  });
+  assert.equal(result.isConfigured, true);
+  assert.equal(result.projectId, TEST_REASSIGNED_PROJECT_ID);
+});
+
+test('browser environment resolver fails closed for missing, mismatched and secret configuration', () => {
+  const missing = resolveSupabaseEnvironment({});
+  assert.equal(missing.projectId, '');
+  assert.equal(missing.projectUrl, '');
+  assert.equal(missing.isConfigured, false);
+
+  const mismatched = resolveSupabaseEnvironment({
+    VITE_SUPABASE_URL: `https://${TEST_DEV_PROJECT_ID}.supabase.co`,
+    VITE_SUPABASE_PROJECT_ID: TEST_REASSIGNED_PROJECT_ID,
+    VITE_SUPABASE_DEVELOPMENT_PROJECT_ID: TEST_DEV_PROJECT_ID,
+    VITE_SUPABASE_PUBLISHABLE_KEY: anonKeyFor(TEST_DEV_PROJECT_ID),
+  });
+  assert.equal(mismatched.projectId, '');
+  assert.equal(mismatched.projectUrl, '');
+  assert.equal(mismatched.isConfigured, false);
+  assert.ok(hasError(mismatched, 'SUPABASE_PROJECT_REFERENCE_MISMATCH'));
+
+  const secret = resolveSupabaseEnvironment({
+    VITE_SUPABASE_URL: `https://${TEST_DEV_PROJECT_ID}.supabase.co`,
+    VITE_SUPABASE_PROJECT_ID: TEST_DEV_PROJECT_ID,
+    VITE_SUPABASE_DEVELOPMENT_PROJECT_ID: TEST_DEV_PROJECT_ID,
+    VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_secret_not-for-browser',
+  });
+  assert.equal(secret.isConfigured, false);
+  assert.equal(secret.publishableKey, '');
+  assert.ok(hasError(secret, 'SUPABASE_KEY_IS_SECRET_KEY'));
+});
+
+test('browser client uses the shared resolver and has no hardcoded project exclusion or URL fallback', () => {
+  const browserClient = readFileSync(new URL('../src/lib/supabaseClient.ts', import.meta.url), 'utf8');
+  assert.match(browserClient, /resolveSupabaseEnvironment\(/);
+  assert.doesNotMatch(browserClient, /ezrxykyocgbolpaebnqx/);
+  assert.doesNotMatch(browserClient, /https:\$\{[^}]*PROJECT_ID[^}]*\}\.supabase\.co/);
 });
 
 test('development target must have an explicit project ID', () => {

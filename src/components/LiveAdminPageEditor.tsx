@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import SafeImage from './SafeImage';
+import UniversalMediaManager from './UniversalMediaManager';
 import {
   ShieldCheck,
   Edit3,
@@ -22,7 +24,6 @@ import {
   Trash2,
   MousePointerClick,
   Sparkles,
-  Upload,
   Globe,
   Lock,
   ExternalLink,
@@ -282,25 +283,6 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
         [activePageId]: updater(prev.pages[activePageId]),
       },
     }));
-  };
-
-  const handleHeroImageUpload = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        updateCurrentPageDraft((p) => ({
-          ...p,
-          heroBanner: {
-            ...p.heroBanner,
-            visible: true,
-            imageUrl: reader.result as string,
-          },
-        }));
-        notify('🖼️ Banner image uploaded to draft!');
-      }
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleMoveSection = (index: number, direction: 'up' | 'down') => {
@@ -666,7 +648,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                         background: `linear-gradient(135deg, ${currentPageDraft.heroBanner.bgColorFrom}, ${currentPageDraft.heroBanner.bgColorTo})`,
                       }}
                     >
-                      <img
+                      <SafeImage category="general"
                         src={currentPageDraft.heroBanner.imageUrl}
                         alt="Hero preview"
                         className="w-12 h-12 rounded-lg object-cover shrink-0"
@@ -1075,7 +1057,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="font-bold block mb-1">Banner Image URL or Upload</label>
+                      <label className="font-bold block mb-1">Banner Image URL</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
@@ -1088,16 +1070,10 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                           }
                           className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                         />
-                        <label className="px-3 py-2 rounded-xl bg-[#4338CA] text-white font-black cursor-pointer flex items-center gap-1 shrink-0">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Upload</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleHeroImageUpload(e.target.files?.[0])}
-                            className="hidden"
-                          />
-                        </label>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">Use an approved HTTPS object URL for a publishable banner. Inline file data is not stored in App Builder records.</p>
+                      <div className="mt-3">
+                        <UniversalMediaManager moduleKey={activePageId} parentType="live_builder_banner" title="Preview banner media" maxFiles={8} />
                       </div>
                     </div>
 

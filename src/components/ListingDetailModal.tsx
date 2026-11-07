@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage, { imageCategoryFor } from './SafeImage';
 import { 
   X, 
   Star, 
@@ -67,6 +68,14 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   if (!listing) return null;
 
   const listingReviews = reviews.filter(r => r.listingId === listing.id);
+  const isMovieListing = listing.categoryId.startsWith('movie-') || listing.customFieldValues?.sectionType === 'movies';
+  const isRequestableRangeListing = listing.categoryId.startsWith('hotel-') || listing.categoryId.startsWith('venue-') ||
+    listing.customFieldValues?.sectionType === 'hotel_stay' || listing.customFieldValues?.sectionType === 'venues' || listing.entityType === 'event';
+  const primaryActionLabel = isMovieListing
+    ? (translations[currentLang] || translations.en).bookNow
+    : isRequestableRangeListing
+      ? currentLang === 'te' ? 'అందుబాటును అడగండి' : 'Request availability'
+      : currentLang === 'te' ? 'ప్రొవైడర్‌ను సంప్రదించండి' : 'Contact provider';
 
   // Dynamic projection calculations
   const currentRating = listing.providerRating ?? 5.0;
@@ -196,7 +205,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
           {/* Image Showcase */}
           <div className="space-y-2">
             <div className="w-full h-64 sm:h-80 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800">
-              <img
+              <SafeImage category={imageCategoryFor(listing.categoryId)}
                 src={listing.images[activeImageIdx] || listing.images[0]}
                 alt={listing.title}
                 className="w-full h-full object-cover"
@@ -212,7 +221,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                       activeImageIdx === idx ? 'border-purple-600 scale-105' : 'border-transparent opacity-70'
                     }`}
                   >
-                    <img src={img} alt="thumb" className="w-full h-full object-cover" />
+                    <SafeImage category={imageCategoryFor(listing.categoryId)} src={img} alt="thumb" className="w-full h-full object-cover" sizes="64px" />
                   </button>
                 ))}
               </div>
@@ -776,7 +785,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
           {/* Provider / Seller Contact Card */}
           <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-indigo-950/40 p-4 sm:p-5 rounded-2xl border border-purple-200 dark:border-purple-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <img
+              <SafeImage category="general"
                 src={listing.providerAvatar}
                 alt={displayProviderName}
                 className="w-14 h-14 rounded-2xl object-cover ring-2 ring-purple-300 dark:ring-purple-700 bg-white"
@@ -843,7 +852,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                   <div key={rev.id} className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <img src={rev.customerAvatar} alt="cust" className="w-6 h-6 rounded-full object-cover" />
+                        <SafeImage category="general" src={rev.customerAvatar} alt="cust" className="w-6 h-6 rounded-full object-cover" />
                         <span className="font-bold text-xs text-slate-900 dark:text-white">{rev.customerName}</span>
                         {rev.verifiedCustomer && (
                           <span className="text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1.5 py-0.2 rounded-sm font-semibold flex items-center gap-1">
@@ -1020,7 +1029,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
             className="flex-1 py-3 rounded-2xl bg-[#4A148C] hover:bg-purple-900 active:scale-95 text-white text-xs sm:text-sm font-black shadow-lg shadow-purple-950/20 flex items-center justify-center gap-2 transition-all"
           >
             <Calendar className="w-4 h-4 text-amber-300" />
-            <span>{t.bookNow}</span>
+            <span>{primaryActionLabel}</span>
           </button>
         </div>
       </div>

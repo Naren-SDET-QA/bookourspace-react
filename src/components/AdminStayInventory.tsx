@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { buildAuthHeaders, supabase } from '../lib/supabaseClient';
+import { stayLifecycleOf, stayPayload } from '../lib/stayListingGate';
 
 type StayUnitDraft = { id?: string; label: string; floor: string; is_active: boolean };
 type RoomTypeDraft = {
@@ -227,6 +228,7 @@ export function AdminStayInventory() {
 
   return (
     <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="admin-stays-title">
+      <StayAdminReviewPanel />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Atomic Supabase RPC · RLS protected</p><h4 id="admin-stays-title" className="text-lg font-black">Hotels & stays inventory</h4><p className="text-xs text-slate-500">Properties, room types and physical units save in one transaction. Deactivation preserves linked booking records.</p></div>
         <button type="button" onClick={() => edit()} disabled={!authorized || saving} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create property</button>
@@ -258,7 +260,8 @@ export function AdminStayInventory() {
           <input aria-label="Base price in rupees" type="number" min="0" step="0.01" placeholder="Price per night ₹" value={draft.basePriceRupees} onChange={(event) => setInput({ basePriceRupees: event.target.value })} required className="rounded-lg border p-2 text-xs" />
           <input aria-label="Tax percent" type="number" min="0" step="0.01" value={draft.taxPercent} onChange={(event) => setInput({ taxPercent: event.target.value })} className="rounded-lg border p-2 text-xs" />
           <input aria-label="Amenities" placeholder="Amenities, comma separated" value={draft.amenities} onChange={(event) => setInput({ amenities: event.target.value })} className="rounded-lg border p-2 text-xs sm:col-span-2" />
-          <select aria-label="Listing status" value={draft.listingStatus} onChange={(event) => setInput({ listingStatus: event.target.value as StayDraft['listingStatus'], isActive: event.target.value !== 'expired' })} className="rounded-lg border p-2 text-xs"><option value="pending_approval">Draft</option><option value="active">Published</option><option value="expired">Deactivated</option></select>
+          <select aria-label="Listing status" value={draft.listingStatus} onChange={(event) => setInput({ listingStatus: event.target.value as StayDraft['listingStatus'], isActive: event.target.value !== 'expired' })} className="rounded-lg border p-2 text-xs"><option value="pending_approval">Pending Super Admin</option><option value="active">Approved / published</option><option value="expired">Suspended</option></select>
+          <label className="flex items-center gap-2 text-xs sm:col-span-2"><input type="checkbox" checked={draft.existingPayload.demo === true} onChange={(event) => setInput({ existingPayload: { ...draft.existingPayload, demo: event.target.checked } })} /> Demo hotel (never accepts real bookings)</label>
           <textarea aria-label="Description" placeholder="Description" value={draft.description} onChange={(event) => setInput({ description: event.target.value })} className="min-h-10 rounded-lg border p-2 text-xs sm:col-span-2 lg:col-span-4" />
         </div>
         <div className="space-y-3">{draft.roomTypes.map((room, roomIndex) => <fieldset key={room.id ?? `new-room-${roomIndex}`} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3"><legend className="px-1 text-xs font-bold">Room type {roomIndex + 1}</legend>
@@ -269,5 +272,119 @@ export function AdminStayInventory() {
         <div className="flex gap-2"><button disabled={saving} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Saving transaction…' : 'Save inventory'}</button><button type="button" disabled={saving} onClick={() => setDraft(null)} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button></div>
       </form>}
     </section>
+  );
+}
+
+type AdminStayRow = {
+  listing_id: string;
+  title: string;
+  status: string;
+  payload: Record<string, unknown> | null;
+  owner_name: string | null;
+  name: string;
+  city: string;
+  is_active: boolean;
+  is_verified: boolean;
+};
+
+function StayAdminReviewPanel() {
+  const [rows, setRows] = useState<AdminStayRow[]>([]);
+  const [audit, setAudit] = useState<Array<{ action: string; reason: string | null; created_at: string; actor_role: string }>>([]);
+  const [selected, setSelected] = useState('');
+  const [reason, setReason] = useState('');
+  const [demo, setDemo] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setError('');
+    const response = await fetch('/api/stays/admin/listings', { headers: buildAuthHeaders() });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok === false) {
+      setRows([]);
+      setError(body?.message || body?.error || 'Sign in as Super Admin to review hotels.');
+      return;
+    }
+    setRows(Array.isArray(body.listings) ? body.listings : []);
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const loadAudit = async (listingId: string) => {
+    const response = await fetch(`/api/stays/admin/listings/${encodeURIComponent(listingId)}/audit`, { headers: buildAuthHeaders() });
+    const body = await response.json().catch(() => ({}));
+    setAudit(Array.isArray(body.events) ? body.events : []);
+  };
+
+  const review = async (action: string) => {
+    if (!selected) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const response = await fetch(`/api/stays/admin/listings/${encodeURIComponent(selected)}/review`, {
+        method: 'POST',
+        headers: buildAuthHeaders({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ action, reason, demo }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body?.ok === false) throw new Error(body?.message || body?.error || 'Review failed');
+      setNotice(`Hotel ${action.replace(/_/g, ' ')} recorded.`);
+      setReason('');
+      await load();
+      await loadAudit(selected);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Review failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-6 space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Super Admin review</p>
+          <h5 className="text-sm font-black">Approve, reject, request changes, suspend or reactivate</h5>
+        </div>
+        <button type="button" onClick={() => void load()} className="rounded-lg border px-3 py-1.5 text-xs font-bold">Refresh queue</button>
+      </div>
+      {error && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-xs text-rose-900">{error}</p>}
+      {notice && <p role="status" className="rounded-lg bg-emerald-50 p-2 text-xs text-emerald-900">{notice}</p>}
+      <div className="space-y-2">
+        {rows.slice(0, 20).map((row) => {
+          const life = stayLifecycleOf(stayPayload(row.payload));
+          return (
+            <article key={row.listing_id} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white p-2 ${selected === row.listing_id ? 'border-indigo-400' : 'border-slate-200'}`}>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold">{row.name || row.title}</p>
+                <p className="text-[11px] text-slate-500">{row.city} · {row.owner_name || 'owner'} · {life} · {row.status}{row.payload && stayPayload(row.payload).demo === true ? ' · demo' : ''}</p>
+              </div>
+              <button type="button" onClick={() => { setSelected(row.listing_id); setDemo(stayPayload(row.payload).demo === true); void loadAudit(row.listing_id); }} className="rounded-lg border px-2 py-1 text-xs font-bold">Select</button>
+            </article>
+          );
+        })}
+        {rows.length === 0 && !error && <p className="text-xs text-slate-500">No stay listings in this database session.</p>}
+      </div>
+      {selected && (
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+          <textarea aria-label="Review reason" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (required to reject, request changes or suspend)" className="min-h-16 w-full rounded-lg border p-2 text-xs" />
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={demo} onChange={(event) => setDemo(event.target.checked)} /> Mark as demo (never accepts real bookings)</label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => void review('approve')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Approve</button>
+            <button type="button" disabled={busy} onClick={() => void review('request_changes')} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-50">Request changes</button>
+            <button type="button" disabled={busy} onClick={() => void review('reject')} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-800 disabled:opacity-50">Reject</button>
+            <button type="button" disabled={busy} onClick={() => void review('suspend')} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-50">Suspend</button>
+            <button type="button" disabled={busy} onClick={() => void review('reactivate')} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-50">Reactivate</button>
+          </div>
+          {audit.length > 0 && (
+            <ul className="space-y-1 text-[11px] text-slate-600">
+              {audit.map((event, index) => (
+                <li key={`${event.created_at}-${index}`}>{event.created_at.slice(0, 19)} · {event.actor_role} · {event.action}{event.reason ? ` — ${event.reason}` : ''}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

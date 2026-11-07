@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
+import SafeImage from './SafeImage';
 import {
   Layers,
   ShieldCheck,
@@ -32,6 +33,7 @@ import {
   UserX,
   RefreshCw,
   Building2,
+  Home,
   History,
   Send,
   Upload,
@@ -39,29 +41,24 @@ import {
   Plug,
   Database,
   Bell,
+  MapPin,
 } from 'lucide-react';
-import {
-  ResponsiveContainer,
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  CartesianGrid,
-} from 'recharts';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { fetchPgAdminBookings } from '../lib/pgBookingClient';
 import { PostingPlan, MarketplaceListing } from '../types/marketplace';
-import { SupremeAdminControlPanel } from './SupremeAdminControlPanel';
-import { AdminReportsAnalyticsSection } from './AdminReportsAnalyticsSection';
-import { AdminThemeManagementSection } from './AdminThemeManagementSection';
-import { AdminIntegrationsSection } from './AdminIntegrationsSection';
-import { AdminDataManagementSection } from './AdminDataManagementSection';
-import { AdminAnnouncementsSection } from './AdminAnnouncementsSection';
-import { AdminPlatformModuleSettings } from './AdminPlatformModuleSettings';
-import { AdminMarketplaceListings } from './AdminMarketplaceListings';
-import { AdminStayInventory } from './AdminStayInventory';
+const SupremeAdminControlPanel = lazy(() => import('./SupremeAdminControlPanel').then((module) => ({ default: module.SupremeAdminControlPanel })));
+const PgAdminWorkspace = lazy(() => import('./PgAdminWorkspace').then((module) => ({ default: module.PgAdminWorkspace })));
+const AdminReportsAnalyticsSection = lazy(() => import('./AdminReportsAnalyticsSection').then((module) => ({ default: module.AdminReportsAnalyticsSection })));
+const AdminThemeManagementSection = lazy(() => import('./AdminThemeManagementSection').then((module) => ({ default: module.AdminThemeManagementSection })));
+const AdminIntegrationsSection = lazy(() => import('./AdminIntegrationsSection').then((module) => ({ default: module.AdminIntegrationsSection })));
+const AdminDataManagementSection = lazy(() => import('./AdminDataManagementSection').then((module) => ({ default: module.AdminDataManagementSection })));
+const AdminAnnouncementsSection = lazy(() => import('./AdminAnnouncementsSection').then((module) => ({ default: module.AdminAnnouncementsSection })));
+const AdminPlatformModuleSettings = lazy(() => import('./AdminPlatformModuleSettings').then((module) => ({ default: module.AdminPlatformModuleSettings })));
+const AdminMarketplaceListings = lazy(() => import('./AdminMarketplaceListings').then((module) => ({ default: module.AdminMarketplaceListings })));
+const AdminStayInventory = lazy(() => import('./AdminStayInventory').then((module) => ({ default: module.AdminStayInventory })));
+const AdminAnalyticsPerformanceModule = lazy(() => import('./AdminAnalyticsAndBilling').then((module) => ({ default: module.AdminAnalyticsPerformanceModule })));
+const AutomatedBillingEnginePanel = lazy(() => import('./AdminAnalyticsAndBilling').then((module) => ({ default: module.AutomatedBillingEnginePanel })));
+const AdminAdPerformanceChart = lazy(() => import('./AdminAdPerformanceChart').then((module) => ({ default: module.AdminAdPerformanceChart })));
 import {
   AdminManagedUser,
   AdminRolePermissions,
@@ -99,6 +96,9 @@ import {
   loadAdminAuditLogs,
   appendAdminAuditLog,
 } from '../utils/adminEnterpriseStore';
+import { setSubcategoryEnabled } from '../lib/subcategoryFlags';
+import { isPopularCategoriesVisible, setPopularCategoriesVisible } from '../lib/homeVisibilitySettings';
+import { loadSectionStyles, saveSectionStyles, type SectionStyles } from '../lib/sectionStyleSettings';
 import {
   ModularTemplateConfig,
   loadModularTemplates,
@@ -121,10 +121,6 @@ import {
   GSTInvoicePayload,
 } from '../utils/gstInvoiceGenerator';
 import {
-  AdminAnalyticsPerformanceModule,
-  AutomatedBillingEnginePanel,
-} from './AdminAnalyticsAndBilling';
-import {
   fetchServerAdminUsers,
   createServerAdminUser,
   updateServerAdminUserStatus,
@@ -137,6 +133,9 @@ import {
 interface AdminDashboardProps {
   onApprovedNavigateToApp?: (listing: MarketplaceListing) => void;
   onOpenLivePageEditor?: () => void;
+  /** Controlled section so the console tab bar in App can drive the workspace. */
+  section?: SuperAdminSectionId;
+  onSectionChange?: (section: SuperAdminSectionId) => void;
 }
 
 export type SuperAdminSectionId =
@@ -152,6 +151,7 @@ export type SuperAdminSectionId =
   | 'dashboard'
   | 'content_management'
   | 'listings_venues'
+  | 'pg_hostels'
   | 'bookings_events'
   | 'feature_management'
   | 'audit_logs'
@@ -174,6 +174,8 @@ interface SensitiveActionModalState {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onApprovedNavigateToApp,
   onOpenLivePageEditor,
+  section,
+  onSectionChange,
 }) => {
   const {
     categories,
@@ -181,6 +183,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     deleteCategory,
     addSubcategoryToCategory,
     deleteSubcategoryFromCategory,
+    toggleSubcategoryEnabled,
     addCustomFieldToCategory,
     deleteCustomFieldFromCategory,
     postingPlans,
@@ -197,8 +200,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   } = useMarketplace();
 
   // Left Sidebar Active Section — starts with User Management, Payment Management, and Ad Management at the top
-  const [activeSection, setActiveSection] =
-    useState<SuperAdminSectionId>('user_management');
+  const [internalSection, setInternalSection] =
+    useState<SuperAdminSectionId>('dashboard');
+  const activeSection = section ?? internalSection;
+  const setActiveSection = (next: SuperAdminSectionId) => {
+    setInternalSection(next);
+    onSectionChange?.(next);
+  };
+
+  // The PG operations badge counts the real PostgreSQL reservations. It is
+  // only a hint; the server authorises every operation underneath it.
+  const [pgAdminBookingCount, setPgAdminBookingCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchPgAdminBookings(50)
+      .then((result) => {
+        if (!cancelled) setPgAdminBookingCount(result.bookings?.length || 0);
+      })
+      .catch(() => {
+        if (!cancelled) setPgAdminBookingCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Toast feedback
   const [adminToast, setAdminToast] = useState<string | null>(null);
@@ -514,7 +539,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
     setUsers(updated);
     saveAdminUsers(updated);
-    void updateServerAdminUserVerify(targetUser.id, nextVerified);
+    void updateServerAdminUserVerify(
+      targetUser.id,
+      nextVerified,
+      `${nextVerified ? 'Verify' : 'Revoke verification for'} ${targetUser.email}: administrator confirmed KYC review.`,
+    );
 
     // Sync verification status to matching listings in MarketplaceContext
     listings.forEach((l) => {
@@ -562,7 +591,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         saveAdminUsers(updated);
         void updateServerAdminUserStatus(
           targetUser.id,
-          willSuspend ? 'suspended' : 'active'
+          willSuspend ? 'suspended' : 'active',
+          `${willSuspend ? 'Suspend' : 'Reactivate'} ${targetUser.email}: administrator confirmed the account review.`,
         );
 
         // Also update provider's listings status in MarketplaceContext
@@ -603,7 +633,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         );
         setUsers(updated);
         saveAdminUsers(updated);
-        void updateServerAdminUserRole(targetUser.id, nextRole);
+        void updateServerAdminUserRole(
+          targetUser.id,
+          nextRole,
+          `Change ${targetUser.email} role from ${targetUser.role} to ${nextRole}: administrator confirmed the access review.`,
+        );
         logAction(
           'User Management',
           'Changed User Role',
@@ -949,6 +983,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('✨');
   const [newSubcategoryInput, setNewSubcategoryInput] = useState('');
+  const [homeVisibilityVersion, setHomeVisibilityVersion] = useState(0);
+  void homeVisibilityVersion;
+  const [sectionStyles, setSectionStylesState] = useState<SectionStyles>(() => loadSectionStyles());
 
   // Custom Field Form
   const [isAddingField, setIsAddingField] = useState(false);
@@ -1284,6 +1321,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       icon: Building2,
     },
     {
+      id: 'pg_hostels',
+      label: 'PGs & Hostels',
+      badge: pgAdminBookingCount || undefined,
+      icon: Home,
+    },
+    {
       id: 'bookings_events',
       label: 'Bookings & Events',
       badge: bookings.length + events.length,
@@ -1318,6 +1361,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   ];
 
   return (
+    <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading administrator tools…</p>}>
     <div className="space-y-5 pb-24 text-slate-900 dark:text-slate-100">
       {/* Top Executive Header with Draft / Preview / Publish & Audit Quick-Access */}
       <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-purple-950 text-white p-4 sm:p-5 rounded-3xl shadow-lg border border-indigo-800/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -2933,7 +2977,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </button>
                   </div>
                   <div className="bg-white text-slate-900 rounded-xl p-3 flex items-center gap-3">
-                    <img
+                    <SafeImage category="general"
                       src={previewAd.imageUrl}
                       alt={previewAd.headline}
                       className="w-20 h-20 rounded-lg object-cover shrink-0"
@@ -2957,85 +3001,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               )}
 
-              {/* Recharts Ad Performance Chart (Impressions, Clicks & Conversion Rate %) */}
-              <div className="p-4 sm:p-5 rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-br from-indigo-50/50 via-white to-purple-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-black uppercase">
-                      <BarChart3 className="w-3 h-3" /> Recharts Visual Analytics
-                    </span>
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
-                      Active Ad Campaign Performance — Impressions, Clicks & Conversion Rate (%)
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-3 text-[11px] font-bold">
-                    <span className="inline-flex items-center gap-1 text-indigo-600">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600 inline-block" /> Impressions
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-emerald-600">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" /> Clicks
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-amber-600">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" /> Conversion Rate (%)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart
-                      data={ads.map((a) => ({
-                        name:
-                          a.campaignName.length > 18
-                            ? a.campaignName.slice(0, 18) + '…'
-                            : a.campaignName,
-                        impressions: a.impressions,
-                        clicks: a.clicks,
-                        conversionRate:
-                          a.impressions > 0
-                            ? Number(((a.clicks / a.impressions) * 100).toFixed(2))
-                            : 0,
-                      }))}
-                      margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} />
-                      <YAxis yAxisId="left" tick={{ fontSize: 10, fontWeight: 700 }} />
-                      <YAxis
-                        yAxisId="right"
-                        orientation="right"
-                        unit="%"
-                        tick={{ fontSize: 10, fontWeight: 700 }}
-                      />
-                      <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700 }} />
-                      <Bar
-                        yAxisId="left"
-                        dataKey="impressions"
-                        name="Impressions"
-                        fill="#4f46e5"
-                        radius={[6, 6, 0, 0]}
-                      />
-                      <Bar
-                        yAxisId="left"
-                        dataKey="clicks"
-                        name="Clicks"
-                        fill="#10b981"
-                        radius={[6, 6, 0, 0]}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        dataKey="conversionRate"
-                        name="Conversion Rate (%)"
-                        stroke="#f59e0b"
-                        strokeWidth={3}
-                        dot={{ r: 4, fill: '#f59e0b' }}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+              {/* Analytics library is loaded only when the admin opens the ads workspace. */}
+              <AdminAdPerformanceChart ads={ads} />
 
               {/* Campaigns List & Controls */}
               <div className="space-y-3">
@@ -3050,7 +3017,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
                     >
                       <div className="flex items-start gap-3.5 min-w-0">
-                        <img
+                        <SafeImage category="general"
                           src={ad.imageUrl}
                           alt={ad.campaignName}
                           className="w-20 h-20 rounded-xl object-cover shrink-0 border border-slate-200"
@@ -3174,6 +3141,141 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Live Ads</span>
                   <div className="text-xl font-black text-purple-600 mt-1">
                     {ads.filter((a) => a.status === 'published').length}
+                  </div>
+                </div>
+              </div>
+
+              {/* QUICK FILTER: PENDING APPROVAL LISTINGS (super admin can jump straight to providers awaiting review) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setModerationFilter('pending_approval');
+                  setActiveSection('listings_venues');
+                }}
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-left transition hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
+              >
+                <span className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400 text-slate-950">
+                    <Clock className="h-4 w-4" />
+                  </span>
+                  <span>
+                    <span className="block text-[13px] font-black text-slate-900 dark:text-white">Pending Approval — Filter listings</span>
+                    <span className="block text-[11px] text-slate-600 dark:text-slate-300">Show only new service-provider listings awaiting super-admin review</span>
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="rounded-full bg-amber-500 px-2.5 py-0.5 text-[11px] font-black text-white">{pendingApprovalsCount}</span>
+                  <span className="text-[16px] font-black text-amber-700 dark:text-amber-300">→</span>
+                </span>
+              </button>
+
+              {/* HOME PAGE VISIBILITY — POPULAR CATEGORIES PER CITY */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-[13px] font-black text-slate-900 dark:text-white">Popular Categories visibility</h4>
+                    <p className="text-[11px] text-slate-500">Toggle the home-page “Popular Categories” strip per city. Hyderabad is hidden by default.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">Home page</span>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  {['Hyderabad', 'Bengaluru', 'Visakhapatnam', 'Vijayawada', 'Mumbai', 'Chennai'].map((city) => {
+                    const visible = isPopularCategoriesVisible(city);
+                    return (
+                      <div key={city} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                        <span className="flex items-center gap-2 text-[12px] font-bold text-slate-800 dark:text-slate-100">
+                          <MapPin className="h-3.5 w-3.5 text-[#7C3AED]" />
+                          {city}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-black ${visible ? 'text-emerald-600' : 'text-rose-500'}`}>{visible ? 'VISIBLE' : 'HIDDEN'}</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={visible}
+                            aria-label={`Toggle Popular Categories for ${city}`}
+                            onClick={() => {
+                              setPopularCategoriesVisible(city, !visible);
+                              setHomeVisibilityVersion((v) => v + 1);
+                            }}
+                            className={`relative rounded-full transition ${visible ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                            style={{ height: 18, width: 32 }}
+                          >
+                            <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-all ${visible ? 'left-[15px]' : 'left-0.5'}`} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* SECTION STYLE SELECTOR — admin chooses which design each section opens with */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-[13px] font-black text-slate-900 dark:text-white">BookOurSpace section display styles</h4>
+                    <p className="text-[11px] text-slate-500">Choose which design each section opens with. Applies to every visitor.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">Layout</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace PG</span>
+                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                      {[['style1', 'PG 1'], ['style2', 'PG 2']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            const next = { ...sectionStyles, pg: val as SectionStyles['pg'] };
+                            setSectionStylesState(next);
+                            saveSectionStyles(next);
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.pg === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace Stay</span>
+                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                      {[['old', 'Stay 1'], ['airbnb', 'Stay 2']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            const next = { ...sectionStyles, stay: val as SectionStyles['stay'] };
+                            setSectionStylesState(next);
+                            saveSectionStyles(next);
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.stay === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace Services</span>
+                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                      {[['old', 'Services 1'], ['triangle', 'Services 2'], ['noddyy', 'Noddyy']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            const next = { ...sectionStyles, services: val as SectionStyles['services'] };
+                            setSectionStylesState(next);
+                            saveSectionStyles(next);
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.services === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3441,27 +3543,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     </div>
 
-                    {/* Subcategories */}
+                    {/* Subcategories — admin can enable/disable each from here */}
                     <div className="space-y-2 bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-2xl">
-                      <label className="text-xs font-bold block">
-                        Subcategories ({activeCategory.subcategories.length})
-                      </label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {activeCategory.subcategories.map((sub, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-1.5 text-[11px] font-medium bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700"
-                          >
-                            <span>{sub}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSubcategory(sub)}
-                              className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-bold block">
+                          Subcategories ({activeCategory.subcategories.length})
+                        </label>
+                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400">
+                          {activeCategory.subcategories.filter((s) => !(activeCategory.disabledSubcategories ?? []).includes(s)).length}/{activeCategory.subcategories.length} enabled
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Toggle a subcategory off to hide it from the public marketplace.
+                      </p>
+                      <div className="space-y-1.5">
+                        {activeCategory.subcategories.map((sub, i) => {
+                          const enabled = !(activeCategory.disabledSubcategories ?? []).includes(sub);
+                          return (
+                            <div
+                              key={`${sub}-${i}`}
+                              className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 transition ${
+                                enabled
+                                  ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-800 dark:bg-emerald-950/30'
+                                  : 'border-slate-200 bg-white opacity-70 dark:border-slate-700 dark:bg-slate-900'
+                              }`}
                             >
-                              ×
-                            </button>
-                          </span>
-                        ))}
+                              <span className={`min-w-0 truncate text-[11.5px] font-semibold ${enabled ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 line-through'}`}>
+                                {sub}
+                              </span>
+                              <div className="flex shrink-0 items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={enabled}
+                                  aria-label={`${enabled ? 'Disable' : 'Enable'} ${sub}`}
+                                  onClick={() => {
+                                    toggleSubcategoryEnabled(activeCategory.id, sub);
+                                    setSubcategoryEnabled(sub, !enabled);
+                                  }}
+                                  className={`relative rounded-full transition ${enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                                  style={{ height: 18, width: 32 }}
+                                >
+                                  <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-all ${enabled ? 'left-[15px]' : 'left-0.5'}`} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSubcategory(sub)}
+                                  className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                                  aria-label={`Delete ${sub}`}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                       <form
                         onSubmit={handleAddSubcategory}
@@ -4045,7 +4181,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={m.id}
                       className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2"
                     >
-                      <img
+                      <SafeImage category="general"
                         src={m.url}
                         alt={m.title}
                         className="w-full h-28 object-cover rounded-xl bg-slate-100"
@@ -4064,6 +4200,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* =====================================================================
               SECTION 6: LISTINGS & VENUES (Approvals, Edits, Reports, Featured, Venue Status)
              ===================================================================== */}
+          {/* =====================================================================
+              SECTION 6b: PGs & HOSTELS (reservations, money, disputes, invoices)
+             ===================================================================== */}
+          {activeSection === 'pg_hostels' && (
+            <div className="space-y-5">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-violet-600">
+                  Section 06b • PG &amp; Hostel Operations
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                  PGs &amp; Hostels (reservations, payments, disputes &amp; invoices)
+                </h3>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Reservations, money and disputes are read from PostgreSQL. Every money action is decided by the
+                  server and needs a super administrator session.
+                </p>
+              </div>
+              <PgAdminWorkspace />
+            </div>
+          )}
+
           {activeSection === 'listings_venues' && (
             <div className="space-y-5">
               <AdminStayInventory />
@@ -4110,7 +4267,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
                     >
                       <div className="flex items-start gap-3 min-w-0">
-                        <img
+                        <SafeImage category="general"
                           src={listing.images[0]}
                           alt={listing.title}
                           className="w-16 h-16 rounded-xl object-cover shrink-0 bg-slate-100"
@@ -5515,5 +5672,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
     </div>
+    </Suspense>
   );
 };

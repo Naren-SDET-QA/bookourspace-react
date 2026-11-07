@@ -103,7 +103,7 @@ test('classes row permits contact but not paid enrolment', () => {
   assert.equal(evaluateCapability(access, 'online_booking').code, 'ONLINE_BOOKING_DISABLED');
 });
 
-test('movies: discovery allowed, checkout blocked without approval', () => {
+test('movies V1: discovery allowed, checkout blocked without approval', () => {
   const access = resolveModuleAccess(
     [flag({ module_key: 'movies', allow_online_booking: true, booking_approved_at: null })],
     'movies'
@@ -111,13 +111,13 @@ test('movies: discovery allowed, checkout blocked without approval', () => {
   assert.equal(access.enabled, true);
   assert.equal(access.contactOwner, true);
   assert.equal(access.onlineBooking, false);
-  assert.equal(access.reason, 'MOVIE_BOOKING_NOT_APPROVED');
+  assert.equal(access.reason, 'MOVIES_V1_DISPLAY_ONLY');
   const gate = evaluateCapability(access, 'online_booking');
   assert.equal(gate.allowed, false);
   assert.equal(gate.status, 403);
 });
 
-test('movies: checkout allowed once approval timestamp exists', () => {
+test('movies V1: checkout stays blocked even if a legacy approval flag is set', () => {
   const access = resolveModuleAccess(
     [
       flag({
@@ -128,8 +128,10 @@ test('movies: checkout allowed once approval timestamp exists', () => {
     ],
     'movies'
   );
-  assert.equal(access.onlineBooking, true);
-  assert.equal(evaluateCapability(access, 'online_booking').allowed, true);
+  assert.equal(access.onlineBooking, false);
+  assert.equal(access.reason, 'MOVIES_V1_DISPLAY_ONLY');
+  assert.equal(evaluateCapability(access, 'online_booking').allowed, false);
+  assert.equal(evaluateCapability(access, 'online_booking').code, 'MOVIES_V1_DISPLAY_ONLY');
 });
 
 test('movie checkout stays blocked while admin leaves the flag off', () => {
