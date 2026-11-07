@@ -308,7 +308,7 @@ export class PlatformSettingsRepository {
 
   async moduleSettings() {
     const { rows } = await this.pool.query(
-      `select settings.module_key, settings.payload, settings.revision,
+      `select registry.module_key, settings.payload, settings.revision,
               settings.updated_at, settings.updated_by,
               profile.full_name, profile.email
          from public.platform_admin_module_registry registry
