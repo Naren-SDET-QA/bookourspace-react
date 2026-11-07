@@ -32,6 +32,7 @@ export LC_ALL=C LANG=C
 TMP_BASE="${TMPDIR:-/tmp}"
 TMP_ROOT="$(mktemp -d "$TMP_BASE/bos-classes-ui.XXXXXX")" || exit 1
 printf '%s\n' "BookOurSpace classes UI e2e scratch directory" > "$TMP_ROOT/.bos-owned"
+export BOS_VITE_CACHE_DIR="$TMP_ROOT/vite-cache"
 PGDATA="$TMP_ROOT/pgdata"
 OUT="$TMP_ROOT/output"
 PGPORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
@@ -357,7 +358,7 @@ DB_URL="postgres://postgres@127.0.0.1:$PGPORT/$DB?sslmode=disable"
 # Non-fatal: if it cannot run, the spec's own mount retries absorb the delay.
 prebundle_vite_deps() {
   [ -x node_modules/.bin/vite ] || return 0
-  node_modules/.bin/vite optimize --logLevel warn >> "$SERVER_LOG" 2>&1 || true
+  BOS_VITE_CACHE_DIR="$BOS_VITE_CACHE_DIR" node_modules/.bin/vite optimize --logLevel warn >> "$SERVER_LOG" 2>&1 || true
 }
 
 start_server() {
@@ -374,6 +375,7 @@ start_server() {
   VITE_ENABLE_DEMO_DATA=false \
   DISABLE_HMR=false \
   BOS_VITE_HMR_PORT="$HM_PORT" \
+  BOS_VITE_CACHE_DIR="$BOS_VITE_CACHE_DIR" \
   BOS_SERVER_HMAC_SECRET="$SECRET" \
   BOS_LISTINGS_DATABASE_URL="$DB_URL" \
   BOS_TEST_AUTHORITATIVE_STORE_PATH="$STORE" \

@@ -126,7 +126,7 @@ try {
   await gotoMarketplace(adminPage, '');
   await adminPage.getByTitle('Open All Sections & Quick Menu').click();
   await adminPage.getByRole('banner').getByRole('button', { name: 'Admin', exact: true }).click();
-  await adminPage.getByRole('heading', { name: 'BookOurSpace Super Admin Console' }).waitFor({ timeout: 45_000 });
+  await adminPage.getByRole('heading', { name: 'BookOurSpace Admin Console' }).waitFor({ timeout: 45_000 });
 
   // Exercise the protected management workspace across the same responsive
   // widths as the public marketplace. These are real local Admin fixtures;

@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import SafeImage from './components/SafeImage';
+import SiteChrome from './components/SiteChrome';
 import {
   Sparkles,
   MapPin,
@@ -59,15 +60,15 @@ import { MarketplaceProvider, useMarketplace } from './context/MarketplaceContex
 import { MarketplaceListing, CustomerAction, EntityType, Booking } from './types/marketplace';
 import { ServiceProvider } from './types';
 import { customerActionList } from './data/customerActions';
-import { venue12Categories } from './data/venueData';
-import { classCategories } from './data/classesData';
-import { pg29Categories } from './data/pgHostelData';
 import {
-  MarketSectionType,
+  venue12Categories,
+  classCategories,
+  pg29Categories,
   servicesCategories,
   hotelStayCategories,
   moviesCategories,
-} from './data/servicesStayMoviesData';
+} from './data/moduleCategories';
+import type { MarketSectionType } from './data/moduleCategories';
 import { playAlertChime } from './utils/audio';
 import { canAccessAdminConsole } from './lib/accessControl';
 import type { SuperAdminSectionId } from './components/AdminDashboard';
@@ -165,8 +166,8 @@ const VoiceRegistrationModal = lazy(() => import('./components/VoiceRegistration
 const VoiceSearchModal = lazy(() => import('./components/VoiceSearchModal').then((module) => ({ default: module.VoiceSearchModal })));
 const ReviewSubmissionModal = lazy(() => import('./components/ReviewSubmissionModal').then((module) => ({ default: module.ReviewSubmissionModal })));
 const RunningBatchesModal = lazy(() => import('./components/RunningBatchesModal').then((module) => ({ default: module.RunningBatchesModal })));
-import { SimpleLoginPage } from './components/SimpleLoginPage';
-import { VenueAgendaView } from './components/VenueAgendaView';
+const SimpleLoginPage = lazy(() => import('./components/SimpleLoginPage').then((module) => ({ default: module.SimpleLoginPage })));
+const VenueAgendaView = lazy(() => import('./components/VenueAgendaView').then((module) => ({ default: module.VenueAgendaView })));
 
 const SupabaseAuthModal = lazy(() => import('./components/SupabaseAuthModal').then((module) => ({ default: module.SupabaseAuthModal })));
 const BookOurSpaceEntryExperience = lazy(() => import('./components/BookOurSpaceEntryExperience'));
@@ -185,24 +186,26 @@ import {
   localizeAreaName
 } from './utils/i18nEngine';
 import { BOSGlobeLoadingScreen } from './components/BOSBrandLogo';
-import { PublishedBuilderRegion } from './components/builder/PublishedBuilderRegion';
+const PublishedBuilderRegion = lazy(() => import('./components/builder/PublishedBuilderRegion').then((module) => ({ default: module.PublishedBuilderRegion })));
+import { SelfHealingBoundary } from './components/SelfHealingBoundary';
+const UserModularTemplateBar = lazy(() => import('./components/ModularSystemEngine').then((module) => ({ default: module.UserModularTemplateBar })));
+const DynamicAdminFeaturesShowcase = lazy(() => import('./components/ModularSystemEngine').then((module) => ({ default: module.DynamicAdminFeaturesShowcase })));
 import {
-  SelfHealingBoundary,
-  UserModularTemplateBar,
-  DynamicAdminFeaturesShowcase,
   loadModularTemplates,
   saveModularTemplates,
   loadDynamicAdminFeatures,
   saveDynamicAdminFeatures,
+  loadSpotlightSubcategoriesModuleMap,
+  loadSearchDateRangeModuleMap,
+  loadHomeScreenLayoutStyle,
+  saveHomeScreenLayoutStyle,
+} from './components/ModularSystemStore';
+import type {
   ModularTemplateConfig,
   DynamicAdminFeature,
   SpotlightModuleSectionKey,
-  loadSpotlightSubcategoriesModuleMap,
-  loadSearchDateRangeModuleMap,
   HomeScreenLayoutStyle,
-  loadHomeScreenLayoutStyle,
-  saveHomeScreenLayoutStyle,
-} from './components/ModularSystemEngine';
+} from './components/ModularSystemStore';
 const SuperAppBentoHomeHub = lazy(() => import('./components/SuperAppBentoHomeHub').then((module) => ({ default: module.SuperAppBentoHomeHub })));
 const CategoryRailStreamExplorer = lazy(() => import('./components/CategoryRailStreamExplorer').then((module) => ({ default: module.CategoryRailStreamExplorer })));
 const LiveSponsoredAdsStrip = lazy(() => import('./components/LiveSponsoredAdsStrip').then((module) => ({ default: module.LiveSponsoredAdsStrip })));
@@ -222,7 +225,6 @@ const UniversalObjectEditorModal = lazy(() => import('./components/UniversalObje
 const LiveAdminPageEditor = lazy(() => import('./components/LiveAdminPageEditor').then((module) => ({ default: module.LiveAdminPageEditor })));
 const UniversalLiveBuilder = lazy(() => import('./components/UniversalLiveBuilder').then((module) => ({ default: module.UniversalLiveBuilder })));
 const QuickBookChatAssistant = lazy(() => import('./components/QuickBookChatAssistant').then((module) => ({ default: module.QuickBookChatAssistant })));
-const SiteChrome = lazy(() => import('./components/SiteChrome'));
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
@@ -2822,7 +2824,7 @@ function MarketplaceAppContent() {
             >
               {/* Published builder region: presentation only; the live module experience below keeps its booking, inventory and pricing logic. */}
               <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-3">
-                <PublishedBuilderRegion pageKey={activeSectionExperience} />
+                <Suspense fallback={null}><PublishedBuilderRegion pageKey={activeSectionExperience} /></Suspense>
               </div>
 
               {activeSectionExperience === 'pg_hostels' && (
@@ -5013,6 +5015,7 @@ function MarketplaceAppContent() {
             {/* INDEPENDENT MODULES & TEMPLATES CUSTOMIZER BAR (ADMIN ENABLE/DISABLE • DEFAULT HIDDEN) */}
             {isTemplateEnabled('independent_modules_bar') && (
               <SelfHealingBoundary moduleId="modular_template_bar" moduleName="Independent Modules & Templates Bar">
+                <Suspense fallback={null}>
                 <UserModularTemplateBar
                   templates={modularTemplates}
                   onUpdateTemplates={(next) => {
@@ -5028,6 +5031,7 @@ function MarketplaceAppContent() {
                     setActiveView('admin_console');
                   }}
                 />
+                </Suspense>
               </SelfHealingBoundary>
             )}
 
@@ -5076,6 +5080,7 @@ function MarketplaceAppContent() {
                   setModularTemplates(next);
                 }}
               >
+                <Suspense fallback={null}>
                 <DynamicAdminFeaturesShowcase
                   features={dynamicFeatures}
                   activeSection={activeMarketSection}
@@ -5087,6 +5092,7 @@ function MarketplaceAppContent() {
                     saveDynamicAdminFeatures(updated);
                   }}
                 />
+                </Suspense>
               </SelfHealingBoundary>
             )}
 
@@ -5339,7 +5345,7 @@ function MarketplaceAppContent() {
 
 
             {/* UNIVERSAL BUILDER — PUBLISHED CONFIGURABLE REGION (presentation only; live listing/booking logic stays in the feed below) */}
-            {homeEnhancementsReady && <PublishedBuilderRegion pageKey={activeMarketSection} />}
+            {homeEnhancementsReady && <Suspense fallback={null}><PublishedBuilderRegion pageKey={activeMarketSection} /></Suspense>}
 
             {/* SCHEDULED SPOTLIGHT STRIP ANNOUNCEMENTS */}
             {homeEnhancementsReady && <Suspense fallback={null}><LiveScheduledAnnouncementsBanner
@@ -5567,10 +5573,12 @@ function MarketplaceAppContent() {
                   onOpenListing={handleSelectListing}
                 />
                 {sectionStyles.venues === 'agenda' && (
+                  <Suspense fallback={null}>
                   <VenueAgendaView
                     listings={locationFilteredListings.filter((l) => l.categoryId.startsWith('venue-'))}
                     onOpen={handleSelectListing}
                   />
+                  </Suspense>
                 )}
               </div>
             )}
@@ -6604,6 +6612,7 @@ function MarketplaceAppContent() {
 
       {/* SIMPLE FULL-PAGE SIGN-IN */}
       {isLoginPageOpen && (
+        <Suspense fallback={null}>
         <SimpleLoginPage
           onClose={() => {
             setIsLoginPageOpen(false);
@@ -6616,6 +6625,7 @@ function MarketplaceAppContent() {
             setIsAuthModalOpen(true);
           }}
         />
+        </Suspense>
       )}
 
       {/* SUPABASE AUTHENTICATION MODAL */}

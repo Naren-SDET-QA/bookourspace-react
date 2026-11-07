@@ -49,11 +49,21 @@ async function searchApi(request: APIRequestContext, query: string) {
   };
 }
 
-test('startup reaches marketplace chrome in under 3 seconds', async ({ page }) => {
+test('cold Guest Home exposes search and all six modules in under 3 seconds', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/src/main.tsx', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   const started = Date.now();
-  const response = await page.goto('/');
+  const response = await page.goto('/', { waitUntil: 'commit' });
   expect(response?.ok()).toBeTruthy();
-  await expect(page.getByTestId('universal-marketplace-header')).toBeVisible();
+  await page.waitForFunction(() => (window as any).__bosEntryActionsReady === true);
+  await page.getByTestId('entry-continue-guest').click();
+  const quickHome = page.locator('#bos-quick-home-shell');
+  await expect(quickHome).toBeVisible();
+  await expect(quickHome.getByRole('searchbox')).toBeVisible();
+  await expect(quickHome.getByRole('navigation', { name: 'Marketplace modules' }).getByRole('button')).toHaveCount(6);
   expect(Date.now() - started).toBeLessThan(3000);
 });
 

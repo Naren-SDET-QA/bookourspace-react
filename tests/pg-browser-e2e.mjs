@@ -154,12 +154,28 @@ async function openLiveListing(page, style) {
   await page.goto(`${uiUrl}/#pg/${style}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   mark('app shell DOM loaded');
   console.log(`  INFO  PG ${style} app shell loaded`);
+  const privacyChoices = page.getByRole('dialog', { name: 'Privacy choices' });
+  try {
+    await privacyChoices.waitFor({ state: 'visible', timeout: 1500 });
+    await privacyChoices.getByRole('button', { name: 'Essential only' }).click();
+  } catch {
+    // A persisted local consent choice may already have dismissed the banner.
+  }
   if (style === 'style1') {
     await page.locator('#pg-search').fill(listingTitle);
     await page.getByRole('button', { name: `View details for ${listingTitle}` }).waitFor({ timeout: 10000 });
     await page.getByRole('button', { name: 'Filters' }).click();
     await page.getByRole('button', { name: 'Under ₹5,000' }).click();
-    await page.getByRole('button', { name: 'Clear all', exact: true }).waitFor({ timeout: 5000 });
+    try {
+      await page.getByRole('button', { name: 'Clear all', exact: true }).waitFor({ timeout: 5000 });
+    } catch (error) {
+      const state = await page.evaluate(() => ({
+        pressed: [...document.querySelectorAll('button[aria-pressed="true"]')].map((button) => button.textContent?.trim()),
+        filterButtons: [...document.querySelectorAll('button')].map((button) => button.textContent?.trim()).filter((text) => text && /rent|clear|filter/i.test(text)),
+      }));
+      console.error(`  DIAGNOSTIC ${diagnostics.engineName}/${style} filter state=${JSON.stringify(state)}`);
+      throw error;
+    }
     await page.getByRole('button', { name: 'Clear all', exact: true }).click();
     console.log('  INFO  style1 search/filter passed');
     mark('style1 search/filter complete');
