@@ -715,19 +715,22 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
           </label>
 
           {phase === 'idle' || phase === 'failed' ? (
-            <button
-              type="button"
-              onClick={() => void startCheckout()}
-              disabled={!isAuthenticated || !quote || quote.availableUnits < quote.units || creating}
-              aria-busy={creating}
-              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-[#f97316] px-4 text-sm font-bold text-white transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CalendarCheck className="h-4 w-4" aria-hidden="true" />}
-              {requestMode
-                ? 'Request to book'
-                : mode === 'razorpay' ? 'Reserve and pay with Razorpay'
-                  : mode === 'upi' ? 'Reserve and get UPI QR' : 'Reserve — Pay at Hotel'}
-            </button>
+            <div className="sticky bottom-0 z-10 -mx-1 mt-1 border-t border-[#ebebeb] bg-white/95 px-1 pb-2 pt-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95 lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+              <button
+                type="button"
+                id="stay-booking-submit"
+                onClick={() => void startCheckout()}
+                disabled={!isAuthenticated || !quote || quote.availableUnits < quote.units || creating}
+                aria-busy={creating}
+                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-[#f97316] px-4 text-sm font-bold text-white transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {creating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CalendarCheck className="h-4 w-4" aria-hidden="true" />}
+                {requestMode
+                  ? 'Request to book'
+                  : mode === 'razorpay' ? 'Reserve and pay with Razorpay'
+                    : mode === 'upi' ? 'Reserve and get UPI QR' : 'Reserve — Pay at Hotel'}
+              </button>
+            </div>
           ) : null}
 
           {error && (
