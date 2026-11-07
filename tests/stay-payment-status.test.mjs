@@ -77,7 +77,9 @@ test('only authoritative verified status presents payment success', () => {
 
 test('Pay at Hotel remains a separate option and success requires server verification', async () => {
   const component = await readFile(new URL('../src/components/StayCheckoutPanel.tsx', import.meta.url), 'utf8');
-  assert.match(component, /onClick=\{\(\) => setMode\('pay_after_service'\)\}[\s\S]{0,250}disabled=\{disabled\}/);
+  assert.match(component, /onClick=\{\(\) => \{ userPickedMode\.current = true; setMode\('pay_after_service'\); \}\}[\s\S]{0,250}disabled=\{disabled\}/);
+  assert.match(component, /Continue with Google/);
+  assert.match(component, /Confirm Reservation/);
   assert.match(component, /verified\.ok && \(verified as \{ verified\?: boolean \}\)\.verified === true/);
   assert.match(component, /const status = \(result as \{ status: string \}\)\.status;[\s\S]{0,120}if \(status === 'verified'\)/);
 });

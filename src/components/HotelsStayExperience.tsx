@@ -44,6 +44,8 @@ import {
   validateStaySearch,
 } from '../lib/servicesStayRules';
 import { supabase, fetchCurrentAuthSession } from '../lib/supabaseClient';
+import { useMarketplace } from '../context/MarketplaceContext';
+import { patchStayCheckoutDraft, readStayCheckoutDraft } from '../lib/stayCheckoutDraft';
 import { AirbnbIndiaExperience } from './AirbnbIndiaExperience';
 import { StayCheckoutPanel } from './StayCheckoutPanel';
 
@@ -270,6 +272,7 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
   const [contactMessage, setContactMessage] = useState('');
   const [contactBusy, setContactBusy] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { authUser } = useMarketplace();
   const [experienceTab, setExperienceTab] = useState<'old' | 'airbnb'>(() => {
     const routeStyle = styleFromHash('stays') ?? styleFromHash('hotels');
     if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'stay1') return 'old';
@@ -286,6 +289,61 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      if (authUser) {
+        if (alive) setIsAuthenticated(true);
+        return;
+      }
+      const session = await fetchCurrentAuthSession().catch(() => null);
+      if (alive) setIsAuthenticated(Boolean(session?.authenticated));
+    };
+    void refresh();
+    const onOauth = () => { void refresh(); };
+    window.addEventListener('bos-google-oauth-redirect', onOauth);
+    return () => {
+      alive = false;
+      window.removeEventListener('bos-google-oauth-redirect', onOauth);
+    };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (experienceTab !== 'old') return;
+    const draft = readStayCheckoutDraft();
+    if (!draft || draft.stayStyle === 'airbnb' || !draft.listingId) return;
+    if (draft.checkIn) setCheckIn(draft.checkIn);
+    if (draft.checkOut) setCheckOut(draft.checkOut);
+    if (draft.guests) setGuests(draft.guests);
+  }, [experienceTab]);
+
+  useEffect(() => {
+    if (experienceTab !== 'old') return;
+    const draft = readStayCheckoutDraft();
+    if (!draft || draft.stayStyle === 'airbnb' || !draft.listingId) return;
+    if (selectedProperty?.listingId === draft.listingId) return;
+    const match = properties.find((row) => row.listingId === draft.listingId);
+    if (match) {
+      setSelectedProperty(match);
+      return;
+    }
+    if (draft.property && typeof draft.property === 'object' && (draft.property as StayProperty).listingId === draft.listingId) {
+      setSelectedProperty(draft.property as StayProperty);
+    }
+  }, [experienceTab, properties, selectedProperty?.listingId]);
+
+  useEffect(() => {
+    if (!selectedProperty || experienceTab !== 'old') return;
+    patchStayCheckoutDraft({
+      stayStyle: 'old',
+      listingId: selectedProperty.listingId,
+      property: selectedProperty,
+      checkIn,
+      checkOut,
+      guests,
+    });
+  }, [experienceTab, selectedProperty, checkIn, checkOut, guests]);
 
   const access: ModuleAccess = resolveServicesModuleAccess(moduleFlags, 'hotels');
   const selectedStayCity = ['all', 'all cities', 'all locations'].includes(selectedCity.trim().toLowerCase()) ? '' : selectedCity;
@@ -382,7 +440,11 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
     setDestination(selectedStayCity);
     setHasSearched(false);
     setAvailability({});
-    setSelectedProperty(null);
+    setSelectedProperty((current) => {
+      const draft = readStayCheckoutDraft();
+      if (draft?.stayStyle !== 'airbnb' && draft?.listingId && current?.listingId === draft.listingId) return current;
+      return null;
+    });
     void loadProperties(selectedStayCity);
   }, [moduleFlags, access.enabled, selectedStayCity]);
 
@@ -497,7 +559,6 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
     setContactDetails(null);
     setContactMessage('');
     setContactState('loading');
-    setIsAuthenticated(false);
     if (!isValidListingContactId(property.listingId) || !supabase) {
       setContactState('unavailable');
       return;
@@ -1241,6 +1302,7 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
                       checkOut={checkOut}
                       guests={guests}
                       isAuthenticated={isAuthenticated}
+                      onSignIn={onSignIn}
                     />
 
                     <div className="mt-4 rounded-xl bg-[#f7f7f7] p-3 text-xs leading-5 text-[#717171] dark:bg-slate-800 dark:text-slate-300">

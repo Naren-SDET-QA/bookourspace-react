@@ -646,6 +646,15 @@ function MarketplaceAppContent() {
         if (savedPath.startsWith('/') && !savedPath.startsWith('//') && !savedPath.startsWith('/auth/callback')) {
           returnPath = savedPath;
         }
+        const stayDraft = sessionStorage.getItem('bos_stay_checkout_v1');
+        if (stayDraft) {
+          returnSection = 'hotel_stay';
+          if (!returnHash.startsWith('#stays') && !returnHash.startsWith('#hotels')) {
+            let stayStyle = '';
+            try { stayStyle = String(JSON.parse(stayDraft)?.stayStyle || ''); } catch { stayStyle = ''; }
+            returnHash = stayStyle === 'old' ? '#stays/old' : '#stays';
+          }
+        }
         sessionStorage.removeItem('bos_oauth_return_section_v1');
         sessionStorage.removeItem('bos_oauth_return_hash_v1');
         sessionStorage.removeItem('bos_oauth_return_path_v1');

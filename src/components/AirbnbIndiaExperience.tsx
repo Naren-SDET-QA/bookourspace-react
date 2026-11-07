@@ -36,6 +36,8 @@ import {
   type StaySearchItem,
 } from '../lib/staySearchClient';
 import { fetchCurrentAuthSession, supabase } from '../lib/supabaseClient';
+import { useMarketplace } from '../context/MarketplaceContext';
+import { clearStayCheckoutDraft, patchStayCheckoutDraft, readStayCheckoutDraft } from '../lib/stayCheckoutDraft';
 import { StayCard } from './stay/StayCard';
 import { StayCheckoutPage } from './stay/StayCheckoutPage';
 import { StaySearchBar, type StaySearchValue } from './stay/StaySearchBar';
@@ -275,6 +277,7 @@ export function AirbnbIndiaExperience({
   const [cloudSavedIds, setCloudSavedIds] = useState<string[] | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [sessionRole, setSessionRole] = useState<'customer' | 'provider' | 'admin' | null>(null);
+  const { authUser } = useMarketplace();
   const [hostOpen, setHostOpen] = useState(false);
   const [wishlistsOpen, setWishlistsOpen] = useState(false);
   const [savedSnapshots, setSavedSnapshots] = useState<StaySearchItem[]>(() => loadGuestSnapshots());
@@ -290,12 +293,18 @@ export function AirbnbIndiaExperience({
 
   useEffect(() => () => { if (toastTimer.current) window.clearTimeout(toastTimer.current); }, []);
 
-  // Session: the server-verified HMAC session is authoritative; the hosted
-  // Supabase session is a fallback for Google sign-in in the browser.
+  // Session: HMAC is authoritative (local E2E + Google). Re-read after OAuth so
+  // a popup sign-in does not leave checkout stuck on "Continue with Google".
   useEffect(() => {
     let alive = true;
-    (async () => {
+    const refresh = async () => {
       try {
+        if (authUser) {
+          if (!alive) return;
+          setIsAuthenticated(true);
+          setSessionRole((authUser.role as 'customer' | 'provider' | 'admin') || 'customer');
+          return;
+        }
         const session = await fetchCurrentAuthSession();
         if (session.authenticated) {
           if (!alive) return;
@@ -303,7 +312,10 @@ export function AirbnbIndiaExperience({
           setSessionRole((session.user?.role as 'customer' | 'provider' | 'admin') || 'customer');
           return;
         }
-        if (!supabase) return;
+        if (!supabase) {
+          if (alive) setIsAuthenticated(false);
+          return;
+        }
         const { data } = await supabase.auth.getUser();
         if (!alive) return;
         setIsAuthenticated(Boolean(data?.user));
@@ -312,11 +324,17 @@ export function AirbnbIndiaExperience({
           if (alive && profile?.role) setSessionRole(profile.role as 'customer' | 'provider' | 'admin');
         }
       } catch {
-        /* signed out is valid */
+        if (alive && !authUser) setIsAuthenticated(false);
       }
-    })();
-    return () => { alive = false; };
-  }, []);
+    };
+    void refresh();
+    const onOauth = () => { void refresh(); };
+    window.addEventListener('bos-google-oauth-redirect', onOauth);
+    return () => {
+      alive = false;
+      window.removeEventListener('bos-google-oauth-redirect', onOauth);
+    };
+  }, [authUser]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -398,7 +416,7 @@ export function AirbnbIndiaExperience({
     const closeCheckoutForConsole = () => {
       setCheckoutOpen(false);
       setCheckoutDraft(null);
-      try { window.sessionStorage.removeItem('bos_stay_checkout_v1'); } catch { /* ignore */ }
+      clearStayCheckoutDraft();
     };
     const onHash = () => {
       if (window.location.hash.startsWith('#admin') || window.location.hash.startsWith('#provider')) closeCheckoutForConsole();
@@ -414,12 +432,11 @@ export function AirbnbIndiaExperience({
   useEffect(() => {
     try {
       if (window.location.hash.startsWith('#admin') || window.location.hash.startsWith('#provider')) return;
-      const raw = window.sessionStorage.getItem('bos_stay_checkout_v1');
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { item?: StaySearchItem; checkIn?: string; checkOut?: string; guests?: number };
-      if (!draft?.item?.id) return;
-      setDetail(draft.item);
-      setCheckoutDraft({ item: draft.item, checkIn: draft.checkIn || '', checkOut: draft.checkOut || '', guests: draft.guests || 2 });
+      const draft = readStayCheckoutDraft();
+      const item = draft?.item as StaySearchItem | undefined;
+      if (!item?.id) return;
+      setDetail(item);
+      setCheckoutDraft({ item, checkIn: draft?.checkIn || '', checkOut: draft?.checkOut || '', guests: draft?.guests || 2 });
       setCheckoutOpen(true);
     } catch { /* ignore malformed drafts */ }
   }, []);
@@ -1078,7 +1095,14 @@ export function AirbnbIndiaExperience({
             try { window.sessionStorage.removeItem('bos_stay_booking_result_v1'); } catch { /* ignore */ }
             const draft = { item: detail, checkIn: filters.checkIn, checkOut: filters.checkOut, guests: filters.guests };
             setCheckoutDraft(draft);
-            try { window.sessionStorage.setItem('bos_stay_checkout_v1', JSON.stringify(draft)); } catch { /* ignore */ }
+            patchStayCheckoutDraft({
+              stayStyle: 'airbnb',
+              listingId: detail.listingId,
+              item: detail,
+              checkIn: filters.checkIn,
+              checkOut: filters.checkOut,
+              guests: filters.guests,
+            });
             setCheckoutOpen(true);
           }}
           onPickDates={(checkIn, checkOut) => updateFilters({ ...filters, checkIn, checkOut })}
@@ -1103,7 +1127,7 @@ export function AirbnbIndiaExperience({
           onClose={() => {
             setCheckoutOpen(false);
             setCheckoutDraft(null);
-            try { window.sessionStorage.removeItem('bos_stay_checkout_v1'); } catch { /* ignore */ }
+            clearStayCheckoutDraft();
           }}
           onSignIn={onSignIn}
           onBooked={() => showToast('Reservation created. Open My trips to see it.')}
