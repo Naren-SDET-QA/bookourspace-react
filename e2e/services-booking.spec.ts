@@ -36,6 +36,11 @@ async function pageFor(browser: Browser, key: 'customer' | 'provider' | 'admin')
       try {
         window.localStorage.setItem('bos_session_token_v1', String(token));
         window.localStorage.setItem('bos_google_auth_user_v1', String(user));
+        window.localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+        window.localStorage.setItem(
+          'bos_privacy_consent_v1',
+          JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }),
+        );
         // Select the classic services experience (the curated hub is display-only).
         window.localStorage.setItem(
           'bos_section_styles_v2',

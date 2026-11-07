@@ -454,6 +454,7 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
               <button
                 type="button"
                 onClick={() => setSelected(null)}
+                aria-label="All services"
                 className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 px-4 text-sm font-semibold transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:border-slate-700 dark:hover:bg-slate-800"
               >
                 <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All services

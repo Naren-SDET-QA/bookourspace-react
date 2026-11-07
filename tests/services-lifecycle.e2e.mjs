@@ -93,6 +93,7 @@ async function startServer(port) {
       ...process.env,
       NODE_ENV: 'test',
       VITE_ENABLE_DEMO_DATA: 'false',
+      DISABLE_HMR: 'true',
       PORT: String(port),
       BOS_SERVER_HMAC_SECRET: SECRET,
       BOS_LISTINGS_DATABASE_URL: connectionString,
@@ -497,8 +498,18 @@ dbTest('browser: customer books, provider completes and records collection, Admi
   const browser = await chromium.launch({ headless: true });
   const browserErrors = [];
   const openAs = async (authToken) => {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await context.addInitScript((value) => localStorage.setItem('bos_session_token_v1', value), authToken);
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      serviceWorkers: 'block',
+    });
+    await context.addInitScript((value) => {
+      try {
+        localStorage.setItem('bos_session_token_v1', value);
+        localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
+        localStorage.setItem('bos_section_styles_v2', JSON.stringify({ pg: 'style2', stay: 'airbnb', services: 'old' }));
+      } catch { /* storage unavailable */ }
+    }, authToken);
     await context.route('**/*', async (route) => {
       try {
         if (new URL(route.request().url()).origin === serverUrl) await route.continue();
@@ -583,7 +594,12 @@ dbTest('browser: customer books, provider completes and records collection, Admi
     await adminClaim.getByRole('button', { name: 'Approve settlement' }).click();
     await expect(adminJob).toContainText('settled');
 
-    await detail.getByRole('button', { name: 'All services' }).click();
+    const allServices = detail.getByRole('button', { name: /^All services$/i });
+    if (await allServices.isVisible().catch(() => false)) {
+      await allServices.click();
+    }
+    await expect(detail).toBeHidden({ timeout: 15_000 });
+    await expect(customerPage.getByRole('button', { name: 'My service bookings' })).toBeVisible({ timeout: 15_000 });
     await customerPage.getByRole('button', { name: 'My service bookings' }).click();
     const customerCompletedJob = customerPage.locator('article').filter({ hasText: completedRef });
     await expect(customerCompletedJob).toContainText('completed');
