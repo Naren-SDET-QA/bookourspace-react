@@ -1,3 +1,4 @@
+import { logSafeError } from './safeLogging';
 import crypto from 'node:crypto';
 import type express from 'express';
 import { type PoolClient } from 'pg';
@@ -118,9 +119,9 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     }
     if (error?.code === '23P01' || error?.code === '23505') { bad(res, 409, 'INVENTORY_CONFLICT'); return; }
     if (error?.code === '40001') { bad(res, 409, 'NO_UNITS_AVAILABLE'); return; }
-    if (error?.code === '42501') { console.error('[stay-host] forbidden', error?.message); bad(res, 403, 'INVENTORY_FORBIDDEN'); return; }
-    if (error?.code === '42P01' || error?.code === '42703') { console.error('[stay-host] schema', error?.code, error?.message); bad(res, 503, 'STAY_HOST_SCHEMA_NOT_READY'); return; }
-    console.error('[stay-host] request failed', error?.code || 'NO_CODE', error?.message || '');
+    if (error?.code === '42501') { logSafeError('stay-host', 'forbidden', error); bad(res, 403, 'INVENTORY_FORBIDDEN'); return; }
+    if (error?.code === '42P01' || error?.code === '42703') { logSafeError('stay-host', 'schema', error); bad(res, 503, 'STAY_HOST_SCHEMA_NOT_READY'); return; }
+    logSafeError('stay-host', 'request', error);
     bad(res, 500, 'STAY_HOST_REQUEST_FAILED');
   };
   const handle = (fn: (req: express.Request, res: express.Response, actorId: string, client: PoolClient) => Promise<unknown>) =>
@@ -172,7 +173,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
       }
       if (error?.code === '42501') return bad(res, 403, 'INVENTORY_FORBIDDEN');
       if (error?.code === '42P01' || error?.code === '42703') return bad(res, 503, 'STAY_HOST_SCHEMA_NOT_READY');
-      console.error('[stay-host] onboard failed', error?.code || 'NO_CODE', error?.message || '');
+      logSafeError('stay-host', 'onboard', error);
       bad(res, 500, 'STAY_HOST_REQUEST_FAILED');
     }
   });

@@ -1,3 +1,4 @@
+import { logSafeError } from './safeLogging';
 import type express from 'express';
 import {
   ProviderListingRepository,
@@ -17,9 +18,7 @@ function sendError(response: express.Response, error: unknown): void {
   }
   // Connection strings and SQL values are never logged; only the database
   // error code and message are, so a 500 is diagnosable in operations.
-  const errorCode = (error as any)?.code;
-  const errorMessage = (error as any)?.message;
-  console.error('[provider-listings] repository failure', errorCode ?? 'NO_CODE', errorMessage ?? 'NO_MESSAGE');
+  logSafeError('provider-listings', 'repository', error);
   response.status(500).json({ ok: false, error: 'LISTING_REPOSITORY_ERROR' });
 }
 

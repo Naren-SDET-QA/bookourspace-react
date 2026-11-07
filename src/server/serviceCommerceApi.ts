@@ -3,6 +3,7 @@ import type express from 'express';
 import { types, type PoolClient } from 'pg';
 import type { ProviderListingActor } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
+import { logSafeError } from './safeLogging';
 import { getSharedPostgresPool } from './postgresPool';
 
 /**
@@ -48,7 +49,7 @@ function mapError(res: express.Response, error: any, fallback: string) {
   if (code === 'P0002') return fail(res, 404, 'NOT_FOUND', 'The requested record does not exist.');
   if (code === '22023') return fail(res, 400, 'INVALID_REQUEST', message.replace(/^[A-Z_]+:?\s*/, ''));
   if (code === '42501') return fail(res, 403, 'FORBIDDEN', 'This action is not permitted for this account.');
-  console.error(`[service-commerce] ${fallback}:`, error);
+  logSafeError('service-commerce', fallback, error);
   return fail(res, 500, fallback, 'The request could not be completed. Nothing was charged.');
 }
 

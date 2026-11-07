@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type express from 'express';
 import { PgPaymentError, type PgPaymentRepository } from './pgPaymentRepository';
+import { logSafeError } from './safeLogging';
 
 export interface PgPaymentsApiDependencies {
   repository?: PgPaymentRepository | null;
@@ -66,7 +67,7 @@ function sendError(response: express.Response, error: unknown) {
     response.status(SQL_ERRORS[code] ?? 409).json({ ok: false, error: code });
     return;
   }
-  console.error('[pg-payments] database operation failed', JSON.stringify({ code: (error as any)?.code, message: String((error as any)?.message || '').slice(0, 400), detail: (error as any)?.detail, where: (error as any)?.where, routine: (error as any)?.routine }));
+  logSafeError('pg-payments', 'database operation', error);
   response.status(500).json({ ok: false, error: 'PG_PAYMENT_OPERATION_FAILED' });
 }
 

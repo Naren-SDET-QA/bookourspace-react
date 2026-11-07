@@ -1,3 +1,4 @@
+import { logSafeError } from './safeLogging';
 import type express from 'express';
 import {
   ServiceBookingRepository,
@@ -19,9 +20,7 @@ function sendError(response: express.Response, error: unknown): void {
     response.status(error.httpStatus).json({ ok: false, error: error.code });
     return;
   }
-  const errorCode = (error as any)?.code;
-  const errorMessage = (error as any)?.message;
-  console.error('[service-bookings] repository failure', errorCode ?? 'NO_CODE', errorMessage ?? 'NO_MESSAGE');
+  logSafeError('service-bookings', 'repository', error);
   response.status(500).json({ ok: false, error: 'SERVICE_BOOKING_REPOSITORY_ERROR' });
 }
 

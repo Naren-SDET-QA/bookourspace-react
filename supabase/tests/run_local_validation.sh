@@ -22,6 +22,9 @@
 # =============================================================================
 set -uo pipefail
 export LC_ALL=C LANG=C
+# The integration children use this fresh disposable database, which includes
+# the distributed limiter migration; enable the real middleware in those tests.
+export BOS_TEST_RATE_LIMIT=1
 
 TMP_BASE="${TMPDIR:-/tmp}"
 TMP_ROOT="$(mktemp -d "$TMP_BASE/bos-local-validation.XXXXXX")" || exit 1
@@ -269,6 +272,25 @@ for MIG_FILE in "$REPO_ROOT"/supabase/migrations/*.sql; do
   echo "    applied $MIG_NAME"
 done
 echo "    tables: $(pq -d "$DB" -tAc "select count(*) from pg_tables where schemaname='public'")"
+echo "=== 4a1. distributed API rate limiter privileges and atomic behavior ==="
+pq -d "$DB" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/tests/distributed_api_rate_limit_test.sql" > "$OUT/distributed-api-rate-limit.out" 2>&1 \
+  || fail "distributed API rate limiter SQL assertions (see $OUT/distributed-api-rate-limit.out)"
+grep "NOTICE:  PASS" "$OUT/distributed-api-rate-limit.out" | sed 's/^/    /'
+RATE_LIMIT_SQL_PASS=$(grep -c "NOTICE:  PASS" "$OUT/distributed-api-rate-limit.out" || true)
+[ "$RATE_LIMIT_SQL_PASS" = "6" ] || fail "distributed API rate limit suite ran only $RATE_LIMIT_SQL_PASS passing assertions"
+echo "=== 4a2. distributed rate limiter concurrent requests ==="
+(
+  pq -d "$DB" -tAc "set role service_role; select allowed from private.consume_api_rate_limit(repeat('b',64),1,3600)" > "$OUT/rate-limit-concurrent-a.out" 2>&1
+) & RATE_LIMIT_A_PID=$!
+(
+  pq -d "$DB" -tAc "set role service_role; select allowed from private.consume_api_rate_limit(repeat('b',64),1,3600)" > "$OUT/rate-limit-concurrent-b.out" 2>&1
+) & RATE_LIMIT_B_PID=$!
+wait "$RATE_LIMIT_A_PID" || fail "first concurrent rate-limit transaction failed"
+wait "$RATE_LIMIT_B_PID" || fail "second concurrent rate-limit transaction failed"
+RATE_LIMIT_ALLOWED=$(cat "$OUT/rate-limit-concurrent-a.out" "$OUT/rate-limit-concurrent-b.out" | grep -c '^t$' || true)
+RATE_LIMIT_DENIED=$(cat "$OUT/rate-limit-concurrent-a.out" "$OUT/rate-limit-concurrent-b.out" | grep -c '^f$' || true)
+[ "$RATE_LIMIT_ALLOWED" = "1" ] && [ "$RATE_LIMIT_DENIED" = "1" ] || fail "concurrent atomic limiter decisions were allowed=$RATE_LIMIT_ALLOWED denied=$RATE_LIMIT_DENIED"
+echo "    PASS concurrent requests serialized: allowed=$RATE_LIMIT_ALLOWED denied=$RATE_LIMIT_DENIED"
 echo "=== 4aa. profile media and account closure migration idempotency ==="
 PROFILE_MEDIA_MIGRATION="$REPO_ROOT/supabase/migrations/20261105163924_profile_media_and_account_closure.sql"
 pq -d "$DB" -q -v ON_ERROR_STOP=1 -f "$PROFILE_MEDIA_MIGRATION" \

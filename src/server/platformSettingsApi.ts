@@ -1,3 +1,4 @@
+import { logSafeError } from './safeLogging';
 import type express from 'express';
 import { getSharedPostgresPool } from './postgresPool';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
@@ -325,7 +326,7 @@ export function registerPlatformSettingsApi(
       response.status(400).json({ ok: false, error: error.code, message: error.message });
       return;
     }
-    console.error('[platform-settings] unexpected failure:', error instanceof Error ? error.message : 'unknown');
+    logSafeError('platform-settings', 'unexpected', error);
     response.status(500).json({ ok: false, error: 'PLATFORM_SETTINGS_ERROR' });
   };
 
