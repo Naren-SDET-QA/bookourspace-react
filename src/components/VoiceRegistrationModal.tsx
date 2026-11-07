@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SafeImage from './SafeImage';
 import { 
   X, 
   Mic, 
@@ -815,7 +816,7 @@ export const VoiceRegistrationModal: React.FC<VoiceRegistrationModalProps> = ({
                     selectedAvatar === avatar ? 'border-purple-600 ring-2 ring-purple-400 scale-105' : 'border-transparent'
                   }`}
                 >
-                  <img
+                  <SafeImage category="general"
                     src={avatar}
                     alt="avatar"
                     className="w-11 h-11 rounded-full object-cover"

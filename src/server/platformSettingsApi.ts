@@ -1,0 +1,511 @@
+import type express from 'express';
+import { getSharedPostgresPool } from './postgresPool';
+import { assertPostgresConnectionTarget } from './persistencePolicy';
+import { BuilderError, type BuilderActor } from './platformBuilderRepository';
+import { normalizePolicies, PolicyValidationError, type PolicyDocument } from '../lib/builder/policies';
+import { findEmbeddedDataUrl } from './mediaInputGuard';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MODULE_KEY = /^[a-z][a-z0-9_]{1,40}$/;
+
+const PLATFORMS = ['Web SPA', 'Android APK/Bundle (OTA)', 'iOS IPA (OTA)'];
+
+function iso(value: unknown): string | null {
+  return value ? new Date(value as string).toISOString() : null;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export interface LivePageVersion {
+  versionId: string;
+  versionNumber: number;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  summary: string;
+  platforms: string[];
+  configSnapshot: Record<string, unknown>;
+}
+
+function mapVersion(row: Record<string, any>): LivePageVersion {
+  return {
+    versionId: String(row.id),
+    versionNumber: Number(row.version_number),
+    publishedAt: iso(row.published_at),
+    publishedBy: row.published_by ?? null,
+    summary: String(row.summary ?? ''),
+    platforms: PLATFORMS,
+    configSnapshot: record(row.config),
+  };
+}
+
+/** Published configuration in the legacy envelope the OTA clients already read. */
+function mapPublished(row: Record<string, any> | undefined): (Record<string, unknown> & {
+  versionId: string;
+  lastPublishedAt: string | null;
+}) | null {
+  if (!row) return null;
+  return {
+    ...record(row.config),
+    versionId: String(row.id),
+    lastPublishedAt: iso(row.published_at),
+    publishedBy: row.published_by ?? null,
+  };
+}
+
+/**
+ * PostgreSQL persistence for the live page configuration stream and the 17
+ * admin module settings.
+ *
+ * The JSON compatibility store remains usable in local development, but a
+ * database-backed process always answers from these tables: the role is
+ * re-derived from public.profiles on every write inside the SQL functions, and
+ * the browser roles cannot execute the RPCs at all.
+ */
+export class PlatformSettingsRepository {
+  private readonly pool: ReturnType<typeof getSharedPostgresPool>;
+
+  constructor(
+    private readonly connectionString: string,
+    private readonly environment: NodeJS.ProcessEnv = process.env,
+  ) {
+    assertPostgresConnectionTarget(connectionString, environment);
+    this.pool = getSharedPostgresPool(connectionString, environment);
+  }
+
+  static fromEnvironment(env: NodeJS.ProcessEnv = process.env): PlatformSettingsRepository | null {
+    const url = String(env.BOS_LISTINGS_DATABASE_URL || '').trim();
+    if (!url) return null;
+    assertPostgresConnectionTarget(url, env);
+    return new PlatformSettingsRepository(url, env);
+  }
+
+  async verifyConnection(): Promise<void> {
+    await this.pool.query('select 1');
+  }
+
+  async resolveActor(userId: string): Promise<BuilderActor> {
+    if (!UUID.test(userId)) throw new BuilderError('BUILDER_AUTH_REQUIRED', 401);
+    let rows: Array<Record<string, any>>;
+    try {
+      ({ rows } = await this.pool.query(
+        `select id, role, account_status, is_super_admin, full_name, email
+           from public.profiles where id = $1`,
+        [userId],
+      ));
+    } catch {
+      throw new BuilderError('BUILDER_UNAVAILABLE', 503);
+    }
+    const profile = rows[0];
+    if (!profile) throw new BuilderError('BUILDER_ADMIN_REQUIRED', 403);
+    if (profile.account_status !== 'active') throw new BuilderError('BUILDER_ACCOUNT_INACTIVE', 403);
+    const role: BuilderActor['role'] | '' = profile.is_super_admin === true
+      ? 'super_admin'
+      : profile.role === 'admin'
+        ? 'admin'
+        : '';
+    if (!role) throw new BuilderError('BUILDER_ADMIN_REQUIRED', 403);
+    return {
+      id: String(profile.id),
+      role,
+      displayName: String(profile.full_name || profile.email || 'Administrator'),
+    };
+  }
+
+  // -- live page configuration ---------------------------------------------
+
+  async liveState() {
+    const [published, draft, versions, audit] = await Promise.all([
+      this.pool.query(
+        `select * from public.platform_live_page_config
+          where state = 'published' order by version_number desc limit 1`,
+      ),
+      this.pool.query(
+        `select * from public.platform_live_page_config where state = 'draft' limit 1`,
+      ),
+      this.pool.query(
+        `select * from public.platform_live_page_config order by version_number desc limit 50`,
+      ),
+      this.pool.query(
+        `select id, actor_id, actor_role, action, summary, version_number, created_at
+           from public.platform_builder_audit
+          where target_key = 'live_page_config'
+          order by id desc limit 50`,
+      ),
+    ]);
+    return {
+      published: mapPublished(published.rows[0]),
+      publishedVersion: published.rows[0] ? mapVersion(published.rows[0]) : null,
+      draft: draft.rows[0] ? record(draft.rows[0].config) : null,
+      versions: versions.rows.map(mapVersion),
+      auditLogs: audit.rows.map((row) => ({
+        id: String(row.id),
+        timestamp: iso(row.created_at),
+        actor: row.actor_id,
+        role: row.actor_role,
+        action: row.action,
+        pageId: 'all_pages',
+        details: row.summary,
+        versionNumber: row.version_number === null ? null : Number(row.version_number),
+      })),
+    };
+  }
+
+  async saveLiveDraft(actor: BuilderActor, config: unknown, summary: string): Promise<LivePageVersion> {
+    const document = record(config);
+    if (Object.keys(document).length === 0) throw new BuilderError('LIVE_PAGE_CONFIG_INVALID', 400);
+    const inlineMediaPath = findEmbeddedDataUrl(document, 'config');
+    if (inlineMediaPath) throw new BuilderError('MEDIA_OBJECT_REFERENCE_REQUIRED', 400, `Inline media is not stored in PostgreSQL (${inlineMediaPath}). Upload media to approved object storage first.`);
+    try {
+      const { rows } = await this.pool.query(
+        `select public.platform_live_page_save_draft($1,$2::jsonb,$3) as result`,
+        [actor.id, JSON.stringify(document), summary],
+      );
+      return mapVersion(rows[0].result);
+    } catch (error) {
+      throw this.translate(error);
+    }
+  }
+
+  async publishLive(actor: BuilderActor, versionId: string | null): Promise<LivePageVersion> {
+    const target = versionId ? String(versionId) : null;
+    if (target && !UUID.test(target)) throw new BuilderError('BUILDER_INVALID_VERSION', 400);
+    try {
+      const { rows } = await this.pool.query(
+        `select public.platform_live_page_publish($1,$2) as result`,
+        [actor.id, target],
+      );
+      return mapVersion(rows[0].result);
+    } catch (error) {
+      throw this.translate(error);
+    }
+  }
+
+  async rollbackLive(actor: BuilderActor, targetVersionId: string): Promise<LivePageVersion> {
+    if (!UUID.test(targetVersionId)) throw new BuilderError('BUILDER_INVALID_VERSION', 400);
+    try {
+      const { rows } = await this.pool.query(
+        `select public.platform_live_page_rollback($1,$2) as result`,
+        [actor.id, targetVersionId],
+      );
+      return mapVersion(rows[0].result);
+    } catch (error) {
+      throw this.translate(error);
+    }
+  }
+
+  // -- admin module settings ----------------------------------------------
+
+  async moduleSettings() {
+    const { rows } = await this.pool.query(
+      `select settings.module_key, settings.payload, settings.revision,
+              settings.updated_at, settings.updated_by,
+              profile.full_name, profile.email
+         from public.platform_admin_module_registry registry
+         left join public.platform_admin_module_settings settings
+                on settings.module_key = registry.module_key
+         left join public.profiles profile on profile.id = settings.updated_by
+        order by registry.sort_order`,
+    );
+    const modules: Record<string, { payload: Record<string, unknown>; updatedBy: string | null; updatedAt: string | null; revision: number }> = {};
+    for (const row of rows) {
+      if (!row.payload) continue;
+      modules[String(row.module_key)] = {
+        payload: record(row.payload),
+        updatedBy: row.full_name || row.email || null,
+        updatedAt: iso(row.updated_at),
+        revision: Number(row.revision ?? 0),
+      };
+    }
+    return { supportedModules: rows.map((row) => String(row.module_key)), modules };
+  }
+
+  async saveModuleSettings(actor: BuilderActor, moduleKey: string, payload: unknown) {
+    if (!MODULE_KEY.test(moduleKey)) throw new BuilderError('INVALID_MODULE_KEY', 400);
+    const inlineMediaPath = findEmbeddedDataUrl(payload, 'settings');
+    if (inlineMediaPath) throw new BuilderError('MEDIA_OBJECT_REFERENCE_REQUIRED', 400, `Inline media is not stored in PostgreSQL (${inlineMediaPath}). Upload media to approved object storage first.`);
+    const body = record(payload);
+    try {
+      const { rows } = await this.pool.query(
+        `select public.platform_admin_save_module_settings($1,$2,$3::jsonb) as result`,
+        [actor.id, moduleKey, JSON.stringify(body)],
+      );
+      const row = rows[0].result as Record<string, any>;
+      return {
+        moduleKey,
+        moduleState: {
+          payload: record(row.payload),
+          updatedBy: actor.displayName,
+          updatedAt: iso(row.updated_at),
+          revision: Number(row.revision ?? 1),
+        },
+      };
+    } catch (error) {
+      throw this.translate(error);
+    }
+  }
+
+  private translate(error: unknown): never {
+    if (error instanceof BuilderError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    const known: Array<[string, number]> = [
+      ['BUILDER_ADMIN_REQUIRED', 403],
+      ['BUILDER_SUPER_ADMIN_REQUIRED', 403],
+      ['BUILDER_DRAFT_NOT_FOUND', 404],
+      ['BUILDER_TARGET_VERSION_NOT_FOUND', 404],
+      ['ADMIN_MODULE_UNKNOWN', 404],
+      ['ADMIN_MODULE_PAYLOAD_INVALID', 400],
+      ['LIVE_PAGE_CONFIG_INVALID', 400],
+    ];
+    const match = known.find(([code]) => message.includes(code));
+    if (match) throw new BuilderError(match[0], match[1], match[0]);
+    throw error;
+  }
+}
+
+export interface PlatformSettingsApiDependencies {
+  repository: PlatformSettingsRepository | null;
+  verifySession: (request: express.Request) => {
+    userId?: string;
+    supabaseUserId?: string;
+    name?: string;
+    role?: string;
+  } | null;
+}
+
+function actorIdFromClaims(claims: { userId?: string; supabaseUserId?: string } | null): string {
+  const candidate = String(claims?.supabaseUserId || claims?.userId || '').trim();
+  return UUID.test(candidate) ? candidate : '';
+}
+
+/**
+ * These routes are registered before the legacy JSON handlers, so a
+ * database-backed process answers them from PostgreSQL and the JSON code below
+ * is unreachable. Local development without a database keeps the old behaviour.
+ */
+export function registerPlatformSettingsApi(
+  app: express.Express,
+  dependencies: PlatformSettingsApiDependencies,
+): void {
+  const { repository, verifySession } = dependencies;
+
+  const repositoryOrFail = (): PlatformSettingsRepository => {
+    if (!repository) throw new BuilderError('BUILDER_NOT_CONFIGURED', 503);
+    return repository;
+  };
+
+  const actorFrom = async (request: express.Request): Promise<BuilderActor | null> => {
+    const claims = verifySession(request);
+    const id = actorIdFromClaims(claims);
+    if (!claims || !id) return null;
+    return repositoryOrFail().resolveActor(id);
+  };
+
+  const requireActor = async (request: express.Request): Promise<BuilderActor> => {
+    const actor = await actorFrom(request);
+    if (!actor) throw new BuilderError('BUILDER_AUTH_REQUIRED', 401);
+    return actor;
+  };
+
+  const sendError = (response: express.Response, error: unknown) => {
+    if (error instanceof BuilderError) {
+      response.status(error.status).json({ ok: false, error: error.code, message: error.message });
+      return;
+    }
+    if (error instanceof PolicyValidationError) {
+      response.status(400).json({ ok: false, error: error.code, message: error.message });
+      return;
+    }
+    console.error('[platform-settings] unexpected failure:', error instanceof Error ? error.message : 'unknown');
+    response.status(500).json({ ok: false, error: 'PLATFORM_SETTINGS_ERROR' });
+  };
+
+  const otaSync = (state: { publishedVersion: LivePageVersion | null }) => ({
+    web: 'synced',
+    android: 'synced',
+    ios: 'synced',
+    activeVersion: state.publishedVersion ? state.publishedVersion.versionId : 'v1.0.0',
+    lastPublishedAt: state.publishedVersion?.publishedAt ?? 'Default Baseline',
+  });
+
+  app.get('/api/live-page-config', async (request, response) => {
+    try {
+      const state = await repositoryOrFail().liveState();
+      // This endpoint is public: an anonymous visitor and a signed-in customer
+      // both get the published configuration, and neither learns whether an
+      // admin session exists.
+      let admin = false;
+      try {
+        admin = Boolean(await actorFrom(request));
+      } catch {
+        admin = false;
+      }
+      response.setHeader('cache-control', 'no-store');
+      response.json({
+        ok: true,
+        published: state.published,
+        ...(admin ? { draft: state.draft, versions: state.versions, auditLogs: state.auditLogs } : {}),
+        otaSync: otaSync(state),
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/live-page-config/draft', async (request, response) => {
+    try {
+      const actor = await requireActor(request);
+      const body = (request.body || {}) as Record<string, unknown>;
+      const version = await repositoryOrFail().saveLiveDraft(
+        actor,
+        body.config,
+        typeof body.summary === 'string' ? body.summary : 'Saved draft changes',
+      );
+      const state = await repositoryOrFail().liveState();
+      response.setHeader('cache-control', 'no-store');
+      response.json({
+        ok: true,
+        draft: state.draft,
+        versions: state.versions,
+        auditLogs: state.auditLogs,
+        savedAt: version.publishedAt ?? new Date().toISOString(),
+        versionNumber: version.versionNumber,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/live-page-config/publish', async (request, response) => {
+    try {
+      const actor = await requireActor(request);
+      const body = (request.body || {}) as Record<string, unknown>;
+      const repository = repositoryOrFail();
+      let version: LivePageVersion;
+      if (body.config && typeof body.config === 'object') {
+        const saved = await repository.saveLiveDraft(
+          actor,
+          body.config,
+          typeof body.summary === 'string' ? body.summary : 'Published live page updates to Web, Android & iOS',
+        );
+        version = await repository.publishLive(actor, saved.versionId);
+      } else {
+        version = await repository.publishLive(actor, body.versionId ? String(body.versionId) : null);
+      }
+      const state = await repository.liveState();
+      response.setHeader('cache-control', 'no-store');
+      response.json({
+        ok: true,
+        published: state.published,
+        draft: state.draft,
+        versions: state.versions,
+        auditLogs: state.auditLogs,
+        versionId: version.versionId,
+        publishedAt: version.publishedAt,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/live-page-config/rollback', async (request, response) => {
+    try {
+      const actor = await requireActor(request);
+      const body = (request.body || {}) as Record<string, unknown>;
+      const repository = repositoryOrFail();
+      const versionId = String(body.versionId || '');
+      if (!versionId) throw new BuilderError('BUILDER_INVALID_VERSION', 400);
+      const version = await repository.rollbackLive(actor, versionId);
+      const state = await repository.liveState();
+      response.setHeader('cache-control', 'no-store');
+      response.json({
+        ok: true,
+        published: state.published,
+        draft: state.draft,
+        versions: state.versions,
+        auditLogs: state.auditLogs,
+        versionId: version.versionId,
+        publishedAt: version.publishedAt,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.get('/api/admin/modules', async (request, response) => {
+    try {
+      await requireActor(request);
+      const settings = await repositoryOrFail().moduleSettings();
+      response.setHeader('cache-control', 'no-store');
+      response.json({
+        ok: true,
+        supportedModules: settings.supportedModules,
+        moduleCount: settings.supportedModules.length,
+        modules: settings.modules,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.put('/api/admin/modules/:moduleKey', async (request, response) => {
+    try {
+      const actor = await requireActor(request);
+      const body = (request.body || {}) as Record<string, unknown>;
+      const payload = body.payload ?? body;
+      const result = await repositoryOrFail().saveModuleSettings(
+        actor,
+        String(request.params.moduleKey || ''),
+        payload,
+      );
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, ...result });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Approved platform policy configuration. Admin-authenticated, server-validated
+   * and stored with the other module settings. These values are advisory: the
+   * server continues to compute prices, availability, refunds and permissions.
+   */
+  app.get('/api/admin/policies', async (request, response) => {
+    try {
+      await requireActor(request);
+      const settings = await repositoryOrFail().moduleSettings();
+      const stored = (settings.modules.app_settings?.payload as Record<string, unknown> | undefined)?.policies;
+      let policies: PolicyDocument;
+      try {
+        policies = normalizePolicies(stored ?? {});
+      } catch {
+        policies = normalizePolicies({});
+      }
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, policies });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.put('/api/admin/policies', async (request, response) => {
+    try {
+      const actor = await requireActor(request);
+      const repository = repositoryOrFail();
+      const policies = normalizePolicies((request.body || {}).policies);
+      const settings = await repository.moduleSettings();
+      const existing = (settings.modules.app_settings?.payload as Record<string, unknown> | undefined) ?? {};
+      const saved = await repository.saveModuleSettings(actor, 'app_settings', {
+        ...existing,
+        policies,
+      });
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, policies, revision: saved.moduleState.revision });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+}

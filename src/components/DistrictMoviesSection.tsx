@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import SafeImage from './SafeImage';
 import {
   MapPin,
   Search,
@@ -58,8 +59,11 @@ import {
   createAuthoritativeBookingAtomic,
   createServerPaymentIntent,
   verifyServerUpiPayment,
+  PAYMENT_VERIFICATION_AVAILABLE,
   verifyAuthoritativeQrPass,
   fetchMoviesInventory,
+  fetchMyMovieBookings,
+  fetchMoviesBookingRecords,
   updateCinemaScreenConfig,
   cancelMovieBookingAtomic,
   createMovieSupportTicket,
@@ -142,6 +146,8 @@ export interface BookedMTicket {
   refundAmount?: number;
 }
 
+const MOVIES_BOOKING_ENABLED = false;
+
 const SEAT_TIERS: SeatTier[] = [
   { id: 'recliner', name: 'VIP M-Lounge Recliner', priceMultiplier: 1.5, rows: ['A', 'B'], seatsPerRow: 8 },
   { id: 'prime', name: 'Prime Executive 4K', priceMultiplier: 1.0, rows: ['C', 'D', 'E', 'F'], seatsPerRow: 10 },
@@ -222,15 +228,18 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     updateListing,
   } = useMarketplace();
 
-  // Strictly use existing movie listings & their existing images
+  const isSampleMovieListing = (listing: MarketplaceListing) =>
+    listing.id.startsWith('movie-hyd-') || listing.id.startsWith('mov-auto-');
+
+  // Discovery must only show persisted movie listings, never local sample cards.
   const movieListings = useMemo(() => {
-    const filtered = listings.filter(
+    return listings.filter(
       (item) =>
-        item.categoryId.startsWith('movie-') ||
-        item.entityType === 'event' ||
-        item.customFieldValues?.sectionType === 'movies'
+        (item.categoryId.startsWith('movie-') ||
+          item.entityType === 'event' ||
+          item.customFieldValues?.sectionType === 'movies') &&
+        !isSampleMovieListing(item)
     );
-    return filtered.length > 0 ? filtered : listings;
   }, [listings]);
 
   // Theme mode: 'light' crisp white aesthetic; 'dark' cinema mode
@@ -297,7 +306,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
 
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
-  const [upiUtrInput, setUpiUtrInput] = useState<string>('412987654321');
+  const [upiUtrInput, setUpiUtrInput] = useState<string>('');
   const [paymentVerificationToken, setPaymentVerificationToken] = useState<string | null>(null);
   const [paymentVerifyStatus, setPaymentVerifyStatus] = useState<
     'idle' | 'verifying' | 'pending_reconciliation' | 'verified' | 'failed'
@@ -363,16 +372,30 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       const res = await fetchMoviesInventory();
       if (res.ok) {
         setCinemaScreens(res.screens);
-        setServerRefunds(res.refunds);
-        setServerSupportTickets(res.supportTickets);
-        setServerAuditLogs(res.auditLogs);
+
+        // Booking records are no longer part of the public inventory response.
+        // Customers read only their own tickets; Admin records require a
+        // server-verified Admin session.
+        let serverTickets: any[] = [];
+        if (userRole === 'admin') {
+          const records = await fetchMoviesBookingRecords();
+          if (records.ok) {
+            setServerRefunds(records.refunds);
+            setServerSupportTickets(records.supportTickets);
+            setServerAuditLogs(records.auditLogs);
+            serverTickets = records.bookings;
+          }
+        } else if (userRole === 'customer') {
+          const mine = await fetchMyMovieBookings();
+          if (mine.ok) serverTickets = mine.bookings;
+        }
 
         // Merge server-persisted movie bookings into bookedTickets so refresh never loses confirmed tickets
-        if (Array.isArray(res.bookings) && res.bookings.length > 0) {
+        if (serverTickets.length > 0) {
           setBookedTickets((prev) => {
             const byId = new Map<string, BookedMTicket>();
             prev.forEach((t) => byId.set(t.ticketId, t));
-            res.bookings.forEach((sb: any) => {
+            serverTickets.forEach((sb: any) => {
               const pass = sb.passCode || sb.id;
               const existing = byId.get(pass);
               const matchedListing = movieListings.find((m) => m.id === sb.listingId) || movieListings[0];
@@ -431,6 +454,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
 
   // Restore active 5-min seat hold across page refresh / back navigation
   useEffect(() => {
+    if (!MOVIES_BOOKING_ENABLED) return;
     try {
       const raw = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (!raw) return;
@@ -562,7 +586,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   }, []);
 
   const getScreenConfigForListing = (listing: MarketplaceListing): AuthoritativeCinemaScreenConfig | undefined => {
-    return cinemaScreens.find((s) => s.cinemaListingId === listing.id) || cinemaScreens[0];
+    return cinemaScreens.find((s) => s.cinemaListingId === listing.id);
   };
 
   const parseShowTimings = (listing: MarketplaceListing): string[] => {
@@ -570,9 +594,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     if (screenCfg && Array.isArray(screenCfg.showtimes) && screenCfg.showtimes.length > 0) {
       return screenCfg.showtimes;
     }
-    const raw = String(
-      listing.customFieldValues?.showTimings || '10:30 AM • 01:45 PM • 04:50 PM • 07:55 PM • 10:55 PM'
-    );
+    const raw = String(listing.customFieldValues?.showTimings || '');
     return raw
       .split('•')
       .map((s) => s.trim())
@@ -582,40 +604,21 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   // Helper to extract rich metadata from existing listing fields
   const getMovieMeta = (item: MarketplaceListing) => {
     const screenCfg = getScreenConfigForListing(item);
-    const cert = item.categoryId === 'movie-standup' ? 'UA 16+' : item.categoryId === 'movie-private' ? 'ALL AGES' : 'UA 16+';
-    const langRaw = String(
-      item.customFieldValues?.languageFormat ||
-        (item.categoryId === 'movie-telugu'
-          ? 'Telugu · Hindi · English'
-          : item.categoryId === 'movie-multiplex'
-          ? 'Telugu · English · Hindi (IMAX / PCX)'
-          : 'Telugu · Hindi · English')
-    );
+    const cert = String(item.customFieldValues?.certification || 'Certification not provided');
+    const langRaw = String(item.customFieldValues?.languageFormat || 'Languages not provided');
     const soundRaw = String(
       screenCfg?.format ||
         item.customFieldValues?.soundSystem ||
         item.customFieldValues?.screenSoundFormat ||
-        '4K Laser · Dolby Atmos'
+        'Screen format not provided'
     );
-    const genreLabel =
-      item.categoryId === 'movie-standup'
-        ? 'Standup Comedy · Live'
-        : item.categoryId === 'movie-private'
-        ? 'Private Theatre · Celebration'
-        : item.categoryId === 'movie-telugu'
-        ? 'Action · Drama · Blockbuster'
-        : 'Action · Sci-Fi · Thriller';
-    const duration =
-      item.categoryId === 'movie-standup'
-        ? '1 hr 45 mins'
-        : item.categoryId === 'movie-private'
-        ? '3 hrs Private Slot'
-        : '2 hrs 48 mins';
+    const genreLabel = String(item.customFieldValues?.genre || 'Genre not provided');
+    const duration = String(item.customFieldValues?.duration || 'Duration not provided');
     const cancellationPolicy = screenCfg
       ? screenCfg.cancellationAllowed
         ? `${screenCfg.refundPercent}% refund up to ${Math.round(screenCfg.cancellationCutoffMinutes / 60)} hrs before show`
         : 'Non-refundable show'
-      : '80% refund up to 2 hrs before show';
+      : 'Cancellation policy not provided';
 
     return { cert, langRaw, soundRaw, genreLabel, duration, cancellationPolicy, screenCfg };
   };
@@ -698,19 +701,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   }, [movieListings, activePillar, selectedCityArea, selectedLang, selectedFormat, selectedGenre, localSearch, sortBy]);
 
   const upcomingReleases = useMemo(() => {
-    const releaseTags = [
-      'Releasing This Friday',
-      'Advance Booking Open',
-      'Early Premiere Shows',
-      'Special Fan Show · Fri',
-      'IMAX / PCX Special Screening',
-      'Weekend Premiere',
-    ];
-    return movieListings.map((item, idx) => ({
+    return movieListings.map((item) => ({
       listing: item,
       posterImage: item.images[1] || item.images[0],
-      releaseBadge: releaseTags[idx % releaseTags.length],
-      baseInterested: 1420 + idx * 635 + item.reviewCount * 3,
     }));
   }, [movieListings]);
 
@@ -821,6 +814,10 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     showtime?: string,
     initialStep: 'showtimes' | 'seats' = 'seats'
   ) => {
+    if (!MOVIES_BOOKING_ENABLED) {
+      triggerDistrictToast('🎬 Movie booking is coming soon — Movies V1 is discovery only.');
+      return;
+    }
     const timings = parseShowTimings(listing);
     const meta = getMovieMeta(listing);
     setBookingModalListing(listing);
@@ -962,18 +959,32 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   // Proceed to Step 4 (Google Login + UPI Payment Intent Creation)
   const handleProceedToPaymentStep = async () => {
     if (!bookingModalListing) return;
-    setBookingStep('payment');
     setPaymentVerifyStatus('idle');
     setPaymentStatusMessage(null);
+
+    if (!PAYMENT_VERIFICATION_AVAILABLE) {
+      const message = 'Movie checkout is unavailable because payment settlement cannot be verified. Do not send funds.';
+      setPaymentVerifyStatus('failed');
+      setPaymentStatusMessage(message);
+      triggerDistrictToast(message);
+      return;
+    }
 
     const intentRes = await createServerPaymentIntent({
       amount: grandTotal,
       merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
       planOrListing: `Movie Ticket: ${bookingModalListing.title} (${selectedShowtime} · ${selectedSeats.join(', ')})`,
-      userId: authUser?.id || supabaseUser?.id || getOrCreateClientSessionId(),
+      purpose: 'booking',
+      listingId: bookingModalListing.id,
     });
     if (intentRes.ok && intentRes.intentId) {
       setPaymentIntentId(intentRes.intentId);
+      setBookingStep('payment');
+    } else {
+      const message = intentRes.message || 'Movie checkout is unavailable. No payment was recorded; do not send funds.';
+      setPaymentVerifyStatus('failed');
+      setPaymentStatusMessage(message);
+      triggerDistrictToast(message);
     }
   };
 
@@ -991,6 +1002,8 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       });
       if (res.ok) {
         triggerDistrictToast(`✓ Signed in with Google as ${res.user?.email || guestEmailInput}`);
+      } else if (res.pending) {
+        triggerDistrictToast(res.message || 'Complete Google sign-in to continue.');
       } else {
         triggerDistrictToast(res.message || 'Google login failed.');
       }
@@ -999,9 +1012,14 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     }
   };
 
-  // Verify UPI Payment (supports testing UTR-only unsettled vs Bank Webhook Verified Settlement)
-  const handleVerifyPaymentAndConfirmTicket = async (simulateBankWebhookSettlement: boolean) => {
+  // Submit a real UTR. The server confirms a ticket only after provider settlement verification.
+  const handleVerifyPaymentAndConfirmTicket = async () => {
     if (!bookingModalListing || selectedSeats.length === 0 || isAtomicallyBooking) return;
+    if (!PAYMENT_VERIFICATION_AVAILABLE) {
+      setPaymentVerifyStatus('failed');
+      setPaymentStatusMessage('Movie checkout is unavailable because payment settlement cannot be verified. Do not send funds.');
+      return;
+    }
     const cleanUtr = upiUtrInput.replace(/\D/g, '');
     if (cleanUtr.length !== 12) {
       setPaymentVerifyStatus('failed');
@@ -1020,7 +1038,8 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
           amount: grandTotal,
           merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
           planOrListing: `Movie Ticket: ${bookingModalListing.title}`,
-          userId: authUser?.id || supabaseUser?.id || getOrCreateClientSessionId(),
+          purpose: 'booking',
+          listingId: bookingModalListing.id,
         });
         currentIntentId = created.intentId || null;
         setPaymentIntentId(currentIntentId);
@@ -1036,12 +1055,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       const verifyRes = await verifyServerUpiPayment({
         intentId: currentIntentId,
         utrNumber: cleanUtr,
-        amount: grandTotal,
-        merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
-        simulateBankWebhookSettlement,
       });
 
-      if (!verifyRes.ok && verifyRes.httpStatus === 409) {
+      if (verifyRes.httpStatus === 409 || verifyRes.error === 'DUPLICATE_UTR_REPLAY') {
         setPaymentVerifyStatus('failed');
         setPaymentStatusMessage(
           verifyRes.message || '409 DUPLICATE_UTR_REPLAY: This UTR has already been used for another transaction.'
@@ -1050,9 +1066,20 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
         return;
       }
 
-      // Now call atomic booking endpoint with requireVerifiedPayment: true
-      // If simulateBankWebhookSettlement was false, verifyRes.paymentVerificationToken is undefined,
-      // and the server MUST reject with 402 PAYMENT_NOT_VERIFIED!
+      if (!verifyRes.ok || !verifyRes.verified || !verifyRes.paymentVerificationToken) {
+        setPaymentVerifyStatus(
+          verifyRes.status === 'pending_provider_reconciliation' ? 'pending_reconciliation' : 'failed'
+        );
+        setPaymentStatusMessage(
+          verifyRes.message ||
+            (verifyRes.error === 'PAYMENT_PROVIDER_NOT_CONFIGURED'
+              ? 'Payment verification is unavailable. No ticket was booked; do not send funds.'
+              : 'Payment could not be verified. No ticket was booked.')
+        );
+        return;
+      }
+
+      // Call the atomic booking endpoint only when the provider has verified settlement.
       const activeDateIso = dateStrip[selectedDateOffset].iso;
       const sessionId = getOrCreateClientSessionId();
       const sortedSeatsKey = [...selectedSeats].sort().join('-');
@@ -1097,7 +1124,6 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
         promoCode: selectedPromoCode || undefined,
         totalAmount: grandTotal,
         paymentMode: 'pay_qr',
-        requireVerifiedPayment: true,
         paymentIntentId: currentIntentId,
         paymentUtr: cleanUtr,
         paymentVerificationToken: verifyRes.paymentVerificationToken,
@@ -1191,6 +1217,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
 
       void refreshMoviesInventory();
       triggerDistrictToast(`🎟️ Payment Settled & Signed QR Ticket Issued! ID: ${newTicket.ticketId}`);
+    } catch {
+      setPaymentVerifyStatus('failed');
+      setPaymentStatusMessage('The payment or booking request could not be completed. No ticket confirmation was issued.');
     } finally {
       setIsAtomicallyBooking(false);
     }
@@ -1349,9 +1378,18 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     triggerDistrictToast(`📥 Downloaded M-Ticket pass (${tkt.ticketId})!`);
   };
 
-  if (!currentSpotlight) return null;
+  if (!currentSpotlight) {
+    return (
+      <section className="rounded-3xl border border-zinc-200 bg-white p-6 text-zinc-900" aria-labelledby="movies-empty-title">
+        <h2 id="movies-empty-title" className="text-xl font-black">Movies & Cinemas</h2>
+        <p className="mt-2 text-sm text-zinc-600">No movie or cinema listings are available for discovery yet.</p>
+        <p className="mt-1 text-sm text-zinc-600">Ticket booking and payment are not available.</p>
+      </section>
+    );
+  }
 
   const spotlightMeta = getMovieMeta(currentSpotlight);
+  const isSampleSpotlight = isSampleMovieListing(currentSpotlight);
   const formatHoldCountdown = (sec: number) => {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
@@ -1426,7 +1464,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                     ))}
                   </select>
                   <div className={`text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    {cinemaScreens.length || 5} Verified Multiplexes
+                    {cinemaScreens.length} configured cinema schedules
                   </div>
                 </div>
               </div>
@@ -1546,7 +1584,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
           onMouseLeave={() => setIsAutoPlaying(true)}
         >
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <img
+            <SafeImage category="movies"
               src={currentSpotlight.images[0]}
               alt=""
               aria-hidden="true"
@@ -1587,6 +1625,11 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                 >
                   {getListingTitle(currentSpotlight, currentLang)}
                 </h1>
+                {isSampleSpotlight && (
+                  <span className="inline-flex w-fit rounded-full bg-amber-300 px-2.5 py-1 text-[10px] font-black uppercase text-amber-950">
+                    Demo preview · not a verified movie listing
+                  </span>
+                )}
 
                 <p
                   className={`text-xs sm:text-sm line-clamp-2 max-w-xl leading-relaxed ${
@@ -1603,40 +1646,21 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                     isLight ? 'text-zinc-600' : 'text-zinc-300'
                   }`}
                 >
-                  <span className="inline-flex items-center gap-1 font-black text-amber-500">
-                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                    <span>{currentSpotlight.providerRating}/5</span>
-                    <span className="font-normal opacity-80">
-                      ({currentSpotlight.reviewCount} votes)
-                    </span>
-                  </span>
-                  <span aria-hidden="true">·</span>
                   <span>{localizeAreaName(currentSpotlight.location.area, currentLang)}</span>
                   <span aria-hidden="true">·</span>
                   <span>{spotlightMeta.soundRaw}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-black text-[#E23744]">₹{currentSpotlight.price} onwards</span>
                 </div>
 
                 <div className="pt-2 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
+                    disabled
                     data-testid="hero-book-tickets-btn"
-                    onClick={() =>
-                      openDistrictBooking(
-                        currentSpotlight,
-                        parseShowTimings(currentSpotlight)[0] || '07:55 PM',
-                        'seats'
-                      )
-                    }
-                    className={`px-6 py-3 rounded-2xl text-xs sm:text-sm font-black flex items-center gap-2 shadow-lg transition transform active:scale-95 cursor-pointer ${
-                      isLight
-                        ? 'bg-zinc-950 hover:bg-zinc-800 text-white'
-                        : 'bg-[#E23744] hover:bg-[#c92d39] text-white'
-                    }`}
+                    aria-label="Movie booking coming soon"
+                    className="px-6 py-3 rounded-2xl text-xs sm:text-sm font-black flex items-center gap-2 bg-zinc-200 text-zinc-600 cursor-not-allowed"
                   >
                     <Ticket className="w-4 h-4" />
-                    <span>Book tickets</span>
+                    <span>Booking coming soon</span>
                   </button>
 
                   <button
@@ -1679,7 +1703,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                   }}
                   className="relative w-full max-w-[340px] aspect-[4/3] sm:aspect-[16/10] lg:aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl border-2 border-white/30 cursor-pointer group"
                 >
-                  <img
+                  <SafeImage category="movies"
                     src={currentSpotlight.images[0]}
                     alt={getListingTitle(currentSpotlight, currentLang)}
                     referrerPolicy="no-referrer"
@@ -1830,7 +1854,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3.5 min-w-0">
                           {tkt.posterUrl && (
-                            <img
+                            <SafeImage category="movies"
                               src={tkt.posterUrl}
                               alt={tkt.movieTitle}
                               referrerPolicy="no-referrer"
@@ -2297,7 +2321,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                     Now Showing in {selectedCityArea === 'All Hyderabad' ? activeAreaName || 'Hyderabad' : selectedCityArea}
                   </h2>
                   <p className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    Official multiplex showtimes, 5-min atomic seat locks, verified UPI settlement, and single-use QR entry
+                    Discovery only. Showtimes and cinema details are listing information and should be confirmed with the cinema; booking is disabled.
                   </p>
                 </div>
                 <span className={`text-xs font-bold ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
@@ -2406,28 +2430,32 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                   {filteredMovies.map((movie) => {
                     const title = getListingTitle(movie, currentLang);
                     const meta = getMovieMeta(movie);
-                    const timings = parseShowTimings(movie);
                     const isFav = favoriteIds.includes(movie.id) || Boolean(favoritedMap[movie.id]);
+                    const isSample = isSampleMovieListing(movie);
 
                     return (
                       <div
                         key={movie.id}
                         data-testid={`movie-card-${movie.id}`}
-                        onClick={() => openDistrictBooking(movie, timings[0] || '07:55 PM', 'seats')}
-                        className={`group rounded-2xl overflow-hidden border flex flex-col justify-between transition-all duration-200 hover:-translate-y-1 cursor-pointer ${
+                        className={`group rounded-2xl overflow-hidden border flex flex-col justify-between transition-all duration-200 hover:-translate-y-1 ${
                           isLight
                             ? 'bg-white border-zinc-200/90 hover:border-zinc-300 hover:shadow-lg'
                             : 'bg-[#151520] border-white/10 hover:border-white/25'
                         }`}
                       >
                         <div className="relative aspect-[3/4] w-full bg-zinc-900 overflow-hidden">
-                          <img
+                          <SafeImage category="movies"
                             src={movie.images[0]}
                             alt={title}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
+                          {isSample && (
+                            <span className="absolute bottom-2.5 left-3 rounded-full bg-amber-300 px-2 py-1 text-[9px] font-black uppercase text-amber-950">
+                              Demo preview · not verified
+                            </span>
+                          )}
 
                           {/* Trailer Play Trigger */}
                           <button
@@ -2461,13 +2489,6 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                             />
                           </button>
 
-                          <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-[11px] font-bold text-white">
-                            <span className="inline-flex items-center gap-1">
-                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                              <span>{movie.providerRating}</span>
-                            </span>
-                            <span className="text-zinc-300 text-[10px]">{movie.reviewCount} votes</span>
-                          </div>
                         </div>
 
                         <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
@@ -2490,12 +2511,8 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                             >
                               {meta.cert} · {meta.langRaw}
                             </p>
-                            <p
-                              className={`text-[11px] font-semibold truncate ${
-                                isLight ? 'text-zinc-600' : 'text-zinc-300'
-                              }`}
-                            >
-                              {localizeAreaName(movie.location.area, currentLang)} · ₹{movie.price}
+                            <p className={`text-[11px] font-semibold truncate ${isLight ? 'text-zinc-600' : 'text-zinc-300'}`}>
+                              {localizeAreaName(movie.location.area, currentLang)}
                             </p>
                           </div>
 
@@ -2518,12 +2535,13 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
 
                             <button
                               type="button"
+                              disabled
                               data-testid={`book-movie-btn-${movie.id}`}
-                              onClick={() => openDistrictBooking(movie, timings[0] || '07:55 PM', 'seats')}
-                              className="py-1.5 px-2 rounded-xl bg-[#E23744] hover:bg-[#c92d39] text-white font-black text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
+                              aria-label="Movie booking coming soon"
+                              className="py-1.5 px-2 rounded-xl bg-zinc-200 text-zinc-600 font-black text-[11px] flex items-center justify-center gap-1 cursor-not-allowed"
                             >
                               <Ticket className="w-3 h-3 shrink-0" />
-                              <span className="truncate">Book</span>
+                              <span className="truncate">Coming soon</span>
                             </button>
                           </div>
                         </div>
@@ -2540,20 +2558,18 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
             <div className="space-y-4 pt-4 border-t border-zinc-200/60 dark:border-white/10">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl sm:text-2xl font-black tracking-tight">
-                    Upcoming Movies & Early Premieres
-                  </h2>
+                  <h2 className="text-xl sm:text-2xl font-black tracking-tight">Movie previews</h2>
                   <p className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    Mark "Interested" to get notified when advance fan-show bookings open
+                    Saved interest stays in this browser; notifications are not sent.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-stretch gap-4 overflow-x-auto no-scrollbar pb-2">
-                {upcomingReleases.map(({ listing, posterImage, releaseBadge, baseInterested }) => {
+                {upcomingReleases.map(({ listing, posterImage }) => {
                   const title = getListingTitle(listing, currentLang);
                   const isInterested = Boolean(interestedMap[listing.id]);
-                  const interestedCount = isInterested ? baseInterested + 1 : baseInterested;
+                  const isSample = isSampleMovieListing(listing);
 
                   return (
                     <div
@@ -2568,7 +2584,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                         onClick={() => setTrailerModalMovie(listing)}
                         className="relative aspect-[16/10] w-full bg-zinc-900 overflow-hidden cursor-pointer group"
                       >
-                        <img
+                        <SafeImage category="movies"
                           src={posterImage}
                           alt={title}
                           referrerPolicy="no-referrer"
@@ -2576,7 +2592,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
                         <span className="absolute bottom-2.5 left-2.5 text-[10px] font-black uppercase tracking-wider bg-black/75 text-amber-300 px-2.5 py-1 rounded-lg">
-                          {releaseBadge}
+                          {isSample ? 'Demo preview' : 'Listing preview'}
                         </span>
                       </div>
 
@@ -2589,7 +2605,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                             {title}
                           </h4>
                           <p className={`text-[11px] mt-0.5 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                            {interestedCount.toLocaleString('en-IN')} people interested
+                            {isSample ? 'Not a verified movie listing' : 'Movie listing preview'}
                           </p>
                         </div>
 
@@ -2603,8 +2619,8 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                               }));
                               triggerDistrictToast(
                                 !isInterested
-                                  ? `🔔 You'll be notified for "${title}"!`
-                                  : `Removed notification for "${title}"`
+                                  ? `Saved "${title}" in this browser. No notification was sent.`
+                                  : `Removed "${title}" from this browser's saved interests.`
                               );
                             }}
                             className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
@@ -2616,15 +2632,15 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                             }`}
                           >
                             <Bell className="w-3.5 h-3.5" />
-                            <span>{isInterested ? 'Interested ✓' : 'Interested'}</span>
+                            <span>{isInterested ? 'Saved here ✓' : 'Save interest here'}</span>
                           </button>
 
                           <button
                             type="button"
-                            onClick={() => openDistrictBooking(listing, '07:55 PM', 'seats')}
-                            className="py-2 px-3 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-black cursor-pointer"
+                            disabled
+                            className="py-2 px-3 rounded-xl bg-zinc-200 text-zinc-600 text-xs font-black cursor-not-allowed"
                           >
-                            Pre-Book
+                            Booking coming soon
                           </button>
                         </div>
                       </div>
@@ -2643,25 +2659,16 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                   <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-[#E23744]" />
                     <span>
-                      Cinemas & Live Showtimes in {selectedCityArea === 'All Hyderabad' ? activeAreaName || 'Hyderabad' : selectedCityArea} (
+                    Cinema listings in {selectedCityArea === 'All Hyderabad' ? activeAreaName || 'Hyderabad' : selectedCityArea} (
                       {dateStrip[selectedDateOffset].dayLabel})
                     </span>
                   </h2>
                   <p className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                    Tap any date and showtime slot below to open the live auditorium seat map
+                    Listed times are for discovery only. Seat maps and online booking are unavailable.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-4 text-xs font-semibold">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span>Available</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    <span>Fast Filling</span>
-                  </span>
-                </div>
+                <span className="text-xs font-semibold text-zinc-500">Availability is not verified</span>
               </div>
 
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -2746,7 +2753,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                       }`}
                     >
                       <div className="flex items-start gap-3.5 max-w-xl">
-                        <img
+                        <SafeImage category="movies"
                           src={cinema.images[0]}
                           alt={title}
                           referrerPolicy="no-referrer"
@@ -2793,30 +2800,17 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2.5">
-                        {timingsToShow.map((slot, sIdx) => {
-                          const isFastFilling = (cIdx + sIdx) % 3 === 1;
-                          return (
-                            <button
-                              key={slot}
-                              type="button"
-                              onClick={() => openDistrictBooking(cinema, slot, 'seats')}
-                              className={`px-4 py-2 rounded-xl border text-left transition cursor-pointer ${
-                                isFastFilling
-                                  ? isLight
-                                    ? 'bg-amber-50 border-amber-300 hover:bg-amber-100 text-amber-900'
-                                    : 'bg-amber-500/10 border-amber-500/40 hover:bg-amber-500/20 text-amber-300'
-                                  : isLight
-                                  ? 'bg-emerald-50/70 border-emerald-300 hover:bg-emerald-100 text-emerald-900'
-                                  : 'bg-emerald-500/10 border-emerald-500/40 hover:bg-emerald-500/20 text-emerald-300'
-                              }`}
-                            >
-                              <div className="text-xs font-black tabular-nums">{slot}</div>
-                              <div className="text-[9px] font-bold uppercase tracking-wider opacity-75">
-                                {sIdx % 2 === 0 ? '4K ATMOS' : 'VIP RECLINER'}
-                              </div>
-                            </button>
-                          );
-                        })}
+                        {timingsToShow.length > 0 ? timingsToShow.map((slot) => (
+                          <span
+                            key={slot}
+                            className={`rounded-xl border px-4 py-2 text-left ${isLight ? 'border-zinc-200 bg-zinc-50 text-zinc-700' : 'border-white/10 bg-white/5 text-zinc-300'}`}
+                          >
+                            <span className="block text-xs font-black tabular-nums">{slot}</span>
+                            <span className="block text-[9px] font-bold uppercase tracking-wider opacity-75">Listed time · confirm with cinema</span>
+                          </span>
+                        )) : (
+                          <span className="text-xs text-zinc-500">No showtimes provided</span>
+                        )}
                       </div>
                     </div>
                   );
@@ -2842,7 +2836,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-[#E23744]">
-                  OFFICIAL 4K TRAILER & SYNOPSIS
+                  Movie listing details · trailer not configured
                 </span>
                 <h3 className="text-lg font-black">{getListingTitle(trailerModalMovie, currentLang)}</h3>
               </div>
@@ -2857,7 +2851,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
 
             {/* Interactive Trailer Player Viewport */}
             <div className="relative aspect-video rounded-2xl overflow-hidden bg-black border border-white/15">
-              <img
+              <SafeImage category="movies"
                 src={trailerModalMovie.images[0]}
                 alt={trailerModalMovie.title}
                 referrerPolicy="no-referrer"
@@ -2929,17 +2923,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => {
-                  const target = trailerModalMovie;
-                  setTrailerModalMovie(null);
-                  openDistrictBooking(target, parseShowTimings(target)[0] || '07:55 PM', 'seats');
-                }}
-                className="px-6 py-3 rounded-2xl bg-[#E23744] hover:bg-[#c92d39] text-white text-xs font-black flex items-center gap-2 cursor-pointer"
-              >
+              <button type="button" disabled className="px-6 py-3 rounded-2xl bg-zinc-200 text-zinc-600 text-xs font-black flex items-center gap-2 cursor-not-allowed">
                 <Ticket className="w-4 h-4" />
-                <span>Select Date, Showtime & Seats</span>
+                <span>Booking coming soon</span>
               </button>
             </div>
           </div>
@@ -3068,7 +3054,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
              Step 3: F&B, Taxes & Promo Offers -> Step 4: Google Login + Verified UPI ->
              Step 5: Signed Single-Use QR Ticket
          ===================================================================== */}
-      {bookingModalListing && (
+      {MOVIES_BOOKING_ENABLED && bookingModalListing && (
         <div
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
           onClick={() => setBookingModalListing(null)}
@@ -3081,7 +3067,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
             {/* Modal Top Header */}
             <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-3">
               <div className="flex items-center gap-3">
-                <img
+                <SafeImage category="movies"
                   src={bookingModalListing.images[0]}
                   alt={getListingTitle(bookingModalListing, currentLang)}
                   referrerPolicy="no-referrer"
@@ -3560,7 +3546,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                           maxLength={12}
                           value={upiUtrInput}
                           onChange={(e) => setUpiUtrInput(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                          placeholder="Enter 12-digit UTR (e.g. 412987654321)"
+                          placeholder="Enter 12-digit UTR"
                           className="w-full rounded-xl bg-black/50 border border-white/20 px-3.5 py-2 text-xs font-mono text-white"
                         />
                       </div>
@@ -3582,29 +3568,18 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div className="pt-1">
                     <button
                       type="button"
-                      data-testid="submit-utr-unsettled-btn"
+                      data-testid="submit-utr-verification-btn"
                       disabled={isAtomicallyBooking}
-                      onClick={() => handleVerifyPaymentAndConfirmTicket(false)}
-                      className="py-2.5 px-3 rounded-xl border border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold cursor-pointer"
+                      onClick={handleVerifyPaymentAndConfirmTicket}
+                      className="w-full py-2.5 px-4 rounded-xl border border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-xs font-bold cursor-pointer"
                     >
-                      Submit UTR Only (Test Unsettled Guard)
-                    </button>
-
-                    <button
-                      type="button"
-                      data-testid="verify-settlement-confirm-btn"
-                      disabled={isAtomicallyBooking}
-                      onClick={() => handleVerifyPaymentAndConfirmTicket(true)}
-                      className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow-lg"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
                       <span>
                         {isAtomicallyBooking
-                          ? 'Verifying Settlement...'
-                          : `Verify Bank Webhook & Issue Ticket (₹${grandTotal})`}
+                          ? 'Checking payment status…'
+                          : `Submit UTR for verification (₹${grandTotal})`}
                       </span>
                     </button>
                   </div>
@@ -3626,7 +3601,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-dashed border-zinc-300 pb-4">
                   <div className="flex items-center gap-3.5">
-                    <img
+                    <SafeImage category="movies"
                       src={activeMTicket.posterUrl}
                       alt={activeMTicket.movieTitle}
                       referrerPolicy="no-referrer"
@@ -3770,16 +3745,23 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                   )}
 
                   {bookingStep === 'fnb' && (
-                    <button
-                      type="button"
-                      data-testid="proceed-to-upi-payment-btn"
-                      disabled={selectedSeats.length === 0}
-                      onClick={handleProceedToPaymentStep}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-lg"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Proceed to Google Auth & UPI (₹{grandTotal}) →</span>
-                    </button>
+                    <div className="flex flex-col items-end gap-2">
+                      {!PAYMENT_VERIFICATION_AVAILABLE && (
+                        <p role="status" className="max-w-sm text-right text-xs text-amber-700 dark:text-amber-300">
+                          Movie checkout is unavailable until provider settlement verification is configured. Do not send funds.
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        data-testid="proceed-to-upi-payment-btn"
+                        disabled={selectedSeats.length === 0 || !PAYMENT_VERIFICATION_AVAILABLE}
+                        onClick={handleProceedToPaymentStep}
+                        className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-lg"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>{PAYMENT_VERIFICATION_AVAILABLE ? `Proceed to UPI (₹${grandTotal}) →` : 'Online checkout unavailable'}</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

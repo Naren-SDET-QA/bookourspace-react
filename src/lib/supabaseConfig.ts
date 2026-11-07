@@ -35,6 +35,8 @@ export interface SupabaseConfigInput {
   anonKey?: string | null;
 }
 
+export type SupabaseEnvironment = Record<string, unknown>;
+
 export interface ResolvedSupabaseConfig {
   /** Empty unless an explicit, valid target was configured. */
   projectId: string;
@@ -51,6 +53,11 @@ export interface DevelopmentSupabasePreflight {
   projectId: string;
   projectUrl: string;
   errors: string[];
+}
+
+function environmentValue(env: SupabaseEnvironment, key: string): string | undefined {
+  const value = env[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function clean(value: string | null | undefined): string {
@@ -267,6 +274,17 @@ export function resolveSupabaseConfig(input: SupabaseConfigInput = {}): Resolved
     isConfigured,
     errors,
   };
+}
+
+/** Resolve the same explicit public Supabase settings used by Vite and the server. */
+export function resolveSupabaseEnvironment(env: SupabaseEnvironment = {}): ResolvedSupabaseConfig {
+  return resolveSupabaseConfig({
+    url: environmentValue(env, 'VITE_SUPABASE_URL'),
+    projectId: environmentValue(env, 'VITE_SUPABASE_PROJECT_ID'),
+    developmentProjectId: environmentValue(env, 'VITE_SUPABASE_DEVELOPMENT_PROJECT_ID'),
+    publishableKey: environmentValue(env, 'VITE_SUPABASE_PUBLISHABLE_KEY'),
+    anonKey: environmentValue(env, 'VITE_SUPABASE_ANON_KEY'),
+  });
 }
 
 /**

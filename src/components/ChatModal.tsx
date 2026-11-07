@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SafeImage from './SafeImage';
 import { X, Send, ShieldCheck, Phone, CheckCircle2, MessageSquare, Sparkles } from 'lucide-react';
 import { MarketplaceListing, ChatMessage } from '../types/marketplace';
 import { 
@@ -142,7 +143,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
         <div className="p-3.5 bg-[#4A148C] text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="relative">
-              <img
+              <SafeImage category="general"
                 src={listing.providerAvatar}
                 alt={displayProviderName}
                 className="w-10 h-10 rounded-full object-cover ring-2 ring-white/50 bg-white"

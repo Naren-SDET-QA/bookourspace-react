@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import SafeImage from './SafeImage';
 import {
   Sparkles,
   X,
@@ -745,7 +746,7 @@ export const QuickBookChatAssistant: React.FC<QuickBookChatAssistantProps> = ({
 
                             <div className="p-3 space-y-2.5">
                               <div className="flex items-start gap-3">
-                                <img
+                                <SafeImage category="general"
                                   src={listing.images?.[0]}
                                   alt={displayTitle}
                                   className="w-16 h-16 rounded-xl object-cover shrink-0 border border-slate-200 dark:border-slate-700"

@@ -1,0 +1,235 @@
+import { expect, test } from '@playwright/test';
+
+const MUMBAI_PROJECT = 'obkfgxjzlscungkhbyvq';
+
+async function openApp(page: import('@playwright/test').Page) {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#root > *')).toBeAttached({ timeout: 30_000 });
+}
+
+test.describe('signed-out Google sign-in entry points', () => {
+  test('official logo selects the static artwork when reduced motion is requested', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('bookourspace-splash')).toHaveCount(0, { timeout: 15_000 });
+    const guestButton = page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true });
+    if (await guestButton.isVisible().catch(() => false)) await guestButton.click();
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).last().click();
+    const logo = page.locator('[aria-label="BookOurSpace Google sign-in"] img');
+    await expect(logo).toBeVisible();
+    await expect.poll(async () => new URL(await logo.evaluate((image: HTMLImageElement) => image.currentSrc)).pathname)
+      .toContain('bos-logo-lockup.webp');
+    await expect(page.getByTestId('bos-logo-pin-rotor')).toBeHidden();
+  });
+
+  test('Flutter-matched launch splash hands off to Google welcome, and Guest choice persists', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.removeItem('bos_entry_choice_v1');
+      const originalSetTimeout = window.setTimeout.bind(window);
+      window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
+        originalSetTimeout(handler, timeout === 1300 ? 3500 : timeout, ...args)) as typeof window.setTimeout;
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('bookourspace-splash')).toBeVisible();
+    const officialLogo = page.locator('[data-testid="bookourspace-splash"] .bos-entry-official-logo');
+    await expect(officialLogo.locator('img')).toHaveAttribute('src', /bos-logo-lockup\.webp$/);
+    await expect(page.getByTestId('bos-logo-pin-rotor')).toBeVisible();
+    const pinRotor = page.locator('.bos-official-logo__spin');
+    await expect(pinRotor).toHaveCSS('animation-name', 'bos-logo-pin-spinner');
+    await expect(pinRotor).toHaveCSS('animation-duration', '2s');
+    await expect(pinRotor).toHaveCSS('animation-timing-function', 'linear');
+    await expect(pinRotor).toHaveCSS('animation-iteration-count', 'infinite');
+    const pinOrigin = (await pinRotor.evaluate((element) => getComputedStyle(element).transformOrigin))
+      .split(/\s+/).map(value => Number.parseFloat(value));
+    expect(pinOrigin[0]).toBeCloseTo(259, 0);
+    expect(pinOrigin[1]).toBeCloseTo(174.5, 0);
+    await expect(officialLogo.locator('.bos-official-logo__face--back')).toHaveCSS('transform', /matrix3d/);
+    const initialTransform = await pinRotor.evaluate((element) => getComputedStyle(element).transform);
+    await page.waitForTimeout(350);
+    const laterTransform = await pinRotor.evaluate((element) => getComputedStyle(element).transform);
+    expect(laterTransform).not.toBe(initialTransform);
+    await expect(officialLogo.locator('img')).toHaveJSProperty('naturalWidth', 1560);
+    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true }).click();
+    await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0, { timeout: 10_000 });
+  });
+
+  test('welcome uses the Flutter dark brand surface and stays usable at mobile and desktop sizes', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const welcome = page.getByTestId('bookourspace-welcome');
+    await welcome.waitFor({ state: 'visible', timeout: 10_000 });
+
+    await expect(welcome).toHaveCSS('background-color', 'rgb(11, 14, 26)');
+    await expect(page.getByTestId('bos-logo-pin-rotor')).toBeVisible();
+    await expect(page.getByTestId('entry-google-sign-in')).toHaveCSS('min-height', '56px');
+    await expect(page.getByTestId('entry-continue-guest')).toHaveCSS('min-height', '56px');
+    await expect(page.getByTestId('entry-google-sign-in')).toHaveAccessibleDescription(/New Google accounts get a profile automatically/);
+
+    for (const viewport of [{ width: 360, height: 640 }, { width: 1440, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
+      await expect(page.getByTestId('entry-continue-guest')).toBeVisible();
+      const layout = await page.evaluate(() => {
+        const root = document.querySelector('[data-testid="bookourspace-welcome"]') as HTMLElement;
+        const google = document.querySelector('[data-testid="entry-google-sign-in"]') as HTMLElement;
+        const guest = document.querySelector('[data-testid="entry-continue-guest"]') as HTMLElement;
+        return {
+          scrollWidth: root.scrollWidth,
+          clientWidth: root.clientWidth,
+          googleWidth: google.getBoundingClientRect().width,
+          guestWidth: guest.getBoundingClientRect().width,
+        };
+      });
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+      expect(layout.googleWidth).toBeGreaterThan(0);
+      expect(layout.guestWidth).toBeGreaterThan(0);
+    }
+  });
+
+
+  test('Google opens the shared auth dialog above welcome and Escape returns with focus', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const googleButton = page.getByTestId('entry-google-sign-in');
+    await googleButton.waitFor({ state: 'visible', timeout: 10_000 });
+    await googleButton.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Sign In with Google' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute('aria-modal', 'true');
+    await expect(dialog).toHaveClass(/\bdark\b/);
+    await expect.poll(
+      () => dialog.evaluate((element) => getComputedStyle(element).backgroundColor)
+    ).not.toBe('rgb(255, 255, 255)');
+    await expect(page.getByRole('button', { name: 'Close sign-in' })).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
+    await expect(googleButton).toBeFocused();
+  });
+
+
+  test('welcome Google button opens the existing Supabase Google auth flow', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('entry-google-sign-in').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.getByTestId('entry-google-sign-in').click();
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue securely with Google' })).toBeVisible();
+  });
+
+  test('home header exposes Continue with Google and opens the shared Supabase auth flow', async ({ page }) => {
+    await openApp(page);
+    const continueButton = page.getByRole('button', { name: 'Continue with Google', exact: true }).last();
+    await expect(continueButton).toBeVisible();
+    await continueButton.click();
+
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue securely with Google' })).toBeVisible();
+  });
+
+  test('top-right menu Sign In opens the shared Supabase auth flow', async ({ page }) => {
+    await openApp(page);
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).last().click();
+
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue securely with Google' })).toBeVisible();
+  });
+
+  test('Profile offers Continue with Google and opens the shared auth modal', async ({ page }) => {
+    await openApp(page);
+    await page.getByRole('button', { name: /^Profile$/ }).click();
+    const continueButton = page.locator('[role="region"][aria-label="Profile"]').getByRole('button', { name: 'Continue with Google', exact: true });
+    await expect(continueButton).toBeVisible();
+    await continueButton.click();
+
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue securely with Google' })).toBeVisible();
+  });
+
+  test('new registration cannot select a privileged role', async ({ page }) => {
+    await openApp(page);
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).last().click();
+
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
+    await expect(page.getByText('Select Account Portal')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Provider', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
+  });
+
+  test('a verified OAuth result restores the selected module destination', async ({ page }) => {
+    await page.goto('/#services', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#root > *')).toBeAttached({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Open All Sections & Quick Menu' }).click();
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
+
+    await page.evaluate(() => {
+      sessionStorage.setItem('bos_oauth_return_section_v1', 'services');
+      sessionStorage.setItem('bos_oauth_return_hash_v1', '#services');
+      sessionStorage.setItem('bos_oauth_return_path_v1', '/');
+      window.dispatchEvent(new CustomEvent('bos-google-oauth-redirect', {
+        detail: {
+          isNewUser: true,
+          user: { name: 'New Customer', email: 'new.customer@example.test', role: 'customer' },
+          redirectTarget: 'marketplace',
+        },
+      }));
+    });
+
+    await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toHaveCount(0);
+    await expect(page.locator('section[aria-label="services section"]')).toBeVisible();
+    expect(new URL(page.url()).hash).toBe('#services');
+  });
+
+  test('popup flow builds the configured Google authorize URL and app callback', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as any).__bosOAuthPopupUrl = null;
+      window.open = (() => ({
+        location: { replace: (url: string) => { (window as any).__bosOAuthPopupUrl = url; } },
+        close: () => undefined,
+      })) as any;
+    });
+
+    await openApp(page);
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).last().click();
+    const appOrigin = new URL(page.url()).origin;
+    await page.getByRole('button', { name: 'Continue securely with Google' }).click();
+    await expect(page.getByText('Complete Google sign-in in the popup window...')).toBeVisible();
+    const authorizeUrlValue = await page.evaluate(() => (window as any).__bosOAuthPopupUrl as string);
+    const authorizeUrl = new URL(authorizeUrlValue);
+
+    expect(authorizeUrl.origin).toBe(`https://${MUMBAI_PROJECT}.supabase.co`);
+    expect(authorizeUrl.pathname).toBe('/auth/v1/authorize');
+    expect(authorizeUrl.searchParams.get('provider')).toBe('google');
+    expect(authorizeUrl.searchParams.get('redirect_to')).toBe(`${appOrigin}/auth/callback?role=customer`);
+  });
+
+  test('a blocked popup falls back to the same Google redirect flow', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.open = () => null;
+    });
+    await page.context().route(`https://${MUMBAI_PROJECT}.supabase.co/auth/v1/authorize**`, async (route) => {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: 'OAuth redirect intercepted for local test.' });
+    });
+
+    await openApp(page);
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).last().click();
+    const appOrigin = new URL(page.url()).origin;
+    const authRequest = page.waitForRequest((request) =>
+      request.url().startsWith(`https://${MUMBAI_PROJECT}.supabase.co/auth/v1/authorize`)
+    );
+    await page.getByRole('button', { name: 'Continue securely with Google' }).click();
+    const request = await authRequest;
+    const authorizeUrl = new URL(request.url());
+    expect(authorizeUrl.searchParams.get('provider')).toBe('google');
+    expect(authorizeUrl.searchParams.get('redirect_to')).toBe(`${appOrigin}/auth/callback?role=customer`);
+  });
+});

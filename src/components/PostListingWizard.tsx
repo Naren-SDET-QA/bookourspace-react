@@ -1,4 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import SafeImage, { imageCategoryFor } from './SafeImage';
+import UniversalMediaManager from './UniversalMediaManager';
+import { inspectMediaFile, type InspectedMedia } from '../lib/media/inspection';
+import { createResponsiveImageVariants, type ProcessedImage } from '../lib/media/imageVariants';
+import { createMediaUploadHandler } from '../lib/media/uploadMediaAsset';
+import { parseStorageObjectReference } from '../lib/media/signedStorageUrl';
+import { sanitizeSvgFile } from '../lib/media/sanitizeSvg';
 import {
   X,
   Check,
@@ -35,6 +42,8 @@ import {
   moviesCategories,
 } from '../data/servicesStayMoviesData';
 import { UniversalBarcode, generateBosBarcodeId } from './UniversalBarcode';
+import { saveServerProviderListing } from '../lib/supabaseClient';
+import { ProviderOnboardingForm } from './ProviderOnboardingForm';
 import {
   UniversalObjectEditorModal,
   getSectionScopedElements,
@@ -51,6 +60,24 @@ interface PostListingWizardProps {
   defaultCategory?: string;
   defaultSubcategory?: string;
 }
+
+type ProviderListingImageItem = {
+  url: string;
+  format: string;
+  name: string;
+  file?: File;
+  inspected?: InspectedMedia;
+  processedImage?: ProcessedImage | null;
+  isCover?: boolean;
+};
+
+const normalizeListingCovers = (items: ProviderListingImageItem[]): ProviderListingImageItem[] => {
+  const realImages = items.map((item, index) => ({ item, index })).filter(({ item }) => item.name !== 'category-cover.jpg');
+  const candidates = realImages.length ? realImages : items.map((item, index) => ({ item, index }));
+  if (!candidates.length) return items;
+  const selected = candidates.find(({ item }) => item.isCover)?.index ?? candidates[0].index;
+  return items.map((item, index) => ({ ...item, isCover: index === selected }));
+};
 
 const ACCEPTED_ALL_IMAGE_FORMATS =
   'image/*,.png,.jpg,.jpeg,.webp,.gif,.svg,.bmp,.avif,.heic,.heif,.tiff,.tif,.ico,.jfif';
@@ -455,33 +482,18 @@ function buildCategorySpecificProviderConfig(
   if (section === 'venues') {
     const isSports = /sport|turf|stadium|ground/i.test(categoryId + catNameEn + subcategoryEn);
     const isCorporate = /corporate|conference|meeting|training|exhibition/i.test(categoryId + catNameEn);
-    const isStudio = /studio|media|shoot/i.test(categoryId + catNameEn);
-
     return {
-      providerNameEn: isSports
-        ? `ProArena ${catNameEn}`
-        : isCorporate
-        ? `CyberConventions ${catNameEn}`
-        : `Anvaya Grand ${catNameEn}`,
-      providerNameTe: isSports
-        ? `ప్రోఎరీనా ${catNameTe}`
-        : isCorporate
-        ? `సైబర్ కన్వెన్షన్స్ ${catNameTe}`
-        : `అన్వయ గ్రాండ్ ${catNameTe}`,
-      providerNameHi: isSports
-        ? `प्रोएरिना ${catNameHi}`
-        : isCorporate
-        ? `साइबर कन्वेंशन ${catNameHi}`
-        : `अन्वया ग्रैंड ${catNameHi}`,
+      providerNameEn: 'Enter your registered venue or business name',
+      providerNameTe: 'మీ నమోదు చేసిన వేదిక లేదా వ్యాపార పేరును నమోదు చేయండి',
+      providerNameHi: 'अपना पंजीकृत स्थल या व्यवसाय का नाम दर्ज करें',
       titlePlaceholderEn: `e.g. Grand ${subcategoryEn} (${catNameEn}) with Valet Parking & AC`,
       titlePlaceholderTe: `ఉదా: గ్రాండ్ ${subcategoryEn} (${catNameTe}) — ఏసీ & వాలెట్ పార్కింగ్`,
       titlePlaceholderHi: `उदा: ग्रैंड ${subcategoryEn} (${catNameHi}) — एसी और वैले पार्किंग`,
       descPlaceholderEn: `Describe ${subcategoryEn} seating capacity, dining hall, AC, valet parking, generator backup, and booking packages...`,
       descPlaceholderTe: `${subcategoryEn} సీటింగ్ కెపాసిటీ, డైనింగ్ హాల్, ఏసీ, పార్కింగ్ మరియు ప్యాకేజీ వివరాలను రాయండి...`,
       descPlaceholderHi: `${subcategoryEn} सीटिंग क्षमता, डाइनिंग हॉल, एसी, पार्किंग और पैकेज विवरण लिखें...`,
-      coverImageUrl:
-        'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=800&q=80',
-      defaultPrice: isSports ? '1500' : isStudio ? '8500' : isCorporate ? '25000' : '65000',
+      coverImageUrl: '',
+      defaultPrice: '',
       defaultPriceUnit: isSports ? '/hr' : '/day',
       fields: [
         {
@@ -915,7 +927,7 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   defaultCategory = 'all',
   defaultSubcategory = 'all',
 }) => {
-  const { categories, postingPlans, addListing, recordPayment, setUserRole } = useMarketplace();
+  const { categories, postingPlans, authUser } = useMarketplace();
   const ui = getUILabels(currentLang);
 
   const loc = (enText: string, teText?: string, hiText?: string) => {
@@ -939,6 +951,8 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   const [selectedSection, setSelectedSection] = useState<MarketSectionType>(defaultSection);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('pg-boys');
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>("Men's hostel");
+  const [adminVenueCategories,setAdminVenueCategories]=useState<any[]>([]);
+  useEffect(()=>{if(!isOpen||selectedSection!=='venues')return;let live=true;fetch('/api/venues/categories').then(r=>r.ok?r.json():Promise.reject()).then(d=>{if(live&&Array.isArray(d.categories))setAdminVenueCategories(d.categories.map((c:any)=>({id:c.id,name:c.label,nameTe:c.label,nameHi:c.label,emoji:c.emoji,subcategories:(c.subcategories||[]).map((label:string)=>({en:label,te:label,hi:label}))})));}).catch(()=>{if(live)setAdminVenueCategories([]);});return()=>{live=false;};},[isOpen,selectedSection]);
 
   const getSectionCategoryList = (sec: MarketSectionType) =>
     sec === 'pg_hostels'
@@ -946,7 +960,7 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
       : sec === 'classes'
       ? classCategories
       : sec === 'venues'
-      ? venue12Categories
+      ? adminVenueCategories.length?adminVenueCategories:venue12Categories
       : sec === 'services'
       ? servicesCategories
       : sec === 'hotel_stay'
@@ -976,42 +990,22 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
     return transliterateLatinToScript(cfg.providerNameEn, lang);
   };
 
-  const getDefaultCity = (lang: AppLanguage) =>
-    lang === 'te'
-      ? 'హైదరాబాద్'
-      : lang === 'hi'
-      ? 'हैदराबाद'
-      : lang === 'en'
-      ? 'Hyderabad'
-      : transliterateLatinToScript('Hyderabad', lang);
-
-  const getDefaultArea = (lang: AppLanguage) =>
-    lang === 'te'
-      ? 'మాదాపూర్ / హైటెక్ సిటీ'
-      : lang === 'hi'
-      ? 'माधापुर / हाईटेक सिटी'
-      : lang === 'en'
-      ? 'Madhapur / Hitech City'
-      : transliterateLatinToScript('Madhapur / Hitech City', lang);
-
   const getDefaultAdminNote = (lang: AppLanguage) =>
     lang === 'te'
-      ? 'మా ధృవీకరించబడిన లిస్టింగ్‌ను ఎంచుకున్న కేటగిరీలో ప్రదర్శించడానికి అడ్మిన్ ఆమోదం కోరుతున్నాము.'
+      ? 'ప్రొవైడర్ మరియు లిస్టింగ్ వివరాలను పరిశీలించి ప్రచురణకు ముందు ఆమోదించండి.'
       : lang === 'hi'
-      ? 'चुनी गई श्रेणी में हमारी सत्यापित लिस्टिंग प्रदर्शित करने के लिए एडमिन अनुमोदन का अनुरोध।'
+      ? 'प्रकाशित करने से पहले प्रोवाइडर और लिस्टिंग विवरण की समीक्षा करके स्वीकृत करें।'
       : lang === 'en'
-      ? 'Requesting Admin verification & approval to display our verified listing in the selected category.'
+      ? 'Please review the provider and listing details before publication.'
       : transliterateLatinToScript(
-          'Requesting Admin verification and approval to display our verified listing in the selected category.',
+          'Please review the provider and listing details before publication.',
           lang
         );
 
   // Provider Registration States
-  const [providerName, setProviderName] = useState(() =>
-    getLocalizedProviderNameFromConfig(categoryConfig, currentLang)
-  );
-  const [providerPhone, setProviderPhone] = useState('98480 12345');
-  const [providerEmail, setProviderEmail] = useState('provider@bookourspace.in');
+  const [providerName, setProviderName] = useState(authUser?.name || '');
+  const [providerPhone, setProviderPhone] = useState('');
+  const [providerEmail, setProviderEmail] = useState('');
   const [providerRegistrationNote, setProviderRegistrationNote] = useState(() =>
     getDefaultAdminNote(currentLang)
   );
@@ -1019,11 +1013,11 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   // Listing Form States
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [price, setPrice] = useState(categoryConfig.defaultPrice);
-  const [priceUnit, setPriceUnit] = useState(categoryConfig.defaultPriceUnit);
-  const [city, setCity] = useState(() => getDefaultCity(currentLang));
-  const [area, setArea] = useState(() => getDefaultArea(currentLang));
-  const [pincode, setPincode] = useState('500081');
+  const [price, setPrice] = useState('');
+  const [priceUnit, setPriceUnit] = useState('');
+  const [city, setCity] = useState('');
+  const [area, setArea] = useState('');
+  const [pincode, setPincode] = useState('');
   const [runningBatchUrl, setRunningBatchUrl] = useState('');
 
   // Dynamic custom field values initialized strictly for the selected category
@@ -1043,21 +1037,22 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   }, [selectedSection]);
 
   // All-Format Listing Images State
-  const [imageItems, setImageItems] = useState<{ url: string; format: string; name: string }[]>([
-    {
-      url: categoryConfig.coverImageUrl,
-      format: 'JPG',
-      name: 'category-cover.jpg',
-    },
-  ]);
+  const [imageItems, setImageItems] = useState<ProviderListingImageItem[]>(
+    categoryConfig.coverImageUrl
+      ? [{ url: categoryConfig.coverImageUrl, format: 'JPG', name: 'category-cover.jpg', isCover: true }]
+      : [],
+  );
   const [newImageUrl, setNewImageUrl] = useState('');
   const [isDraggingImages, setIsDraggingImages] = useState(false);
 
   // Optional Batch Schedule Images (Classes Only)
-  const [batchScheduleImageItems, setBatchScheduleImageItems] = useState<
-    { url: string; format: string; name: string }[]
-  >([]);
+  const [batchScheduleImageItems, setBatchScheduleImageItems] = useState<ProviderListingImageItem[]>([]);
   const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+  const localMediaUrlsRef = useRef(new Set<string>());
+  useEffect(() => () => {
+    localMediaUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    localMediaUrlsRef.current.clear();
+  }, []);
 
   const fileInputStep2Ref = useRef<HTMLInputElement | null>(null);
   const batchFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1066,21 +1061,22 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   // Selected Posting Plan / Platform fee
   const [selectedPlanId, setSelectedPlanId] = useState(postingPlans[0]?.id || 'plan-basic');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [providerSubmissionMessage, setProviderSubmissionMessage] = useState<string | null>(null);
   const [submittedPendingListing, setSubmittedPendingListing] = useState<any | null>(null);
 
   // Apply category-specific defaults whenever categoryConfig changes
   const applyCategoryConfigDefaults = (cfg: CategoryProviderConfig) => {
-    setProviderName(getLocalizedProviderNameFromConfig(cfg, currentLang));
-    setPrice(cfg.defaultPrice);
-    setPriceUnit(cfg.defaultPriceUnit);
+    setProviderName(authUser?.name || '');
+    setPrice('');
+    setPriceUnit('');
     const nextFields: Record<string, string> = {};
     cfg.fields.forEach((f) => {
-      nextFields[f.key] = f.options && f.options.length > 0 ? f.options[0] : f.placeholder || '';
+      nextFields[f.key] = '';
     });
     setCustomFieldValues(nextFields);
     setImageItems((prev) => {
       if (prev.length === 1 && prev[0].name === 'category-cover.jpg') {
-        return [{ url: cfg.coverImageUrl, format: 'JPG', name: 'category-cover.jpg' }];
+        return [{ url: cfg.coverImageUrl, format: 'JPG', name: 'category-cover.jpg', isCover: true }];
       }
       return prev;
     });
@@ -1177,13 +1173,16 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   }, [isOpen, defaultSection, defaultCategory, defaultSubcategory]);
 
   useEffect(() => {
-    setProviderName(getLocalizedProviderNameFromConfig(categoryConfig, currentLang));
-    setCity(getDefaultCity(currentLang));
-    setArea(getDefaultArea(currentLang));
+    setProviderName(authUser?.name || '');
+    setCity('');
+    setArea('');
     setProviderRegistrationNote(getDefaultAdminNote(currentLang));
-  }, [currentLang]);
+  }, [currentLang, authUser?.name]);
 
   if (!isOpen) return null;
+  if (!authUser || !['provider', 'admin'].includes(authUser.role)) {
+    return <ProviderOnboardingForm authUser={authUser} defaultSection={defaultSection} onClose={onClose} />;
+  }
 
   const matchedLegacyCat =
     categories.find((c) => c.id === selectedCategoryId) || categories[0];
@@ -1195,42 +1194,36 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
   };
 
   // Universal Multi-Format Image File Reader
-  const processUploadedFiles = (
+  const processUploadedFiles = async (
     files: FileList | File[],
     target: 'listing' | 'batch' = 'listing'
   ) => {
     const fileArray = Array.from(files);
     if (fileArray.length === 0) return;
 
-    fileArray.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = String(ev.target?.result || '');
-        if (!dataUrl) return;
-        const format = detectImageFormatLabel(dataUrl, file.name);
-        const newItem = {
-          url: dataUrl,
-          format,
-          name: file.name || `image.${format.toLowerCase()}`,
-        };
-        if (target === 'batch') {
-          setBatchScheduleImageItems((prev) => [...prev, newItem]);
-        } else {
-          setImageItems((prev) => [...prev, newItem]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
-
-    setUploadFeedback(
-      loc(
-        `Added ${fileArray.length} image(s) (${fileArray
-          .map((f) => detectImageFormatLabel('', f.name))
-          .join(', ')})`,
-        `${fileArray.length} చిత్రాలు జోడించబడ్డాయి`,
-        `${fileArray.length} चित्र जोड़े गए`
-      )
-    );
+    const accepted: ProviderListingImageItem[] = [];
+    const rejected: string[] = [];
+    for (const file of fileArray) {
+      try {
+        const inspected = await inspectMediaFile(file);
+        if (inspected.kind !== 'image') throw new Error('Only images can be used as listing photos.');
+        const safeFile = inspected.format === 'svg' ? await sanitizeSvgFile(file) : file;
+        const processedImage = await createResponsiveImageVariants(safeFile).catch(() => null);
+        const url = URL.createObjectURL(safeFile);
+        localMediaUrlsRef.current.add(url);
+        accepted.push({ url, format: inspected.format.toUpperCase(), name: file.name || `image.${inspected.format}`, file: safeFile, inspected, processedImage });
+      } catch (error) {
+        rejected.push(`${file.name}: ${error instanceof Error ? error.message : 'Unsupported image.'}`);
+      }
+    }
+    if (accepted.length) {
+      if (target === 'batch') setBatchScheduleImageItems((prev) => [...prev, ...accepted]);
+      else setImageItems((prev) => {
+        return normalizeListingCovers([...prev, ...accepted]);
+      });
+    }
+    const resultText = `Added ${accepted.length} inspected image(s)${rejected.length ? `. Rejected: ${rejected.join('; ')}` : ''}`;
+    setUploadFeedback(loc(resultText, resultText, resultText));
     setTimeout(() => setUploadFeedback(null), 3500);
   };
 
@@ -1265,9 +1258,23 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
     if (target === 'batch') {
       setBatchScheduleImageItems((prev) => [...prev, newItem]);
     } else {
-      setImageItems((prev) => [...prev, newItem]);
+      setImageItems((prev) => normalizeListingCovers([...prev, newItem]));
     }
     setNewImageUrl('');
+  };
+
+  const moveListingImage = (index: number, offset: -1 | 1) => {
+    setImageItems((current) => {
+      const nextIndex = index + offset;
+      if (nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const chooseListingCover = (index: number) => {
+    setImageItems((current) => current.map((item, itemIndex) => ({ ...item, isCover: itemIndex === index })));
   };
 
   const getLocalizedSubcategoryName = (subEn: string, subObj?: any) => {
@@ -1438,93 +1445,91 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
     </div>
   );
 
-  const handleSubmitProviderRequestToAdmin = () => {
+  const handleSubmitProviderRequestToAdmin = async () => {
+    setProviderSubmissionMessage(null);
+    if (selectedSection === 'movies') {
+      setProviderSubmissionMessage('Movies are display-only. Movie or showtime listings cannot be submitted through provider listing management.');
+      return;
+    }
+    if (!authUser || !['provider', 'admin'].includes(authUser.role)) {
+      setProviderSubmissionMessage('A server-approved provider account is required before submitting a listing. Ask an administrator to activate your provider profile; No listing or payment was created.');
+      return;
+    }
+    const cleanTitle = title.trim();
+    const listingPrice = Number(price);
+    const listingImages = imageItems.filter((item) => item.name !== 'category-cover.jpg' && item.url.trim());
+    const coverIndex = listingImages.findIndex((item) => item.isCover);
+    const orderedListingImages = coverIndex > 0
+      ? [listingImages[coverIndex], ...listingImages.filter((_, index) => index !== coverIndex)]
+      : listingImages;
+    const uploadedImages = [...orderedListingImages, ...batchScheduleImageItems.filter((item) => item.url.trim())];
+    if (!activeSectionCat || !cleanTitle || !selectedSubcategory || !price.trim() || !Number.isFinite(listingPrice) || listingPrice < 0) {
+      setProviderSubmissionMessage('Complete the selected category, subcategory, title and a valid non-negative price before submitting.');
+      return;
+    }
+    if (uploadedImages.some((item) => !item.file && !/^https:\/\//i.test(item.url) && !(parseStorageObjectReference(item.url)?.bucket === 'bos-public-media'))) {
+      setProviderSubmissionMessage('Images must be HTTPS URLs or approved public-media references. No image data or listing was submitted.');
+      return;
+    }
     setIsProcessingPayment(true);
-
-    setTimeout(() => {
-      recordPayment(
-        selectedPlan.billingPeriod === 'one_time' ? 'pay_per_post' : 'plan_subscription',
-        selectedPlan.price,
-        selectedPlan.name,
-        'UPI / Card'
-      );
-
-      const localizedSubcat = getSubcategoryDisplayName(selectedSubcategory, currentLang);
-      const finalTitle =
-        title.trim() ||
-        `${
-          providerName.trim() || getLocalizedProviderNameFromConfig(categoryConfig, currentLang)
-        } — ${localizedSubcat} (${area})`;
-      const finalDescription =
-        description.trim() ||
-        loc(
-          `Verified ${selectedSubcategory} under ${activeSectionCat?.name} by ${providerName.trim()} in ${area}, ${city}. Contact ${providerPhone} for instant booking & details.`,
-          `${city}, ${area} లో ${providerName.trim()} వారి ధృవీకరించబడిన ${localizedSubcat} (${activeCategoryDisplayName}). తక్షణ బుకింగ్ కోసం ${providerPhone} ను సంప్రదించండి.`,
-          `${city}, ${area} में ${providerName.trim()} द्वारा सत्यापित ${localizedSubcat} (${activeCategoryDisplayName})। तत्काल बुकिंग के लिए ${providerPhone} पर संपर्क करें।`
-        );
-
-      const allListingImages =
-        imageItems.length > 0 ? imageItems.map((i) => i.url) : [categoryConfig.coverImageUrl];
-      const batchImages = batchScheduleImageItems.map((i) => i.url);
-
-      const newListing = addListing({
-        title: finalTitle,
-        description: finalDescription,
-        categoryId: selectedCategoryId,
+    try {
+      const entityType = selectedSection === 'pg_hostels' || selectedSection === 'hotel_stay'
+        ? 'property'
+        : selectedSection === 'classes'
+          ? 'course'
+          : selectedSection === 'venues'
+            ? 'venue'
+            : 'service';
+      const listingId = `lst-${crypto.randomUUID()}`;
+      const requestId = crypto.randomUUID();
+      const uploadForListing = createMediaUploadHandler(selectedSection, 'provider_listing', listingId);
+      const imageReferences: string[] = [];
+      for (let index = 0; index < uploadedImages.length; index += 1) {
+        const item = uploadedImages[index];
+        if (!item.file || !item.inspected) {
+          imageReferences.push(item.url);
+          continue;
+        }
+        const result = await uploadForListing(item.file, {
+          inspected: item.inspected,
+          processedImage: item.processedImage ?? null,
+          altText: item.name.slice(0, 500),
+          caption: '',
+          displayOrder: index,
+          onProgress: () => undefined,
+        });
+        imageReferences.push(result.objectPath);
+      }
+      const response = await saveServerProviderListing(null, {
+        id: listingId,
+        requestId,
+        title: cleanTitle,
+        categoryId: activeSectionCat.id,
         subcategory: selectedSubcategory,
-        entityType: matchedLegacyCat?.entityType || 'service',
-        price: Number(price) || Number(categoryConfig.defaultPrice) || 1500,
-        priceUnit,
-        currency: '₹',
-        location: {
-          city: city.trim() || 'Hyderabad',
-          area: area.trim() || 'Madhapur',
-          pincode: pincode.trim() || '500081',
-          distanceKm: 1.4,
+        entityType,
+        price: listingPrice,
+        priceUnit: priceUnit.trim() || 'quote',
+        payload: {
+          description: description.trim(),
+          location: { city: city.trim(), area: area.trim(), pincode: pincode.trim() },
+          images: imageReferences,
+          customFieldValues,
+          ...(runningBatchUrl.trim() ? { runningBatchUrl: runningBatchUrl.trim() } : {}),
         },
-        distanceKm: 1.4,
-        images: [...allListingImages, ...batchImages],
-        batchScheduleImages: batchImages.length > 0 ? batchImages : undefined,
-        providerId: 'prov-current-user',
-        providerName:
-          providerName.trim() || getLocalizedProviderNameFromConfig(categoryConfig, currentLang),
-        providerPhone: providerPhone.trim() || '98480 12345',
-        providerEmail: providerEmail.trim() || 'provider@bookourspace.in',
-        providerAvatar:
-          allListingImages[0] ||
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-        providerRating: 4.9,
-        reviewCount: 1,
-        isVerified: false,
-        isFeatured: selectedPlan.isFeaturedIncluded,
-        status: 'pending_approval',
-        providerRegistrationNote: providerRegistrationNote.trim(),
-        submittedAt: new Date().toLocaleTimeString(),
-        runningBatchUrl:
-          selectedSection === 'classes' && runningBatchUrl.trim()
-            ? runningBatchUrl.trim()
-            : undefined,
-        customFieldValues: {
-          ...customFieldValues,
-          sectionType: selectedSection,
-          categoryName: activeSectionCat?.name || selectedSubcategory,
-          ...(selectedSection === 'classes' && runningBatchUrl.trim()
-            ? { runningBatchUrl: runningBatchUrl.trim() }
-            : {}),
-          ...(selectedSection === 'classes' && batchImages.length > 0
-            ? { batchScheduleImage: batchImages[0] }
-            : {}),
-        },
-        postingPlanId: selectedPlanId,
-        expiresAt: new Date(Date.now() + selectedPlan.validityDays * 86400000)
-          .toISOString()
-          .split('T')[0],
       });
-
-      setUserRole('provider');
+      if (!response.ok || response.data.source !== 'postgres' || !response.listing || response.listing.status !== 'pending_approval') {
+        throw new Error(response.data.error || 'The server did not confirm a pending PostgreSQL listing.');
+      }
+      const pending = response.listing;
+      setSubmittedPendingListing(pending);
+      setStep(4);
+      setProviderSubmissionMessage('Listing saved in PostgreSQL as pending admin review. Uploaded media was validated against its stored object before publication. No listing fee or payment was taken.');
+      window.dispatchEvent(new Event('bos-marketplace-listings-updated'));
+    } catch (reason) {
+      setProviderSubmissionMessage(reason instanceof Error ? reason.message : 'Listing submission failed. No payment was taken.');
+    } finally {
       setIsProcessingPayment(false);
-      setSubmittedPendingListing(newListing);
-    }, 600);
+    }
   };
 
   return (
@@ -1962,15 +1967,17 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
                           key={idx}
                           className="relative w-16 h-16 rounded-xl overflow-hidden border-2 border-orange-400 shrink-0 bg-white"
                         >
-                          <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                          <SafeImage src={item.url} alt={item.name} className="w-full h-full object-cover" category={imageCategoryFor(selectedSection)} sizes="64px" />
                           <span className="absolute bottom-0 left-0 right-0 bg-orange-600/90 text-white text-[8px] font-black text-center">
                             {item.format}
                           </span>
                           <button
                             type="button"
-                            onClick={() =>
-                              setBatchScheduleImageItems((prev) => prev.filter((_, i) => i !== idx))
-                            }
+                            onClick={() => {
+                              const [removed] = batchScheduleImageItems.filter((_, i) => i === idx);
+                              if (removed) { URL.revokeObjectURL(removed.url); localMediaUrlsRef.current.delete(removed.url); }
+                              setBatchScheduleImageItems((prev) => prev.filter((_, i) => i !== idx));
+                            }}
                             className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/75 text-white text-[9px] flex items-center justify-center cursor-pointer"
                           >
                             ✕
@@ -2064,14 +2071,22 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
                         key={idx}
                         className="relative w-20 h-20 rounded-xl overflow-hidden shrink-0 border-2 border-indigo-200 dark:border-slate-700 bg-white group shadow-2xs"
                       >
-                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                        <SafeImage src={item.url} alt={item.name} className="w-full h-full object-cover" category={imageCategoryFor(selectedSection)} sizes="80px" />
                         <span className="absolute bottom-0 left-0 right-0 bg-slate-900/80 text-amber-300 text-[9px] font-black text-center py-0.5 uppercase">
                           {item.format}
                         </span>
+                        {item.isCover && <span className="absolute bottom-5 left-1 right-1 rounded bg-amber-300 px-1 py-0.5 text-[8px] font-black uppercase text-slate-950">Cover</span>}
+                        <div className="absolute top-1 left-1 flex gap-1">
+                          {!item.isCover && <button type="button" aria-label={`Set ${item.name} as cover`} onClick={() => chooseListingCover(idx)} className="rounded bg-white/95 px-1 py-0.5 text-[8px] font-bold text-slate-900">Set cover</button>}
+                          <button type="button" aria-label={`Move ${item.name} earlier`} disabled={idx === 0} onClick={() => moveListingImage(idx, -1)} className="rounded bg-white/95 px-1 py-0.5 text-[9px] font-bold text-slate-900 disabled:opacity-40">↑</button>
+                          <button type="button" aria-label={`Move ${item.name} later`} disabled={idx === imageItems.length - 1} onClick={() => moveListingImage(idx, 1)} className="rounded bg-white/95 px-1 py-0.5 text-[9px] font-bold text-slate-900 disabled:opacity-40">↓</button>
+                        </div>
                         <button
                           type="button"
                           onClick={() =>
-                            setImageItems((prev) => prev.filter((_, i) => i !== idx))
+                            setImageItems((prev) => {
+                              return normalizeListingCovers(prev.filter((_, i) => i !== idx));
+                            })
                           }
                           className="absolute top-1 right-1 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs cursor-pointer"
                         >
@@ -2110,6 +2125,8 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
           {/* STEP 3: Location & Multi-Format Media Gallery */}
           {step === 3 && (
             <div className="space-y-4">
+              <UniversalMediaManager moduleKey={selectedSection} parentType="provider_listing_draft" title="Listing media preview" />
+              <UniversalMediaManager moduleKey={selectedSection} parentType="provider_private_documents" privacy="private" title="Private certificates and documents" />
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
@@ -2217,13 +2234,17 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
                       key={i}
                       className="relative w-24 h-24 rounded-xl overflow-hidden shrink-0 border-2 border-slate-200 dark:border-slate-700 bg-white"
                     >
-                      <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                      <SafeImage src={item.url} alt={item.name} className="w-full h-full object-cover" category={imageCategoryFor(selectedSection)} sizes="96px" />
                       <span className="absolute bottom-0 left-0 right-0 bg-black/75 text-amber-300 text-[9px] font-black text-center py-0.5">
                         {item.format}
                       </span>
                       <button
                         type="button"
-                        onClick={() => setImageItems(imageItems.filter((_, idx) => idx !== i))}
+                        onClick={() => {
+                          URL.revokeObjectURL(item.url);
+                          localMediaUrlsRef.current.delete(item.url);
+                          setImageItems(imageItems.filter((_, idx) => idx !== i));
+                        }}
                         className="absolute top-1 right-1 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-[10px] cursor-pointer"
                       >
                         ✕
@@ -2401,17 +2422,22 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
                       })}
                   </div>
 
+                  {providerSubmissionMessage && (
+                    <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                      {providerSubmissionMessage}
+                    </p>
+                  )}
                   <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
                         {loc(
-                          `${activeSectionCat?.name} Provider Registration & Fee`,
-                          `${activeCategoryDisplayName} ప్రొవైడర్ నమోదు & రుసుము`,
-                          `${activeCategoryDisplayName} प्रोवाइडर पंजीकरण और शुल्क`
+                        `${activeSectionCat?.name} Listing Submission`,
+                          `${activeCategoryDisplayName} లిస్టింగ్ సమర్పణ`,
+                          `${activeCategoryDisplayName} लिस्टिंग सबमिशन`
                         )}
                       </span>
                       <div className="text-lg font-black text-slate-900 dark:text-white tabular-nums">
-                        ₹{selectedPlan.price}{' '}
+                        {loc('No fee collected', 'రుసుము వసూలు చేయబడదు', 'कोई शुल्क नहीं लिया जाएगा')}{' '}
                         <span className="text-xs font-bold text-emerald-600">
                           • {imageItems.length + batchScheduleImageItems.length}{' '}
                           {loc('Images Attached', 'ఫోటోలు జతచేయబడ్డాయి', 'तस्वीरें संलग्न')}
@@ -2434,9 +2460,9 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
                               'एडमिन को भेजा जा रहा है...'
                             )
                           : loc(
-                              'Submit Request to Admin for Review',
-                              'అడ్మిన్ ఆమోదం కోసం పంపండి',
-                              'एडमिन की मंजूरी के लिए भेजें'
+                          'Submit for Admin review',
+                            'అడ్మిన్ సమీక్షకు సమర్పించండి',
+                            'एडमिन समीक्षा के लिए भेजें'
                             )}
                       </span>
                     </button>
@@ -2467,18 +2493,6 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (step === 2 && !title.trim()) {
-                    const localizedSubcat = getSubcategoryDisplayName(
-                      selectedSubcategory,
-                      currentLang
-                    );
-                    setTitle(
-                      `${
-                        providerName.trim() ||
-                        getLocalizedProviderNameFromConfig(categoryConfig, currentLang)
-                      } — ${localizedSubcat}`
-                    );
-                  }
                   setStep((step + 1) as any);
                 }}
                 className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"

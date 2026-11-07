@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage, { imageCategoryFor } from './SafeImage';
 import {
   Search,
   ShieldCheck,
@@ -22,6 +23,7 @@ import {
 import { MarketplaceListing } from '../types/marketplace';
 import { MarketSectionType, servicesCategories, hotelStayCategories, moviesCategories } from '../data/servicesStayMoviesData';
 import { pg29Categories, PGCategoryInfo } from '../data/pgHostelData';
+import { isSubcategoryEnabled } from '../lib/subcategoryFlags';
 import { classCategories, ClassCategoryInfo } from '../data/classesData';
 import { venue12Categories, VenueCategoryInfo } from '../data/venueData';
 import {
@@ -208,7 +210,13 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
   // Subcategory / Stream chips for the right-hand Stream Explorer
   const activeStreamChips = React.useMemo(() => {
     if (activeCategoryObj) {
-      return activeCategoryObj.subcategories.map((sub: any) => ({
+      const disabled: string[] = (activeCategoryObj as any).disabledSubcategories ?? [];
+      return activeCategoryObj.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !disabled.includes(name) && isSubcategoryEnabled(name);
+        })
+        .map((sub: any) => ({
         en: typeof sub === 'string' ? sub : sub.en,
         label:
           currentLang === 'te'
@@ -227,7 +235,13 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
     const chips: { en: string; label: string; emoji: string; catId: string }[] = [];
     const seen = new Set<string>();
     sectionCategories.forEach((cat) => {
-      cat.subcategories.slice(0, 2).forEach((sub: any) => {
+      cat.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !((cat as any).disabledSubcategories ?? []).includes(name) && isSubcategoryEnabled(name);
+        })
+        .slice(0, 2)
+        .forEach((sub: any) => {
         const en = typeof sub === 'string' ? sub : sub.en;
         if (!seen.has(en)) {
           seen.add(en);
@@ -460,11 +474,12 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
                         : 'border-slate-200/90 dark:border-slate-800 group-hover:scale-105'
                     }`}
                   >
-                    <img
+                    <SafeImage
                       src={railImg}
                       alt={catName}
                       className="w-full h-full object-cover"
-                      loading="lazy"
+                      category={imageCategoryFor(catName)}
+                      sizes="56px"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-slate-950/10 to-transparent" />
                     <span className="absolute bottom-0.5 right-1 text-xs sm:text-sm leading-none drop-shadow">
@@ -702,14 +717,15 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
                       {/* Top Image Area */}
                       <div>
                         <div className="relative h-28 sm:h-36 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                          <img
+                          <SafeImage
                             src={
                               item.images?.[0] ||
                               'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80'
                             }
                             alt={displayTitle}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            loading="lazy"
+                            category={imageCategoryFor(`${item.categoryId} ${item.entityType} ${item.subcategory}`)}
+                            sizes="(max-width: 640px) 92vw, (max-width: 1024px) 48vw, 360px"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/65 via-transparent to-transparent" />
 

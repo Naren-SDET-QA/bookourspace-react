@@ -339,7 +339,7 @@ export const DEFAULT_THEME_SETTINGS: AdminThemeSettings = {
   surfaceBackgroundLight: '#FDF6FA',
   surfaceBackgroundDark: '#020617',
   themeMode: 'light',
-  brandLogoEmblemUrl: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+  brandLogoEmblemUrl: '/assets/optimized/brand-emblem-512.webp',
   brandTagline: 'FIND • BOOK • ENJOY',
   showGlobeAnimation: true,
   borderRadiusStyle: 'rounded',
@@ -682,7 +682,7 @@ export const DEFAULT_CONTENT_SETTINGS: AdminContentSettings = {
     {
       id: 'MED-1',
       title: 'BOS Brand Emblem',
-      url: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+      url: '/assets/optimized/brand-emblem-512.webp',
       category: 'Branding',
       uploadedAt: '2026-10-28',
     },

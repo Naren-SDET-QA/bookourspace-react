@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import { 
   ArrowLeft, 
   Crown, 
@@ -26,7 +27,7 @@ interface EditProfileScreenProps {
 }
 
 const presetAvatars = [
-  '/public/assets/aistudio/image_13d09e7d.png',
+  '/assets/optimized/profile-avatar-256.webp',
   'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&w=250&q=80',
   'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=250&q=80',
   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=250&q=80',
@@ -299,7 +300,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
                         isSelected ? 'ring-3 ring-purple-600 scale-105' : 'ring-1 ring-slate-200 dark:ring-slate-700'
                       }`}
                     >
-                      <img
+                      <SafeImage category="general"
                         src={avatar}
                         alt="face"
                         className="w-full h-full rounded-full object-cover"

@@ -89,7 +89,7 @@ export const classCategories: ClassCategoryInfo[] = [
   },
   {
     id: 'class-software',
-    name: 'Software',
+    name: 'Software & IT',
     nameTe: 'సాఫ్ట్‌వేర్ & ఐటీ కోర్సులు',
     nameHi: 'सॉफ्टवेयर और आईटी कोर्स',
     emoji: '💻',
@@ -107,6 +107,37 @@ export const classCategories: ClassCategoryInfo[] = [
       { en: 'UI/UX Design (Figma, Prototyping)', te: 'యూఐ/యూఎక్స్ డిజైనింగ్ (UI/UX Figma)', hi: 'यूआई/यूएक्स डिजाइन' },
       { en: 'Advanced Excel & Data Dashboards', te: 'అడ్వాన్స్‌డ్ ఎక్సెల్ & డాష్‌బోర్డులు', hi: 'एडवांस्ड एक्सेल' },
       { en: 'Tally Prime & GST Accounting', te: 'ట్యాలీ ప్రైమ్ & జీఎస్టీ అకౌంటింగ్', hi: 'टैली और जीएसटी' }
+    ]
+  },
+  {
+    id: 'class-ai',
+    name: 'AI & Emerging Tech',
+    nameTe: 'ఏఐ & నూతన టెక్నాలజీ',
+    nameHi: 'एआई और नई तकनीक',
+    emoji: '🤖',
+    subcategories: [
+      { en: 'Generative AI & Prompt Engineering', te: 'జెనరేటివ్ AI & ప్రాంప్ట్ ఇంజనీరింగ్', hi: 'जनरेटिव एआई' },
+      { en: 'Machine Learning with Python', te: 'మెషీన్ లెర్నింగ్ (Python)', hi: 'मशीन लर्निंग' },
+      { en: 'Deep Learning & Neural Networks', te: 'డీప్ లెర్నింగ్ & న్యూరల్ నెట్‌వర్క్స్', hi: 'डीप लर्निंग' },
+      { en: 'Computer Vision & NLP', te: 'కంప్యూటర్ విజన్ & NLP', hi: 'कंप्यूटर विज़न और एनएलपी' },
+      { en: 'AI for Business & Analytics', te: 'వ్యాపారానికి AI & అనలిటిక్స్', hi: 'बिज़नेस के लिए एआई' },
+      { en: 'AI tools for students & teachers', te: 'విద్యార్థులకు AI సాధనాలు', hi: 'छात्रों के लिए एआई टूल्स' }
+    ]
+  },
+  {
+    id: 'class-government-skills',
+    name: 'Government Skills',
+    nameTe: 'ప్రభుత్వ నైపుణ్య శిక్షణ',
+    nameHi: 'सरकारी कौशल प्रशिक्षण',
+    emoji: '🏗️',
+    subcategories: [
+      { en: 'PMKVY & Skill India programs', te: 'పీఎంకేవీవై & స్కిల్ ఇండియా', hi: 'पीएमकेवीवाई और स्किल इंडिया' },
+      { en: 'Free government training (SC/ST/BC/EWS)', te: 'ప్రభుత్వ ఉచిత శిక్షణ (SC/ST/BC/EWS)', hi: 'सरकारी निःशुल्क प्रशिक्षण' },
+      { en: 'Digital literacy & CSC programs', te: 'డిజిటల్ లిటరసీ & సీఎస్సీ కోర్సులు', hi: 'डिजिटल साक्षरता और सीएससी' },
+      { en: 'ITI trades (Electrician, Fitter, Welder)', te: 'ఐటీఐ ట్రేడ్స్ (ఎలక్ట్రిషియన్, ఫిట్టర్)', hi: 'आईटीआई ट्रेड' },
+      { en: 'Solar technician & green jobs', te: 'సోలార్ టెక్నీషియన్ & గ్రీన్ జాబ్స్', hi: 'सोलर तकनीशियन' },
+      { en: 'Rural livelihood & self-employment', te: 'గ్రామీణ జీవనోపాధి & స్వయం ఉపాధి', hi: 'ग्रामीण आजीविका' },
+      { en: 'Govt interview & personality development', te: 'ప్రభుత్వ ఇంటర్వ్యూ & వ్యక్తిత్వ వికాసం', hi: 'सरकारी इंटरव्यू तैयारी' }
     ]
   },
   {
@@ -309,6 +340,102 @@ export const classCategories: ClassCategoryInfo[] = [
       { en: 'Personality development & Confidence', te: 'వ్యక్తిత్వ వికాసం & ఆత్మవిశ్వాసం', hi: 'व्यक्तित्व विकास' },
       { en: 'Mental health & Student counseling', te: 'విద్యార్థుల కౌన్సిలింగ్ & గైడెన్స్', hi: 'छात्र परामर्श' }
     ]
+  },
+  {
+    id: 'class-life-skills',
+    name: 'Life Skills',
+    nameTe: 'జీవన నైపుణ్యాలు',
+    nameHi: 'जीवन कौशल',
+    emoji: '🌱',
+    subcategories: [
+      { en: 'Communication & confidence', te: 'కమ్యూనికేషన్ & ఆత్మవిశ్వాసం', hi: 'संचार और आत्मविश्वास' },
+      { en: 'Financial and digital literacy', te: 'ఆర్థిక & డిజిటల్ అక్షరాస్యత', hi: 'वित्तीय और डिजिटल साक्षरता' },
+      { en: 'Everyday independence skills', te: 'రోజువారీ స్వతంత్ర జీవన నైపుణ్యాలు', hi: 'दैनिक स्वतंत्रता के कौशल' }
+    ]
+  },
+  {
+    id: 'class-business',
+    name: 'Business',
+    nameTe: 'వ్యాపారం & వ్యాపారవేత్త నైపుణ్యాలు',
+    nameHi: 'व्यवसाय और उद्यमिता',
+    emoji: '📈',
+    subcategories: [
+      { en: 'Entrepreneurship & startup basics', te: 'వ్యాపారవేత్త నైపుణ్యాలు & స్టార్టప్ ప్రాథమికాలు', hi: 'उद्यमिता और स्टार्टअप की मूल बातें' },
+      { en: 'Accounting and small-business tools', te: 'అకౌంటింగ్ & చిన్న వ్యాపార సాధనాలు', hi: 'लेखांकन और छोटे व्यवसाय के उपकरण' },
+      { en: 'Sales and digital marketing', te: 'అమ్మకాలు & డిజిటల్ మార్కెటింగ్', hi: 'बिक्री और डिजिटल मार्केटिंग' }
+    ]
+  },
+  {
+    id: 'class-corporate',
+    name: 'Corporate',
+    nameTe: 'కార్పొరేట్ శిక్షణ',
+    nameHi: 'कॉर्पोरेट प्रशिक्षण',
+    emoji: '🏢',
+    subcategories: [
+      { en: 'Workplace communication', te: 'కార్యాలయ కమ్యూనికేషన్', hi: 'कार्यस्थल संचार' },
+      { en: 'Team and leadership development', te: 'టీమ్ & నాయకత్వ అభివృద్ధి', hi: 'टीम और नेतृत्व विकास' },
+      { en: 'Role-specific professional training', te: 'ఉద్యోగ పాత్రకు సంబంధించిన వృత్తిపరమైన శిక్షణ', hi: 'भूमिका-विशिष्ट पेशेवर प्रशिक्षण' }
+    ]
+  },
+  {
+    id: 'class-technical',
+    name: 'Technical',
+    nameTe: 'సాంకేతిక శిక్షణ',
+    nameHi: 'तकनीकी प्रशिक्षण',
+    emoji: '⚙️',
+    subcategories: [
+      { en: 'Electronics and repair fundamentals', te: 'ఎలక్ట్రానిక్స్ & మరమ్మత్తు ప్రాథమికాలు', hi: 'इलेक्ट्रॉनिक्स और मरम्मत की मूल बातें' },
+      { en: 'Tools, safety and workshop practice', te: 'పరికరాలు, భద్రత & వర్క్‌షాప్ అభ్యాసం', hi: 'उपकरण, सुरक्षा और कार्यशाला अभ्यास' },
+      { en: 'Technical certification preparation', te: 'సాంకేతిక సర్టిఫికేషన్ సిద్ధత', hi: 'तकनीकी प्रमाणन की तैयारी' }
+    ]
+  },
+  {
+    id: 'class-healthcare',
+    name: 'Healthcare',
+    nameTe: 'ఆరోగ్య సంరక్షణ శిక్షణ',
+    nameHi: 'स्वास्थ्य सेवा प्रशिक्षण',
+    emoji: '🩺',
+    subcategories: [
+      { en: 'First aid and safety awareness', te: 'ప్రథమ చికిత్స & భద్రత అవగాహన', hi: 'प्राथमिक उपचार और सुरक्षा जागरूकता' },
+      { en: 'Caregiving skills', te: 'సంరక్షణ నైపుణ్యాలు', hi: 'देखभाल के कौशल' },
+      { en: 'Health and wellness education', te: 'ఆరోగ్యం & వెల్‌నెస్ విద్య', hi: 'स्वास्थ्य और कल्याण शिक्षा' }
+    ]
+  },
+  {
+    id: 'class-driving',
+    name: 'Driving',
+    nameTe: 'డ్రైవింగ్ శిక్షణ',
+    nameHi: 'ड्राइविंग प्रशिक्षण',
+    emoji: '🚗',
+    subcategories: [
+      { en: 'Car driving lessons', te: 'కారు డ్రైవింగ్ పాఠాలు', hi: 'कार चलाना सीखें' },
+      { en: 'Two-wheeler riding lessons', te: 'ద్విచక్ర వాహన శిక్షణ', hi: 'दो-पहिया वाहन चलाना सीखें' },
+      { en: 'Road-safety and traffic rules', te: 'రోడ్డు భద్రత & ట్రాఫిక్ నియమాలు', hi: 'सड़क सुरक्षा और यातायात नियम' }
+    ]
+  },
+  {
+    id: 'class-agriculture',
+    name: 'Agriculture',
+    nameTe: 'వ్యవసాయ శిక్షణ',
+    nameHi: 'कृषि प्रशिक्षण',
+    emoji: '🌾',
+    subcategories: [
+      { en: 'Crop and soil-care fundamentals', te: 'పంటలు & నేల సంరక్షణ ప్రాథమికాలు', hi: 'फसल और मिट्टी की देखभाल की मूल बातें' },
+      { en: 'Farm equipment and safe operation', te: 'వ్యవసాయ పరికరాలు & సురక్షిత నిర్వహణ', hi: 'कृषि उपकरण और सुरक्षित संचालन' },
+      { en: 'Water-efficient and sustainable practices', te: 'నీటి-సమర్థ & స్థిరమైన వ్యవసాయ పద్ధతులు', hi: 'जल-कुशल और टिकाऊ तरीके' }
+    ]
+  },
+  {
+    id: 'class-community-skills',
+    name: 'Community Skills',
+    nameTe: 'సమాజ నైపుణ్యాలు',
+    nameHi: 'सामुदायिक कौशल',
+    emoji: '🤝',
+    subcategories: [
+      { en: 'Community leadership and participation', te: 'సమాజ నాయకత్వం & భాగస్వామ్యం', hi: 'सामुदायिक नेतृत्व और भागीदारी' },
+      { en: 'Local volunteering and practical skills', te: 'స్థానిక స్వచ్ఛంద సేవ & ప్రాయోగిక నైపుణ్యాలు', hi: 'स्थानीय स्वयंसेवा और व्यावहारिक कौशल' },
+      { en: 'Public-service and civic awareness', te: 'ప్రజా సేవ & పౌర అవగాహన', hi: 'जनसेवा और नागरिक जागरूकता' }
+    ]
   }
 ];
 
@@ -340,7 +467,7 @@ export const initialClassListings: MarketplaceListing[] = [
     },
     images: [
       'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=1000&q=80',
-      '/assets/aistudio/image_f84e3637.png',
+      '/assets/optimized/classes-batches.webp',
       'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1000&q=80'
     ],
     providerId: 'prov-durgasoft',

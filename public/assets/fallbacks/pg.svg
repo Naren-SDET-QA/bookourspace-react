@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Room illustration">
+  <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#e0e7ff"/><stop offset="1" stop-color="#fff7ed"/></linearGradient></defs>
+  <rect width="640" height="360" fill="url(#g)"/><circle cx="520" cy="82" r="38" fill="#fde68a" opacity=".8"/>
+  <path d="M0 257h640v103H0z" fill="#c7d2fe"/><path d="M72 70h496v187H72z" rx="12" fill="#fff" stroke="#c4b5fd" stroke-width="8"/>
+  <path d="M315 78v105M80 180h480" stroke="#c4b5fd" stroke-width="8"/><path d="M97 207h446v39H97z" fill="#7c3aed"/>
+  <path d="M122 179h145v56H122zM275 188h90v48h-90z" fill="#ede9fe" stroke="#8b5cf6" stroke-width="5"/>
+  <path d="M103 246h430v13H103zM127 259v46m380-46v46" stroke="#4338ca" stroke-width="9" stroke-linecap="round"/>
+  <path d="M455 114h74v55h-74z" fill="#bfdbfe" stroke="#818cf8" stroke-width="5"/><path d="M492 114v55m-37-28h74" stroke="#818cf8" stroke-width="4"/>
+</svg>

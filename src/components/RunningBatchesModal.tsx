@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import SafeImage from './SafeImage';
 import {
   X,
   ExternalLink,
@@ -736,7 +737,7 @@ export const RunningBatchesModal: React.FC<RunningBatchesModalProps> = ({
                   key={i}
                   className="relative w-full max-w-4xl border-2 border-indigo-300 dark:border-slate-700 rounded-xl overflow-hidden shadow-md bg-white"
                 >
-                  <img
+                  <SafeImage category="classes"
                     src={imgSrc}
                     alt={`Uploaded Batch Schedule ${i + 1}`}
                     className="w-full h-auto object-contain"
@@ -757,8 +758,8 @@ export const RunningBatchesModal: React.FC<RunningBatchesModalProps> = ({
 
               {isDurgaSoft && (
                 <div className="w-full max-w-4xl border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-md bg-white">
-                  <img
-                    src="/assets/aistudio/image_f84e3637.png"
+                  <SafeImage category="classes"
+                    src="/assets/optimized/classes-batches.webp"
                     alt="DurgaSoft All Batches Schedule"
                     className="w-full h-auto object-contain"
                   />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Mail,
@@ -14,14 +14,17 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import {
   isSupabaseConfigured,
   SUPABASE_PROJECT_ID,
   fetchGoogleOAuthConfig,
   signInWithSupabaseGoogleOAuth,
 } from '../lib/supabaseClient';
-import { UserRole } from '../types/marketplace';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { launchGoogleOAuthWindow } from '../lib/googleOAuthLauncher';
+import BOSOfficialLogo from './BOSOfficialLogo';
 
 interface SupabaseAuthModalProps {
   isOpen: boolean;
@@ -29,6 +32,8 @@ interface SupabaseAuthModalProps {
   currentUser: User | null;
   onAuthSuccess?: (message: string) => void;
   onNavigateView?: (target: 'marketplace' | 'provider_portal' | 'admin_console') => void;
+  returnSection?: string;
+  forceDark?: boolean;
 }
 
 export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
@@ -37,31 +42,36 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   currentUser,
   onAuthSuccess,
   onNavigateView,
+  returnSection = 'pg_hostels',
+  forceDark = false,
 }) => {
   const {
     supabaseProfile,
     authUser,
     isAccountBlocked,
     blockedReason,
-    loginWithGoogle,
     logoutGoogleSession,
     updateUserProfile,
     syncAccountData,
-    userRole,
     bookings,
     enquiries,
     favoriteIds,
     transactions,
   } = useMarketplace();
 
-  const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [role, setRole] = useState<UserRole>('customer');
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const activeAccount = authUser || currentUser;
 
@@ -69,8 +79,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     if (authUser) {
       setFullName(authUser.name || 'Marketplace User');
       setPhone(authUser.phone || '');
-      setRole(authUser.role || userRole);
-      setEmail(authUser.email || '');
     } else if (currentUser) {
       setFullName(
         supabaseProfile?.full_name ||
@@ -80,40 +88,87 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       setPhone(
         supabaseProfile?.phone || currentUser.user_metadata?.phone || ''
       );
-      setRole(
-        supabaseProfile?.role ||
-          (currentUser.user_metadata?.role as UserRole) ||
-          userRole
-      );
-      setEmail(currentUser.email || '');
     }
-  }, [authUser, currentUser, supabaseProfile, userRole]);
+  }, [authUser, currentUser, supabaseProfile]);
 
   useEffect(() => {
     if (!isOpen) return;
+    const callbackParams = new URLSearchParams(window.location.search);
+    const callbackError = callbackParams.get('error_description') || callbackParams.get('error');
+    if (callbackError) {
+      setErrorMsg(callbackError.replace(/[+_]/g, ' '));
+      for (const key of ['code', 'state', 'error', 'error_description']) callbackParams.delete(key);
+      const query = callbackParams.toString();
+      window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }
     const handleOAuthEvent = (e: Event) => {
       const custom = e as CustomEvent;
       if (custom.detail?.user) {
         const u = custom.detail.user;
-        const target = custom.detail.redirectTarget as
-          | 'marketplace'
-          | 'provider_portal'
-          | 'admin_console'
-          | undefined;
         onAuthSuccess?.(
           custom.detail.isNewUser
             ? `Google account registered & signed in (${u.role.toUpperCase()})`
             : `Signed in with Google (${u.role.toUpperCase()})`
         );
-        if (target && onNavigateView) {
-          onNavigateView(target);
-        }
+        // OAuth always returns to Home. Server-assigned permissions remain
+        // available from the account profile and protected routes.
+        onNavigateView?.('marketplace');
         onClose();
       }
     };
+    const handleOAuthError = (e: Event) => {
+      const message = (e as CustomEvent<{ message?: string }>).detail?.message;
+      setLoading(false);
+      setInfoMsg(null);
+      setErrorMsg(message || 'Google sign-in could not be completed. Please try again.');
+    };
     window.addEventListener('bos-google-oauth-redirect', handleOAuthEvent);
-    return () => window.removeEventListener('bos-google-oauth-redirect', handleOAuthEvent);
+    window.addEventListener('bos-google-oauth-error', handleOAuthError);
+    return () => {
+      window.removeEventListener('bos-google-oauth-redirect', handleOAuthEvent);
+      window.removeEventListener('bos-google-oauth-error', handleOAuthError);
+    };
   }, [isOpen, onAuthSuccess, onNavigateView, onClose]);
+
+  // The sign-in surface is a modal dialog: Escape closes it, Tab stays inside,
+  // focus moves to the close control, and focus returns to the opener on exit.
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.getAttribute('aria-hidden') !== 'true');
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus?.();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -121,38 +176,58 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     setErrorMsg(null);
     setInfoMsg(null);
     setLoading(true);
+    const isNative = Capacitor.isNativePlatform();
     try {
-      if (isSupabaseConfigured) {
-        const supaRes = await signInWithSupabaseGoogleOAuth(role);
-        if (supaRes.ok && supaRes.url) {
-          const popup = window.open(
-            supaRes.url,
-            'bos_google_oauth_popup',
-            'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
-          );
-          if (popup) {
-            setInfoMsg('Complete Google sign-in in the popup window...');
-            setLoading(false);
-            return;
-          }
-        }
+      sessionStorage.setItem('bos_oauth_return_section_v1', returnSection);
+      sessionStorage.setItem('bos_oauth_return_hash_v1', window.location.hash);
+      const returnPath = window.location.pathname === '/auth/callback'
+        ? '/'
+        : `${window.location.pathname}${window.location.search}`;
+      sessionStorage.setItem('bos_oauth_return_path_v1', returnPath);
+    } catch {
+      // The native WebView or privacy mode may disable session storage; OAuth still works.
+    }
+    // Open synchronously inside the click gesture so browser popup blockers
+    // do not discard user activation while the OAuth URL is being requested.
+    const popup = isNative ? null : window.open(
+      'about:blank',
+      'bos_google_oauth_popup',
+      'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
+    );
+    try {
+      let oauth = isSupabaseConfigured
+        ? await signInWithSupabaseGoogleOAuth('customer')
+        : { ok: false as const };
+      if ((!oauth.ok || !oauth.url) && !isNative) {
+        oauth = await fetchGoogleOAuthConfig('customer');
       }
-
-      const cfg = await fetchGoogleOAuthConfig(role);
-      if (cfg.ok && cfg.url) {
-        const popup = window.open(
-          cfg.url,
-          'bos_google_oauth_popup',
-          'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
-        );
-        if (popup) {
-          setInfoMsg('Complete Google sign-in in the popup window...');
-          setLoading(false);
-          return;
-        }
+      if (!oauth.ok || !oauth.url) {
+        popup?.close();
+        setErrorMsg(oauth.error || 'Secure Google sign-in is unavailable. Please try again later.');
+        return;
       }
-      setErrorMsg('Popup blocked or unavailable. Use the Google Account form below to continue.');
+      if (isNative) {
+        await Browser.open({ url: oauth.url });
+        setInfoMsg('Complete Google sign-in in the browser. You will return to BookOurSpace automatically.');
+        return;
+      }
+      if (popup) {
+        launchGoogleOAuthWindow({
+          window: popup,
+          url: oauth.url,
+          redirect: (url) => window.location.assign(url),
+        });
+        setInfoMsg('Complete Google sign-in in the popup window...');
+      } else {
+        // Full-page OAuth is the fallback when the browser blocks popups.
+        launchGoogleOAuthWindow({
+          window: null,
+          url: oauth.url,
+          redirect: (url) => window.location.assign(url),
+        });
+      }
     } catch (err: any) {
+      popup?.close();
       setErrorMsg(err?.message || 'Could not launch Google OAuth popup.');
     } finally {
       setLoading(false);
@@ -161,56 +236,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
 
   const handleGoogleDirectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg(null);
-    setInfoMsg(null);
-
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !normalizedEmail.includes('@')) {
-      setErrorMsg('Please enter a valid Google email address.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await loginWithGoogle({
-        email: normalizedEmail,
-        name: fullName.trim() || undefined,
-        phone: phone.trim() || undefined,
-        requestedRole: 'customer',
-        allowRoleChange: false,
-      });
-
-      if (!result.ok) {
-        setErrorMsg(
-          result.message ||
-            'Google authentication failed. Check if your account is active.'
-        );
-        return;
-      }
-
-      const signedUser = result.user;
-      const target =
-        result.redirectTarget ||
-        (signedUser?.role === 'admin'
-          ? 'admin_console'
-          : signedUser?.role === 'provider'
-          ? 'provider_portal'
-          : 'marketplace');
-
-      onAuthSuccess?.(
-        result.isNewUser
-          ? `Welcome ${signedUser?.name}! Google account auto-registered (${signedUser?.role.toUpperCase()})`
-          : `Welcome back ${signedUser?.name}! Signed in with Google (${signedUser?.role.toUpperCase()})`
-      );
-      if (onNavigateView) {
-        onNavigateView(target);
-      }
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Google authentication failed.');
-    } finally {
-      setLoading(false);
-    }
+    await handlePopupGoogleSignIn();
   };
 
   const handleSaveProfile = async () => {
@@ -218,13 +244,24 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     setErrorMsg(null);
     setInfoMsg(null);
     try {
-      await updateUserProfile({
+      const result = await updateUserProfile({
         fullName: fullName.trim(),
         phone: phone.trim(),
-        role,
       });
-      setInfoMsg('Profile updated!');
-      onAuthSuccess?.('Profile saved to your account');
+      if (result.persisted === 'profile') {
+        setInfoMsg('Profile updated!');
+        onAuthSuccess?.('Profile saved to your account');
+      } else if (result.persisted === 'account_only') {
+        // The name and phone reached the Google/Supabase account, but the
+        // durable marketplace profile could not be written. Say so instead of
+        // reporting a save that did not happen.
+        setErrorMsg(
+          'Your Google account was updated, but the marketplace profile could not be saved. Please try again later.'
+        );
+        onAuthSuccess?.('Account details updated; marketplace profile not saved yet');
+      } else {
+        setErrorMsg('Your profile could not be saved. Please sign in again and retry.');
+      }
     } catch (err: any) {
       setErrorMsg(err?.message || 'Could not update profile.');
     } finally {
@@ -260,12 +297,19 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+      style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom) + 1rem)' }}
+      className="fixed inset-0 z-[300] bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bos-auth-title"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 space-y-5 max-h-[92vh] overflow-y-auto"
+        style={{ maxHeight: 'calc(100dvh - 56px - env(safe-area-inset-bottom) - 2rem)' }}
+        className={`${forceDark ? 'dark ' : ''}w-full max-w-md bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 space-y-5 max-h-[92vh] overflow-y-auto`}
       >
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-center gap-2.5">
@@ -273,7 +317,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               <ShieldCheck className="w-5 h-5 text-amber-300" />
             </div>
             <div>
-              <h3 className="text-base font-black">
+              <h3 id="bos-auth-title" className="text-base font-black">
                 {activeAccount ? 'Google Verified Account' : 'Sign In with Google'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -282,13 +326,21 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
+            aria-label="Close sign-in"
             className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {!activeAccount && (
+          <div className={`flex justify-center ${forceDark ? 'rounded-2xl bg-white p-3' : ''}`} aria-label="BookOurSpace Google sign-in">
+            <BOSOfficialLogo animated loading="eager" className="w-[min(82vw,320px)]" />
+          </div>
+        )}
 
         {isAccountBlocked && (
           <div className="p-3.5 rounded-2xl bg-rose-100 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-start gap-2.5">
@@ -323,7 +375,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                   <span>Google OAuth Verified</span>
                 </div>
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-[#4A148C] dark:text-purple-300 capitalize">
-                  {authUser?.role || role} Role
+                  {authUser?.role || supabaseProfile?.role || 'customer'} Role
                 </span>
               </div>
               <div className="text-sm font-black truncate">
@@ -381,33 +433,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Active Workspace Role
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(
-                    [
-                      { id: 'customer', label: 'Customer' },
-                      { id: 'provider', label: 'Provider' },
-                      { id: 'admin', label: 'Admin' },
-                    ] as { id: UserRole; label: string }[]
-                  ).map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => setRole(r.id)}
-                      className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                        role === r.id
-                          ? 'bg-[#4A148C] text-white border-[#4A148C]'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-1">
@@ -444,32 +469,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Role Selector for New Registration / Routing */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                Select Account Portal (New users auto-register with this role)
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: 'customer', label: 'Customer Marketplace' },
-                  { id: 'provider', label: 'Service Provider Portal' },
-                ].map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => setRole(r.id as UserRole)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                      role === r.id
-                        ? 'bg-[#4A148C] text-white border-[#4A148C]'
-                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Official Google OAuth Popup Button */}
             <button
               type="button"
@@ -498,66 +497,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               <span>Continue with Google OAuth Popup</span>
             </button>
 
-            <div className="relative flex items-center justify-center">
-              <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-              <span className="bg-white dark:bg-slate-900 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
-                Or Instant Google Account Sign-In / Auto-Register
-              </span>
-              <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-            </div>
-
             <form onSubmit={handleGoogleDirectSubmit} className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Google Email Address *
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="yourname@gmail.com"
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-10 pr-3.5 py-2.5 text-xs outline-hidden focus:border-[#4A148C]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                    Full Name (New User)
-                  </label>
-                  <div className="relative">
-                    <UserIcon className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="Auto-filled if existing"
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-2.5 py-2 text-xs outline-hidden focus:border-[#4A148C]"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                    Mobile (Optional)
-                  </label>
-                  <div className="relative">
-                    <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="9876543210"
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-2.5 py-2 text-xs outline-hidden focus:border-[#4A148C]"
-                    />
-                  </div>
-                </div>
-              </div>
-
+              <p className="text-xs text-slate-500 text-center">Account identity and email are supplied by Google and verified by Supabase Auth. Profile details can be edited after sign-in.</p>
               <button
                 type="submit"
                 disabled={loading}
@@ -565,8 +506,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               >
                 <span>
                   {loading
-                    ? 'Verifying with Google OAuth...'
-                    : 'Sign In / Auto-Register with Google'}
+                    ? 'Opening secure Google sign-in…'
+                    : 'Continue securely with Google'}
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </button>

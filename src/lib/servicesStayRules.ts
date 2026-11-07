@@ -25,6 +25,35 @@ export interface StayContactDetails {
   disclaimer?: string;
 }
 
+export interface ProviderContactRequest {
+  listingTitle: string;
+  customerName?: string;
+  customerPhone?: string;
+  dates?: string;
+  guests?: number;
+  notes?: string;
+  kind: 'availability' | 'listing';
+}
+
+/** Builds a customer-reviewed message draft; it never records a booking/payment. */
+export function buildProviderContactMessage(request: ProviderContactRequest): string {
+  const lines = [
+    request.kind === 'availability' ? 'Availability request (not a confirmed booking)' : 'Listing enquiry',
+    `Listing: ${request.listingTitle.trim()}`,
+  ];
+  if (request.customerName?.trim()) lines.push(`Name: ${request.customerName.trim()}`);
+  if (request.customerPhone?.trim()) lines.push(`Phone: ${request.customerPhone.trim()}`);
+  if (request.dates?.trim()) lines.push(`Requested dates: ${request.dates.trim()}`);
+  if (Number.isInteger(request.guests) && (request.guests ?? 0) > 0) lines.push(`Guests: ${request.guests}`);
+  if (request.notes?.trim()) lines.push(`Details: ${request.notes.trim()}`);
+  lines.push(
+    request.kind === 'availability'
+      ? 'Please confirm availability and final terms. No room or venue is reserved by this message. Payment is due at the property/venue after confirmation.'
+      : 'Please confirm current availability and price. This message does not create a booking. Payment will be arranged directly with you if we proceed.'
+  );
+  return lines.join('\n');
+}
+
 export type StayScreenState = 'loading' | 'error' | 'empty' | 'results';
 
 export function resolveServicesModuleAccess(

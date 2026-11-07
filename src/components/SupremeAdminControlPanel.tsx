@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import SafeImage from './SafeImage';
 import {
   Sparkles,
   Plus,
@@ -588,7 +589,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                   {feat.fieldType === 'image' && (
                     <div className="flex items-center gap-2">
                       {feat.value && typeof feat.value === 'string' && (
-                        <img
+                        <SafeImage category="general"
                           src={feat.value}
                           alt={feat.label}
                           className="w-10 h-10 rounded-lg object-cover border"
@@ -974,7 +975,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                     </div>
                   ) : (
                     <div className="flex items-center gap-3 min-w-0">
-                      <img
+                      <SafeImage category="general"
                         src={item.images?.[0]}
                         alt={item.title}
                         className="w-10 h-10 rounded-xl object-cover shrink-0 border"

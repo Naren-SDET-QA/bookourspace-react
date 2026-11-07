@@ -11,6 +11,8 @@ export interface VenueCategoryInfo {
     te: string;
     hi: string;
   }[];
+  /** Excludes this category from synthetic demo provider generation. */
+  generateDemoListings?: boolean;
 }
 
 export const venue12Categories: VenueCategoryInfo[] = [
@@ -720,7 +722,7 @@ export const initialVenueListings: MarketplaceListing[] = [
       pincode: '500081'
     },
     images: [
-      'https://images.unsplash.com/photo-1529900245534-47fbf0204f5d?auto=format&fit=crop&w=1000&q=80',
+      'https://images.unsplash.com/photo-1522778119026-d647f0596c20?auto=format&fit=crop&w=1000&q=80',
       'https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=1000&q=80'
     ],
     providerId: 'prov-v108',

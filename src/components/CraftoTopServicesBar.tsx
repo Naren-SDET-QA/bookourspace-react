@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -47,6 +48,7 @@ import {
 import { venue12Categories, VenueCategoryInfo } from '../data/venueData';
 import { classCategories, classDeliveryModes, classTimingSlots, ClassCategoryInfo } from '../data/classesData';
 import { pg29Categories, PGCategoryInfo } from '../data/pgHostelData';
+import { isSubcategoryEnabled, SUBCATEGORY_FLAGS_EVENT } from '../lib/subcategoryFlags';
 import {
   MarketSectionType,
   servicesCategories,
@@ -64,6 +66,7 @@ import {
 } from './ModularSystemEngine';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { UserWalletAndLedgerSection } from './UserWalletAndQuickModals';
+import { canAccessAdminConsole } from '../lib/accessControl';
 
 interface CraftoTopServicesBarProps {
   activeMarketSection: MarketSectionType;
@@ -102,11 +105,14 @@ interface CraftoTopServicesBarProps {
   activeView?: 'marketplace' | 'provider_portal' | 'admin_console';
   comparedCount?: number;
   onOpenCompareModal?: () => void;
+  onOpenGoogleSignIn?: () => void;
   externalLoginModalOpen?: boolean;
   onExternalLoginModalClose?: () => void;
   selectedArea?: string;
   onSelectArea?: (area: string) => void;
   popularAreas?: string[];
+  selectedLocationLabel?: string;
+  onOpenLocationSelector?: () => void;
   unreadNotificationsCount?: number;
   onOpenNotifications?: () => void;
   darkMode?: boolean;
@@ -117,6 +123,8 @@ interface CraftoTopServicesBarProps {
   onOpenServicesDiscovery?: () => void;
   homeScreenStyle?: HomeScreenLayoutStyle;
   onChangeHomeScreenStyle?: (style: HomeScreenLayoutStyle) => void;
+  /** Hide the movie/section category pills strip (the Movies screen has its own language pills). */
+  hideCategoryRibbon?: boolean;
 }
 
 export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
@@ -151,10 +159,13 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   activeView = 'marketplace',
   comparedCount = 0,
   onOpenCompareModal,
+  onOpenGoogleSignIn,
   externalLoginModalOpen = false,
   onExternalLoginModalClose,
   selectedArea = 'all',
   onSelectArea,
+  selectedLocationLabel,
+  onOpenLocationSelector,
   popularAreas = [
     'All Areas in City',
     'Madhapur',
@@ -178,6 +189,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   onOpenServicesDiscovery,
   homeScreenStyle = 'bento_landing_hub',
   onChangeHomeScreenStyle,
+  hideCategoryRibbon = false,
 }) => {
   const {
     authUser,
@@ -191,6 +203,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const isLoginModalVisible = showLoginModal || externalLoginModalOpen;
+  const canOpenAdminConsole = !isAccountBlocked && canAccessAdminConsole(authUser?.role);
   const closeLoginModal = () => {
     setShowLoginModal(false);
     onExternalLoginModalClose?.();
@@ -271,6 +284,19 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
       window.removeEventListener('bos-dynamic-schema-updated', syncSpotlightSubcatToggle);
       window.removeEventListener('bos-live-page-config-updated', syncSpotlightSubcatToggle);
     };
+  }, []);
+
+  React.useEffect(() => {
+    const syncDisabledSubcategories = () => {
+      try {
+        const saved = localStorage.getItem('bos_disabled_spotlight_subcategories_v1');
+        setDisabledSubcategoryKeys(saved ? JSON.parse(saved) : []);
+      } catch {
+        setDisabledSubcategoryKeys([]);
+      }
+    };
+    window.addEventListener(SUBCATEGORY_FLAGS_EVENT, syncDisabledSubcategories);
+    return () => window.removeEventListener(SUBCATEGORY_FLAGS_EVENT, syncDisabledSubcategories);
   }, []);
 
   const handleToggleSpotlightSubcategoriesBar = (nextState?: boolean) => {
@@ -418,15 +444,21 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
       activeHotelCat ||
       activeMovieCat;
     if (activeCatObj) {
-      return activeCatObj.subcategories.map((sub: any, idx: number) => ({
-        en: typeof sub === 'string' ? sub : sub.en,
-        te: typeof sub === 'string' ? sub : sub.te,
-        hi: typeof sub === 'string' ? sub : sub.hi,
-        catId: activeCatObj.id,
-        catEmoji: activeCatObj.emoji,
-        catName: getCategoryTitle(activeCatObj),
-        isSpotlight: idx < 3,
-      }));
+      const disabled: string[] = (activeCatObj as any).disabledSubcategories ?? [];
+      return activeCatObj.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !disabled.includes(name) && isSubcategoryEnabled(name);
+        })
+        .map((sub: any, idx: number) => ({
+          en: typeof sub === 'string' ? sub : sub.en,
+          te: typeof sub === 'string' ? sub : sub.te,
+          hi: typeof sub === 'string' ? sub : sub.hi,
+          catId: activeCatObj.id,
+          catEmoji: activeCatObj.emoji,
+          catName: getCategoryTitle(activeCatObj),
+          isSpotlight: idx < 3,
+        }));
     }
 
     // When "All" category is selected, surface top high-demand subcategories across displayed categories
@@ -442,7 +474,13 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
     const seen = new Set<string>();
 
     displayedCategories.forEach((cat, catIdx) => {
-      cat.subcategories.slice(0, 2).forEach((sub: any, subIdx: number) => {
+      cat.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !((cat as any).disabledSubcategories ?? []).includes(name) && isSubcategoryEnabled(name);
+        })
+        .slice(0, 2)
+        .forEach((sub: any, subIdx: number) => {
         const en = typeof sub === 'string' ? sub : sub.en;
         if (!seen.has(en)) {
           seen.add(en);
@@ -471,7 +509,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   ]);
 
   return (
-    <header className="w-full relative z-30 transition-colors duration-200 bg-gradient-to-b from-[#F5F3FF] via-[#FFFFFF] to-[#F8FAFC] dark:from-[#0E0B29] dark:via-[#120F33] dark:to-[#0A0C20] text-[#0F172A] dark:text-white border-b border-indigo-100/80 dark:border-indigo-950/80 shadow-[0_4px_20px_-4px_rgba(79,70,229,0.08)]">
+    <header data-testid="universal-marketplace-header" className="w-full sticky top-0 z-40 transition-colors duration-200 bg-gradient-to-b from-[#F5F3FF] via-[#FFFFFF] to-[#F8FAFC] dark:from-[#0E0B29] dark:via-[#120F33] dark:to-[#0A0C20] text-[#0F172A] dark:text-white border-b border-indigo-100/80 dark:border-indigo-950/80 shadow-[0_4px_20px_-4px_rgba(79,70,229,0.08)]">
       {/* Decorative Top Wave / Skyline Accent Strip matching Light & Dark screenshots */}
       <div className="h-1.5 w-full bg-gradient-to-r from-[#4338CA] via-[#7C3AED] to-[#F97316]" />
 
@@ -479,7 +517,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
       <div className="px-2.5 sm:px-6 pt-2 pb-2 relative">
         <div className="max-w-7xl mx-auto flex flex-col gap-2">
           {/* Row 1: BOSBrandLogo (Left, with 360° Rotating Middle O & Interactive VERIFIED Pill) + Clean Non-Overlapping Right Actions */}
-          <div className="flex items-center justify-between gap-1 sm:gap-2">
+          <div className="bos-brand-actions-row flex items-center justify-between gap-1 sm:gap-2">
             <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 shrink-0">
               {onBackToHomeHub && (
                 <button
@@ -509,7 +547,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
             </div>
 
             {/* Right Actions: Language (md+) + Post Free + Theme Toggle + Notification Bell + Hamburger Menu */}
-            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            <div className="bos-header-actions flex items-center gap-1 sm:gap-2 shrink-0">
               {/* Language Switcher (Desktop/Tablet) */}
               <div className="hidden md:flex items-center gap-1 bg-white dark:bg-[#17133A] px-2.5 py-1.5 rounded-full border border-slate-200/90 dark:border-indigo-500/30 shadow-2xs">
                 <Globe className="w-3.5 h-3.5 text-[#5B21B6] dark:text-indigo-400 shrink-0" />
@@ -544,13 +582,56 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 </span>
               </button>
 
+              {canOpenAdminConsole && onSelectRole && (
+                <button
+                  type="button"
+                  data-testid="admin-console-entry"
+                  aria-label="Open Admin Console"
+                  aria-current={activeView === 'admin_console' ? 'page' : undefined}
+                  onClick={() => onSelectRole('admin')}
+                  className={`h-7 w-7 sm:h-9 sm:w-auto sm:px-3 rounded-full flex items-center justify-center gap-1.5 border text-[#1E1B4B] dark:text-white shrink-0 transition ${
+                    activeView === 'admin_console'
+                      ? 'bg-indigo-950 text-white border-indigo-950 dark:bg-indigo-800 dark:border-indigo-700'
+                      : 'bg-white dark:bg-[#17133A] border-indigo-300 dark:border-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 text-amber-500 shrink-0" aria-hidden="true" />
+                  <span className="hidden md:inline whitespace-nowrap text-[11px] font-black">Admin Console</span>
+                </button>
+              )}
+
+              {onOpenGoogleSignIn && authUser && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSignIn}
+                  aria-label={`Signed in as ${authUser.email}. Open account profile`}
+                  title={authUser.email}
+                  className="h-7 sm:h-9 max-w-[150px] sm:max-w-[220px] px-2 sm:px-3 rounded-full bg-white dark:bg-[#17133A] border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-[9px] sm:text-[11px] font-black flex items-center justify-center gap-1 sm:gap-1.5 shadow-2xs shrink-0 cursor-pointer"
+                >
+                  <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{authUser.name || authUser.email}</span>
+                </button>
+              )}
+
+              {!authUser && onOpenGoogleSignIn && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSignIn}
+                  aria-label="Continue with Google"
+                  className="h-7 sm:h-9 px-2 sm:px-3 rounded-full bg-white dark:bg-[#17133A] hover:bg-indigo-50 dark:hover:bg-indigo-950 border border-indigo-200 dark:border-indigo-700 text-[#4338CA] dark:text-indigo-300 text-[9px] sm:text-[11px] font-black flex items-center justify-center gap-1 sm:gap-1.5 shadow-2xs transition shrink-0 cursor-pointer whitespace-nowrap"
+                >
+                  <Globe className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#4285F4]" aria-hidden="true" />
+                  <span>Continue with Google</span>
+                </button>
+              )}
+
               {/* Dark / Light Mode Toggle */}
               {onToggleDarkMode && (
                 <button
                   type="button"
                   onClick={onToggleDarkMode}
                   title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                  className="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-white dark:bg-[#17133A] border border-slate-200/90 dark:border-indigo-500/40 flex items-center justify-center text-slate-700 dark:text-amber-300 hover:border-[#7C3AED] shadow-2xs transition shrink-0 cursor-pointer"
+                  className="bos-header-theme-action w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-white dark:bg-[#17133A] border border-slate-200/90 dark:border-indigo-500/40 flex items-center justify-center text-slate-700 dark:text-amber-300 hover:border-[#7C3AED] shadow-2xs transition shrink-0 cursor-pointer"
                 >
                   {darkMode ? (
                     <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
@@ -565,7 +646,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 type="button"
                 onClick={() => onOpenNotifications?.()}
                 title="Notifications & Alerts"
-                className="relative w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-white dark:bg-[#17133A] border border-slate-200/90 dark:border-indigo-500/40 flex items-center justify-center text-slate-800 dark:text-white hover:border-[#7C3AED] shadow-2xs transition shrink-0 cursor-pointer"
+                className="bos-header-notifications-action relative w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-white dark:bg-[#17133A] border border-slate-200/90 dark:border-indigo-500/40 flex items-center justify-center text-slate-800 dark:text-white hover:border-[#7C3AED] shadow-2xs transition shrink-0 cursor-pointer"
               >
                 <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.2]" />
                 <span className="absolute top-1 right-1 sm:top-1.5 sm:right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-1 ring-white dark:ring-[#17133A]" />
@@ -578,7 +659,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowHamburgerMenu((prev) => !prev)}
-                className={`w-7 h-7 sm:w-9 sm:h-9 rounded-full border flex items-center justify-center shadow-2xs transition-colors shrink-0 cursor-pointer ${
+                className={`bos-header-menu-action w-7 h-7 sm:w-9 sm:h-9 rounded-full border flex items-center justify-center shadow-2xs transition-colors shrink-0 cursor-pointer ${
                   showHamburgerMenu
                     ? 'bg-[#5B21B6] text-white border-[#5B21B6]'
                     : 'bg-white dark:bg-[#17133A] text-[#0F172A] dark:text-white border-slate-200/90 dark:border-indigo-500/40 hover:bg-indigo-50 dark:hover:bg-slate-800'
@@ -598,27 +679,18 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 items-center">
             {/* Location Bar Pill matching reference screenshots without overlapping select arrow */}
             <div className="lg:col-span-5 flex items-center justify-between gap-2 bg-white dark:bg-[#17133A]/95 border border-slate-200/90 dark:border-indigo-500/30 rounded-full px-3 sm:px-3.5 py-1.5 sm:py-2 shadow-[0_2px_10px_rgba(15,23,42,0.04)]">
-              <div className="relative flex items-center gap-1 min-w-0 max-w-[140px] sm:max-w-[210px]">
+              <div className="relative flex items-center gap-1 min-w-0 max-w-[150px] sm:max-w-[230px]">
                 <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#6D28D9] dark:text-purple-400 fill-[#6D28D9]/15 shrink-0" />
-                <select
-                  value={selectedArea}
-                  onChange={(e) => onSelectArea?.(e.target.value)}
-                  aria-label="Select City or Locality in Hyderabad"
-                  className="w-full appearance-none bg-transparent text-slate-900 dark:text-white font-extrabold text-xs sm:text-sm outline-hidden cursor-pointer truncate pr-4"
+                <button
+                  type="button"
+                  onClick={() => onOpenLocationSelector?.()}
+                  aria-label="Select city or locality"
+                  className="w-full min-w-0 flex items-center gap-1 bg-transparent text-slate-900 dark:text-white font-extrabold text-xs sm:text-sm outline-hidden cursor-pointer truncate pr-4 text-left"
                 >
-                  <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                    Hyderabad
-                  </option>
-                  {popularAreas.map((area) => (
-                    <option
-                      key={area}
-                      value={area}
-                      className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                    >
-                      {area === 'All Areas in City' ? 'Hyderabad' : area}
-                    </option>
-                  ))}
-                </select>
+                  <span className="truncate">
+                    {selectedLocationLabel || (selectedArea && selectedArea !== 'all' ? selectedArea : 'All Cities')}
+                  </span>
+                </button>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 pointer-events-none absolute right-0" />
               </div>
 
@@ -626,10 +698,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  const nextArea = selectedArea === 'Madhapur' ? 'Hitech City' : 'Madhapur';
-                  onSelectArea?.(nextArea);
-                }}
+                onClick={() => onOpenLocationSelector?.()}
                 className="flex items-center gap-1 text-[11px] sm:text-xs font-extrabold text-[#6D28D9] dark:text-purple-300 hover:text-[#4C1D95] dark:hover:text-purple-200 shrink-0 cursor-pointer"
               >
                 <LocateFixed className="w-3.5 h-3.5 text-[#6D28D9] dark:text-purple-400 shrink-0" />
@@ -722,6 +791,35 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                   <span>{verifiedOnly ? '✓ Verified On' : 'Verified Only'}</span>
                 </button>
+
+                {onToggleDarkMode && (
+                  <button
+                    type="button"
+                    aria-label={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                    onClick={() => {
+                      onToggleDarkMode();
+                      setShowHamburgerMenu(false);
+                    }}
+                    className="md:hidden py-2 px-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 text-xs font-black flex items-center justify-center gap-1.5 border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+                  >
+                    {darkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                    <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>
+                  </button>
+                )}
+
+                {onOpenNotifications && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHamburgerMenu(false);
+                      onOpenNotifications();
+                    }}
+                    className="md:hidden py-2 px-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 text-xs font-black flex items-center justify-center gap-1.5 border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+                  >
+                    <Bell className="w-3.5 h-3.5" />
+                    <span>Notifications</span>
+                  </button>
+                )}
               </div>
 
               {/* Admin Home Screen Layout Style Selector inside Hamburger Menu */}
@@ -769,11 +867,11 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 <div className="text-[10px] font-black uppercase text-slate-400 mb-1.5">
                   Switch Portal Mode
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className={`grid ${canOpenAdminConsole ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5`}>
                   {[
-                    { id: 'customer', label: 'Customer', icon: Users },
-                    { id: 'provider', label: 'Provider', icon: Briefcase },
-                    { id: 'admin', label: 'Admin', icon: ShieldCheck },
+                    { id: 'customer' as const, label: 'Customer', icon: Users },
+                    { id: 'provider' as const, label: 'Provider', icon: Briefcase },
+                    ...(canOpenAdminConsole ? [{ id: 'admin' as const, label: 'Admin', icon: ShieldCheck }] : []),
                   ].map((r) => {
                     const RIcon = r.icon;
                     const isCurrentRole = userRole === r.id;
@@ -814,8 +912,6 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                     type="button"
                     onClick={() => {
                       onSelectMarketSection(sec.id as MarketSectionType);
-                      onSelectCategory('all');
-                      onSelectSubcategory('all');
                       setShowHamburgerMenu(false);
                     }}
                     className={`p-2 rounded-xl border text-left text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
@@ -855,12 +951,16 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   type="button"
                   onClick={() => {
                     setShowHamburgerMenu(false);
-                    setShowLoginModal(true);
+                    if (!authUser && onOpenGoogleSignIn) {
+                      onOpenGoogleSignIn();
+                    } else {
+                      setShowLoginModal(true);
+                    }
                   }}
                   className="px-2.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-[#5B21B6] dark:text-indigo-300 font-black text-xs flex items-center gap-1 cursor-pointer"
                 >
                   <UserCheck className="w-3.5 h-3.5" />
-                  <span>Profile</span>
+                  <span>{authUser ? 'Profile' : 'Sign In'}</span>
                 </button>
 
                 {onOpenCompareModal && (
@@ -925,12 +1025,12 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 <button
                   key={tab.id}
                   type="button"
+                  data-testid={`market-section-${tab.id}`}
+                  aria-pressed={isActive}
                   onClick={() => {
-                    if (activeMarketSection !== tab.id) {
-                      onSelectMarketSection(tab.id);
-                      onSelectCategory('all');
-                      onSelectSubcategory('all');
-                    }
+                    // Always (re)enter the section so its screen loads below the header,
+                    // even when this card is already the active section.
+                    onSelectMarketSection(tab.id);
                   }}
                   className={`group py-1.5 sm:py-2.5 px-0.5 sm:px-3 rounded-2xl transition-all duration-200 flex flex-col items-center justify-center gap-1 cursor-pointer border min-w-0 overflow-hidden ${
                     isActive
@@ -969,8 +1069,8 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
       {/* LOGIN / PROFILE MODAL (OPENS WHEN USER CLICKS PROFILE TAB IN BOTTOM FOOTER) */}
       {isLoginModalVisible && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#FFFFFF] dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-700 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+        <div style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom) + 1rem)' }} className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div style={{ maxHeight: 'calc(100dvh - 56px - env(safe-area-inset-bottom) - 2rem)' }} className="bg-[#FFFFFF] dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-700 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-[#4338CA] text-white flex items-center justify-center font-black">
@@ -1017,6 +1117,17 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
             )}
 
             <div className="space-y-3">
+              {!authUser && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSignIn}
+                  className="w-full py-3 px-4 rounded-xl bg-[#4338CA] hover:bg-indigo-800 text-white text-sm font-black flex items-center justify-center gap-2.5 shadow-md transition-colors cursor-pointer"
+                >
+                  <Globe className="w-4 h-4 text-white" aria-hidden="true" />
+                  <span>Continue with Google</span>
+                </button>
+              )}
+
               {/* Google OAuth Popup Button + Verified Badge */}
               <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -1199,6 +1310,11 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   });
                   setOauthLoading(false);
                   if (!res.ok) {
+                    if (res.pending) {
+                      setOauthAuthSuccess(res.message || 'Complete Google sign-in to continue.');
+                      setOauthAuthError(null);
+                      return;
+                    }
                     setOauthAuthError(res.message || 'Google login failed. Account may be blocked.');
                     return;
                   }
@@ -1226,14 +1342,14 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
         </div>
       )}
 
-      {/* 2. HORIZONTAL CATEGORY PILLS STRIP (`All PGs`, `Students PGs`, `Working Professionals`, `Boys`, `Girls`, `Co-Living`, + More Checklist) */}
-      <div className="bg-transparent relative">
+      {/* 2. HORIZONTAL CATEGORY PILLS STRIP */}
+      <div className={`bg-transparent relative ${hideCategoryRibbon ? 'hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-2.5 sm:px-6 pb-2 pt-0.5">
           <div className="flex items-center justify-between gap-2">
             {/* Horizontal Scrollable Pill Categories matching reference screenshots */}
             <div
               style={{ zoom: categoryZoom }}
-              className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 flex-1 min-w-0"
+              className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 flex-1 min-w-0 lg:flex-wrap lg:overflow-visible"
             >
               {/* "All PGs / All Courses / All Venues / All Services / All Hotels / All Movies" Pill */}
               <button
@@ -1742,7 +1858,7 @@ const ProfileSavedAndWalletPanel: React.FC<{ currentLang: AppLanguage }> = ({
                 className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-center justify-between gap-2.5 text-xs"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <img
+                  <SafeImage category="general"
                     src={item.images?.[0]}
                     alt={item.title}
                     className="w-11 h-11 rounded-lg object-cover shrink-0"
