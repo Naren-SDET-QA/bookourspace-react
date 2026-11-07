@@ -118,7 +118,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             44 Main Categories · Configurable Plans & Fees · Direct Booking
           </span>
           <button
+            type="button"
             onClick={onToggleDarkMode}
+            aria-pressed={darkMode}
+            aria-label={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             className="p-1 rounded-md hover:bg-slate-800 text-slate-300 transition-colors"
             title="Toggle theme"
           >

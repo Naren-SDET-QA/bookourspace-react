@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import SafeImage from './SafeImage';
 import { 
   ChevronDown, 
@@ -43,7 +43,8 @@ import {
   Eye,
   EyeOff,
   Bell,
-  LocateFixed
+  LocateFixed,
+  HelpCircle
 } from 'lucide-react';
 import { venue12Categories, VenueCategoryInfo } from '../data/venueData';
 import { classCategories, classDeliveryModes, classTimingSlots, ClassCategoryInfo } from '../data/classesData';
@@ -211,6 +212,15 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
     setShowLoginModal(false);
     onExternalLoginModalClose?.();
   };
+
+  useEffect(() => {
+    if (!showHamburgerMenu) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowHamburgerMenu(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showHamburgerMenu]);
   const [loggedInUser, setLoggedInUser] = useState<{
     name: string;
     phone: string;
@@ -636,6 +646,8 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 <button
                   type="button"
                   onClick={onToggleDarkMode}
+                  aria-pressed={darkMode}
+                  aria-label={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                   title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                   className="bos-header-theme-action w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-white dark:bg-[#17133A] border border-slate-200/90 dark:border-indigo-500/40 flex items-center justify-center text-slate-700 dark:text-amber-300 hover:border-[#7C3AED] shadow-2xs transition shrink-0 cursor-pointer"
                 >
@@ -665,6 +677,8 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowHamburgerMenu((prev) => !prev)}
+                aria-expanded={showHamburgerMenu}
+                aria-controls="bos-mobile-menu"
                 className={`bos-header-menu-action w-7 h-7 sm:w-9 sm:h-9 rounded-full border flex items-center justify-center shadow-2xs transition-colors shrink-0 cursor-pointer ${
                   showHamburgerMenu
                     ? 'bg-[#5B21B6] text-white border-[#5B21B6]'
@@ -719,9 +733,11 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
               <div className="relative flex items-center bg-white dark:bg-[#17133A]/95 rounded-full border border-slate-200/90 dark:border-indigo-500/30 focus-within:border-[#6D28D9] focus-within:ring-2 focus-within:ring-purple-500/20 shadow-[0_2px_12px_rgba(15,23,42,0.05)] pl-4 pr-1.5 py-1 transition-all">
                 <Search className="w-4 h-4 text-[#6D28D9] dark:text-purple-400 stroke-[2.5] shrink-0 mr-2" />
                 <input
-                  type="text"
+                  id="bos-site-search"
+                  type="search"
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}
+                  aria-label="Search BookOurSpace"
                   placeholder={
                     currentLang === 'te'
                       ? 'పీజీలు, క్లాసులు, హాళ్లు, సర్వీసులు, హోటళ్లు, సినిమాలు వెతకండి...'
@@ -754,7 +770,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
           {/* Hamburger Quick Menu Drawer */}
           {showHamburgerMenu && (
-            <div className="w-full sm:w-80 sm:ml-auto bg-white dark:bg-slate-900 text-[#0F172A] dark:text-white rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-3.5 z-50 animate-in fade-in slide-in-from-top-1 duration-150 space-y-3">
+            <div id="bos-mobile-menu" role="menu" className="w-full sm:w-80 sm:ml-auto bg-white dark:bg-slate-900 text-[#0F172A] dark:text-white rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-3.5 z-50 animate-in fade-in slide-in-from-top-1 duration-150 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
                 <span className="text-xs font-black uppercase tracking-wider text-[#5B21B6] dark:text-indigo-300">
                   {ui.menuTitle}
@@ -931,6 +947,18 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   </button>
                 ))}
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowHamburgerMenu(false);
+                  window.dispatchEvent(new Event('bos-open-help'));
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs font-black flex items-center justify-center gap-1.5 border border-slate-200 dark:border-slate-700"
+              >
+                <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />
+                Help & FAQ
+              </button>
 
               {/* Language, Login & Compare Controls inside Hamburger Menu */}
               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">

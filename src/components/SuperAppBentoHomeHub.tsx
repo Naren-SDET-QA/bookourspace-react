@@ -368,6 +368,8 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
             <button
               type="button"
               onClick={onToggleDarkMode}
+              aria-pressed={darkMode}
+              aria-label={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[#0F3CC9] dark:text-amber-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
             >

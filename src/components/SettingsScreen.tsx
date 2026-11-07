@@ -113,7 +113,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <button
               onClick={() => {
                 playAlertChime('pop');
-                alert('Crafto Local Services 24/7 Helpline: 1800-425-9999\nWhatsApp: +91 9966191813\nAssisting customers and service specialists across Home Maintenance.');
+                window.dispatchEvent(new Event('bos-open-help'));
               }}
               className="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors text-left"
             >
@@ -222,6 +222,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <button
                 type="button"
                 onClick={onToggleDarkMode}
+                aria-pressed={darkMode}
+                aria-label={darkMode ? t.lightMode : t.darkMode}
                 className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${
                   darkMode ? 'bg-purple-600' : 'bg-slate-300'
                 }`}

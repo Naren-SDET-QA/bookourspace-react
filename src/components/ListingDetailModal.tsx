@@ -33,6 +33,8 @@ import {
   getPriceUnitDisplayName 
 } from '../utils/translations';
 import { UniversalBarcode, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
+import { LastUpdated } from './ui/LastUpdated';
+import { CopyButton } from './ui/CopyButton';
 
 interface ListingDetailModalProps {
   listing: MarketplaceListing | null;
@@ -248,6 +250,10 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                 <span className="text-emerald-600 dark:text-emerald-400 font-bold text-xs">
                   📍 {distKm} km {t.away}
                 </span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <LastUpdated at={listing.createdAt} label="Listed" />
+                <CopyButton value={`${typeof window !== 'undefined' ? window.location.href : ''}`.trim()} label="Copy link" />
               </div>
             </div>
 

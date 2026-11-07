@@ -137,7 +137,10 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Dark Mode */}
           <button
+            type="button"
             onClick={onToggleDarkMode}
+            aria-pressed={darkMode}
+            aria-label={darkMode ? t.lightMode : t.darkMode}
             className="p-1 rounded-md text-purple-200 hover:text-white hover:bg-purple-800 transition-colors"
             title={darkMode ? t.lightMode : t.darkMode}
           >

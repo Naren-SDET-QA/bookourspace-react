@@ -17,8 +17,11 @@ import {
   Check,
   Sparkles,
   ExternalLink,
-  Settings2
+  Settings2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
+import { CopyButton } from './ui/CopyButton';
 import { useMarketplace } from '../context/MarketplaceContext';
 import {
   GSTInvoicePayload,
@@ -148,11 +151,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [devicePlatform, setDevicePlatform] = useState<DevicePlatform>('desktop');
   const [utrReference, setUtrReference] = useState('');
   const [appLaunchedNotice, setAppLaunchedNotice] = useState<string | null>(null);
-  const [copiedVpa, setCopiedVpa] = useState(false);
+
 
   const [cardNumber, setCardNumber] = useState('4532 •••• •••• 8821');
   const [cardExpiry, setCardExpiry] = useState('08/29');
   const [cardCvv, setCardCvv] = useState('•••');
+  const [showCvv, setShowCvv] = useState(false);
   const [selectedBank, setSelectedBank] = useState('HDFC Bank');
 
   // Customer / Provider GST Billing Fields
@@ -170,7 +174,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const [isOneRupeeTestMode, setIsOneRupeeTestMode] = useState(defaultOneRupeeTest);
   const [qrScanMode, setQrScanMode] = useState<'upi_pay' | 'open_mobile_app'>('upi_pay');
-  const [copiedMobileLink, setCopiedMobileLink] = useState(false);
+
 
   const mobileShareUrl = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -304,14 +308,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     persistMerchantAccounts(filtered);
     if (selectedAccountId === id) {
       setSelectedAccountId(filtered[0].id);
-    }
-  };
-
-  const handleCopyVpa = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(merchantVpa.trim());
-      setCopiedVpa(true);
-      setTimeout(() => setCopiedVpa(false), 2000);
     }
   };
 
@@ -1031,20 +1027,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                           value={mobileShareUrl}
                           className="w-full flex-1 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-lg text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
                         />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (navigator.clipboard) {
-                              navigator.clipboard.writeText(mobileShareUrl);
-                              setCopiedMobileLink(true);
-                              setTimeout(() => setCopiedMobileLink(false), 2500);
-                            }
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black shrink-0 cursor-pointer flex items-center gap-1"
-                        >
-                          {copiedMobileLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedMobileLink ? 'Copied Link!' : 'Copy Mobile Link'}</span>
-                        </button>
+                        <CopyButton value={mobileShareUrl} label="Copy Mobile Link" copiedLabel="Copied Link!" className="bg-indigo-600 text-white border-indigo-600 hover:text-white" />
                       </div>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400">
                         Open this link in your mobile browser (Chrome / Safari) and tap <b>Google Pay, PhonePe, Paytm, BHIM, or CRED</b> to launch your UPI app directly!
@@ -1128,14 +1111,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                         {merchantVpa}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyVpa}
-                      className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-100 text-[10px] font-black text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 cursor-pointer"
-                    >
-                      {copiedVpa ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedVpa ? 'Copied' : 'Copy'}</span>
-                    </button>
+                    <CopyButton value={merchantVpa.trim()} label="Copy" />
                   </div>
 
                   <div>
@@ -1224,14 +1200,26 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     placeholder="MM/YY"
                     className="w-full px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
-                  <input
-                    type="password"
-                    maxLength={4}
-                    value={cardCvv}
-                    onChange={(e) => setCardCvv(e.target.value)}
-                    placeholder="CVV"
-                    className="w-full px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showCvv ? 'text' : 'password'}
+                      maxLength={4}
+                      value={cardCvv}
+                      onChange={(e) => setCardCvv(e.target.value)}
+                      placeholder="CVV"
+                      autoComplete="cc-csc"
+                      className="w-full px-3 py-1.5 pr-9 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCvv((value) => !value)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500"
+                      aria-label={showCvv ? 'Hide CVV' : 'Show CVV'}
+                      aria-pressed={showCvv}
+                    >
+                      {showCvv ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

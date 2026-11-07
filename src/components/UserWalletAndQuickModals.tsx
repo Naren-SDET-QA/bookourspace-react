@@ -132,6 +132,43 @@ export const UserWalletAndLedgerSection: React.FC<{
   );
 };
 
+const SITE_FAQ = [
+  { q: 'How do I sign in?', a: 'Production BookOurSpace uses Google Sign-In only. New Google accounts receive a profile automatically. Email and password login is not offered.' },
+  { q: 'How do I search across PG, classes, halls, services, stays and movies?', a: 'Use the search bar in the header, or the location picker for city, area, village, mandal or PIN. Results stay inside the module you are browsing.' },
+  { q: 'How do bookings and payments work?', a: 'Book from a listing. Razorpay Checkout, UPI and Pay after service stay available where the module supports them. Unverified screenshots are never treated as paid.' },
+  { q: 'How do Movies work?', a: 'Movies shows theatre showtimes only. There are no seats, tickets, payments or refunds in Movies.' },
+  { q: 'How does Stay 2 differ from Stay 1?', a: 'Stay 2 is the default Hotels & Stays journey at #stays. Stay 1 remains at #stays/old.' },
+  { q: 'How do I download a GST invoice?', a: 'Open My Bookings and use GST PDF Invoice on a confirmed booking. A tax invoice prints only when GSTIN is configured and payment is verified.' },
+  { q: 'How does hourly hotel booking work?', a: 'Open Stay and use hourly filters where a hotel publishes 3h/6h/12h stays.' },
+  { q: 'Where are class batch dates?', a: 'On a class card, open the calendar to see start dates and assessments from the listing.' },
+  { q: 'What does the privacy banner store?', a: 'Essential keeps sign-in and bookings working. Allow campaign tags to keep UTM values on this device only. Native apps skip the cookie banner.' },
+];
+
+function SiteFaqList() {
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <div className="space-y-2 text-xs">
+      {SITE_FAQ.map((item, index) => {
+        const expanded = open === index;
+        return (
+          <div key={item.q} className="rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/70">
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setOpen(expanded ? null : index)}
+              className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left font-black text-slate-900 dark:text-white"
+            >
+              <span>{item.q}</span>
+              <span aria-hidden="true">{expanded ? '−' : '+'}</span>
+            </button>
+            {expanded && <p className="px-3 pb-3 leading-relaxed text-slate-600 dark:text-slate-300">{item.a}</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 interface QuickActionModalsProps {
   activeModal: QuickActionModalType;
   onClose: () => void;
@@ -383,32 +420,7 @@ export const QuickActionModals: React.FC<QuickActionModalsProps> = ({
           </div>
         )}
 
-        {activeModal === 'help_centre' && (
-          <div className="space-y-2.5 text-xs">
-            {[
-              {
-                q: 'How do I download my formal GST Tax Invoice PDF?',
-                a: 'Open "My Bookings" in the bottom bar and click "📄 GST PDF Invoice" on any confirmed booking to print or download your invoice with GSTIN & QR validation.',
-              },
-              {
-                q: 'How does Hourly Hotel Booking work?',
-                a: 'Switch to the "Stay / Hotels" section and toggle "Hourly Booking" to filter hotels offering flexible 3h/6h/12h stays with custom check-in and check-out date-time selection.',
-              },
-              {
-                q: 'How do I view Course Batch Start Dates & Exam Dates?',
-                a: 'On any Class/Course card, click "📅 View Calendar" to inspect monthly start dates, assessment exams, off-days, and verified Student Success placement stats.',
-              },
-            ].map((faq, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1"
-              >
-                <div className="font-black text-slate-900 dark:text-white">{faq.q}</div>
-                <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{faq.a}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {activeModal === 'help_centre' && <SiteFaqList />}
       </div>
     </div>
   );

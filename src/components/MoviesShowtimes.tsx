@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Clock, Film, Loader2, MapPin, Pencil, RotateCcw, Search, ShieldCheck, X } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { LastUpdated } from './ui/LastUpdated';
 
 interface ShowtimeScreen {
   id: string;
@@ -217,7 +218,7 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
             <ShieldCheck className="h-3 w-3 text-emerald-600" />
             Showtimes are updated by theatres/admins and authorized daily sync. No seats, tickets, payments or refunds.
             <span className="ml-auto font-semibold">
-              Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleString('en-IN') : 'no verified showtimes yet'}
+              {lastUpdated ? <LastUpdated at={lastUpdated} /> : 'Last updated: no verified showtimes yet'}
               {loadedInMs !== null ? ` · ${loadedInMs} ms` : ''}
             </span>
           </p>
@@ -232,7 +233,7 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
             <Film className="mx-auto h-8 w-8 text-blue-600" />
             <p className="mt-2 text-sm font-bold text-slate-900">No showtimes for this location yet</p>
             <p className="mt-1 text-xs text-slate-500">Theatres and admins can add a real movie title, theatre, date and timings. No placeholder showtimes are shown.</p>
-            <p className="mt-2 text-[11px] font-semibold text-slate-500">Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleString('en-IN') : 'no verified showtimes yet'}</p>
+            <p className="mt-2 text-[11px] font-semibold text-slate-500">{lastUpdated ? <LastUpdated at={lastUpdated} /> : 'Last updated: no verified showtimes yet'}</p>
           </div>
         ) : movie === null ? (
           <section aria-label="Movies">

@@ -10,6 +10,8 @@ import { fetchRazorpayPaymentHistory, fetchRlsProfile } from '../lib/supabaseCli
 import SafeImage from './SafeImage';
 import UniversalMediaManager, { type MediaManagerItem } from './UniversalMediaManager';
 import BOSOfficialLogo from './BOSOfficialLogo';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { FormStatus } from './ui/FormStatus';
 
 export interface ProfileScreenUser {
   id: string;
@@ -118,6 +120,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [notifications, setNotifications] = useState(() => localStorage.getItem('bos_profile_notifications') !== 'off');
   const [paymentHistoryState, setPaymentHistoryState] = useState<'idle' | 'loading' | 'loaded' | 'unavailable'>('idle');
   const [paymentHistory, setPaymentHistory] = useState<Array<{ id: string; amount: number; currency?: string; status: string; createdAt: string; listingTitle?: string }>>([]);
+  const [confirmSignOutOpen, setConfirmSignOutOpen] = useState(false);
 
   useEffect(() => {
     setAvatarUrl(user?.avatarUrl || '');
@@ -169,7 +172,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   );
 
   const signOut = async () => {
-    if (!window.confirm(t.confirmSignOut)) return;
+    setConfirmSignOutOpen(false);
     setSigningOut(true); setError('');
     try { await onSignOut(); onClose(); }
     catch { setError(t.signOutError); }
@@ -195,7 +198,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           {(avatarUrl || coverUrl) && <p className="text-xs text-slate-500">Images are private and visible to your account.</p>}
         </div>}
         <button disabled={saving} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-700 px-4 font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{saving ? 'Saving…' : 'Save profile'}</button>
-        {savedMessage && <p role="status" className="text-sm text-slate-700">{savedMessage}</p>}
+        {savedMessage && <FormStatus tone={savedMessage.includes('could not') ? 'error' : 'success'}>{savedMessage}</FormStatus>}
       </form>
     </section>
   );
@@ -209,7 +212,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         <p className="mt-3 text-sm leading-6 text-slate-600">Closing your account revokes active sessions and removes profile contact details. Booking, payment, refund, dispute and audit records are retained for operational and legal records.</p>
         <label className="mt-4 block text-sm font-semibold">Type CLOSE to confirm<input value={closureConfirmation} onChange={(event) => setClosureConfirmation(event.target.value)} autoCapitalize="characters" className="mt-2 min-h-12 w-full rounded-xl border border-slate-300 px-3" /></label>
         <button type="button" disabled={closingAccount || closureConfirmation !== 'CLOSE'} onClick={async () => { setClosingAccount(true); setError(''); try { const ok = await onRequestAccountClosure(); if (!ok) setError('Account closure could not be completed. Reauthenticate and try again.'); } catch { setError('Account closure could not be completed. Reauthenticate and try again.'); } finally { setClosingAccount(false); } }} className="mt-4 min-h-12 w-full rounded-xl bg-rose-700 px-4 font-bold text-white disabled:opacity-50">{closingAccount ? 'Closing account…' : 'Close account'}</button>
-        {error && <p role="alert" className="mt-3 text-sm text-rose-700">{error}</p>}
+        {error && <FormStatus tone="error">{error}</FormStatus>}
       </div>
     </section>
   );
@@ -347,7 +350,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <div className="space-y-2 rounded-3xl border border-slate-200 bg-white p-2 shadow-sm">
             {row(<Languages className="h-5 w-5" />, t.language, () => setScreen('settings'))}
             {row(<CircleHelp className="h-5 w-5" />, t.helpCentre, onHelp)}
-            <button type="button" disabled={signingOut} onClick={() => void signOut()} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"><LogOut className="h-5 w-5 text-indigo-700" />{signingOut ? 'Signing out…' : t.signOut}</button>
+            <button type="button" disabled={signingOut} onClick={() => setConfirmSignOutOpen(true)} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"><LogOut className="h-5 w-5 text-indigo-700" />{signingOut ? 'Signing out…' : t.signOut}</button>
+            <ConfirmDialog
+              open={confirmSignOutOpen}
+              title={t.signOut}
+              description={t.confirmSignOut}
+              confirmLabel={t.signOut}
+              danger
+              onCancel={() => setConfirmSignOutOpen(false)}
+              onConfirm={() => void signOut()}
+            />
             <button type="button" onClick={() => setScreen('delete')} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50"><Trash2 className="h-5 w-5" />{t.delete}</button>
           </div>
         </>}

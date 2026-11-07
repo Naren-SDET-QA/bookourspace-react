@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BedDouble, CalendarDays, CircleAlert, Hotel, ImagePlus, LoaderCircle, Plus, RefreshCw, Save, X } from 'lucide-react';
+import { BedDouble, CalendarDays, Hotel, ImagePlus, LoaderCircle, Plus, RefreshCw, Save, X } from 'lucide-react';
 import UniversalMediaManager, { type MediaManagerItem } from './UniversalMediaManager';
 import SafeImage from './SafeImage';
 import { createMediaUploadHandler } from '../lib/media/uploadMediaAsset';
 import { buildAuthHeaders } from '../lib/supabaseClient';
 import { cancelStayBooking, type ApiFailure } from '../lib/stayCheckoutClient';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { FormStatus } from './ui/FormStatus';
 
 type HostListing = { listing_id: string; title: string; status: string; property_id: string | null; name?: string; city?: string; area?: string; property_type?: string; is_active?: boolean };
 type Property = Record<string, any>;
@@ -38,6 +40,7 @@ export default function HostStayWorkspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
 
   const refreshListings = useCallback(async (preserveId = '') => {
     const result = await api<{ listings: HostListing[] }>('/api/stays/host/listings');
@@ -139,8 +142,8 @@ export default function HostStayWorkspace() {
       <div><p className="text-xs font-black uppercase tracking-wider text-indigo-600">Stay hosting</p><h2 className="mt-1 flex items-center gap-2 text-xl font-black text-slate-900 dark:text-white"><Hotel aria-hidden="true"/> Property and inventory</h2><p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Manage verified listing inventory, room rates, availability, bookings and photos. Changes are saved to PostgreSQL.</p></div>
       <button type="button" disabled={busy} onClick={() => { setBusy(true); void refreshListings(selectedId).then(id => refresh(id)).catch(e => setError(String(e?.message || 'REFRESH_FAILED'))).finally(() => setBusy(false)); }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold disabled:opacity-50 dark:border-slate-700"><RefreshCw className="h-4 w-4"/>Refresh</button>
     </header>
-    {error && <p role="alert" className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200"><CircleAlert className="h-4 w-4 shrink-0"/>{error}</p>}
-    {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">{notice}</p>}
+    {error && <FormStatus tone="error">{error}</FormStatus>}
+    {notice && <FormStatus tone="success">{notice}</FormStatus>}
     {busy && !detail && <div className="flex items-center gap-2 py-8 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin"/>Loading your stay listings…</div>}
     {!busy && listings.length === 0 && <div className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200"><b>No stay listing is linked to this active provider account.</b><p className="mt-1">Use “Register as Provider & Submit Listing Request” above and choose Hotels & Stays. Inventory tools unlock after the provider role is approved and the listing request is submitted.</p></div>}
     {listings.length > 0 && <>
@@ -189,7 +192,31 @@ export default function HostStayWorkspace() {
           </div>
         </>}
       </>}
-      <section className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-700"><h3 className="font-black">Stay bookings</h3><p className="text-xs text-slate-500">Guest contact details are not shown here. Cancellations use the server cancellation policy; any refund is a quote until the payment provider confirms settlement.</p>{hostBookings.length ? <ul className="space-y-2">{hostBookings.map(item=><li key={item.booking_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800"><span><b>{item.property_name} · {item.room_type} · {item.unit_label}</b><br/>{item.check_in} → {item.check_out} · {item.status} · payment {item.payment_status || 'unknown'}</span><span className="font-bold">{item.total_paise == null ? '—' : `₹${(item.total_paise/100).toLocaleString('en-IN')}`}{['held','confirmed'].includes(item.status) && <button type="button" onClick={async()=>{if(!window.confirm('Cancel this booking? Any refund remains subject to payment-provider confirmation.'))return;setBusy(true);try{const outcome=await cancelStayBooking(item.booking_id);if((outcome as ApiFailure)?.ok===false)throw new Error((outcome as ApiFailure).error);await refresh();setNotice('Booking cancelled. Refund settlement has not been claimed by this app.');}catch(e){setError(String((e as Error).message));}finally{setBusy(false);}}} className="ml-2 min-h-10 rounded-lg border border-rose-300 px-3 text-xs font-bold text-rose-700">Cancel</button>}</span></li>)}</ul> : <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500 dark:bg-slate-800">No stay bookings to manage.</p>}</section>
+      <section className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-700"><h3 className="font-black">Stay bookings</h3><p className="text-xs text-slate-500">Guest contact details are not shown here. Cancellations use the server cancellation policy; any refund is a quote until the payment provider confirms settlement.</p>{hostBookings.length ? <ul className="space-y-2">{hostBookings.map(item=><li key={item.booking_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800"><span><b>{item.property_name} · {item.room_type} · {item.unit_label}</b><br/>{item.check_in} → {item.check_out} · {item.status} · payment {item.payment_status || 'unknown'}</span><span className="font-bold">{item.total_paise == null ? '—' : `₹${(item.total_paise/100).toLocaleString('en-IN')}`}{['held','confirmed'].includes(item.status) && <button type="button" onClick={()=>setCancelBookingId(item.booking_id)} className="ml-2 min-h-10 rounded-lg border border-rose-300 px-3 text-xs font-bold text-rose-700">Cancel</button>}</span></li>)}</ul> : <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500 dark:bg-slate-800">No stay bookings to manage.</p>}</section>
     </>}
+    <ConfirmDialog
+      open={Boolean(cancelBookingId)}
+      title="Cancel this stay booking?"
+      description="Any refund remains subject to payment-provider confirmation. BookOurSpace will not mark money as settled from this cancellation."
+      confirmLabel="Cancel booking"
+      danger
+      onCancel={() => setCancelBookingId(null)}
+      onConfirm={async () => {
+        const bookingId = cancelBookingId;
+        setCancelBookingId(null);
+        if (!bookingId) return;
+        setBusy(true);
+        try {
+          const outcome = await cancelStayBooking(bookingId);
+          if ((outcome as ApiFailure)?.ok === false) throw new Error((outcome as ApiFailure).error);
+          await refresh();
+          setNotice('Booking cancelled. Refund settlement has not been claimed by this app.');
+        } catch (e) {
+          setError(String((e as Error).message));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
   </section>;
 }

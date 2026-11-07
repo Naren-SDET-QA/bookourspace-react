@@ -118,6 +118,7 @@ import { setStoredAuthoritativeSession } from './lib/supabaseClient';
 import { supabase } from './lib/supabaseClient';
 import BookOurSpaceEntryExperience from './components/BookOurSpaceEntryExperience';
 import { SectionErrorBoundary } from './components/SectionErrorBoundary';
+import { SkipToContent } from './components/SkipToContent';
 import { DEMO_DATA_ENABLED } from './lib/demoDataPolicy';
 import { popularAreasList, distanceRadiuses } from './data/comprehensiveListings';
 
@@ -220,6 +221,7 @@ const UniversalObjectEditorModal = lazy(() => import('./components/UniversalObje
 const LiveAdminPageEditor = lazy(() => import('./components/LiveAdminPageEditor').then((module) => ({ default: module.LiveAdminPageEditor })));
 const UniversalLiveBuilder = lazy(() => import('./components/UniversalLiveBuilder').then((module) => ({ default: module.UniversalLiveBuilder })));
 const QuickBookChatAssistant = lazy(() => import('./components/QuickBookChatAssistant').then((module) => ({ default: module.QuickBookChatAssistant })));
+const SiteChrome = lazy(() => import('./components/SiteChrome'));
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
@@ -366,6 +368,7 @@ function MarketplaceAppContent() {
   // Hotel Hourly Booking Toggle & Quick Action Modals State
   const [hourlyBookingOnly, setHourlyBookingOnly] = useState<boolean>(false);
   const [activeQuickModal, setActiveQuickModal] = useState<QuickActionModalType>(null);
+  const siteChromeReady = useIdleReady(true, 900);
   const [isUniversalEditorOpen, setIsUniversalEditorOpen] = useState<boolean>(false);
   const [isQuickBookOpen, setIsQuickBookOpen] = useState<boolean>(false);
   const [showMoviesClassicGrid, setShowMoviesClassicGrid] = useState<boolean>(false);
@@ -949,6 +952,12 @@ function MarketplaceAppContent() {
       localStorage.setItem('theme_mode', 'light');
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    const openHelp = () => setActiveQuickModal('help_centre');
+    window.addEventListener('bos-open-help', openHelp);
+    return () => window.removeEventListener('bos-open-help', openHelp);
+  }, []);
 
   // Modals & Drawers
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
@@ -2048,6 +2057,8 @@ function MarketplaceAppContent() {
   return (
     <Suspense fallback={<SectionScreenFallback label="Loading BookOurSpace…" />}>
     <div
+      id="bos-main-content"
+      tabIndex={-1}
       className={`bos-app-shell ${
         isBentoHomeScreen
           ? 'bos-app-shell-bento min-h-screen overflow-visible pb-20'
@@ -2055,6 +2066,7 @@ function MarketplaceAppContent() {
       } w-full max-w-full bg-[#F5F4FB] dark:bg-[#0A0C20] text-slate-900 dark:text-slate-100 transition-colors duration-200 flex flex-col box-border`}
       style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
     >
+      <SkipToContent />
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
       <BOSGlobeLoadingScreen />
 
@@ -5778,7 +5790,7 @@ function MarketplaceAppContent() {
               setIsFooterProfileOpen(false);
               window.scrollTo({ top: 0, behavior: 'smooth' });
               if (!isBentoHomeScreen) {
-                const searchInput = document.querySelector<HTMLInputElement>('input[type="text"]');
+                const searchInput = document.querySelector<HTMLInputElement>('input[type="text"], input[type="search"]');
                 if (searchInput) {
                   searchInput.focus();
                 } else {
@@ -6616,6 +6628,12 @@ function MarketplaceAppContent() {
             setFormerLocalInitialCategory(undefined);
             setIsServicesDiscoveryOpen(true);
           }} />
+        </Suspense>
+      )}
+
+      {siteChromeReady && (
+        <Suspense fallback={null}>
+          <SiteChrome onOpenHelp={() => setActiveQuickModal('help_centre')} />
         </Suspense>
       )}
 
