@@ -701,16 +701,12 @@ export function StayDetail({
                 type="button"
                 onClick={() => {
                   if (previewOnly) return;
-                  if (!isAuthenticated) {
-                    onSignIn?.();
-                    return;
-                  }
                   onReserve();
                 }}
                 disabled={previewOnly || nights <= 0}
                 className="mt-4 hidden min-h-[50px] w-full items-center justify-center rounded-xl bg-[#f97316] px-4 text-base font-bold text-white transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-60 lg:flex"
               >
-                {previewOnly ? 'Sample listing — not bookable' : nights <= 0 ? 'Add dates to reserve' : isAuthenticated ? 'Reserve' : 'Sign in to book'}
+                {previewOnly ? 'Sample listing — not bookable' : nights <= 0 ? 'Add dates to reserve' : 'Reserve'}
               </button>
               {previewOnly && (
                 <p role="note" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium leading-5 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
@@ -755,7 +751,7 @@ export function StayDetail({
                 <p className="mt-4 text-sm text-[#717171] dark:text-slate-400">Add your dates to see the total for the stay.</p>
               )}
               {!isAuthenticated && !previewOnly && (
-                <p className="mt-2 text-center text-[11px] font-medium text-amber-700 dark:text-amber-300">Sign-in is mandatory. Guest checkout is not available.</p>
+                <p className="mt-2 text-center text-[11px] font-medium text-amber-700 dark:text-amber-300">Continue with Google at checkout. Dates and guest details are kept.</p>
               )}
 
               <p className="mt-4 rounded-xl bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#717171] dark:bg-slate-800 dark:text-slate-300">
@@ -816,16 +812,12 @@ export function StayDetail({
                 document.getElementById('stay-booking-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 return;
               }
-              if (!isAuthenticated) {
-                onSignIn?.();
-                return;
-              }
               onReserve();
             }}
             disabled={previewOnly}
             className="shrink-0 rounded-xl bg-[#f97316] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#ea580c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f97316] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {previewOnly ? 'Sample listing' : nights <= 0 ? 'Check availability' : isAuthenticated ? 'Reserve' : 'Sign in to book'}
+            {previewOnly ? 'Sample listing' : nights <= 0 ? 'Check availability' : 'Reserve'}
           </button>
         </div>
       </div>

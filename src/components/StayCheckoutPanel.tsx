@@ -41,6 +41,7 @@ import {
 import { loadRazorpayScript } from '../utils/razorpayLoader';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { isStayOnlineMethodAvailable, stayPaymentStatusPresentation, staySettlementMessage } from '../lib/stayPaymentStatus';
+import { patchStayCheckoutDraft, readStayCheckoutDraft } from '../lib/stayCheckoutDraft';
 
 interface StayCheckoutPanelProps {
   property: StayProperty;
@@ -111,13 +112,19 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
         basePricePaise: room.basePricePaise,
         amenities: [] as string[],
       }));
-  const [roomTypeId, setRoomTypeId] = useState<string>(roomTypes[0]?.id || '');
-  const [units, setUnits] = useState(1);
+  const draftOnLoad = readStayCheckoutDraft();
+  const [roomTypeId, setRoomTypeId] = useState<string>(draftOnLoad?.roomTypeId || roomTypes[0]?.id || '');
+  const [units, setUnits] = useState(draftOnLoad?.units && draftOnLoad.units >= 1 ? draftOnLoad.units : 1);
   const [quote, setQuote] = useState<StayQuote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [capabilities, setCapabilities] = useState<StayPaymentCapabilities | null>(null);
-  const [mode, setMode] = useState<'upi' | 'pay_after_service' | 'razorpay'>('pay_after_service');
+  const [mode, setMode] = useState<'upi' | 'pay_after_service' | 'razorpay'>(
+    draftOnLoad?.paymentMode === 'upi' || draftOnLoad?.paymentMode === 'razorpay' || draftOnLoad?.paymentMode === 'pay_after_service'
+      ? draftOnLoad.paymentMode
+      : 'pay_after_service',
+  );
+  const userPickedMode = React.useRef(Boolean(draftOnLoad?.paymentMode));
   const [phase, setPhase] = useState<Phase>('idle');
   const [creating, setCreating] = useState(false);
   const [checkout, setCheckout] = useState<StayCheckoutResult | null>(null);
@@ -125,14 +132,16 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
   const [verificationInProgress, setVerificationInProgress] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [guestPhone, setGuestPhone] = useState(authUser?.phone || '');
-  const [guestName, setGuestName] = useState(authUser?.name || '');
+  const [guestPhone, setGuestPhone] = useState(authUser?.phone || draftOnLoad?.guestPhone || '');
+  const [guestName, setGuestName] = useState(authUser?.name || draftOnLoad?.guestName || '');
   const [guestEmail, setGuestEmail] = useState(authUser?.email || '');
-  const [guestAddress, setGuestAddress] = useState('');
+  const [guestAddress, setGuestAddress] = useState(draftOnLoad?.guestAddress || '');
   const [guestTouched, setGuestTouched] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
   const [bookings, setBookings] = useState<StayBookingRow[] | null>(null);
   const [bookingNotice, setBookingNotice] = useState<string | null>(null);
+
+  const signedIn = Boolean(isAuthenticated || authUser);
 
   useEffect(() => {
     if (!authUser) return;
@@ -142,6 +151,31 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
     setGuestEmail((current) => (authUser.email ? authUser.email : current || ''));
     setGuestPhone((current) => current || authUser.phone || '');
   }, [authUser?.id, authUser?.name, authUser?.email]);
+
+  useEffect(() => {
+    const draft = readStayCheckoutDraft();
+    if (draft?.roomTypeId) setRoomTypeId((current) => current || draft.roomTypeId || '');
+    if (draft?.units && draft.units >= 1) setUnits(draft.units);
+    if (draft?.paymentMode === 'pay_after_service' || draft?.paymentMode === 'upi' || draft?.paymentMode === 'razorpay') {
+      setMode(draft.paymentMode);
+    }
+  }, []);
+
+  useEffect(() => {
+    patchStayCheckoutDraft({
+      stayStyle: pageLayout ? 'airbnb' : 'old',
+      listingId: property.listingId,
+      checkIn,
+      checkOut,
+      guests,
+      guestName,
+      guestPhone,
+      guestAddress,
+      roomTypeId,
+      units,
+      paymentMode: mode,
+    });
+  }, [pageLayout, property.listingId, checkIn, checkOut, guests, guestName, guestPhone, guestAddress, roomTypeId, units, mode]);
 
   useEffect(() => {
     onQuoteChange?.(quote);
@@ -179,6 +213,11 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
   useEffect(() => {
     if (!capabilities) return;
     setMode((current) => {
+      if (userPickedMode.current) {
+        if (current === 'razorpay' && !razorpayAvailable) return upiAvailable ? 'upi' : 'pay_after_service';
+        if (current === 'upi' && !upiAvailable) return razorpayAvailable ? 'razorpay' : 'pay_after_service';
+        return current;
+      }
       if (current === 'razorpay' && razorpayAvailable) return current;
       if (current === 'upi' && upiAvailable) return current;
       if (razorpayAvailable) return 'razorpay';
@@ -273,8 +312,25 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
       setError('Choose a room type and dates before booking.');
       return;
     }
-    if (!isAuthenticated || !authUser) {
-      setError('Sign in with a verified account to reserve this stay.');
+    if (!signedIn || !authUser) {
+      patchStayCheckoutDraft({
+        stayStyle: pageLayout ? 'airbnb' : 'old',
+        listingId: property.listingId,
+        checkIn,
+        checkOut,
+        guests,
+        guestName,
+        guestPhone,
+        guestAddress,
+        roomTypeId,
+        units,
+        paymentMode: mode,
+      });
+      if (onSignIn) {
+        onSignIn();
+        return;
+      }
+      setError('Continue with Google to reserve this stay. Booking details are kept on this page.');
       return;
     }
     const guest = validateGuestDetails(guestName, guestEmail, guestPhone);
@@ -487,10 +543,10 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
       </div>
       )}
 
-      {!isAuthenticated && (
+      {!signedIn && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-900 dark:bg-amber-950/40" role="status">
           <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
-            Sign in or create an account to reserve. Nothing is reserved while signed out.
+            Continue with Google to confirm. Dates, room and guest details stay on this page. Nothing is reserved until you confirm.
           </p>
           {onSignIn && (
             <button
@@ -498,7 +554,7 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
               onClick={onSignIn}
               className="min-h-[34px] shrink-0 rounded-lg bg-[#f97316] px-3 text-[11px] font-bold text-white transition hover:bg-[#ea580c]"
             >
-              Sign in / Create account
+              Continue with Google
             </button>
           )}
         </div>
@@ -599,7 +655,7 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
           <div className="grid gap-2 sm:grid-cols-3">
             <button
               type="button"
-              onClick={() => setMode('razorpay')}
+              onClick={() => { userPickedMode.current = true; setMode('razorpay'); }}
               aria-pressed={mode === 'razorpay'}
               disabled={disabled || !razorpayAvailable}
               className={`flex min-h-[44px] items-start gap-2 rounded-xl border p-2.5 text-left transition ${
@@ -616,7 +672,7 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setMode('upi')}
+              onClick={() => { userPickedMode.current = true; setMode('upi'); }}
               aria-pressed={mode === 'upi'}
               disabled={disabled || !upiAvailable}
               className={`flex min-h-[44px] items-start gap-2 rounded-xl border p-2.5 text-left transition ${
@@ -633,7 +689,7 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setMode('pay_after_service')}
+              onClick={() => { userPickedMode.current = true; setMode('pay_after_service'); }}
               aria-pressed={mode === 'pay_after_service'}
               disabled={disabled}
               className={`flex min-h-[44px] items-start gap-2 rounded-xl border p-2.5 text-left transition disabled:opacity-60 ${
@@ -726,16 +782,37 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
               <button
                 type="button"
                 id="stay-booking-submit"
-                onClick={() => void startCheckout()}
-                disabled={!isAuthenticated || !quote || quote.availableUnits < quote.units || creating}
+                onClick={() => {
+                  if (!signedIn) {
+                    patchStayCheckoutDraft({
+                      stayStyle: pageLayout ? 'airbnb' : 'old',
+                      listingId: property.listingId,
+                      checkIn,
+                      checkOut,
+                      guests,
+                      guestName,
+                      guestPhone,
+                      guestAddress,
+                      roomTypeId,
+                      units,
+                      paymentMode: mode,
+                    });
+                    onSignIn?.();
+                    return;
+                  }
+                  void startCheckout();
+                }}
+                disabled={signedIn ? (!quote || quote.availableUnits < quote.units || creating) : !onSignIn}
                 aria-busy={creating}
                 className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-[#f97316] px-4 text-sm font-bold text-white transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CalendarCheck className="h-4 w-4" aria-hidden="true" />}
-                {requestMode
-                  ? 'Request to book'
-                  : mode === 'razorpay' ? 'Reserve and pay with Razorpay'
-                    : mode === 'upi' ? 'Reserve and get UPI QR' : 'Reserve — Pay at Hotel'}
+                {!signedIn
+                  ? 'Continue with Google'
+                  : requestMode
+                    ? 'Request to book'
+                    : mode === 'razorpay' ? 'Reserve and pay with Razorpay'
+                      : mode === 'upi' ? 'Reserve and get UPI QR' : 'Confirm Reservation'}
               </button>
             </div>
           ) : null}

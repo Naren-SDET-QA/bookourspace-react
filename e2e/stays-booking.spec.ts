@@ -43,7 +43,11 @@ test.beforeEach(async () => {
 async function openApp(browser: Browser, token: string, viewport?: { width: number; height: number }): Promise<{ page: Page; context: BrowserContext }> {
   const context = await browser.newContext(viewport ? { viewport } : undefined);
   await context.addInitScript(([value]) => {
-    try { window.localStorage.setItem('bos_session_token_v1', String(value)); } catch { /* ignore */ }
+    try { window.localStorage.setItem('bos_entry_choice_v1', value ? 'signed-in' : 'guest'); } catch { /* ignore */ }
+    try {
+      if (value) window.localStorage.setItem('bos_session_token_v1', String(value));
+      else window.localStorage.removeItem('bos_session_token_v1');
+    } catch { /* ignore */ }
   }, [token]);
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
@@ -245,7 +249,7 @@ test('Style 2 — signed-in local customer reserves, sees My Bookings, cancels, 
     await payAfterService.waitFor({ state: 'visible', timeout: 30_000 });
     await payAfterService.click();
     await expect(payAfterService).toHaveAttribute('aria-pressed', 'true');
-    const reserve = dialog.getByRole('button', { name: /^(Reserve with pay after service|Reserve — Pay at Hotel)/i }).first();
+    const reserve = dialog.getByRole('button', { name: /^(Confirm Reservation|Reserve with pay after service|Reserve — Pay at Hotel)/i }).first();
     await expect(reserve).toBeEnabled({ timeout: 20_000 });
     await reserve.click();
 
@@ -323,6 +327,56 @@ test('Style 2 — mobile and tablet viewports reach the same booking panel witho
   }
 });
 
+test('Stay 1 and Stay 2 — unsigned guest reaches Continue with Google and keeps dates in the checkout draft', async ({ browser }) => {
+  const checkIn = isoPlus(25);
+  const checkOut = isoPlus(27);
+
+  const { page, context } = await openApp(browser, '', { width: 1280, height: 800 });
+  try {
+    await page.goto(`${harness.uiUrl}/#stays/airbnb`, { waitUntil: 'domcontentloaded' });
+    const card = page.locator(`[aria-label="View ${STAY.title}"]`).first();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await card.click();
+    const stay2 = page.getByRole('dialog');
+    await expect(stay2).toBeVisible();
+    const stay2Dates = stay2.locator('input[type="date"]');
+    await stay2Dates.nth(0).fill(checkIn);
+    await stay2Dates.nth(1).fill(checkOut);
+    const stay2Reserve = stay2.getByRole('button', { name: 'Reserve', exact: true }).first();
+    await expect(stay2Reserve).toBeEnabled({ timeout: 20_000 });
+    await stay2Reserve.click();
+    await expect(stay2.getByRole('button', { name: 'Continue with Google' }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(stay2.getByRole('button', { name: 'Confirm Reservation' })).toHaveCount(0);
+    const stay2Draft = await page.evaluate(() => window.sessionStorage.getItem('bos_stay_checkout_v1'));
+    expect(stay2Draft).toBeTruthy();
+    expect(stay2Draft).toContain(STAY.listingId);
+    expect(stay2Draft).toContain(checkIn);
+    expect(stay2Draft).toContain(checkOut);
+  } finally {
+    await context.close().catch(() => undefined);
+  }
+
+  const stay1 = await openApp(browser, '', { width: 1280, height: 800 });
+  try {
+    await stay1.page.goto(`${harness.uiUrl}/#stays/old`, { waitUntil: 'domcontentloaded' });
+    await expect(stay1.page.locator('body')).toContainText(STAY.title, { timeout: 30_000 });
+    await stay1.page.getByText(STAY.title, { exact: false }).first().click();
+    const dialog = stay1.page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const dates = dialog.locator('input[type="date"]');
+    await dates.nth(0).fill(checkIn);
+    await dates.nth(1).fill(checkOut);
+    await expect(dialog.getByRole('button', { name: 'Continue with Google' }).first()).toBeVisible({ timeout: 20_000 });
+    const stay1Draft = await stay1.page.evaluate(() => window.sessionStorage.getItem('bos_stay_checkout_v1'));
+    expect(stay1Draft).toBeTruthy();
+    expect(stay1Draft).toContain(STAY.listingId);
+    expect(stay1Draft).toContain(checkIn);
+    expect(stay1Draft).toContain(checkOut);
+  } finally {
+    await stay1.context.close().catch(() => undefined);
+  }
+});
+
 test('Style 1 — signed-in customer reserves with pay after service, views booking, cancels, and releases inventory', async ({ browser }) => {
   const { page, context } = await openApp(browser, tokens.customerA);
   try {
@@ -344,7 +398,7 @@ test('Style 1 — signed-in customer reserves with pay after service, views book
     const payAfterService = dialog.getByRole('button', { name: /^Pay at (Hotel|property)/i }).first();
     await payAfterService.click();
     await expect(payAfterService).toHaveAttribute('aria-pressed', 'true');
-    const reserve = dialog.getByRole('button', { name: /^(Reserve with pay after service|Reserve — Pay at Hotel)/i }).first();
+    const reserve = dialog.getByRole('button', { name: /^(Confirm Reservation|Reserve with pay after service|Reserve — Pay at Hotel)/i }).first();
     await expect(reserve).toBeEnabled({ timeout: 20_000 });
     await reserve.click();
     await expect(dialog).toContainText('Room reserved — payment due at the property', { timeout: 30_000 });
