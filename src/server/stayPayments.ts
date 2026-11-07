@@ -458,7 +458,10 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
         const currentProfile = await client.query(
           'select role, account_status from public.profiles where id = auth.uid() limit 1',
         );
-        if (currentProfile.rows[0]?.role !== 'customer' || currentProfile.rows[0]?.account_status !== 'active') {
+        // Admins may book too (staff/comp stays); providers may not book as
+        // themselves because their account is the supply side.
+        const bookerRole = String(currentProfile.rows[0]?.role || '');
+        if (!['customer', 'admin'].includes(bookerRole) || currentProfile.rows[0]?.account_status !== 'active') {
           throw Object.assign(new Error('ACTIVE_CUSTOMER_REQUIRED'), { code: '42501' });
         }
         // create_stay_checkout receives only server-configured payment

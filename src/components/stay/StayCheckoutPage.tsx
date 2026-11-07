@@ -58,6 +58,7 @@ export function StayCheckoutPage({
   const [qrToken, setQrToken] = useState('');
   const [receiptOpen, setReceiptOpen] = useState(false);
   const nights = quote?.nights || 0;
+  const authEmail = (() => { try { const raw = window.localStorage.getItem('bos_session_token_v1'); if (!raw) return ''; const payload = JSON.parse(atob(raw.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'))); return String(payload?.email || ''); } catch { return ''; } })();
   const image = property.images?.[0];
 
   useEffect(() => {
@@ -223,13 +224,27 @@ export function StayCheckoutPage({
           )}
           <section className={`rounded-2xl border p-4 ${isAuthenticated ? 'border-[#ebebeb] dark:border-slate-800' : 'border-amber-300 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20'}`}>
             <div className="flex items-center gap-3">
-              <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${isAuthenticated ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white'}`}>{isAuthenticated ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : '1'}</span>
-              <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-semibold">1. Log in or sign up</h2>
-                <p className="text-xs text-[#717171] dark:text-slate-400">{isAuthenticated ? 'You are signed in. Your booking is attached to this verified account.' : 'Sign in to reserve. Nothing is held while you are signed out.'}</p>
-              </div>
-              {!isAuthenticated && onSignIn && (
-                <button type="button" onClick={onSignIn} className="shrink-0 rounded-lg bg-[#f97316] px-4 py-2 text-xs font-semibold text-white">Sign in / Create account</button>
+              <button
+                type="button"
+                onClick={onSignIn}
+                disabled={!onSignIn}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
+                aria-label={isAuthenticated ? 'Manage your signed-in account' : 'Sign in or create an account'}
+              >
+                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isAuthenticated ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white'}`}>{isAuthenticated ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : '1'}</span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-semibold">{isAuthenticated ? '1. Your account' : '1. Log in or sign up'}</h2>
+                  <p className="text-xs text-[#717171] dark:text-slate-400">{isAuthenticated ? `Signed in as ${receipt?.guestEmail || authEmail || 'your verified account'}. Your booking is attached to this account.` : 'Sign in to reserve. Nothing is held while you are signed out.'}</p>
+                </div>
+              </button>
+              {onSignIn && (
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold ${isAuthenticated ? 'border border-[#dddddd] text-[#222222] dark:border-slate-700 dark:text-slate-100' : 'bg-[#f97316] text-white'}`}
+                >
+                  {isAuthenticated ? 'Manage account' : 'Sign in / Create account'}
+                </button>
               )}
             </div>
           </section>
