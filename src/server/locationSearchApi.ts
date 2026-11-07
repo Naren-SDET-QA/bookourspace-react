@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { getSharedPostgresPool } from './postgresPool';
+import { logSafeError } from './safeLogging';
 
 export interface LocationSearchApiDeps {
   env?: NodeJS.ProcessEnv;
@@ -39,13 +40,8 @@ function labelOf(location: { name: string; district?: string; state: string }): 
 const MAX_OFFSET = 10_000;
 const MAX_CACHE_ITEMS = 64;
 const CATALOG_CACHE_MS = 60_000;
-const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-const NOMINATIM_MIN_INTERVAL_MS = 1000;
-const NOMINATIM_CACHE_MS = 30 * 60 * 1000;
 const externalRequestTimes = new Map<string, number[]>();
 const externalSessions = new Map<string, { ip: string; expiresAt: number }>();
-const nominatimCache = new Map<string, { hits: unknown[]; expiresAt: number }>();
-let nominatimLastAt = 0;
 
 function safeJson(res: Response, status: number, code: string) {
   res.status(status).json({ ok: false, error: code });
@@ -136,71 +132,6 @@ export function registerLocationSearchApi(app: Express, deps: LocationSearchApiD
   const googleTermsReady = env.BOS_GOOGLE_MAPS_TERMS_READY === 'true';
   const fetchImpl = deps.fetchImpl || fetch;
 
-  const geocodeIndia = async (query: string): Promise<ReturnType<typeof locationDto>[]> => {
-    const key = query.trim().toLowerCase();
-    const cachedGeo = nominatimCache.get(key);
-    if (cachedGeo && cachedGeo.expiresAt > now()) return cachedGeo.hits as ReturnType<typeof locationDto>[];
-    if (cachedGeo) nominatimCache.delete(key);
-    if (now() - nominatimLastAt < NOMINATIM_MIN_INTERVAL_MS) return [];
-    nominatimLastAt = now();
-    const url = new URL(NOMINATIM_URL);
-    if (/^[1-9][0-9]{5}$/.test(query.trim())) {
-      url.searchParams.set('postalcode', query.trim());
-      url.searchParams.set('country', 'India');
-    } else {
-      url.searchParams.set('q', `${query}, India`);
-    }
-    url.searchParams.set('countrycodes', 'in');
-    url.searchParams.set('format', 'jsonv2');
-    url.searchParams.set('addressdetails', '1');
-    url.searchParams.set('limit', '5');
-    try {
-      const response = await fetchImpl(url, {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'BookOurSpace/1.0 (india-location-search; nominatim-fallback)',
-        },
-        signal: AbortSignal.timeout(2500),
-      });
-      if (!response.ok) return [];
-      const payload = await response.json();
-      if (!Array.isArray(payload)) return [];
-      const hits = payload.flatMap((entry: any, index: number) => {
-        const address = entry?.address && typeof entry.address === 'object' ? entry.address : {};
-        const countryCode = String(address.country_code || '').toLowerCase();
-        if (countryCode && countryCode !== 'in') return [];
-        const name = String(entry.display_name || '').split(',')[0]?.trim();
-        const lat = Number(entry.lat);
-        const lng = Number(entry.lon);
-        if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return [];
-        const state = String(address.state || address.region || 'India').trim();
-        const district = String(address.state_district || address.county || address.city_district || name).trim();
-        const pincode = String(address.postcode || '').trim();
-        return [locationDto({
-          id: -1 - index,
-          name,
-          district,
-          state,
-          state_code: '',
-          location_type: 'city',
-          kind: 'city',
-          mandal: '',
-          pincode: /^[1-9][0-9]{5}$/.test(pincode) ? pincode : null,
-          latitude: lat,
-          longitude: lng,
-          is_popular: false,
-          aliases: [],
-          source: 'geocode',
-        })];
-      }).slice(0, SUGGESTION_LIMIT);
-      nominatimCache.set(key, { hits, expiresAt: now() + NOMINATIM_CACHE_MS });
-      while (nominatimCache.size > MAX_CACHE_ITEMS) nominatimCache.delete(nominatimCache.keys().next().value!);
-      return hits;
-    } catch {
-      return [];
-    }
-  };
-
   const withServiceRole = async <T>(run: (client: PoolClient) => Promise<T>, timeoutMs = 700): Promise<T> => {
     if (!pool) throw new Error('LOCATION_DATABASE_UNAVAILABLE');
     const client = await pool.connect();
@@ -246,7 +177,7 @@ export function registerLocationSearchApi(app: Express, deps: LocationSearchApiD
         res.setHeader('X-Location-Cache', result.hit ? 'HIT' : 'MISS');
         res.json(result.value);
       } catch (error) {
-        if (env.NODE_ENV === 'test') console.error('[location-search-test-error]', error);
+        if (env.NODE_ENV === 'test') logSafeError('location-search-test', 'catalog query', error);
         safeJson(res, 503, 'LOCATION_CATALOG_UNAVAILABLE');
       }
     };
@@ -341,9 +272,6 @@ export function registerLocationSearchApi(app: Express, deps: LocationSearchApiD
     ), suggestionMode ? 1500 : 700);
     const hasMore = result.rows.length > pageLimit;
     const rows = result.rows.slice(0, pageLimit).map((row) => locationDto({ ...row, source: row.source || 'directory' }));
-    if (suggestionMode && rows.length === 0) {
-      return { ok: true, locations: await geocodeIndia(q), nextOffset: null };
-    }
     return { ok: true, locations: rows, nextOffset: hasMore ? offset + pageLimit : null };
   });
 

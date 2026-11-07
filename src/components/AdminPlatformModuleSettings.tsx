@@ -9,7 +9,6 @@ import {
   readModulesSlice,
   saveModuleConfigDraft,
 } from '../modules/moduleConfigStore';
-import { fetchRlsProfile } from '../lib/supabaseClient';
 import {
   fetchPlatformModuleFlags,
   subscribeToPlatformModuleFlags,
@@ -38,9 +37,17 @@ export function AdminPlatformModuleSettings() {
     setLoading(true);
     setError(null);
     try {
-      const profile = await fetchRlsProfile();
-      setIsAdmin(profile?.role === 'admin' && profile.account_status === 'active');
-      setFlags(await fetchPlatformModuleFlags());
+      const token = window.localStorage.getItem('bos_session_token_v1');
+      const [accessResponse, loadedFlags] = await Promise.all([
+        fetch('/api/platform-settings/access', {
+          headers: token ? { 'x-bos-session-token': token } : {},
+          cache: 'no-store',
+        }),
+        fetchPlatformModuleFlags(),
+      ]);
+      const access = await accessResponse.json().catch(() => null) as { canManage?: boolean } | null;
+      setIsAdmin(accessResponse.ok && access?.canManage === true);
+      setFlags(loadedFlags);
     } catch {
       setFlags(null);
       setError('Supabase module settings could not be loaded. No changes have been published.');
@@ -68,8 +75,8 @@ export function AdminPlatformModuleSettings() {
       setFlags((current) => current?.map((item) => item.module_key === saved.module_key ? saved : item) ?? null);
       setNotice(`${MODULE_LABELS[row.module_key] ?? row.module_key} setting saved to Supabase.`);
     } catch (err) {
-      setError(err instanceof Error && err.message === 'SUPABASE_ADMIN_REQUIRED'
-        ? 'Supabase rejected this change. Sign in with an active admin profile and try again.'
+      setError(err instanceof Error && err.message === 'BUILDER_SUPER_ADMIN_REQUIRED'
+        ? 'This change requires an active Super Admin session.'
         : 'The setting was not saved. Check the connection and database permissions, then retry.');
     } finally {
       setSavingKey(null);
@@ -92,7 +99,7 @@ export function AdminPlatformModuleSettings() {
       {!isAdmin && !loading && (
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100" role="status">
           <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>Editing requires a Supabase-authenticated account whose database profile has the admin role. The app’s separate server session is not sufficient for these writes.</p>
+          <p>Editing requires an active Super Admin account verified from the server session and database profile. Regular Admin and customer accounts cannot change public module visibility.</p>
         </div>
       )}
 

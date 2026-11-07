@@ -99,6 +99,17 @@ async function boot(page: Page) {
   }
 }
 
+async function openVenueAdminWorkspace(page: Page) {
+  const disclosure = page
+    .locator('details')
+    .filter({ hasText: 'Venue booking oversight & workspace' })
+    .first();
+  await expect(disclosure).toBeVisible();
+  const isOpen = await disclosure.evaluate((element) => (element as HTMLDetailsElement).open);
+  if (!isOpen) await disclosure.locator(':scope > summary').click();
+  await expect(disclosure.getByRole('heading', { name: 'Venue booking oversight' })).toBeVisible({ timeout: 45_000 });
+}
+
 async function openVenue(page: Page) {
   if ((await page.getByRole('dialog').count()) > 0) {
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -252,10 +263,9 @@ test.describe.serial('Function Halls authenticated browser journey', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await boot(page);
     await page.goto('/#admin', { waitUntil: 'domcontentloaded' });
-    // The authenticated app can render the same console heading in two admin
-    // regions; target the primary console header while the later assertions
-    // verify the actual listing approval controls and persistence.
-    await expect(page.getByRole('heading', { name: 'BookOurSpace Super Admin Console' }).first()).toBeVisible({
+    // Target the primary Admin Console heading; the detailed dashboard label
+    // is rendered as a separate non-heading status label below it.
+    await expect(page.getByRole('heading', { name: 'BookOurSpace Admin Console' }).first()).toBeVisible({
       timeout: 45_000,
     });
 
@@ -275,7 +285,9 @@ test.describe.serial('Function Halls authenticated browser journey', () => {
     await expect(page.getByText('Admin review saved as active.')).toBeVisible({ timeout: 20_000 });
     await expect(row).toContainText('active');
 
-    await expect(page.getByRole('heading', { name: 'Venue booking oversight' })).toBeVisible();
+    // This workspace is intentionally collapsed by default to keep the Admin
+    // Console compact; open it through the real disclosure control.
+    await openVenueAdminWorkspace(page);
     await page.getByText(/Admin-managed venue categories/).click();
     const categoryId = `venue-browser-${Date.now().toString(36)}`;
     await page.getByLabel('Category ID').fill(categoryId);
@@ -425,7 +437,7 @@ test.describe.serial('Function Halls authenticated browser journey', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await boot(page);
     await page.goto('/#admin', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Venue booking oversight' })).toBeVisible({ timeout: 45_000 });
+    await openVenueAdminWorkspace(page);
     const resolutionInput = page.getByLabel(`Resolution for ${bookingRef}`);
     await expect(resolutionInput).toBeVisible({ timeout: 20_000 });
     await resolutionInput.fill(DISPUTE_RESOLUTION);
@@ -597,7 +609,7 @@ test('persists venue, approval, cancellation, dispute and owner block after a se
     await signIn(admin, 'admin');
     await boot(admin);
     await admin.goto('/#admin', { waitUntil: 'domcontentloaded' });
-    await expect(admin.getByRole('heading', { name: 'Venue booking oversight' })).toBeVisible({ timeout: 45_000 });
+    await openVenueAdminWorkspace(admin);
     const adminBooking = admin.locator('article').filter({ hasText: RESTART_REF }).filter({ hasText: 'cancelled' }).first();
     await expect(adminBooking).toBeVisible({ timeout: 20_000 });
     await adminBooking.getByText('Audit history').click();
