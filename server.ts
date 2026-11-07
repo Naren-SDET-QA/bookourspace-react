@@ -468,7 +468,7 @@ async function startServer() {
       repository: platformSettingsRepository,
       verifySession: (request) => verifySessionTokenFromRequest(request),
     });
-  } else {
+  }
 
   // 1. GET Live Page Config (OTA endpoint consumed by Web, Android, and iOS clients)
   if (!platformSettingsRepository) app.get('/api/live-page-config', (req, res) => {
@@ -655,7 +655,6 @@ async function startServer() {
       auditLogs: store.auditLogs,
     });
   });
-  }
 
   // 5. GET & POST Automated Billing Engine Endpoints
   app.get('/api/billing/records', (_req, res) => {
