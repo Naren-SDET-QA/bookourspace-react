@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 72,
+  "migrationCount": 73,
   "migrations": [
     {
       "order": 2,
@@ -590,12 +590,20 @@
       "file": "supabase/migrations/20261108140000_distributed_api_rate_limits.sql",
       "bytes": 3521,
       "sha256": "62755a92c84474e18f43cd4384b010250ff6e26e552367448060837d3a5ede01"
+    },
+    {
+      "order": 74,
+      "version": "20261108150000",
+      "name": "superadmin_module_visibility",
+      "file": "supabase/migrations/20261108150000_superadmin_module_visibility.sql",
+      "bytes": 963,
+      "sha256": "66dc7a930565aef9e838f2f75cf4e277e75660d360555190621393a01e32c78d"
     }
   ],
   "review": {
-    "at": "2026-11-07T19:03:38.768Z",
-    "note": "Add show_date and public completeness/expiry index for Movies showtimes-only; no applied migration rewritten.",
-    "migrationCount": 71,
+    "at": "2026-11-07T20:41:08.790Z",
+    "note": "Reviewed 20261108150000_superadmin_module_visibility: public reads and RLS preserved; direct anon/authenticated writes revoked; server requires active Super Admin and audits updates; fresh PostgreSQL 17 chain and reapply checks pass.",
+    "migrationCount": 73,
     "baselineSha256": "f37bdbcaf1870a05fe8f45acbf2ec17f0cc99162cd7e60270d5f8d5fabe412c2"
   }
 }

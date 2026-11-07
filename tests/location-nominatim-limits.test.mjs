@@ -9,8 +9,8 @@ function listen(app) {
   });
 }
 
-test('Nominatim is last fallback, India-only, identified, cached, and capped at 1 request per second', async () => {
-  const calls = [];
+test('unmatched catalog search does not call an unapproved external geocoder', async () => {
+  let providerCalls = 0;
   const app = express();
   app.use(express.json());
   registerLocationSearchApi(app, {
@@ -24,19 +24,7 @@ test('Nominatim is last fallback, India-only, identified, cached, and capped at 
         release: () => undefined,
       }),
     },
-    fetchImpl: async (url, init) => {
-      calls.push({ url: String(url), userAgent: init?.headers?.['User-Agent'] || init?.headers?.['user-agent'] });
-      return new Response(JSON.stringify([{
-        display_name: 'Connaught Place, New Delhi, Delhi, India',
-        lat: '28.6315',
-        lon: '77.2167',
-        address: { country_code: 'in', state: 'Delhi', county: 'New Delhi' },
-      }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    },
-    now: (() => {
-      let t = 1_000;
-      return () => t;
-    })(),
+    fetchImpl: async () => { providerCalls += 1; return new Response('{}', { status: 200 }); },
   });
   const server = await listen(app);
   const port = server.address().port;
@@ -45,19 +33,15 @@ test('Nominatim is last fallback, India-only, identified, cached, and capped at 
     const firstBody = await first.json();
     assert.equal(first.status, 200);
     assert.equal(first.headers.get('x-location-cache'), 'MISS');
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].url, /nominatim\.openstreetmap\.org/);
-    assert.match(calls[0].url, /countrycodes=in/);
-    assert.match(calls[0].userAgent, /BookOurSpace/);
-    assert.equal(firstBody.locations[0].source, 'geocode');
-    assert.equal(firstBody.locations[0].name, 'Connaught Place');
+    assert.deepEqual(firstBody.locations, []);
+    assert.equal(providerCalls, 0);
 
     const second = await fetch(`http://127.0.0.1:${port}/api/locations/search?q=ConnaughtPlaceX9`);
     assert.equal(second.headers.get('x-location-cache'), 'HIT');
-    assert.equal(calls.length, 1);
+    assert.equal(providerCalls, 0);
 
     await fetch(`http://127.0.0.1:${port}/api/locations/search?q=AnotherMissingPlaceY8`);
-    assert.equal(calls.length, 1, 'second distinct miss inside 1s must not call Nominatim');
+    assert.equal(providerCalls, 0);
 
     const external = await fetch(`http://127.0.0.1:${port}/api/locations/external/autocomplete`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -65,7 +49,7 @@ test('Nominatim is last fallback, India-only, identified, cached, and capped at 
     });
     assert.equal(external.status, 503);
     assert.equal((await external.json()).error, 'EXTERNAL_LOCATION_PROVIDER_NOT_CONFIGURED');
-    assert.equal(calls.length, 1);
+    assert.equal(providerCalls, 0);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

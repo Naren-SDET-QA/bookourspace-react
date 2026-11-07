@@ -97,7 +97,7 @@ import {
   loadAdminAuditLogs,
   appendAdminAuditLog,
 } from '../utils/adminEnterpriseStore';
-import { setSubcategoryEnabled } from '../lib/subcategoryFlags';
+import { isSubcategoryEnabled, setSubcategoryEnabled } from '../lib/subcategoryFlags';
 import { isPopularCategoriesVisible, setPopularCategoriesVisible } from '../lib/homeVisibilitySettings';
 import { loadSectionStyles, saveSectionStyles, type SectionStyles } from '../lib/sectionStyleSettings';
 import {
@@ -184,7 +184,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     deleteCategory,
     addSubcategoryToCategory,
     deleteSubcategoryFromCategory,
-    toggleSubcategoryEnabled,
     addCustomFieldToCategory,
     deleteCustomFieldFromCategory,
     postingPlans,
@@ -985,6 +984,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newCatIcon, setNewCatIcon] = useState('✨');
   const [newSubcategoryInput, setNewSubcategoryInput] = useState('');
   const [homeVisibilityVersion, setHomeVisibilityVersion] = useState(0);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
   void homeVisibilityVersion;
   const [sectionStyles, setSectionStylesState] = useState<SectionStyles>(() => loadSectionStyles());
 
@@ -3209,9 +3209,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             role="switch"
                             aria-checked={visible}
                             aria-label={`Toggle Popular Categories for ${city}`}
+                            disabled={visibilitySaving}
                             onClick={() => {
-                              setPopularCategoriesVisible(city, !visible);
-                              setHomeVisibilityVersion((v) => v + 1);
+                              setVisibilitySaving(true);
+                              void setPopularCategoriesVisible(city, !visible).then((result) => {
+                                if (result === 'failed') {
+                                  showAdminNotification('Could not publish home visibility. Sign in as Super Admin and retry.');
+                                  return;
+                                }
+                                setHomeVisibilityVersion((v) => v + 1);
+                                showAdminNotification(result === 'published'
+                                  ? 'Home visibility published for all customers.'
+                                  : 'Development preview saved on this device only.');
+                              }).finally(() => setVisibilitySaving(false));
                             }}
                             className={`relative rounded-full transition ${visible ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
                             style={{ height: 18, width: 32 }}
@@ -3612,7 +3622,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </p>
                       <div className="space-y-1.5">
                         {activeCategory.subcategories.map((sub, i) => {
-                          const enabled = !(activeCategory.disabledSubcategories ?? []).includes(sub);
+                          const enabled = isSubcategoryEnabled(sub);
                           return (
                             <div
                               key={`${sub}-${i}`}
@@ -3631,9 +3641,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   role="switch"
                                   aria-checked={enabled}
                                   aria-label={`${enabled ? 'Disable' : 'Enable'} ${sub}`}
+                                  disabled={visibilitySaving}
                                   onClick={() => {
-                                    toggleSubcategoryEnabled(activeCategory.id, sub);
-                                    setSubcategoryEnabled(sub, !enabled);
+                                    setVisibilitySaving(true);
+                                    void setSubcategoryEnabled(sub, !enabled).then((result) => {
+                                      if (result === 'failed') {
+                                        showAdminNotification('Could not publish category visibility. Sign in as Super Admin and retry.');
+                                        return;
+                                      }
+                                      setHomeVisibilityVersion((v) => v + 1);
+                                      showAdminNotification(result === 'published'
+                                        ? 'Category visibility published for all customers.'
+                                        : 'Development preview saved on this device only.');
+                                    }).finally(() => setVisibilitySaving(false));
                                   }}
                                   className={`relative rounded-full transition ${enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
                                   style={{ height: 18, width: 32 }}

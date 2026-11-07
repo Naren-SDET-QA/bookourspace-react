@@ -299,6 +299,7 @@ set role authenticated;
 -- here to make the RLS policy (not a missing GRANT) the thing under test.
 reset role;
 grant select, insert, update, delete on public.platform_module_flags to authenticated;
+update public.platform_module_flags set is_enabled = true, allow_contact_owner = true where module_key = 'services';
 set test.uid = '22222222-2222-2222-2222-222222222222';
 set role authenticated;
 select pg_temp.ok_raises('a guest cannot write module flags directly',
@@ -307,25 +308,22 @@ select pg_temp.ok_raises('a guest cannot write module flags directly',
 select pg_temp.ok_raises('a guest cannot use the admin stay inventory transaction',
   $q$select public.admin_upsert_stay_inventory('invalid-listing', '11111111-1111-1111-1111-111111111111', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)$q$,
   'ACTIVE_ADMIN_REQUIRED');
-update public.platform_module_flags set is_enabled = false where module_key = 'services';
+select pg_temp.ok_rowcount('a guest cannot directly update module flags',
+  $q$update public.platform_module_flags set is_enabled = false where module_key = 'services'$q$, 0);
 reset role;
 select pg_temp.ok('a guest cannot update published module settings',
   (select is_enabled from public.platform_module_flags where module_key = 'services'));
 
 set test.uid = '44444444-4444-4444-4444-444444444444';
 set role authenticated;
-update public.platform_module_flags
-   set is_enabled = false,
-       allow_contact_owner = false,
-       updated_by = '44444444-4444-4444-4444-444444444444'
- where module_key = 'services';
-select pg_temp.ok('an active admin can persist module visibility and contact settings',
-  (select not is_enabled and not allow_contact_owner
-       from public.platform_module_flags where module_key = 'services'));
-select pg_temp.ok('admin module changes persist with the admin actor recorded',
-  (select is_enabled = false and allow_contact_owner = false
-       and updated_by = '44444444-4444-4444-4444-444444444444'
-     from public.platform_module_flags where module_key = 'services'));
+select pg_temp.ok_rowcount('even a Super Admin must use the server API instead of direct public-client DML',
+  $q$update public.platform_module_flags set is_enabled = false, allow_contact_owner = false where module_key = 'services'$q$, 0);
+reset role;
+select pg_temp.ok('server-only module visibility cannot be changed directly from Supabase clients',
+  (select is_enabled and allow_contact_owner from public.platform_module_flags where module_key = 'services'));
+
+set test.uid = '44444444-4444-4444-4444-444444444444';
+set role authenticated;
 select pg_temp.ok_rowcount('an active admin can persist marketplace listing edits',
   $q$update public.listings set title = 'Admin-updated fixture listing' where id = 'listing-fixture-001'$q$, 1);
 select public.admin_upsert_stay_inventory(
@@ -394,7 +392,7 @@ select pg_temp.ok_rowcount('a suspended admin cannot update stay inventory',
   $q$update public.stay_units set label = 'Should not persist' where id = '11111111-0000-0000-0000-00000000000a'$q$, 0);
 reset role;
 select pg_temp.ok('a suspended admin cannot update module settings',
-  (select not is_enabled and not allow_contact_owner
+  (select is_enabled and allow_contact_owner
      from public.platform_module_flags where module_key = 'services'));
 select pg_temp.ok('the suspended admin listing edit did not persist',
   (select title = 'Admin Stay Fixture'

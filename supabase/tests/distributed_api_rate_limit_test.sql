@@ -29,16 +29,27 @@ end $$;
 set role service_role;
 DO $$
 declare
+  test_bucket text := pg_catalog.repeat(
+    pg_catalog.md5(pg_catalog.clock_timestamp()::text || pg_catalog.random()::text),
+    2
+  );
   first_allowed boolean;
   second_allowed boolean;
   third_allowed boolean;
+  stored_count integer;
 begin
-  select allowed into first_allowed from private.consume_api_rate_limit(repeat('a', 64), 2, 3600);
-  select allowed into second_allowed from private.consume_api_rate_limit(repeat('a', 64), 2, 3600);
-  select allowed into third_allowed from private.consume_api_rate_limit(repeat('a', 64), 2, 3600);
+  select allowed into first_allowed from private.consume_api_rate_limit(test_bucket, 2, 3600);
+  select allowed into second_allowed from private.consume_api_rate_limit(test_bucket, 2, 3600);
+  select allowed into third_allowed from private.consume_api_rate_limit(test_bucket, 2, 3600);
   if not first_allowed or not second_allowed or third_allowed then
     raise exception 'FAIL atomic limiter threshold was not enforced';
   end if;
+  select request_count into stored_count
+    from private.api_rate_limit_windows where bucket_hash = test_bucket;
+  if stored_count <> 3 then
+    raise exception 'FAIL atomic limiter did not persist one counter update per request';
+  end if;
+  delete from private.api_rate_limit_windows where bucket_hash = test_bucket;
   raise notice 'PASS atomic counter allows the configured threshold and denies the next hit';
 
   begin
@@ -49,5 +60,3 @@ begin
   end;
 end $$;
 reset role;
-
-select 1 / case when (select count(*) from private.api_rate_limit_windows where bucket_hash = repeat('a', 64) and request_count = 3) = 1 then 1 else 0 end;

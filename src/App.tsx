@@ -126,6 +126,7 @@ const CraftoTopServicesBar = lazy(() => import('./components/CraftoTopServicesBa
 import { LocationSelector, loadPersistedLocation, persistLocation, type SelectedLocation } from './components/LocationSelector';
 import { filterListingsByLocation, matchesSelectedLocation } from './lib/locationCityFilter';
 import { isPopularCategoriesVisible } from './lib/homeVisibilitySettings';
+import { applyRemoteMarketplaceVisibility } from './lib/marketplaceVisibility';
 const FlipkartBannerSlider = lazy(() => import('./components/FlipkartBannerSlider').then((module) => ({ default: module.FlipkartBannerSlider })));
 const FlipkartFilterSidebar = lazy(() => import('./components/FlipkartFilterSidebar').then((module) => ({ default: module.FlipkartFilterSidebar })));
 const TrendingNearMeSection = lazy(() => import('./components/TrendingNearMeSection').then((module) => ({ default: module.TrendingNearMeSection })));
@@ -805,6 +806,7 @@ function MarketplaceAppContent() {
           const remoteStyles = (result.published as { sectionStyles?: unknown } | null)?.sectionStyles;
           const applied = remoteStyles ? applyRemoteSectionStyles(remoteStyles) : null;
           if (applied) setSectionStylesState(applied);
+          applyRemoteMarketplaceVisibility((result.published as { visibility?: unknown } | null)?.visibility);
         })
         .catch(() => {
           // Keep the last known local cache/default when the dev backend is unavailable.

@@ -349,7 +349,25 @@ pq -d "$DB" -q -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/migrations/20261101000
   || fail "migration 004 is not idempotent on reapply"
 REALTIME_FLAG_ROWS=$(pq -d "$DB" -tAc "select count(*) from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='platform_module_flags'")
 [ "$REALTIME_FLAG_ROWS" = "1" ] || fail "reapplying migration 004 duplicated/removed the publication entry"
-echo "    platform_module_flags is published once; migration 004 reapply passed"
+pq -d "$DB" -q -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/migrations/20261108150000_superadmin_module_visibility.sql" \
+  > "$OUT/superadmin-module-visibility-reapply.out" 2> "$OUT/superadmin-module-visibility-reapply.err" \
+  || fail "reapplying the final Super Admin module visibility policy"
+MODULE_FLAG_CLIENT_WRITE_PRIVILEGE=$(pq -d "$DB" -tAc "select exists (
+  select 1 from unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) as p(privilege)
+   where has_table_privilege('anon','public.platform_module_flags',p.privilege)
+      or has_table_privilege('authenticated','public.platform_module_flags',p.privilege)
+)")
+MODULE_FLAG_WRITE_POLICY=$(pq -d "$DB" -tAc "select count(*) from pg_policies where schemaname='public' and tablename='platform_module_flags' and cmd in ('ALL','INSERT','UPDATE','DELETE')")
+MODULE_FLAG_RLS=$(pq -d "$DB" -tAc "select relrowsecurity from pg_class where oid='public.platform_module_flags'::regclass")
+MODULE_FLAG_SELECT_GRANTS=$(pq -d "$DB" -tAc "select has_table_privilege('anon','public.platform_module_flags','SELECT') and has_table_privilege('authenticated','public.platform_module_flags','SELECT')")
+MODULE_FLAG_PUBLIC_READ_POLICY=$(pq -d "$DB" -tAc "select count(*) from pg_policies where schemaname='public' and tablename='platform_module_flags' and cmd='SELECT' and qual='true'")
+[ "$REALTIME_FLAG_ROWS" = "1" ] || fail "module visibility migration altered the Realtime publication"
+[ "$MODULE_FLAG_CLIENT_WRITE_PRIVILEGE" = "f" ] || fail "anon/authenticated retain a direct module flag write privilege"
+[ "$MODULE_FLAG_WRITE_POLICY" = "0" ] || fail "authenticated users retain a direct module flag write policy"
+[ "$MODULE_FLAG_RLS" = "t" ] || fail "module visibility migration disabled RLS"
+[ "$MODULE_FLAG_SELECT_GRANTS" = "t" ] || fail "public module flag SELECT grant was removed"
+[ "$MODULE_FLAG_PUBLIC_READ_POLICY" = "1" ] || fail "public module flag SELECT policy is missing or changed"
+echo "    module flags are published once; final Super Admin-only server write boundary survives legacy migration reapply"
 
 echo "=== 4c. active-admin listing policy idempotency ==="
 pq -d "$DB" -q -v ON_ERROR_STOP=1 \

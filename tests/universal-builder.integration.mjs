@@ -481,6 +481,73 @@ console.log('=== E. PostgreSQL legacy live-page config ===');
   assert.equal(publicStyles.json.published?.sectionStyles?.venues, 'agenda');
   pass('only Super Admin can publish allowlisted timetable and agenda styles for all clients');
 
+  const adminAccess = await call('GET', '/api/platform-settings/access', { token: ADMIN });
+  expectedStatus(adminAccess, 200, 'regular admin visibility access');
+  assert.equal(adminAccess.json.canManage, false);
+  const superAccess = await call('GET', '/api/platform-settings/access', { token: SUPER });
+  expectedStatus(superAccess, 200, 'super admin visibility access');
+  assert.equal(superAccess.json.canManage, true);
+
+  const moduleRows = await call('GET', '/api/modules');
+  expectedStatus(moduleRows, 200, 'public module flag snapshot');
+  const ecommerce = moduleRows.json.modules.find((row) => row.module_key === 'ecommerce');
+  assert.ok(ecommerce);
+  const deniedModuleWrite = await call('PATCH', '/api/platform-settings/module-flags/ecommerce', {
+    token: ADMIN,
+    body: { allow_contact_owner: false },
+  });
+  expectedStatus(deniedModuleWrite, 403, 'regular admin module visibility write');
+  const invalidModuleWrite = await call('PATCH', '/api/platform-settings/module-flags/ecommerce', {
+    token: SUPER,
+    body: { allow_online_booking: true },
+  });
+  expectedStatus(invalidModuleWrite, 400, 'module visibility allowlist');
+  const moduleWrite = await call('PATCH', '/api/platform-settings/module-flags/ecommerce', {
+    token: SUPER,
+    body: { allow_contact_owner: !ecommerce.allow_contact_owner },
+  });
+  expectedStatus(moduleWrite, 200, 'super admin module visibility write');
+  assert.equal(moduleWrite.json.module.allow_contact_owner, !ecommerce.allow_contact_owner);
+  const changedModuleRows = await call('GET', '/api/modules');
+  assert.equal(changedModuleRows.json.modules.find((row) => row.module_key === 'ecommerce').allow_contact_owner, !ecommerce.allow_contact_owner);
+  const moduleRestore = await call('PATCH', '/api/platform-settings/module-flags/ecommerce', {
+    token: SUPER,
+    body: { allow_contact_owner: ecommerce.allow_contact_owner },
+  });
+  expectedStatus(moduleRestore, 200, 'restore module visibility fixture');
+  pass('module flags are server-authorized to Super Admin and immediately persist to the public module feed');
+
+  const originalVisibility = publicStyles.json.published?.visibility ?? {
+    popularCategoriesDisabledCities: ['Hyderabad'],
+    disabledSubcategories: [],
+  };
+  const deniedVisibility = await call('POST', '/api/live-page-config/visibility', {
+    token: ADMIN,
+    body: { visibility: { popularCategoriesDisabledCities: [] } },
+  });
+  expectedStatus(deniedVisibility, 403, 'regular admin visibility publish');
+  const invalidVisibility = await call('POST', '/api/live-page-config/visibility', {
+    token: SUPER,
+    body: { visibility: { routes: { '/admin': false } } },
+  });
+  expectedStatus(invalidVisibility, 400, 'visibility schema allowlist');
+  const visibilityWrite = await call('POST', '/api/live-page-config/visibility', {
+    token: SUPER,
+    body: { visibility: { popularCategoriesDisabledCities: ['Testville'], disabledSubcategories: ['Test category'] } },
+  });
+  expectedStatus(visibilityWrite, 200, 'super admin visibility publish');
+  assert.deepEqual(visibilityWrite.json.visibility.popularCategoriesDisabledCities, ['Testville']);
+  assert.deepEqual(visibilityWrite.json.visibility.disabledSubcategories, ['Test category']);
+  const customerVisibility = await call('GET', '/api/live-page-config');
+  expectedStatus(customerVisibility, 200, 'customer published visibility read');
+  assert.deepEqual(customerVisibility.json.published?.visibility?.disabledSubcategories, ['Test category']);
+  const restoreVisibility = await call('POST', '/api/live-page-config/visibility', {
+    token: SUPER,
+    body: { visibility: originalVisibility },
+  });
+  expectedStatus(restoreVisibility, 200, 'restore visibility fixture');
+  pass('category and home visibility publish to a new central version; anonymous customers receive only published settings');
+
   const customerDraft = await call('POST', '/api/live-page-config/draft', {
     token: CUSTOMER,
     body: { config: { pages: {} } },
