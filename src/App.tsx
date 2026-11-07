@@ -59,7 +59,7 @@ import { MarketplaceProvider, useMarketplace } from './context/MarketplaceContex
 import { MarketplaceListing, CustomerAction, EntityType, Booking } from './types/marketplace';
 import { ServiceProvider } from './types';
 import { customerActionList } from './data/customerActions';
-import { initialVenueListings, venue12Categories } from './data/venueData';
+import { venue12Categories } from './data/venueData';
 import { classCategories } from './data/classesData';
 import { pg29Categories } from './data/pgHostelData';
 import {
@@ -116,11 +116,10 @@ function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
 
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
 import { supabase } from './lib/supabaseClient';
-import BookOurSpaceEntryExperience from './components/BookOurSpaceEntryExperience';
 import { SectionErrorBoundary } from './components/SectionErrorBoundary';
 import { SkipToContent } from './components/SkipToContent';
 import { DEMO_DATA_ENABLED } from './lib/demoDataPolicy';
-import { popularAreasList, distanceRadiuses } from './data/comprehensiveListings';
+import { popularAreasList, distanceRadiuses } from './data/filterOptions';
 
 // Route- and modal-specific surfaces stay out of the initial customer bundle.
 const CraftoTopServicesBar = lazy(() => import('./components/CraftoTopServicesBar').then((module) => ({ default: module.CraftoTopServicesBar })));
@@ -169,6 +168,7 @@ import { SimpleLoginPage } from './components/SimpleLoginPage';
 import { VenueAgendaView } from './components/VenueAgendaView';
 
 const SupabaseAuthModal = lazy(() => import('./components/SupabaseAuthModal').then((module) => ({ default: module.SupabaseAuthModal })));
+const BookOurSpaceEntryExperience = lazy(() => import('./components/BookOurSpaceEntryExperience'));
 const ProfileScreen = lazy(() => import('./components/ProfileScreen').then((module) => ({ default: module.ProfileScreen })));
 import {
   AppLanguage,
@@ -385,6 +385,7 @@ function MarketplaceAppContent() {
     }
   });
   const homeEnhancementsReady = useIdleReady(entryExperience === 'ready', 1200);
+  const [homeSearchFocused, setHomeSearchFocused] = useState(false);
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
   const { favoriteIds, toggleFavorite, supabaseUser, authUser, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
@@ -522,7 +523,7 @@ function MarketplaceAppContent() {
       const hash = window.location.hash.replace('#', '');
       if (!hash.startsWith('venue-')) return;
       const id = hash.slice('venue-'.length);
-      const venue = listings.find((l) => l.id === id) ?? initialVenueListings.find((l) => l.id === id);
+      const venue = listings.find((l) => l.id === id);
       if (venue) {
         setIsPGSectionOpen(false);
         setIsHomeServicesOpen(false);
@@ -557,12 +558,49 @@ function MarketplaceAppContent() {
 
   useEffect(() => {
     let mounted = true;
-    document.getElementById('bos-prelaunch-screen')?.remove();
-    const bootWindow = window as Window & { __bosBootEntryAction?: 'guest' | 'google' };
+    const bootWindow = window as Window & {
+      __bosBootEntryAction?: 'guest' | 'google';
+      __bosQuickHomeModule?: string;
+      __bosQuickHomeSearch?: string;
+      __bosQuickHomeOpenLocation?: boolean;
+    };
     const bootAction = bootWindow.__bosBootEntryAction;
     delete bootWindow.__bosBootEntryAction;
     if (bootAction === 'guest') setEntryExperience('ready');
     if (bootAction === 'google') setIsAuthModalOpen(true);
+    const applyQuickModule = (section: string) => {
+      if (!['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay', 'movies'].includes(section)) return;
+      setActiveMarketSection(section as MarketSectionType);
+      setIsBentoLandingActive(false);
+      setIsPGSectionOpen(section === 'pg_hostels');
+      setIsClassesTimingsOpen(section === 'classes');
+      setIsHomeServicesOpen(section === 'services');
+      setIsHotelsStayExperienceOpen(section === 'hotel_stay');
+    };
+    if (bootWindow.__bosQuickHomeModule) applyQuickModule(bootWindow.__bosQuickHomeModule);
+    if (typeof bootWindow.__bosQuickHomeSearch === 'string') setSearchQuery(bootWindow.__bosQuickHomeSearch);
+    if (bootWindow.__bosQuickHomeOpenLocation) setIsLocationSelectorOpen(true);
+    delete bootWindow.__bosQuickHomeModule;
+    delete bootWindow.__bosQuickHomeSearch;
+    delete bootWindow.__bosQuickHomeOpenLocation;
+    const handleBootEntryChoice = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: 'guest' | 'google' }>).detail?.action;
+      if (action === 'guest') setEntryExperience('ready');
+      if (action === 'google') setIsAuthModalOpen(true);
+    };
+    window.addEventListener('bos-boot-entry-choice', handleBootEntryChoice);
+    const handleQuickModule = (event: Event) => {
+      const section = (event as CustomEvent<{ section?: string }>).detail?.section;
+      if (section) applyQuickModule(section);
+    };
+    const handleQuickSearch = (event: Event) => {
+      const value = (event as CustomEvent<{ value?: string }>).detail?.value;
+      if (typeof value === 'string') setSearchQuery(value);
+    };
+    const handleQuickLocation = () => setIsLocationSelectorOpen(true);
+    window.addEventListener('bos-quick-home-module', handleQuickModule);
+    window.addEventListener('bos-quick-home-search', handleQuickSearch);
+    window.addEventListener('bos-quick-home-location', handleQuickLocation);
 
     // Session restoration runs in the background; it does not gate the public
     // entry screen or the six-module marketplace.
@@ -641,6 +679,10 @@ function MarketplaceAppContent() {
     window.addEventListener('bos-google-oauth-logout', handleOAuthLogout);
     return () => {
       mounted = false;
+      window.removeEventListener('bos-boot-entry-choice', handleBootEntryChoice);
+      window.removeEventListener('bos-quick-home-module', handleQuickModule);
+      window.removeEventListener('bos-quick-home-search', handleQuickSearch);
+      window.removeEventListener('bos-quick-home-location', handleQuickLocation);
       entryAuthSubscription?.unsubscribe();
       window.removeEventListener('bos-google-oauth-redirect', handleOAuthRedirect);
       window.removeEventListener('bos-google-oauth-logout', handleOAuthLogout);
@@ -1502,6 +1544,16 @@ function MarketplaceAppContent() {
     sortBy
   ]);
 
+  useEffect(() => {
+    // Keep the lightweight HTML entry usable while the application boots.
+    // Remove it only after Guest, Google or a restored account has selected
+    // the real application surface.
+    if (entryExperience === 'ready' || isAuthModalOpen || DEMO_DATA_ENABLED) {
+      document.getElementById('bos-prelaunch-screen')?.remove();
+      document.getElementById('bos-quick-home-shell')?.remove();
+    }
+  }, [entryExperience, isAuthModalOpen]);
+
   // Share the selected header city with experiences that maintain their own
   // category-level filtering and data loading.
   const locationFilteredListings = useMemo(
@@ -1806,8 +1858,47 @@ function MarketplaceAppContent() {
     search: string;
   }>>>({});
 
-  const sharedMarketplaceHeader = (
-          <Suspense fallback={<div aria-hidden="true" className="h-11 shrink-0" />}>
+  const quickHomeHeader = (
+    <header data-testid="universal-marketplace-header" className="sticky top-0 z-40 w-full border-b border-indigo-100 bg-white/95 px-3 py-2 shadow-xs backdrop-blur dark:border-indigo-950 dark:bg-slate-950/95">
+      <div className="mx-auto flex max-w-7xl flex-col gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <button type="button" onClick={() => setIsLocationSelectorOpen(true)} className="min-h-10 max-w-[42%] truncate rounded-lg border border-slate-200 px-2.5 text-xs font-bold text-slate-700 dark:border-slate-700 dark:text-slate-200" aria-label="Select city or locality">
+            {selectedLocationLabel || 'All Cities'}
+          </button>
+          <input type="search" value={searchQuery} onFocus={() => setHomeSearchFocused(true)} onBlur={() => setHomeSearchFocused(false)} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search PGs, classes, halls, services, stay, movies..." aria-label="Search PGs, classes, halls, services, stay, movies..." className="min-h-10 min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-900 outline-hidden focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+        </div>
+        <nav aria-label="Marketplace modules" className="flex gap-1.5 overflow-x-auto no-scrollbar">
+          {([
+            ['pg_hostels', "PG's"], ['classes', 'Classes'], ['venues', 'Halls'],
+            ['services', 'Services'], ['hotel_stay', 'Stay'], ['movies', 'Movies'],
+          ] as const).map(([section, label]) => (
+            <button key={section} type="button" aria-current={activeMarketSection === section ? 'page' : undefined} onClick={() => {
+              moduleHeaderStateRef.current[activeMarketSection] = { category: selectedCategory, subcategory: selectedSubcategory, search: searchQuery };
+              const saved = moduleHeaderStateRef.current[section];
+              setSelectedCategory(saved?.category ?? 'all');
+              setSelectedSubcategory(saved?.subcategory ?? 'all');
+              setSearchQuery(saved?.search ?? '');
+              setIsBentoLandingActive(false);
+              setIsServicesDiscoveryOpen(false);
+              setIsPGSectionOpen(section === 'pg_hostels');
+              setIsClassesTimingsOpen(section === 'classes');
+              setIsHomeServicesOpen(section === 'services');
+              setIsHotelsStayExperienceOpen(section === 'hotel_stay');
+              if (section === 'pg_hostels') returnSectionAfterPGRef.current = activeMarketSection;
+              if (section === 'hotel_stay') returnSectionAfterStayRef.current = activeMarketSection;
+              if (section === 'services') returnSectionAfterServicesRef.current = activeMarketSection;
+              setActiveMarketSection(section);
+            }} className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold ${activeMarketSection === section ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'}`}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </header>
+  );
+
+  const sharedMarketplaceHeader = homeEnhancementsReady && !homeSearchFocused ? (
+          <Suspense fallback={quickHomeHeader}>
           <CraftoTopServicesBar
             activeMarketSection={activeMarketSection}
             onSelectMarketSection={(sec) => {
@@ -2052,7 +2143,7 @@ function MarketplaceAppContent() {
             hideCategoryRibbon={activeMarketSection === 'movies' || isHotelsStayExperienceOpen}
           />
           </Suspense>
-  );
+  ) : quickHomeHeader;
 
   return (
     <Suspense fallback={<SectionScreenFallback label="Loading BookOurSpace…" />}>
@@ -2070,38 +2161,36 @@ function MarketplaceAppContent() {
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
       <BOSGlobeLoadingScreen />
 
-      {entryExperience !== 'ready' && !authUser && (
-        <BookOurSpaceEntryExperience
-          mode={entryExperience}
-          onDemoSignIn={async (role) => {
-            try {
-              const response = await fetch('/api/dev/demo-session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ role }),
-              });
-              const data = await response.json().catch(() => ({}));
-              if (!response.ok || !data?.ok || !data.sessionToken || !data.user) {
-                window.alert(data?.message || 'The local demo account is not available. Run npm run dev once to seed it.');
-                return;
+      {DEMO_DATA_ENABLED && entryExperience !== 'ready' && !authUser && (
+        <Suspense fallback={null}>
+          <BookOurSpaceEntryExperience
+            mode={entryExperience}
+            onDemoSignIn={async (role) => {
+              try {
+                const response = await fetch('/api/dev/demo-session', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ role }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data?.ok || !data.sessionToken || !data.user) {
+                  window.alert(data?.message || 'The local demo account is not available. Run npm run dev once to seed it.');
+                  return;
+                }
+                setStoredAuthoritativeSession(data.sessionToken, data.user);
+                try { localStorage.setItem('bos_entry_choice_v1', 'signed-in'); } catch { /* ignore */ }
+                window.location.reload();
+              } catch {
+                window.alert('The local demo account could not be started.');
               }
-              setStoredAuthoritativeSession(data.sessionToken, data.user);
-              try { localStorage.setItem('bos_entry_choice_v1', 'signed-in'); } catch { /* ignore */ }
-              window.location.reload();
-            } catch {
-              window.alert('The local demo account could not be started.');
-            }
-          }}
-          onGoogleSignIn={() => {
-            // Keep the Flutter welcome screen mounted beneath the auth dialog.
-            // It is replaced only after a session exists or the visitor chooses Guest.
-            setIsAuthModalOpen(true);
-          }}
-          onContinueAsGuest={() => {
-            try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
-            setEntryExperience('ready');
-          }}
-        />
+            }}
+            onGoogleSignIn={() => setIsAuthModalOpen(true)}
+            onContinueAsGuest={() => {
+              try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
+              setEntryExperience('ready');
+            }}
+          />
+        </Suspense>
       )}
 
       {DEMO_DATA_ENABLED && (
@@ -5239,7 +5328,7 @@ function MarketplaceAppContent() {
 
 
             {/* UNIVERSAL BUILDER — PUBLISHED CONFIGURABLE REGION (presentation only; live listing/booking logic stays in the feed below) */}
-            <PublishedBuilderRegion pageKey={activeMarketSection} />
+            {homeEnhancementsReady && <PublishedBuilderRegion pageKey={activeMarketSection} />}
 
             {/* SCHEDULED SPOTLIGHT STRIP ANNOUNCEMENTS */}
             {homeEnhancementsReady && <Suspense fallback={null}><LiveScheduledAnnouncementsBanner
