@@ -436,6 +436,20 @@ console.log('=== E. PostgreSQL legacy live-page config ===');
   assert.equal(anonymous.json.ok, true);
   pass('legacy live-page-config answers from PostgreSQL instead of 503');
 
+  // A disposable database starts without a published platform config row.
+  // Create the baseline through the same authorized API before exercising
+  // draft privacy and rollback; do not assume cloud seed data exists.
+  if (!anonymous.json.published?.versionId) {
+    const seed = await call('POST', '/api/live-page-config/publish', {
+      token: SUPER,
+      body: {
+        config: { pages: { pg_hostels: { heroBanner: { headline: 'Local baseline' } } } },
+        summary: 'Local integration baseline',
+      },
+    });
+    expectedStatus(seed, 200, 'initialize local published config');
+  }
+
   const draft = await call('POST', '/api/live-page-config/draft', {
     token: ADMIN,
     body: {
@@ -485,7 +499,7 @@ console.log('=== E. PostgreSQL legacy live-page config ===');
   expectedStatus(customerModules, 403, 'customer admin modules read');
   const adminModules = await call('GET', '/api/admin/modules', { token: ADMIN });
   expectedStatus(adminModules, 200, 'Admin module settings read');
-  assert.ok(adminModules.json.modules.app_settings);
+  assert.ok(adminModules.json.supportedModules.includes('app_settings'));
   const customerModuleWrite = await call('PUT', '/api/admin/modules/app_settings', {
     token: CUSTOMER,
     body: { payload: { routeOwnershipProbe: 'customer-denied' } },
