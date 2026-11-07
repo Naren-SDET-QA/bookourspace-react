@@ -236,7 +236,9 @@ export async function startClassesHarness(): Promise<ClassesHarness> {
         ...process.env,
         NODE_ENV: 'test',
         PORT: String(apiPort),
-        DISABLE_HMR: 'false',
+        // Keep the browser journey on a stable document if source files change
+        // while the suite is running; HMR can detach controlled form fields.
+        DISABLE_HMR: 'true',
         BOS_VITE_HMR_PORT: String(hmrPort),
         BOS_SERVER_HMAC_SECRET: TEST_HMAC_SECRET,
         BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,

@@ -337,7 +337,7 @@ test('detail shows verified reviews, real availability and server-computed taxes
   try {
     await openStays(page);
     await card(page, STAY.title).click();
-    const detail = page.getByRole('dialog').first();
+    const detail = page.getByRole('dialog', { name: STAY.title });
     await expect(detail).toContainText('Verified stay.');
     await expect(detail).toContainText('Reviewer One');
     await expect(detail).toContainText('2 reviews');
@@ -354,7 +354,7 @@ test('detail shows verified reviews, real availability and server-computed taxes
     await expectTotal(page, 5);
 
     await card(page, 'E2E Bandra Sea View Flat').click();
-    const flat = page.getByRole('dialog').first();
+    const flat = page.getByRole('dialog', { name: 'E2E Bandra Sea View Flat' });
     await expect(flat).toContainText('Availability');
     const target = new Date();
     target.setDate(target.getDate() + 32);
