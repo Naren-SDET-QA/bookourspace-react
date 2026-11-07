@@ -37,7 +37,8 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  retries: 1,
+  outputDir: process.env.BOS_PLAYWRIGHT_OUTPUT_DIR || 'test-results',
   reporter: [['list']],
   use: {
     baseURL: externalBaseURL || defaultBaseURL,
@@ -68,9 +69,11 @@ export default defineConfig({
       ...(process.env.BOS_LISTINGS_DATABASE_URL ? { BOS_LISTINGS_DATABASE_URL: process.env.BOS_LISTINGS_DATABASE_URL } : {}),
       PORT: localWebPort,
       BOS_VITE_CACHE_DIR: localViteCacheDir,
-      // Keep the Vite client enabled; server.ts attaches its websocket to the
-      // same Express HTTP server for this isolated test process.
-      DISABLE_HMR: 'false',
+      // Keep browser tests stable when another local task is editing source:
+      // HMR can replace a lazy module during a journey and reset React state.
+      // Vite still serves the current modules; only its websocket reload path
+      // is disabled for the lifetime of this isolated test server.
+      DISABLE_HMR: 'true',
       // Tests only inspect the Mumbai OAuth URL; they never authenticate. Use
       // a synthetic public key and explicitly target Mumbai so accidental
       // .env credentials cannot be inherited. OAuth tests intercept the auth

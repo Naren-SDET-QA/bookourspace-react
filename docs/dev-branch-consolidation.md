@@ -25,3 +25,16 @@ No safe *unique* implementation remained outside the feature branch. The only un
 - All six modules and their routes, admin controls, India location search, Movies showtimes-only, 71 migrations/manifests, tests/e2e, selected docs, responsive brand assets.
 - Dirty runtime files (`authoritative-marketplace-store.json`, `live-page-config.json`) remain local, not committed.
 - Native platform files remain untouched in the Capacitor worktree.
+
+## Checks (dev)
+
+| Check | Result |
+|---|---|
+| TypeScript | PASS |
+| Build | PASS |
+| Unit/API | 318 tests, 300 pass, 0 fail, 18 skipped |
+| Browser E2E | 113 passed, 1 flaky (passed on retry), 23 skipped; `retries: 1` |
+| Migration manifest | 71 migrations, sha256 PASS |
+| Native Android/iOS | BLOCKED — not in dev; preserved in Capacitor worktree, no device run |
+
+Remaining gaps: native platform code stays in the separate Capacitor worktree; E2E needs one retry under this environment; hosted DB/deploy untouched.

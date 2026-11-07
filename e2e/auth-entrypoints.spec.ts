@@ -57,6 +57,26 @@ test.describe('signed-out Google sign-in entry points', () => {
     await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0, { timeout: 10_000 });
   });
 
+  test('fast Guest Home keeps search and module choices while React finishes loading', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.route('**/src/main.tsx', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await route.continue();
+    });
+    await page.goto('/', { waitUntil: 'commit' });
+    await page.getByTestId('entry-continue-guest').click();
+    const quickHome = page.locator('#bos-quick-home-shell');
+    await expect(quickHome).toBeVisible();
+    await quickHome.getByRole('searchbox').fill('early mobile search');
+    await quickHome.getByRole('button', { name: 'Classes', exact: true }).click();
+    await expect(quickHome.getByRole('button', { name: 'Classes', exact: true })).toHaveAttribute('aria-current', 'page');
+
+    await expect(page.getByTestId('universal-marketplace-header')).toBeVisible({ timeout: 30_000 });
+    const appHeader = page.getByTestId('universal-marketplace-header');
+    await expect(appHeader.getByRole('searchbox')).toHaveValue('early mobile search');
+    await expect(appHeader.getByRole('button', { name: 'Classes', exact: true })).toHaveAttribute('aria-current', 'page');
+  });
+
   test('welcome uses the Flutter dark brand surface and stays usable at mobile and desktop sizes', async ({ page }) => {
     await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });
