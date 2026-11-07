@@ -107,31 +107,21 @@ export async function updatePlatformModuleFlag(
   moduleKey: string,
   patch: { is_enabled?: boolean; allow_contact_owner?: boolean }
 ): Promise<ModuleFlagRow> {
-  const client = supabase;
-  if (!client) throw new Error('SUPABASE_UNAVAILABLE');
-  const { data: authData, error: authError } = await client.auth.getUser();
-  const user = authData.user;
-  if (authError || !user) throw new Error('SUPABASE_AUTH_REQUIRED');
-
-  // UI checks are for clear feedback only. The table's RLS policy still
-  // performs the authoritative public.is_admin() check on every write.
-  const { data: profile, error: profileError } = await client
-    .from('profiles')
-    .select('role, account_status')
-    .eq('id', user.id)
-    .maybeSingle();
-  if (profileError || profile?.role !== 'admin' || profile.account_status !== 'active') {
-    throw new Error('SUPABASE_ADMIN_REQUIRED');
+  const token = typeof window !== 'undefined'
+    ? window.localStorage.getItem('bos_session_token_v1')
+    : null;
+  if (!token) throw new Error('SUPER_ADMIN_SESSION_REQUIRED');
+  const response = await fetch(`/api/platform-settings/module-flags/${encodeURIComponent(moduleKey)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-bos-session-token': token },
+    body: JSON.stringify(patch),
+    cache: 'no-store',
+  });
+  const result = await response.json().catch(() => null) as { ok?: boolean; module?: ModuleFlagRow; error?: string } | null;
+  if (!response.ok || result?.ok !== true || !result.module) {
+    throw new Error(result?.error || 'MODULE_FLAG_SAVE_FAILED');
   }
-
-  const { data, error } = await client
-    .from('platform_module_flags')
-    .update({ ...patch, updated_by: user.id, updated_at: new Date().toISOString() })
-    .eq('module_key', moduleKey)
-    .select('module_key, is_enabled, allow_contact_owner, allow_online_booking, requires_owner_approval, booking_approved_at')
-    .maybeSingle();
-  if (error || !data) throw new Error('MODULE_FLAG_SAVE_FAILED');
-  return data as ModuleFlagRow;
+  return result.module;
 }
 
 export function subscribeToPlatformModuleFlags(onChange: () => void): () => void {

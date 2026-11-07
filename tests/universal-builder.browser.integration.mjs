@@ -57,13 +57,17 @@ let adminContext;
 let customerContext;
 try {
   adminContext = await browser.newContext();
-  await adminContext.addInitScript((sessionToken) => localStorage.setItem('bos_session_token_v1', sessionToken), token);
+  await adminContext.addInitScript((sessionToken) => {
+    localStorage.setItem('bos_session_token_v1', sessionToken);
+    localStorage.setItem('bos_entry_choice_v1', 'guest');
+  }, token);
   const admin = await adminContext.newPage();
   admin.setDefaultTimeout(8_000);
   await admin.goto(`${base}/`, { waitUntil: 'domcontentloaded', timeout: 15_000 });
   await admin.locator('#root').waitFor({ state: 'attached' });
 
   customerContext = await browser.newContext();
+  await customerContext.addInitScript(() => localStorage.setItem('bos_entry_choice_v1', 'guest'));
   const customer = await customerContext.newPage();
   customer.setDefaultTimeout(15_000);
 
