@@ -19,13 +19,6 @@ import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 import { initialPostingPlans } from '../data/postingPlans';
 import { ensureListingPriceBreakdown } from '../data/listingPrice';
 import { launchGoogleOAuthWindow } from '../lib/googleOAuthLauncher';
-import { 
-  initialListings, 
-  initialEnquiries, 
-  initialBookings, 
-  initialReviews, 
-  initialTransactions,
-} from '../data/seedData';
 import { saveMarketplaceToCache, useOnlineStatus } from '../utils/marketplaceCache';
 import { listingImageSources } from '../lib/media/signedStorageUrl';
 
@@ -268,6 +261,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Guards the authoritative-session revocation so a sign-out event that is
   // caused by our own revocation cannot start another one.
   const logoutRevocationInFlight = useRef(false);
+  const demoListingIdsRef = useRef<Set<string>>(new Set());
 
   // Browser storage and fixture data are not authoritative inventory. Preserve
   // existing local values, but show them only in explicit local demo mode.
@@ -281,10 +275,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
           return parsed.map(ensureListingPriceBreakdown);
         }
       }
-      localStorage.setItem('marketplace_listings_v18', JSON.stringify(initialListings));
-      return initialListings;
+      return [];
     } catch {
-      return initialListings;
+      return [];
     }
   });
 
@@ -310,9 +303,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_enquiries');
-      return saved ? JSON.parse(saved) : initialEnquiries;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return initialEnquiries;
+      return [];
     }
   });
 
@@ -320,9 +313,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_bookings');
-      return saved ? JSON.parse(saved) : initialBookings;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return initialBookings;
+      return [];
     }
   });
 
@@ -330,9 +323,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_reviews');
-      return saved ? JSON.parse(saved) : initialReviews;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return initialReviews;
+      return [];
     }
   });
 
@@ -340,11 +333,45 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (!DEMO_DATA_ENABLED) return [];
     try {
       const saved = localStorage.getItem('marketplace_transactions');
-      return saved ? JSON.parse(saved) : initialTransactions;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return initialTransactions;
+      return [];
     }
   });
+
+  // Local preview inventory is optional. Keep its catalog out of the initial
+  // production graph and load it asynchronously only in explicit demo mode.
+  useEffect(() => {
+    if (!DEMO_DATA_ENABLED) return;
+    let active = true;
+    const loadStoredOrSeed = <T,>(key: string, seed: T[]): T[] => {
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) return parsed;
+        }
+        localStorage.setItem(key, JSON.stringify(seed));
+      } catch {
+        return seed;
+      }
+      return seed;
+    };
+    void import('../data/seedData').then((seed) => {
+      if (!active) return;
+      demoListingIdsRef.current = new Set(seed.initialListings.map((listing) => listing.id));
+      setListings((current) => current.length > 20
+        ? current
+        : loadStoredOrSeed('marketplace_listings_v18', seed.initialListings).map(ensureListingPriceBreakdown));
+      setEnquiries((current) => current.length ? current : loadStoredOrSeed('marketplace_enquiries', seed.initialEnquiries));
+      setBookings((current) => current.length ? current : loadStoredOrSeed('marketplace_bookings', seed.initialBookings));
+      setReviews((current) => current.length ? current : loadStoredOrSeed('marketplace_reviews', seed.initialReviews));
+      setTransactions((current) => current.length ? current : loadStoredOrSeed('marketplace_transactions', seed.initialTransactions));
+    }).catch(() => {
+      // A demo fixture bundle failure never affects authenticated production data.
+    });
+    return () => { active = false; };
+  }, []);
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(DEMO_DATA_ENABLED ? [
     {
@@ -459,7 +486,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
       if (mounted && remoteListings !== null) {
         const fixtureIds = DEMO_DATA_ENABLED
-          ? new Set(initialListings.map((listing) => listing.id))
+          ? demoListingIdsRef.current
           : new Set<string>();
         const customerListings = DEMO_DATA_ENABLED
           ? remoteListings
@@ -995,7 +1022,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const syncAccountData = async (): Promise<number> => {
     if (!isSupabaseConfigured) return 0;
     const seedIds = DEMO_DATA_ENABLED
-      ? new Set(initialListings.map((l) => l.id))
+      ? demoListingIdsRef.current
       : new Set<string>();
     const customListings = listings.filter((l) => !seedIds.has(l.id));
     const { syncedCount } = await syncLocalAccountDataToSupabase({

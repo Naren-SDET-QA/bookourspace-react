@@ -10,3 +10,12 @@ test-results/
 playwright-report/
 .e2e-*.log
 .local/
+# Local compatibility runtime state; never commit customer/payment/token data.
+authoritative-marketplace-store.json
+
+# Capacitor-generated native build output; keep source projects and assets only.
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/public/
+ios/App/App/public/

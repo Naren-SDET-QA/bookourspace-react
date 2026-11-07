@@ -152,7 +152,14 @@ test('expired published cache is discarded and never shown on a cold offline sta
     localStorage.setItem('bos_builder_page_v1:classes', JSON.stringify({ page: pageRecord, cachedAt: Date.now() - 8 * 24 * 60 * 60 * 1000 }));
   }, expired);
   await page.route('**/api/builder/pages/classes', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{"ok":false}' }));
+  const fetchCompleted = page.waitForResponse((response) => (
+    response.url().includes('/api/builder/pages/classes') && response.status() === 503
+  ));
   await page.goto('/#classes', { waitUntil: 'domcontentloaded' });
+  // Builder content is lazy loaded. Wait for its authoritative fetch before
+  // checking that stale storage was removed; the surrounding module can render
+  // before the builder chunk has even started.
+  await fetchCompleted;
   await expect(page.locator('section[aria-label="classes section"]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-builder-page="classes"]')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('bos_builder_page_v1:classes'))).toBeNull();

@@ -1,10 +1,17 @@
 import { expect, test } from '@playwright/test';
 
-test('home image layout renders at the target responsive widths', async ({ page }) => {
+test('Classes image layout renders at the target responsive widths', async ({ page }) => {
+  // The optimized Guest Home intentionally defers module imagery. Classes has
+  // deterministic fixture cards, so use it to cover the SafeImage surfaces.
+  await page.route('https://images.unsplash.com/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/gif',
+    body: Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64'),
+  }));
   for (const width of [320, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     if (width === 320) {
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await page.goto('/#classes', { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => document.body.innerText.includes('Continue with Google'), null, { timeout: 30_000 });
       await page.waitForFunction(() => !document.body.innerText.includes('Self-Healing Modular Engine'), null, { timeout: 30_000 });
     }
@@ -23,7 +30,7 @@ test('a failed remote photo renders its local module fallback without retrying t
     failedSourceRequests += 1;
     await route.fulfill({ status: 404, contentType: 'text/plain', body: 'test image missing' });
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/#classes', { waitUntil: 'domcontentloaded' });
   const proof = page.locator('img[data-safe-image]').first();
   await expect(proof).toBeVisible();
   await proof.evaluate((image: HTMLImageElement) => {

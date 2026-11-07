@@ -59,6 +59,16 @@ const browser = await chromium.launch({ headless: true });
 const results = [];
 let failures = 0;
 
+async function dismissPrivacyChoices(page) {
+  const privacyChoices = page.getByRole('dialog', { name: 'Privacy choices' });
+  try {
+    await privacyChoices.waitFor({ state: 'visible', timeout: 3000 });
+    await privacyChoices.getByRole('button', { name: 'Essential only' }).click();
+  } catch {
+    // The explicit local essential-only choice is already stored in this context.
+  }
+}
+
 function assertCheck(name, ok, detail = '') {
   if (ok) {
     console.log(`  PASS  ${name}`);
@@ -101,6 +111,7 @@ try {
     if (await continueAsGuest.waitFor({ timeout: 10000 }).then(() => true).catch(() => false)) {
       await continueAsGuest.click();
     }
+    await dismissPrivacyChoices(page);
 
     // -------------------------------------------------- signed-out discovery
     const detailsButton = page.getByRole('button', { name: `View details for ${listingTitle}` });
@@ -154,6 +165,7 @@ try {
     }, [sessionToken, customerUuid]);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.goto(`${uiUrl}/#pg`, { waitUntil: 'domcontentloaded' });
+    await dismissPrivacyChoices(page);
 
     const signedInButton = page.getByRole('button', { name: `View details for ${listingTitle}` });
     const signedInListed = await signedInButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
