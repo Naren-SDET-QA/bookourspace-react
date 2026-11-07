@@ -6,23 +6,36 @@ import {
   Building2, Map, Check, WifiOff, Navigation, Landmark,
 } from 'lucide-react';
 import {
-  INDIAN_STATES,
-  POPULAR_CITIES,
-  searchLocations,
-  nearestCity,
-  labelOf,
-  locationKey,
-  type IndiaCity,
-} from '../data/indiaLocations';
+  debounceMsForQuery,
+  loadIndiaLocationDistricts,
+  loadIndiaLocationHome,
+  searchIndiaLocations,
+  type IndiaLocationSuggestion,
+  type IndiaDistrictSuggestion,
+  type IndiaStateSuggestion,
+} from '../lib/indiaLocationSearch';
+import {
+  fetchExternalLocationSuggestions,
+  nearestCatalogLocation,
+  resolveExternalLocation,
+  searchLocationPage,
+  type ExternalLocationSuggestion,
+  type IndiaLocationOption,
+} from '../lib/locationSearch';
 import { getNativePosition } from '../lib/nativeLocation';
 import type { NativeLocationDiagnostic } from '../lib/nativeLocationPermission';
 
 export interface SelectedLocation {
   city: string;
   area?: string;
+  state?: string;
+  district?: string;
+  pincode?: string;
+  kind?: string;
   label?: string;
   lat?: number;
   lng?: number;
+  source?: 'external' | 'catalog' | 'recent' | 'directory' | 'curated' | 'geocode' | string;
 }
 
 interface LocationSelectorProps {
@@ -35,6 +48,14 @@ interface LocationSelectorProps {
 const RECENT_KEY = 'bos_recent_locations';
 const SELECTED_KEY = 'bos_selected_location';
 
+function locationLabel(loc: { name: string; district?: string; state: string }): string {
+  return loc.name === loc.district ? `${loc.name}, ${loc.state}` : `${loc.name}, ${loc.district || loc.name}, ${loc.state}`;
+}
+
+function locationKey(loc: { name: string; state: string; district?: string }): string {
+  return `${loc.name}|${loc.state}|${loc.district || ''}`.toLocaleLowerCase('en-IN');
+}
+
 export function loadPersistedLocation(): SelectedLocation | null {
   try {
     const raw = localStorage.getItem(SELECTED_KEY);
@@ -46,8 +67,12 @@ export function loadPersistedLocation(): SelectedLocation | null {
   }
 }
 
-export function persistLocation(loc: SelectedLocation) {
+export function persistLocation(loc: SelectedLocation | null) {
   try {
+    if (!loc) {
+      localStorage.removeItem(SELECTED_KEY);
+      return;
+    }
     localStorage.setItem(SELECTED_KEY, JSON.stringify(loc));
   } catch {
     /* storage unavailable — ignore */
@@ -83,6 +108,19 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
   const [gps, setGps] = useState<'idle' | 'locating' | 'denied' | 'unsupported' | 'error'>('idle');
   const [recent, setRecent] = useState<SelectedLocation[]>([]);
   const [offline, setOffline] = useState(typeof navigator !== 'undefined' && navigator.onLine === false);
+  const [results, setResults] = useState<IndiaLocationSuggestion[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [catalogPlaces, setCatalogPlaces] = useState<IndiaLocationSuggestion[]>([]);
+  const [catalogOffset, setCatalogOffset] = useState<number | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [states, setStates] = useState<IndiaStateSuggestion[]>([]);
+  const [districts, setDistricts] = useState<IndiaDistrictSuggestion[]>([]);
+  const [popular, setPopular] = useState<IndiaLocationOption[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [externalPlaces, setExternalPlaces] = useState<ExternalLocationSuggestion[]>([]);
+  const [externalLoading, setExternalLoading] = useState(false);
+  const [externalError, setExternalError] = useState('');
+  const externalSessionToken = useRef<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -94,9 +132,32 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
     setGps('idle');
     setRecent(loadRecent());
     setOffline(typeof navigator !== 'undefined' && navigator.onLine === false);
+    setExternalPlaces([]);
+    setExternalError('');
+    externalSessionToken.current = null;
+    let cancelled = false;
+    setBrowseLoading(true);
+    loadIndiaLocationHome().then(({ states: nextStates, popular: nextPopular }) => {
+      if (cancelled) return;
+      setStates(nextStates);
+      setPopular(nextPopular);
+    }).catch(() => {
+      if (!cancelled) { setStates([]); setPopular([]); }
+    }).finally(() => { if (!cancelled) setBrowseLoading(false); });
     const t = setTimeout(() => inputRef.current?.focus(), 120);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || view !== 'districts' || !activeState) { setDistricts([]); return; }
+    let cancelled = false;
+    setBrowseLoading(true);
+    loadIndiaLocationDistricts(activeState).then((items) => {
+      if (!cancelled) setDistricts(items);
+    }).catch(() => { if (!cancelled) setDistricts([]); })
+      .finally(() => { if (!cancelled) setBrowseLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, view, activeState]);
 
   useEffect(() => {
     if (!open) return;
@@ -113,25 +174,194 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
     };
   }, [open, onClose]);
 
-  const results = useMemo(() => (query.trim() ? searchLocations(query, 40) : []), [query]);
+  useEffect(() => {
+    if (!open) return;
+    const needle = query.trim();
+    setExternalPlaces([]);
+    setExternalError('');
+    externalSessionToken.current = null;
+    if (!needle) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const hits = await searchIndiaLocations(needle, controller.signal);
+        setResults(hits);
+      } catch (error) {
+        if ((error as { name?: string })?.name !== 'AbortError') setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, debounceMsForQuery(needle));
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [open, query]);
 
-  const stateObj = useMemo(() => INDIAN_STATES.find((s) => s.name === activeState) ?? null, [activeState]);
-  const districtObj = useMemo(
-    () => stateObj?.districts.find((d) => d.name === activeDistrict) ?? null,
-    [stateObj, activeDistrict]
-  );
+  useEffect(() => {
+    if (!open || view !== 'cities' || !activeState || !activeDistrict) {
+      setCatalogPlaces([]);
+      setCatalogOffset(null);
+      return;
+    }
+    let cancelled = false;
+    setCatalogLoading(true);
+    searchLocationPage({ state: activeState, district: activeDistrict, offset: 0 })
+      .then((page) => {
+        if (cancelled) return;
+        setCatalogPlaces(page.locations.map((loc) => ({
+          kind: loc.type,
+          name: loc.name,
+          state: loc.state,
+          district: loc.district,
+          mandal: '',
+          pincode: null,
+          lat: loc.lat,
+          lng: loc.lng,
+          label: locationLabel(loc),
+          aliases: loc.aliases ?? [],
+          source: 'directory' as const,
+        })));
+        setCatalogOffset(page.nextOffset);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCatalogPlaces([]);
+          setCatalogOffset(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [open, view, activeState, activeDistrict]);
 
-  const choose = (loc: IndiaCity, area?: string) => {
+  const stateObj = useMemo(() => states.find((s) => s.name === activeState) ?? null, [states, activeState]);
+  const districtObj = useMemo(() => districts.find((d) => d.name === activeDistrict) ?? null, [districts, activeDistrict]);
+
+  const choose = (loc: Pick<IndiaLocationOption, 'name' | 'state' | 'district' | 'type' | 'lat' | 'lng'>, area?: string) => {
     const payload: SelectedLocation = {
       city: loc.name,
       area: area ?? loc.name,
-      label: labelOf(loc),
-      lat: loc.lat,
-      lng: loc.lng,
+      state: loc.state,
+      district: loc.district,
+      kind: loc.type,
+      label: locationLabel(loc),
+      lat: loc.lat ?? undefined,
+      lng: loc.lng ?? undefined,
+      source: 'catalog',
     };
     pushRecent(payload);
     onSelect(payload);
     onClose();
+  };
+
+  const chooseSuggestion = (hit: IndiaLocationSuggestion) => {
+    const city = hit.kind === 'state' || hit.kind === 'district' ? hit.name : hit.name;
+    const payload: SelectedLocation = {
+      city,
+      area: hit.kind === 'village' || hit.kind === 'town' || hit.kind === 'mandal' ? hit.name : city,
+      state: hit.state,
+      district: hit.district || hit.name,
+      pincode: hit.pincode || undefined,
+      kind: hit.kind,
+      label: hit.label,
+      lat: hit.lat ?? undefined,
+      lng: hit.lng ?? undefined,
+      source: hit.source,
+    };
+    pushRecent(payload);
+    onSelect(payload);
+    onClose();
+  };
+
+  const searchExternalPlaces = async () => {
+    const input = query.trim();
+    if (input.length < 3 || externalLoading) return;
+    const token = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = crypto.getRandomValues(new Uint8Array(1))[0] & 15;
+          return (c === 'x' ? r : (r & 3) | 8).toString(16);
+        });
+    externalSessionToken.current = token;
+    setExternalError('');
+    setExternalLoading(true);
+    try {
+      setExternalPlaces(await fetchExternalLocationSuggestions(input, token));
+    } catch {
+      setExternalPlaces([]);
+      setExternalError('Google Maps search is unavailable right now. Try again later.');
+    } finally {
+      setExternalLoading(false);
+    }
+  };
+
+  const chooseExternalPlace = async (place: ExternalLocationSuggestion) => {
+    const token = externalSessionToken.current;
+    if (!token) return;
+    setExternalLoading(true);
+    try {
+      const location = await resolveExternalLocation(place.placeId, token);
+      const payload: SelectedLocation = {
+        city: location.city,
+        area: location.area,
+        state: location.state,
+        label: `${location.label} · Google Maps`,
+        lat: location.lat,
+        lng: location.lng,
+        source: 'external',
+      };
+      externalSessionToken.current = null;
+      setExternalPlaces([]);
+      onSelect(payload);
+      onClose();
+    } catch {
+      externalSessionToken.current = null;
+      setExternalError('That place could not be selected. Search again.');
+    } finally {
+      setExternalLoading(false);
+    }
+  };
+
+  const loadMoreCatalog = async () => {
+    if (catalogOffset == null || !activeState || !activeDistrict || catalogLoading) return;
+    setCatalogLoading(true);
+    try {
+      const page = await searchLocationPage({ state: activeState, district: activeDistrict, offset: catalogOffset });
+      setCatalogPlaces((current) => {
+        const seen = new Set(current.map((item) => `${item.name}|${item.district}|${item.state}`.toLowerCase()));
+        const extra = page.locations.flatMap((loc) => {
+          const key = `${loc.name}|${loc.district}|${loc.state}`.toLowerCase();
+          if (seen.has(key)) return [];
+          seen.add(key);
+          return [{
+            kind: loc.type,
+            name: loc.name,
+            state: loc.state,
+            district: loc.district,
+            mandal: '',
+            pincode: null,
+            lat: loc.lat,
+            lng: loc.lng,
+            label: locationLabel(loc),
+            aliases: loc.aliases ?? [],
+            source: 'directory' as const,
+          }];
+        });
+        return [...current, ...extra];
+      });
+      setCatalogOffset(page.nextOffset);
+    } catch {
+      setCatalogOffset(null);
+    } finally {
+      setCatalogLoading(false);
+    }
   };
 
   const chooseRecent = (r: SelectedLocation) => {
@@ -161,7 +391,8 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
           throw new Error('LOCATION_INVALID_COORDINATES');
         }
         setGps('idle');
-        choose(nearestCity(latitude, longitude));
+        const nearest = await nearestCatalogLocation(latitude, longitude);
+        choose({ name: nearest.name, state: nearest.state, district: nearest.district, type: nearest.type, lat: nearest.lat, lng: nearest.lng });
       } catch (error) {
         const errorCode = typeof error === 'object' && error !== null && 'code' in error
           ? (error as { code?: unknown }).code
@@ -180,9 +411,10 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
     setGps('locating');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const near = nearestCity(pos.coords.latitude, pos.coords.longitude);
-        setGps('idle');
-        choose(near);
+        void nearestCatalogLocation(pos.coords.latitude, pos.coords.longitude).then((near) => {
+          setGps('idle');
+          choose({ name: near.name, state: near.state, district: near.district, type: near.type, lat: near.lat, lng: near.lng });
+        }).catch(() => setGps('error'));
       },
       (err) => {
         setGps(err.code === err.PERMISSION_DENIED ? 'denied' : 'error');
@@ -203,11 +435,14 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
       role="dialog"
       aria-modal="true"
       aria-label="Select your location"
-      onClick={onClose}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
       <div
         className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[88vh] sm:max-w-lg sm:rounded-3xl"
-        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
         {/* Header */}
         <div className="relative bg-gradient-to-r from-[#5B21B6] to-[#7C3AED] px-5 pb-4 pt-5 text-white">
@@ -236,8 +471,9 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search city, district or village…"
-              aria-label="Search city, district or village"
+              placeholder="Search city, area, PIN or village…"
+              aria-label="Search city, area, PIN or village"
+              inputMode="search"
               className="min-w-0 flex-1 bg-transparent text-[13px] font-semibold text-slate-900 outline-none placeholder:font-medium placeholder:text-slate-400"
             />
             {query && (
@@ -248,7 +484,7 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
           </div>
           {offline && (
             <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10.5px] font-semibold text-amber-700">
-              <WifiOff className="h-3 w-3" /> Offline — saved and built-in locations still work.
+              <WifiOff className="h-3 w-3" /> Offline — only recently loaded locations are available.
             </p>
           )}
         </div>
@@ -257,11 +493,20 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
           {/* Search results */}
           {query.trim() ? (
             <div>
-              {results.length === 0 ? (
+              {searching && results.length === 0 ? (
+                <p className="px-2 py-6 text-center text-[12px] font-semibold text-slate-500">Searching India locations…</p>
+              ) : results.length === 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-8 text-center">
                   <MapPin className="mx-auto h-6 w-6 text-[#7C3AED]" />
                   <p className="mt-2 text-[13px] font-bold text-slate-800">No location found for “{query.trim()}”</p>
-                  <p className="mt-0.5 text-[11px] text-slate-500">Try a nearby city or browse by state below.</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Try a nearby city, district, village or 6-digit PIN.</p>
+                  {query.trim().length >= 3 && (
+                    <button type="button" onClick={() => { void searchExternalPlaces(); }} disabled={externalLoading}
+                      className="mt-3 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-[11.5px] font-bold text-slate-700 disabled:opacity-60">
+                      {externalLoading ? 'Searching…' : 'Search beyond catalog with Google Maps'}
+                    </button>
+                  )}
+                  {externalError && <p role="status" className="mt-2 text-[11px] font-semibold text-rose-600">{externalError}</p>}
                   <button type="button" onClick={() => setQuery('')} className="mt-3 rounded-full bg-[#7C3AED] px-4 py-1.5 text-[11.5px] font-bold text-white">
                     Browse states
                   </button>
@@ -269,10 +514,10 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
               ) : (
                 <ul className="space-y-0.5">
                   {results.map((loc) => (
-                    <li key={`${locationKey(loc)}`}>
+                    <li key={`${loc.kind}|${loc.name}|${loc.state}|${loc.district}|${loc.pincode ?? ''}`}>
                       <button
                         type="button"
-                        onClick={() => choose(loc)}
+                        onClick={() => chooseSuggestion(loc)}
                         className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition hover:bg-purple-50"
                       >
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-100 text-[#7C3AED]">
@@ -280,13 +525,32 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px] font-bold text-slate-900">{loc.name}</span>
-                          <span className="block truncate text-[10.5px] text-slate-500">{loc.district}, {loc.state}</span>
+                          <span className="block truncate text-[10.5px] text-slate-500">{loc.label}</span>
                         </span>
                         {isSelected(loc.name) && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
                       </button>
                     </li>
                   ))}
                 </ul>
+              )}
+              {externalPlaces.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-2">
+                  <p translate="no" className="px-2 pb-1 whitespace-nowrap text-xs font-normal text-[#5e5e5e]">Google Maps</p>
+                  <ul className="space-y-0.5">
+                    {externalPlaces.map((place) => (
+                      <li key={place.placeId}>
+                        <button type="button" disabled={externalLoading} onClick={() => { void chooseExternalPlace(place); }}
+                          className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition hover:bg-purple-50 disabled:opacity-60">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-100 text-[#7C3AED]"><MapPin className="h-4 w-4" /></span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-bold text-slate-900">{place.mainText}</span>
+                            <span className="block truncate text-[10.5px] text-slate-500">{place.secondaryText || place.text}</span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           ) : view === 'home' ? (
@@ -327,7 +591,7 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
               <div>
                 <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Popular cities</h3>
                 <div className="grid grid-cols-4 gap-2">
-                  {POPULAR_CITIES.map((loc) => (
+                  {popular.map((loc) => (
                     <button
                       key={locationKey(loc)}
                       type="button"
@@ -373,21 +637,22 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
                   <Map className="h-3 w-3" /> Browse by state
                 </h3>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {INDIAN_STATES.map((s) => (
+                  {states.map((s) => (
                     <button
-                      key={s.code}
+                      key={s.code || s.name}
                       type="button"
                       onClick={() => { setActiveState(s.name); setActiveDistrict(null); setView('districts'); }}
                       className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-purple-300 hover:bg-purple-50/50"
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-[12px] font-bold text-slate-800">{s.name}</span>
-                        <span className="block text-[9.5px] text-slate-400">{s.districts.length} districts</span>
+                        <span className="block text-[9.5px] text-slate-400">{s.districts} districts</span>
                       </span>
                       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                     </button>
                   ))}
                 </div>
+                {browseLoading && <p className="mt-2 text-center text-[11px] text-slate-500">Loading catalog…</p>}
               </div>
             </div>
           ) : view === 'districts' && stateObj ? (
@@ -399,7 +664,7 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
                 <Landmark className="h-3 w-3" /> {stateObj.name} · districts
               </h3>
               <div className="grid grid-cols-2 gap-1.5">
-                {stateObj.districts.map((d) => (
+                {districts.map((d) => (
                   <button
                     key={d.name}
                     type="button"
@@ -408,7 +673,7 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-[12px] font-bold text-slate-800">{d.name}</span>
-                      <span className="block text-[9.5px] text-slate-400">{d.cities.length} places</span>
+                      <span className="block text-[9.5px] text-slate-400">{d.locations} places</span>
                     </span>
                     <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                   </button>
@@ -424,32 +689,42 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
                 <MapPin className="h-3 w-3" /> {districtObj.name}
               </h3>
               <ul className="space-y-0.5">
-                {districtObj.cities.map((loc) => (
-                  <li key={locationKey(loc)}>
+                {catalogPlaces.map((place) => (
+                  <li key={`catalog-${place.kind}-${place.name}-${place.mandal}`}>
                     <button
                       type="button"
-                      onClick={() => choose(loc)}
+                      onClick={() => chooseSuggestion(place)}
                       className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition hover:bg-purple-50"
                     >
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-100 text-[#7C3AED]">
                         <MapPin className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-bold text-slate-900">{loc.name}</span>
-                        <span className="block truncate text-[10.5px] text-slate-500">{loc.type} · {loc.state}</span>
+                        <span className="block truncate text-[13px] font-bold text-slate-900">{place.name}</span>
+                        <span className="block truncate text-[10.5px] text-slate-500">{place.kind} · {place.state}</span>
                       </span>
-                      {isSelected(loc.name) && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
                     </button>
                   </li>
                 ))}
               </ul>
+              {catalogLoading && <p className="py-2 text-center text-[11px] text-slate-500">Loading places…</p>}
+              {catalogOffset != null && (
+                <button
+                  type="button"
+                  onClick={() => { void loadMoreCatalog(); }}
+                  disabled={catalogLoading}
+                  className="mt-2 w-full rounded-xl border border-slate-200 py-2 text-[12px] font-bold text-[#7C3AED]"
+                >
+                  {catalogLoading ? 'Loading places…' : 'Load more places'}
+                </button>
+              )}
             </div>
           ) : null}
         </div>
 
         <div className="border-t border-slate-100 px-4 py-2.5">
           <p className="text-center text-[10px] text-slate-400">
-            {selected?.label ? `Current: ${selected.label}` : 'Verified Indian locations · works offline'}
+            {selected?.label ? `Current: ${selected.label}` : 'Location results are loaded as needed from the server'}
           </p>
         </div>
       </div>

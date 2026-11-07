@@ -310,6 +310,12 @@ export function registerPlatformSettingsApi(
     return actor;
   };
 
+  const requireSuperAdmin = async (request: express.Request): Promise<BuilderActor> => {
+    const actor = await requireActor(request);
+    if (actor.role !== 'super_admin') throw new BuilderError('BUILDER_SUPER_ADMIN_REQUIRED', 403);
+    return actor;
+  };
+
   const sendError = (response: express.Response, error: unknown) => {
     if (error instanceof BuilderError) {
       response.status(error.status).json({ ok: false, error: error.code, message: error.message });
@@ -381,7 +387,7 @@ export function registerPlatformSettingsApi(
 
   app.post('/api/live-page-config/publish', async (request, response) => {
     try {
-      const actor = await requireActor(request);
+      const actor = await requireSuperAdmin(request);
       const body = (request.body || {}) as Record<string, unknown>;
       const repository = repositoryOrFail();
       let version: LivePageVersion;
@@ -411,9 +417,45 @@ export function registerPlatformSettingsApi(
     }
   });
 
+
+  // Public GET already returns the published config. This endpoint lets a
+  // Super Admin persist the six category display styles centrally instead of
+  // keeping them in one browser's localStorage.
+  app.post('/api/live-page-config/section-styles', async (request, response) => {
+    try {
+      const actor = await requireSuperAdmin(request);
+      const body = (request.body || {}) as Record<string, unknown>;
+      const styles = body.styles && typeof body.styles === 'object' ? body.styles as Record<string, unknown> : null;
+      const allowed: Record<string, string[]> = {
+        pg: ['style1', 'style2'],
+        stay: ['old', 'airbnb'],
+        services: ['old', 'triangle', 'noddyy'],
+        classes: ['cards', 'timetable'],
+        venues: ['showcase', 'agenda'],
+        movies: ['experience', 'classic'],
+      };
+      if (!styles) throw new BuilderError('SECTION_STYLES_INVALID', 400);
+      for (const key of Object.keys(styles)) {
+        if (!(key in allowed) || !allowed[key].includes(String(styles[key]))) {
+          throw new BuilderError('SECTION_STYLES_INVALID', 400, `Invalid style for ${key}`);
+        }
+      }
+      const repository = repositoryOrFail();
+      const state = await repository.liveState();
+      const base = (state.published || {}) as Record<string, unknown>;
+      const merged = { ...base, sectionStyles: { ...(typeof base.sectionStyles === 'object' ? base.sectionStyles as object : {}), ...styles } };
+      const saved = await repository.saveLiveDraft(actor, merged, 'Super Admin section display styles');
+      const version = await repository.publishLive(actor, saved.versionId);
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, okStyles: true, sectionStyles: merged.sectionStyles, versionId: version.versionId, publishedAt: version.publishedAt });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
   app.post('/api/live-page-config/rollback', async (request, response) => {
     try {
-      const actor = await requireActor(request);
+      const actor = await requireSuperAdmin(request);
       const body = (request.body || {}) as Record<string, unknown>;
       const repository = repositoryOrFail();
       const versionId = String(body.versionId || '');

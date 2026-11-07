@@ -71,6 +71,15 @@ else
   done
 fi
 
+LOC_COUNT=$("${PSQL[@]}" -d "$DB_NAME" -tAc "select coalesce(to_regclass('public.india_locations')::text, '')")
+if [ -n "$LOC_COUNT" ]; then
+  LOC_ROWS=$("${PSQL[@]}" -d "$DB_NAME" -tAc "select count(*) from public.india_locations")
+  if [ "${LOC_ROWS:-0}" -lt 1000 ]; then
+    echo "[stays-dev] seeding India location directory (loopback only)"
+    BOS_LISTINGS_DATABASE_URL="$DB_URL" npx tsx "$ROOT/scripts/seed-india-locations.ts"
+  fi
+fi
+
 COUNT=$("${PSQL[@]}" -d "$DB_NAME" -tAc "select count(*) from public.stay_properties")
 if [ "$COUNT" = "0" ]; then
   echo "[stays-dev] seeding the existing demo catalog into the local database"

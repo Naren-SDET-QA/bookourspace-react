@@ -444,13 +444,42 @@ console.log('=== E. PostgreSQL legacy live-page config ===');
     },
   });
   expectedStatus(draft, 200, 'legacy draft');
+  const privateDraftRead = await call('GET', '/api/live-page-config');
+  expectedStatus(privateDraftRead, 200, 'published config while draft exists');
+  assert.notEqual(privateDraftRead.json.published?.pages?.pg_hostels?.heroBanner?.headline, 'Legacy PG probe');
+  const publishAsAdmin = await call('POST', '/api/live-page-config/publish', { token: ADMIN, body: {} });
+  expectedStatus(publishAsAdmin, 403, 'legacy publish as non-super admin');
+  assert.equal(publishAsAdmin.json.error, 'BUILDER_SUPER_ADMIN_REQUIRED');
   const publishedConfig = await call('POST', '/api/live-page-config/publish', { token: SUPER, body: {} });
   expectedStatus(publishedConfig, 200, 'legacy publish');
   const publicConfig = await call('GET', '/api/live-page-config');
   expectedStatus(publicConfig, 200, 'legacy public read');
   assert.ok(publicConfig.json.published?.versionId);
   assert.equal(publicConfig.json.otaSync.activeVersion, publishedConfig.json.versionId);
-  pass('legacy configuration draft/publish persists in PostgreSQL and is served publicly');
+  assert.equal(publicConfig.json.published?.pages?.pg_hostels?.heroBanner?.headline, 'Legacy PG probe');
+  pass('Admin drafts stay private until Super Admin publishes; the published version is served publicly');
+
+  const adminStyleWrite = await call('POST', '/api/live-page-config/section-styles', {
+    token: ADMIN,
+    body: { styles: { classes: 'timetable', venues: 'agenda' } },
+  });
+  expectedStatus(adminStyleWrite, 403, 'section styles as non-super admin');
+  assert.equal(adminStyleWrite.json.error, 'BUILDER_SUPER_ADMIN_REQUIRED');
+  const invalidStyle = await call('POST', '/api/live-page-config/section-styles', {
+    token: SUPER,
+    body: { styles: { classes: 'compact' } },
+  });
+  expectedStatus(invalidStyle, 400, 'invalid section style');
+  const publishedStyles = await call('POST', '/api/live-page-config/section-styles', {
+    token: SUPER,
+    body: { styles: { classes: 'timetable', venues: 'agenda' } },
+  });
+  expectedStatus(publishedStyles, 200, 'section style publish');
+  const publicStyles = await call('GET', '/api/live-page-config');
+  expectedStatus(publicStyles, 200, 'published styles for customer');
+  assert.equal(publicStyles.json.published?.sectionStyles?.classes, 'timetable');
+  assert.equal(publicStyles.json.published?.sectionStyles?.venues, 'agenda');
+  pass('only Super Admin can publish allowlisted timetable and agenda styles for all clients');
 
   const customerDraft = await call('POST', '/api/live-page-config/draft', {
     token: CUSTOMER,

@@ -340,7 +340,19 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
     if (!guest.ok) {
       return fail(res, 400, 'INVALID_GUEST_DETAILS', guest.message);
     }
-    if (!actor.email || guest.email !== actor.email) {
+    let accountEmail = String(actor.email || '').trim().toLowerCase();
+    if (!accountEmail) {
+      try {
+        const profile = await withActor(actor, async (client) => {
+          const result = await client.query('select email from public.profiles where id = auth.uid() limit 1');
+          return result.rows[0] || null;
+        });
+        accountEmail = String(profile?.email || '').trim().toLowerCase();
+      } catch {
+        accountEmail = '';
+      }
+    }
+    if (!accountEmail || guest.email.toLowerCase() !== accountEmail) {
       return fail(res, 403, 'GUEST_EMAIL_MISMATCH', 'Use the email address from your signed-in Google account.');
     }
     const requestedGuests = Number(body.guests ?? 1);

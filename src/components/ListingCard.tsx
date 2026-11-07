@@ -495,6 +495,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
 
     return (
       <div
+        data-listing-city={listing.location?.city || ''}
         onClick={() => onSelect(buildHotelPayload())}
         className={`group relative bg-white dark:bg-slate-900 rounded-3xl border transition-all duration-300 flex flex-col justify-between overflow-hidden hover:-translate-y-1 hover:shadow-2xl cursor-pointer ${
           isCompared
@@ -858,6 +859,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
 
   return (
     <div 
+      data-listing-city={listing.location?.city || ''}
       className={`group relative bg-white dark:bg-slate-900 border rounded-2xl transition-all duration-300 flex flex-col justify-between p-2.5 hover:-translate-y-0.5 hover:shadow-xl cursor-pointer ${
         isCompared 
           ? 'border-[#4338CA] ring-2 ring-[#4338CA]/30 shadow-md' 

@@ -64,7 +64,7 @@ export function StayReceiptModal({ bookingId, onClose }: { bookingId: string; on
       <div role="dialog" aria-modal="true" aria-label="Booking receipt" className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl bg-white p-5 text-[#222222] shadow-2xl sm:rounded-2xl dark:bg-slate-950 dark:text-slate-100">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <img src="/assets/brand/bos-logo-lockup.webp" alt="BookOurSpace" className="mb-2 h-8 w-auto object-contain object-left" />
+            <img src="/assets/brand/bos-logo-lockup.webp" srcSet="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" sizes="160px" width="1560" height="320" decoding="async" alt="BookOurSpace" className="mb-2 h-8 w-auto object-contain object-left" />
             <p className="text-xl font-semibold">{receipt?.taxInvoice ? 'GST tax invoice' : paid ? 'Payment receipt' : 'Booking confirmation'}</p>
             <p className="mt-1 text-xs text-[#717171] dark:text-slate-400">{receipt?.taxInvoice ? 'GST-compliant tax invoice after verified settlement.' : paid ? 'Paid amount, taxes and transaction reference.' : 'This is a booking confirmation, not a paid receipt. Payment is still due.'}</p>
           </div>

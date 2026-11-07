@@ -1,8 +1,9 @@
 import React, { useId } from 'react';
 
 export const BOS_OFFICIAL_LOGO_STATIC = '/assets/brand/bos-logo-lockup.webp';
-// Rotation is rendered as a lightweight overlay over the same static artwork.
-export const BOS_OFFICIAL_LOGO_ANIMATED = BOS_OFFICIAL_LOGO_STATIC;
+// The animated overlay uses the same artwork at a responsive 2x size so it
+// never pulls the 219 KB print original into the mobile Home critical path.
+export const BOS_OFFICIAL_LOGO_ANIMATED = '/assets/brand/bos-logo-lockup-1120-bea9629c0067.webp';
 
 const LOGO_WIDTH = 1560;
 const LOGO_HEIGHT = 320;
@@ -30,6 +31,8 @@ export default function BOSOfficialLogo({
     <span className={`bos-official-logo ${className}`} role="img" aria-label={alt}>
       <img
         src={BOS_OFFICIAL_LOGO_STATIC}
+        srcSet="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w"
+        sizes="(max-width: 622px) 90vw, 560px"
         alt=""
         width={LOGO_WIDTH}
         height={LOGO_HEIGHT}
@@ -54,8 +57,8 @@ export default function BOSOfficialLogo({
           {/* Clear the stationary pin underneath while retaining its original shadow. */}
           <path d={PIN_PATH} fill="#fff" />
           <g className="bos-official-logo__spin">
-            <image className="bos-official-logo__face bos-official-logo__face--front" href={BOS_OFFICIAL_LOGO_STATIC} x="0" y="0" width={LOGO_WIDTH} height={LOGO_HEIGHT} clipPath={`url(#${clipId})`} />
-            <image className="bos-official-logo__face bos-official-logo__face--back" href={BOS_OFFICIAL_LOGO_STATIC} x="0" y="0" width={LOGO_WIDTH} height={LOGO_HEIGHT} clipPath={`url(#${clipId})`} />
+            <image className="bos-official-logo__face bos-official-logo__face--front" href={BOS_OFFICIAL_LOGO_ANIMATED} x="0" y="0" width={LOGO_WIDTH} height={LOGO_HEIGHT} clipPath={`url(#${clipId})`} />
+            <image className="bos-official-logo__face bos-official-logo__face--back" href={BOS_OFFICIAL_LOGO_ANIMATED} x="0" y="0" width={LOGO_WIDTH} height={LOGO_HEIGHT} clipPath={`url(#${clipId})`} />
           </g>
         </svg>
       )}

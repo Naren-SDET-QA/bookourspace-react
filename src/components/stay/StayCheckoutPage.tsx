@@ -96,7 +96,7 @@ export function StayCheckoutPage({
           <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
             <button type="button" onClick={onClose} aria-label="Close booking result" className="flex h-10 w-10 items-center justify-center rounded-full border border-[#dddddd] dark:border-slate-700"><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
             <h1 className="text-lg font-semibold">{property.localTestFixture ? 'Local test reservation created' : paid ? 'Payment successful' : requested ? 'Request sent' : 'Booking confirmed'}</h1>
-            <img src="/assets/brand/bos-logo-lockup.webp" alt="BookOurSpace" className="ml-auto h-8 w-auto max-w-40 object-contain object-right" />
+            <img src="/assets/brand/bos-logo-lockup.webp" srcSet="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" sizes="160px" width="1560" height="320" decoding="async" alt="BookOurSpace" className="ml-auto h-8 w-auto max-w-40 object-contain object-right" />
           </div>
         </header>
         <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">

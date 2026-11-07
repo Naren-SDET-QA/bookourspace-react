@@ -43,8 +43,12 @@ const pending = new Set([
   '20261106010000_stay_razorpay_and_verified_upi.sql',
   '20261106120000_stay_owner_onboarding_approval.sql',
   '20261106130000_stay_booking_guest_contacts.sql',
+  '20261107183158_india_location_catalog_search.sql',
+  '20261108090000_india_location_directory.sql',
+  '20261108120000_movies_showtimes_only.sql',
+  '20261108130000_movies_showtimes_dates.sql',
 ]);
-if (pending.size !== 9) throw new Error(`expected 9 pending migration files; found ${pending.size}`);
+if (pending.size !== 13) throw new Error(`expected 13 pending migration files; found ${pending.size}`);
 if (files.length !== expectedCount) throw new Error(`expected ${expectedCount} manifest migration files; found ${files.length}`);
 for (const file of files) {
   const sql = fs.readFileSync(path.join(dir, file), 'utf8');

@@ -49,17 +49,15 @@ async function bootApp(page: Page) {
   await expect
     .poll(async () => (await page.locator('body').innerText()).trim().length, { timeout: 30_000 })
     .toBeGreaterThan(200);
-  // The shell mounts before the branded startup overlay finishes its 950 ms
-  // entrance. Wait for the real interactive shell before keyboard and route
-  // checks so they do not target the inert overlay wrapper.
-  await expect(
-    page.getByText('Self-Healing Modular Engine & 360° Globe Ready...', { exact: true })
-  ).toHaveCount(0, { timeout: 30_000 });
+  // The lightweight boot screen is interactive while App loads. Wait for the
+  // real marketplace header so keyboard and route checks don't target it.
+  await expect(page.getByRole('button', { name: 'Open All Sections & Quick Menu' }))
+    .toBeVisible({ timeout: 30_000 });
 }
 
 async function waitForLazyModule(page: Page, route: string) {
   if (route === '#movies') {
-    await expect(page.getByRole('heading', { name: /Movies in|Movies & Cinemas/i }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Movies & showtimes/i }).first()).toBeVisible();
     return;
   }
   const modules: Record<string, { section: string; loading: string }> = {
@@ -205,13 +203,17 @@ test.describe('responsive shell', () => {
   });
 });
 
-test('Movies route does not show bundled sample shows without saved owner entries', async ({ page }) => {
+test('Movies route shows only real showtimes and no booking surfaces', async ({ page }) => {
   await bootApp(page);
   await page.evaluate(() => { window.location.hash = '#movies'; });
-  await expect(page.getByRole('heading', { name: /Movies in|Movies & Cinemas/i }).first()).toBeVisible();
-  await expect(page.getByText('No shows found', { exact: true })).toBeVisible();
-  await expect(page.locator('article')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Movies & showtimes/i }).first()).toBeVisible();
+  // No bundled/demo movie titles may leak into the showtimes directory.
   await expect(page.getByText(/Pushpa 2|Kalki 2898 AD|PVR Orion Mall|indicative sample/i)).toHaveCount(0);
+  // Real inventory or the honest empty state, never fabricated cards.
+  await expect(page.getByText(/Movies near you|No showtimes for this location yet|Movie not assigned/).first()).toBeVisible();
+  // Booking, seats, payments, tickets and refunds are hidden for Movies.
+  await expect(page.getByRole('button', { name: /book seats|select seats|pay now|buy ticket|refund/i })).toHaveCount(0);
+  await expect(page.getByText(/No online booking for Movies/i).first()).toBeVisible();
 });
 
 test.describe('module deep links', () => {
@@ -244,14 +246,25 @@ test.describe('module deep links', () => {
     expect(errors, `uncaught page errors: ${errors.join(' | ')}`).toHaveLength(0);
   });
 
-  test('all six modules stay within the viewport at every target width', async ({ page }) => {
+  test('all six module views stay within the viewport at every target width', async ({ page }) => {
     const errors = collectErrors(page);
     await bootApp(page);
+    const sections: Record<string, string> = {
+      '#pg': 'pg_hostels',
+      '#classes': 'classes',
+      '#venues': 'venues',
+      '#services': 'services',
+      '#stays': 'hotel_stay',
+      '#movies': 'movies',
+    };
+    const header = page.getByTestId('universal-marketplace-header');
     for (const viewport of VIEWPORTS) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       for (const route of ROUTES) {
-        await page.evaluate((hash) => { window.location.hash = hash; }, route);
-        await expect.poll(async () => page.evaluate(() => window.location.hash)).toBe(route);
+        const section = sections[route];
+        const tab = header.getByTestId(`market-section-${section}`);
+        await tab.click();
+        await expect(tab).toHaveAttribute('aria-pressed', 'true');
         await waitForLazyModule(page, route);
         const size = await page.evaluate(() => ({
           viewport: document.documentElement.clientWidth,
