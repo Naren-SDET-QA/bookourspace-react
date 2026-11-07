@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 71,
+  "migrationCount": 72,
   "migrations": [
     {
       "order": 2,
@@ -582,6 +582,14 @@
       "file": "supabase/migrations/20261108130000_movies_showtimes_dates.sql",
       "bytes": 454,
       "sha256": "c2b2fcf806f1dbe440e3113d47325b6a6ecb23380b3bdc66036b900b8540f600"
+    },
+    {
+      "order": 73,
+      "version": "20261108140000",
+      "name": "distributed_api_rate_limits",
+      "file": "supabase/migrations/20261108140000_distributed_api_rate_limits.sql",
+      "bytes": 3521,
+      "sha256": "62755a92c84474e18f43cd4384b010250ff6e26e552367448060837d3a5ede01"
     }
   ],
   "review": {

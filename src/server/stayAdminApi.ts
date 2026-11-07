@@ -1,3 +1,4 @@
+import { logSafeError } from './safeLogging';
 import type express from 'express';
 import { type PoolClient } from 'pg';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
@@ -125,7 +126,7 @@ export function registerStayAdminApi(app: express.Express, deps: StayAdminApiDep
         }
         if (error?.code === 'P0002') { bad(res, 404, 'STAY_LISTING_NOT_FOUND'); return; }
         if (error?.code === '42501') { bad(res, 403, 'STAY_REVIEW_FORBIDDEN', message); return; }
-        console.error('[stay-admin] request failed', error?.code || 'NO_CODE', error?.message || '');
+        logSafeError('stay-admin', 'request', error);
         bad(res, 500, 'STAY_ADMIN_REQUEST_FAILED');
       }
     };

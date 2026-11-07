@@ -43,6 +43,9 @@ import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
 import { registerMediaValidationApi } from './src/server/mediaValidationApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
 import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
+import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
+import { apiNoStoreByDefault } from './src/server/apiCachePrivacy';
+import { logSafeError } from './src/server/safeLogging';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -252,7 +255,7 @@ function loadServerStore(): ServerStoreData {
       };
     }
   } catch (err) {
-    console.error('Error loading live-page-config.json:', err);
+    logSafeError('server', 'load live page configuration', err);
   }
   return {
     published: null,
@@ -391,6 +394,7 @@ async function startServer() {
 
   const app = express();
   app.disable('x-powered-by');
+  app.use(apiNoStoreByDefault);
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -447,6 +451,13 @@ async function startServer() {
   // Native Capacitor origins used by this app unless the server operator supplies
   // an exact comma-separated BOS_NATIVE_APP_ORIGINS allowlist.
   app.use(createNativeAppCorsMiddleware());
+  app.use(createDistributedApiRateLimitMiddleware({
+    pool: pgRuntimePool || null,
+    hmacSecret: SERVER_HMAC_SECRET,
+    enabled: process.env.NODE_ENV === 'test'
+      ? process.env.BOS_TEST_RATE_LIMIT === '1'
+      : process.env.NODE_ENV === 'production' || Boolean(pgRuntimePool),
+  }));
   app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
 
   // 0. PostgreSQL-backed live page configuration and admin module settings.
@@ -1067,7 +1078,7 @@ Task:
         recommendations: validRecs.slice(0, 3),
       });
     } catch (error: any) {
-      console.error('Gemini Quick Book error, using smart ranker fallback:', error?.message || error);
+      logSafeError('gemini', 'quick book; using ranker fallback', error);
       res.json(buildSmartRankedResponse('fallback_on_error'));
     }
   });
@@ -1526,7 +1537,7 @@ Task:
         };
       }
     } catch (err) {
-      console.error('Failed to read authoritative store, initializing clean store:', err);
+      logSafeError('server', 'read compatibility store', err);
     }
     return {
       seatLocks: {},
@@ -1554,7 +1565,7 @@ Task:
       fs.renameSync(tempPath, AUTH_STORE_FILE_PATH);
       return true;
     } catch (err) {
-      console.error('Failed to persist authoritative store:', err);
+      logSafeError('server', 'persist compatibility store', err);
       try {
         if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       } catch {}
@@ -2180,7 +2191,7 @@ Task:
         });
         return;
       } catch (error) {
-        console.error('[auth] production profile provisioning failed:', (error as any)?.message || error);
+        logSafeError('auth', 'profile provisioning', error);
         res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
         return;
       }
@@ -2459,7 +2470,7 @@ Task:
         });
         return;
       } catch (error) {
-        console.error('[auth] production profile lookup failed:', (error as any)?.message || error);
+        logSafeError('auth', 'production profile lookup', error);
         res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -2489,7 +2500,7 @@ Task:
       try {
         const profile = await providerListingRepository.profileForIdentity(claims);
         if (!profile) {
-          console.error('[auth] no profile row for the claimed identity', claims.supabaseUserId, claims.email);
+          console.error('[auth] no profile row for verified identity');
           res.status(503).json({ ok: false, error: 'AUTH_PROFILE_NOT_PROVISIONED' });
           return;
         }
@@ -2518,7 +2529,7 @@ Task:
       } catch (error) {
         // A silent 503 hides the real reason, so it is logged before the
         // fail-closed response.
-        console.error('[auth] profile lookup failed:', (error as any)?.message || error);
+        logSafeError('auth', 'profile lookup', error);
         res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -2712,7 +2723,7 @@ Task:
         });
         return;
       } catch (error) {
-        console.error('[auth] production route guard failed:', (error as any)?.message || error);
+        logSafeError('auth', 'production route guard', error);
         res.status(503).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -5331,7 +5342,7 @@ Task:
   // A rejected request must never take the booking server down, and it must
   // never leak an internal message to the browser.
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('[server] unhandled request failure:', error?.message || error);
+    logSafeError('server', 'unhandled request', error);
     if (res.headersSent) return;
     if (String(error?.message || '').startsWith('PERSISTENCE_JSON_STORE_UNAVAILABLE_IN_PRODUCTION')) {
       res.status(503).json({

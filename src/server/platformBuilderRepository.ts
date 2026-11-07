@@ -1,3 +1,4 @@
+import { logSafeError } from './safeLogging';
 import type express from 'express';
 import { getSharedPostgresPool } from './postgresPool';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
@@ -512,7 +513,7 @@ export function registerPlatformBuilderApi(app: express.Express, deps: PlatformB
       response.status(400).json({ ok: false, error: error.code, message: error.message });
       return;
     }
-    console.error('[builder] unexpected failure:', error instanceof Error ? error.message : 'unknown');
+    logSafeError('builder', 'unexpected', error);
     response.status(500).json({ ok: false, error: 'BUILDER_INTERNAL_ERROR' });
   };
 

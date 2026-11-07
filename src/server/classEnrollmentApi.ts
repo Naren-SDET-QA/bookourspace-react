@@ -4,6 +4,7 @@ import {
   ClassEnrollmentRepository,
 } from './classEnrollmentRepository';
 import type { ProviderListingActor } from './providerListingRepository';
+import { logSafeError } from './safeLogging';
 
 export interface ClassEnrollmentApiDependencies {
   repository: ClassEnrollmentRepository;
@@ -15,20 +16,7 @@ function sendError(response: express.Response, error: unknown): void {
     response.status(error.httpStatus).json({ ok: false, error: error.code });
     return;
   }
-  const errorCode = (error as any)?.code;
-  const errorMessage = (error as any)?.message;
-  console.error('[class-enrollments] repository failure', errorCode ?? 'NO_CODE', errorMessage ?? 'NO_MESSAGE');
-  if (process.env.NODE_ENV === 'test' && error && typeof error === 'object') {
-    const pgError = error as Record<string, unknown>;
-    console.error('[class-enrollments] postgres context', JSON.stringify(Object.fromEntries(
-      ['code', 'detail', 'hint', 'where', 'schema', 'table', 'constraint', 'routine', 'file', 'line']
-        .filter((key) => pgError[key] !== undefined)
-        .map((key) => [key, pgError[key]]),
-    )));
-  }
-  if (process.env.NODE_ENV === 'test' && error instanceof Error && error.stack) {
-    console.error(error.stack);
-  }
+  logSafeError('class-enrollments', 'repository', error);
   response.status(500).json({ ok: false, error: 'CLASS_ENROLLMENT_REPOSITORY_ERROR' });
 }
 
