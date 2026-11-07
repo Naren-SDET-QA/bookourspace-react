@@ -447,6 +447,8 @@ console.log('=== E. PostgreSQL legacy live-page config ===');
   const privateDraftRead = await call('GET', '/api/live-page-config');
   expectedStatus(privateDraftRead, 200, 'published config while draft exists');
   assert.notEqual(privateDraftRead.json.published?.pages?.pg_hostels?.heroBanner?.headline, 'Legacy PG probe');
+  const baselineVersionId = privateDraftRead.json.published?.versionId;
+  assert.ok(baselineVersionId, 'published baseline version is available for rollback');
   const publishAsAdmin = await call('POST', '/api/live-page-config/publish', { token: ADMIN, body: {} });
   expectedStatus(publishAsAdmin, 403, 'legacy publish as non-super admin');
   assert.equal(publishAsAdmin.json.error, 'BUILDER_SUPER_ADMIN_REQUIRED');
@@ -458,6 +460,46 @@ console.log('=== E. PostgreSQL legacy live-page config ===');
   assert.equal(publicConfig.json.otaSync.activeVersion, publishedConfig.json.versionId);
   assert.equal(publicConfig.json.published?.pages?.pg_hostels?.heroBanner?.headline, 'Legacy PG probe');
   pass('Admin drafts stay private until Super Admin publishes; the published version is served publicly');
+
+  const rollbackAsAdmin = await call('POST', '/api/live-page-config/rollback', {
+    token: ADMIN,
+    body: { versionId: baselineVersionId },
+  });
+  expectedStatus(rollbackAsAdmin, 403, 'live page rollback as regular Admin');
+  assert.equal(rollbackAsAdmin.json.error, 'BUILDER_SUPER_ADMIN_REQUIRED');
+  const rollback = await call('POST', '/api/live-page-config/rollback', {
+    token: SUPER,
+    body: { versionId: baselineVersionId },
+  });
+  expectedStatus(rollback, 200, 'live page rollback as Super Admin');
+  assert.equal(rollback.json.published.versionId, rollback.json.versionId);
+  assert.ok(rollback.json.auditLogs.some((entry) => entry.action === 'live_page_rolled_back'));
+  const afterRollback = await call('GET', '/api/live-page-config');
+  expectedStatus(afterRollback, 200, 'public read after rollback');
+  assert.notEqual(afterRollback.json.published?.pages?.pg_hostels?.heroBanner?.headline, 'Legacy PG probe');
+  pass('only Super Admin can roll back; the restored published state and audit row are visible');
+
+  const anonymousModules = await call('GET', '/api/admin/modules');
+  expectedStatus(anonymousModules, 401, 'anonymous admin modules read');
+  const customerModules = await call('GET', '/api/admin/modules', { token: CUSTOMER });
+  expectedStatus(customerModules, 403, 'customer admin modules read');
+  const adminModules = await call('GET', '/api/admin/modules', { token: ADMIN });
+  expectedStatus(adminModules, 200, 'Admin module settings read');
+  assert.ok(adminModules.json.modules.app_settings);
+  const customerModuleWrite = await call('PUT', '/api/admin/modules/app_settings', {
+    token: CUSTOMER,
+    body: { payload: { routeOwnershipProbe: 'customer-denied' } },
+  });
+  expectedStatus(customerModuleWrite, 403, 'customer Admin module settings write');
+  const adminModuleWrite = await call('PUT', '/api/admin/modules/app_settings', {
+    token: ADMIN,
+    body: { payload: { routeOwnershipProbe: 'database-admin-write' } },
+  });
+  expectedStatus(adminModuleWrite, 200, 'Admin module settings write');
+  assert.equal(adminModuleWrite.json.moduleState.payload.routeOwnershipProbe, 'database-admin-write');
+  const reloadedAdminModules = await call('GET', '/api/admin/modules', { token: ADMIN });
+  assert.equal(reloadedAdminModules.json.modules.app_settings.payload.routeOwnershipProbe, 'database-admin-write');
+  pass('Admin module routes retain role checks and PostgreSQL persistence');
 
   const adminStyleWrite = await call('POST', '/api/live-page-config/section-styles', {
     token: ADMIN,

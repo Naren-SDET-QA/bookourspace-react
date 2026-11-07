@@ -410,9 +410,9 @@ function validateVisibilityPatch(value: unknown): MarketplaceVisibilityPatch {
 }
 
 /**
- * These routes are registered before the legacy JSON handlers, so a
- * database-backed process answers them from PostgreSQL and the JSON code below
- * is unreachable. Local development without a database keeps the old behaviour.
+ * PostgreSQL-backed handlers are registered only when their repository is
+ * configured. server.ts registers JSON compatibility handlers behind the
+ * inverse startup guard, leaving one route owner in either mode.
  */
 export function registerPlatformSettingsApi(
   app: express.Express,
