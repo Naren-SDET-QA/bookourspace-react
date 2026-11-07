@@ -12,7 +12,7 @@ test.describe('signed-out Google sign-in entry points', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('bookourspace-splash')).toHaveCount(0, { timeout: 15_000 });
-    const guestButton = page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true });
+    const guestButton = page.getByTestId('bookourspace-welcome').getByRole('button', { name: 'Explore Spaces as Guest', exact: true });
     if (await guestButton.isVisible().catch(() => false)) await guestButton.click();
     await page.getByRole('button', { name: 'Continue with Google', exact: true }).last().click();
     const logo = page.locator('[aria-label="BookOurSpace Google sign-in"] img');
@@ -23,8 +23,9 @@ test.describe('signed-out Google sign-in entry points', () => {
   });
 
   test('lightweight boot welcome is immediately usable and Guest choice persists', async ({ page }) => {
-    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => localStorage.removeItem('bos_entry_choice_v1'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
     const officialLogo = page.locator('[data-testid="bookourspace-welcome"] .bos-entry-official-logo');
     await expect(officialLogo.locator('img')).toHaveAttribute('src', /bos-logo-lockup\.webp$/);
@@ -46,10 +47,12 @@ test.describe('signed-out Google sign-in entry points', () => {
     await expect.poll(async () => officialLogo.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth))
       .toBeGreaterThanOrEqual(560);
     await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true })).toBeVisible();
+    const welcomeGuest = page.getByTestId('bookourspace-welcome').getByRole('button', { name: 'Explore Spaces as Guest', exact: true });
+    await expect(welcomeGuest).toBeVisible();
 
-    await page.getByRole('button', { name: 'Explore Spaces as Guest', exact: true }).click();
+    await welcomeGuest.click();
     await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('bos_entry_choice_v1'))).toBe('guest');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0, { timeout: 10_000 });
   });
