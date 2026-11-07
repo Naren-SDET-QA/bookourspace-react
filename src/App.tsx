@@ -71,6 +71,7 @@ import {
 import { playAlertChime } from './utils/audio';
 import { canAccessAdminConsole } from './lib/accessControl';
 import type { SuperAdminSectionId } from './components/AdminDashboard';
+import { applyLivePageOverrides } from './lib/livePageOverrides';
 const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
   { id: 'dashboard', label: 'Overview' },
   { id: 'data_management', label: 'Data Management' },
@@ -708,6 +709,7 @@ function MarketplaceAppContent() {
         });
     };
     refreshPublishedConfig();
+    const publishPoll = window.setInterval(refreshPublishedConfig, 20_000);
     window.addEventListener('bos-live-page-config-refresh', refreshPublishedConfig);
     const handleLivePageSync = (ev: Event) => {
       const customEv = ev as CustomEvent<{ mode: string; config: LivePageEditorConfig }>;
@@ -722,10 +724,34 @@ function MarketplaceAppContent() {
     window.addEventListener('bos-live-page-config-updated', handleLivePageSync);
     return () => {
       mounted = false;
+      window.clearInterval(publishPoll);
       window.removeEventListener('bos-live-page-config-refresh', refreshPublishedConfig);
       window.removeEventListener('bos-live-page-config-updated', handleLivePageSync);
     };
   }, []);
+
+  // Apply the published inline overrides to every visitor's page. React may
+  // re-render the text later, so a debounced observer re-applies them.
+  useEffect(() => {
+    if (!livePageConfig) return;
+    let scheduled: number | undefined;
+    const apply = () => {
+      try {
+        applyLivePageOverrides(livePageConfig, activeMarketSection);
+      } catch { /* never break rendering for an override */ }
+    };
+    apply();
+    scheduled = window.setTimeout(apply, 350);
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(scheduled);
+      scheduled = window.setTimeout(apply, 250);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      window.clearTimeout(scheduled);
+      observer.disconnect();
+    };
+  }, [livePageConfig, activeMarketSection, activeView]);
 
   const currentLivePage =
     livePageConfig.pages[activeMarketSection] || livePageConfig.pages.pg_hostels;
