@@ -53,7 +53,20 @@ function routesIn(source, file) {
  * "no PostgreSQL configured" fallback pattern: only one of them is ever
  * mounted in a process.
  */
-function areMutuallyExclusive(source, first, second) {
+function areMutuallyExclusive(source, first, second, sourceByFile) {
+  // PostgreSQL handlers are registered only when the repository exists;
+  // their local JSON counterparts must carry the inverse guard themselves.
+  // Checking both sides avoids treating an earlier `return` inside a handler
+  // as proof that duplicate registrations are mutually exclusive.
+  if (first.file === 'src/server/platformSettingsApi.ts' && second.file === 'server.ts') {
+    const serverSource = sourceByFile.get(second.file) || '';
+    const repositoryGuard = /if\s*\(\s*platformSettingsRepository\s*\)\s*\{\s*registerPlatformSettingsApi\(app,/s.test(serverSource);
+    const registrationPrefix = serverSource.slice(Math.max(0, second.index - 100), second.index);
+    const inverseFallbackGuard = /if\s*\(\s*!platformSettingsRepository\s*\)\s*$/.test(registrationPrefix);
+    if (repositoryGuard && inverseFallbackGuard) {
+      return 'database registration versus explicit local fallback guard';
+    }
+  }
   const between = source.slice(first.index, second.index);
   if (/}\s*else\s*{/.test(between)) return 'if/else branch';
   if (/return;/.test(between)) return 'early-return fallback';
@@ -61,10 +74,16 @@ function areMutuallyExclusive(source, first, second) {
 }
 
 const routes = [];
+const sourceByFile = new Map();
 for (const file of fs.readdirSync(serverDir).filter((name) => name.endsWith('.ts'))) {
-  routes.push(...routesIn(read(path.join(serverDir, file)), `src/server/${file}`));
+  const relative = `src/server/${file}`;
+  const source = read(path.join(serverDir, file));
+  sourceByFile.set(relative, source);
+  routes.push(...routesIn(source, relative));
 }
-routes.push(...routesIn(read(path.join(root, 'server.ts')), 'server.ts'));
+const serverSource = read(path.join(root, 'server.ts'));
+sourceByFile.set('server.ts', serverSource);
+routes.push(...routesIn(serverSource, 'server.ts'));
 
 const grouped = new Map();
 for (const route of routes) {
@@ -77,8 +96,8 @@ let shadowed = 0;
 console.log(`# Duplicate route audit — ${routes.length} registrations, ${grouped.size} distinct paths\n`);
 for (const [key, list] of grouped) {
   if (list.length < 2) continue;
-  const source = read(path.join(root, list[0].file));
-  const exclusive = areMutuallyExclusive(source, list[0], list[1]);
+  const source = sourceByFile.get(list[0].file) || read(path.join(root, list[0].file));
+  const exclusive = areMutuallyExclusive(source, list[0], list[1], sourceByFile);
   if (exclusive) {
     console.log(`OK   ${key} — mutually exclusive (${exclusive})`);
     for (const item of list) console.log(`       ${item.file}:${item.line}`);

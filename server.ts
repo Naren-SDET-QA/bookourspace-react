@@ -461,18 +461,17 @@ async function startServer() {
   app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
 
   // 0. PostgreSQL-backed live page configuration and admin module settings.
-  //    Registered first so that a database-backed process never answers these
-  //    from the JSON compatibility store; the JSON handlers below stay for
-  //    local development without a database.
+  //    Exactly one route owner is registered per process: PostgreSQL when
+  //    configured, otherwise the local-only JSON compatibility handlers.
   if (platformSettingsRepository) {
     registerPlatformSettingsApi(app, {
       repository: platformSettingsRepository,
       verifySession: (request) => verifySessionTokenFromRequest(request),
     });
-  }
+  } else {
 
   // 1. GET Live Page Config (OTA endpoint consumed by Web, Android, and iOS clients)
-  app.get('/api/live-page-config', (req, res) => {
+  if (!platformSettingsRepository) app.get('/api/live-page-config', (req, res) => {
     const store = loadServerStore();
     const claims = verifySessionTokenFromRequest(req);
     const isAdmin = Boolean(claims && hasCurrentAdminSession(claims));
@@ -492,7 +491,7 @@ async function startServer() {
   });
 
   // 2. POST Save Draft (Authorized Admin only)
-  app.post('/api/live-page-config/draft', (req, res) => {
+  if (!platformSettingsRepository) app.post('/api/live-page-config/draft', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims || !hasCurrentAdminSession(claims)) {
       res.status(claims ? 403 : 401).json({ ok: false, error: claims ? 'FORBIDDEN_ADMIN_ONLY' : 'UNAUTHORIZED_SESSION' });
@@ -533,7 +532,7 @@ async function startServer() {
   });
 
   // 3. POST Publish Live Config across Web, Android, and iOS (Authorized Admin only)
-  app.post('/api/live-page-config/publish', (req, res) => {
+  if (!platformSettingsRepository) app.post('/api/live-page-config/publish', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims || !hasCurrentAdminSession(claims)) {
       res.status(claims ? 403 : 401).json({ ok: false, error: claims ? 'FORBIDDEN_ADMIN_ONLY' : 'UNAUTHORIZED_SESSION' });
@@ -606,7 +605,7 @@ async function startServer() {
   });
 
   // 4. POST Rollback to a Previous Version (Authorized Admin only)
-  app.post('/api/live-page-config/rollback', (req, res) => {
+  if (!platformSettingsRepository) app.post('/api/live-page-config/rollback', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims || !hasCurrentAdminSession(claims)) {
       res.status(claims ? 403 : 401).json({ ok: false, error: claims ? 'FORBIDDEN_ADMIN_ONLY' : 'UNAUTHORIZED_SESSION' });
@@ -656,6 +655,7 @@ async function startServer() {
       auditLogs: store.auditLogs,
     });
   });
+  }
 
   // 5. GET & POST Automated Billing Engine Endpoints
   app.get('/api/billing/records', (_req, res) => {
@@ -4602,7 +4602,7 @@ Task:
     'app_settings',
   ] as const;
 
-  app.get('/api/admin/modules', (_req, res) => {
+  if (!platformSettingsRepository) app.get('/api/admin/modules', (_req, res) => {
     const claims = verifySessionTokenFromRequest(_req);
     if (!claims) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
@@ -4621,7 +4621,7 @@ Task:
     });
   });
 
-  app.put('/api/admin/modules/:moduleKey', (req, res) => {
+  if (!platformSettingsRepository) app.put('/api/admin/modules/:moduleKey', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
