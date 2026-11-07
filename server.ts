@@ -1497,6 +1497,18 @@ Task:
     /** Provider webhook event ids, recorded once for idempotent callbacks. */
     razorpayWebhookEvents: Record<string, { eventType?: string; intentId?: string; status?: string; receivedAt?: string }>;
     checkedInPasses: Record<string, { checkedInAt: string; checkedInBy: string }>;
+    passVerificationAudit: Array<{
+      id: string;
+      occurredAt: string;
+      actorUserId: string;
+      actorRole: 'provider' | 'admin';
+      action: 'check_in';
+      bookingId: string;
+      listingId: string;
+      previousState: 'confirmed';
+      newState: 'checked_in';
+      reason: string;
+    }>;
     users: AuthoritativeUserRecord[];
     notifications: AuthoritativeNotificationRecord[];
     notificationCampaigns: AuthoritativeNotificationCampaign[];
@@ -1519,6 +1531,7 @@ Task:
           usedRazorpayPaymentIds: parsed.usedRazorpayPaymentIds || {},
           razorpayWebhookEvents: parsed.razorpayWebhookEvents || {},
           checkedInPasses: parsed.checkedInPasses || {},
+          passVerificationAudit: Array.isArray(parsed.passVerificationAudit) ? parsed.passVerificationAudit : [],
           users:
             Array.isArray(parsed.users) && parsed.users.length > 0
               ? parsed.users
@@ -1548,6 +1561,7 @@ Task:
       usedRazorpayPaymentIds: {},
       razorpayWebhookEvents: {},
       checkedInPasses: {},
+      passVerificationAudit: [],
       users: [...INITIAL_SEED_USERS],
       notifications: [...INITIAL_SEED_NOTIFICATIONS],
       notificationCampaigns: [...INITIAL_SEED_CAMPAIGNS],
@@ -3537,14 +3551,38 @@ Task:
   });
 
   // 9. CRYPTOGRAPHIC QR PASS SIGNING & VERIFICATION ENDPOINTS
-  app.post('/api/passes/verify', (req, res) => {
-    const { passToken, passCode, signature, markCheckedIn, verifierRole } = req.body || {};
-    const store = loadAuthoritativeStore();
+  let passCheckInQueue: Promise<void> = Promise.resolve();
+  const withPassCheckInLock = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const previous = passCheckInQueue;
+    let release!: () => void;
+    passCheckInQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  };
 
-    let cleanCode = String(passCode || '').trim().toUpperCase();
-    let providedSig = String(signature || '').trim().toUpperCase();
+  app.post('/api/passes/verify', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, verified: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (claims.authProvider !== 'google' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(claims.supabaseUserId || ''))) {
+      res.status(401).json({ ok: false, verified: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
+      return;
+    }
 
-    const rawToken = String(passToken || '').trim();
+    const body = req.body || {};
+    const rawToken = String(body.passToken || '').trim();
+    let cleanCode = String(body.passCode || '').trim().toUpperCase();
+    let providedSig = String(body.signature || '').trim().toUpperCase();
+    if (rawToken.length > 500 || cleanCode.length > 120 || providedSig.length > 128) {
+      res.status(400).json({ ok: false, verified: false, error: 'INVALID_PASS_TOKEN' });
+      return;
+    }
     if (rawToken.includes('.')) {
       const parts = rawToken.split('.');
       cleanCode = parts[0].trim().toUpperCase();
@@ -3552,124 +3590,310 @@ Task:
     } else if (!cleanCode && rawToken) {
       cleanCode = rawToken.toUpperCase();
     }
-
-    if (!cleanCode) {
-      res.status(400).json({ ok: false, verified: false, error: 'MISSING_PASS_CODE' });
+    if (!cleanCode || !providedSig) {
+      res.status(400).json({ ok: false, verified: false, error: 'MISSING_PASS_CODE_OR_SIGNATURE' });
       return;
     }
+    const markCheckedIn = body.markCheckedIn === true;
 
-    // Look up authoritative booking by passCode or qrPassToken or bookingId
-    const booking = store.bookings.find(
-      (b) =>
-        b.passCode.toUpperCase() === cleanCode ||
-        b.qrPassToken.toUpperCase() === rawToken.toUpperCase() ||
-        b.id.toUpperCase() === cleanCode
-    );
-
-    if (!booking) {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'PASS_NOT_FOUND_OR_FORGED',
-        message: `QR Pass "${cleanCode}" does not match any server-issued booking record.`,
-      });
-      return;
-    }
-
-    // Verify cryptographic HMAC signature
-    const expected = signQrPassPayload({
-      passCode: booking.passCode,
-      bookingId: booking.id,
-      listingId: booking.listingId,
-      scheduledDate: booking.scheduledDate,
-      seats: booking.seats,
+    const response = (status: number, error: string, message?: string) => ({
+      status,
+      body: { ok: false, verified: false, error, ...(message ? { message } : {}) },
+    });
+    const verifiedResponse = (booking: {
+      id: string;
+      listingId: string;
+      listingTitle: string;
+      customerName: string;
+      scheduledDate: string;
+      timeSlot?: string;
+      showtime?: string;
+      seats?: string[];
+      screenName?: string;
+      passCode: string;
+      checkedInAt?: string | null;
+    }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        verified: true,
+        booking: {
+          id: booking.id,
+          listingId: booking.listingId,
+          listingTitle: booking.listingTitle,
+          customerName: booking.customerName,
+          scheduledDate: booking.scheduledDate,
+          timeSlot: booking.timeSlot,
+          showtime: booking.showtime,
+          seats: booking.seats,
+          screenName: booking.screenName,
+          passCode: booking.passCode,
+          checkedInAt: booking.checkedInAt || null,
+        },
+      },
     });
 
-    if (!providedSig || !safeTimingEqualHex(providedSig, expected.qrSignature)) {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'INVALID_OR_FORGED_QR_SIGNATURE',
-        message: 'Cryptographic HMAC-SHA256 signature is missing or invalid. Forged QR passes are rejected.',
-      });
-      return;
-    }
+    try {
+      if (pgRuntimePool) {
+        const client = await pgRuntimePool.connect();
+        let transactionOpen = false;
+        try {
+          await client.query('begin');
+          transactionOpen = true;
+          const actorId = String(claims.supabaseUserId).toLowerCase();
+          const profileResult = await client.query(
+            `select role, account_status from public.profiles where id = $1::uuid limit 1`,
+            [actorId],
+          );
+          const profile = profileResult.rows[0];
+          if (!profile || profile.account_status !== 'active') {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'ACTIVE_PROFILE_REQUIRED' });
+            return;
+          }
+          const actorRole = String(profile.role);
+          if (!['provider', 'admin'].includes(actorRole) || claims.role !== actorRole) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'PROVIDER_OR_ADMIN_REQUIRED' });
+            return;
+          }
 
-    if (booking.status === 'cancelled') {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'BOOKING_CANCELLED',
-        message: `QR Pass ${booking.passCode} has been cancelled and refunded. Theatre entry is denied.`,
-      });
-      return;
-    }
+          const result = await client.query(
+            `select b.id, b.listing_id, b.listing_title, b.provider_id, b.customer_name,
+                    b.scheduled_date, b.scheduled_time, b.status, b.payload,
+                    b.qr_signature, b.qr_pass_token, b.payment_mode, b.payment_status,
+                    l.owner_id
+               from public.bookings b
+               left join public.listings l on l.id = b.listing_id
+              where upper(b.id) = $1
+                 or upper(coalesce(b.payload ->> 'passCode', '')) = $1
+                 or b.qr_pass_token = $2
+              order by case when b.qr_pass_token = $2 then 0 else 1 end
+              limit 1
+              for update of b`,
+            [cleanCode, rawToken],
+          );
+          const row = result.rows[0];
+          if (!row) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(404).json({ ok: false, verified: false, error: 'PASS_NOT_FOUND' });
+            return;
+          }
+          if (actorRole === 'provider' && String(row.owner_id || '').toLowerCase() !== actorId) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'FORBIDDEN_NOT_LISTING_OWNER' });
+            return;
+          }
 
-    if (booking.paymentMode === 'pay_qr' && booking.paymentStatus !== 'verified') {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'PAYMENT_NOT_VERIFIED',
-        message: `QR Pass ${booking.passCode} payment is pending bank settlement verification. Entry is denied.`,
-      });
-      return;
-    }
+          const payload = row.payload && typeof row.payload === 'object' ? row.payload as Record<string, unknown> : {};
+          const passCode = String(payload.passCode || cleanCode).trim().toUpperCase();
+          const seats = Array.isArray(payload.seats) ? payload.seats.map(String) : [];
+          const expected = signQrPassPayload({
+            passCode,
+            bookingId: String(row.id),
+            listingId: String(row.listing_id),
+            scheduledDate: String(row.scheduled_date),
+            seats,
+          });
+          if (!row.qr_signature || !safeTimingEqualHex(String(row.qr_signature).toUpperCase(), expected.qrSignature) || !safeTimingEqualHex(providedSig, expected.qrSignature)) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'INVALID_OR_FORGED_QR_SIGNATURE' });
+            return;
+          }
+          if (String(row.status) === 'cancelled') {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'BOOKING_CANCELLED' });
+            return;
+          }
+          if (String(row.payment_mode) === 'pay_qr' && String(row.payment_status) !== 'verified') {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'PAYMENT_NOT_VERIFIED' });
+            return;
+          }
+          const expiryValue = payload.expiresAtIso ?? payload.expiresAt;
+          const expiry = typeof expiryValue === 'string' ? Date.parse(expiryValue) : Number.NaN;
+          if (!Number.isFinite(expiry)) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'TICKET_EXPIRY_REQUIRED' });
+            return;
+          }
+          if (expiry <= Date.now()) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(403).json({ ok: false, verified: false, error: 'TICKET_EXPIRED' });
+            return;
+          }
+          if (String(row.status) === 'checked_in' || payload.checkedInAt) {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(409).json({ ok: false, verified: false, alreadyCheckedIn: true, error: 'PASS_ALREADY_USED' });
+            return;
+          }
+          if (String(row.status) !== 'confirmed') {
+            await client.query('rollback');
+            transactionOpen = false;
+            res.status(409).json({ ok: false, verified: false, error: 'PASS_NOT_CHECKIN_ELIGIBLE' });
+            return;
+          }
 
-    if (booking.expiresAtIso && new Date(booking.expiresAtIso).getTime() < Date.now()) {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'TICKET_EXPIRED',
-        message: `QR Pass ${booking.passCode} expired at ${booking.expiresAtIso}.`,
-      });
-      return;
-    }
+          let checkedInAt: string | null = null;
+          if (markCheckedIn) {
+            const update = await client.query(
+              `update public.bookings
+                  set status = 'checked_in',
+                      payload = jsonb_set(coalesce(payload, '{}'::jsonb), '{checkedInAt}', to_jsonb(now()::text), true)
+                where id = $1 and status = 'confirmed'
+                returning payload ->> 'checkedInAt' as checked_in_at`,
+              [row.id],
+            );
+            if (!update.rows[0]) {
+              await client.query('rollback');
+              transactionOpen = false;
+              res.status(409).json({ ok: false, verified: false, alreadyCheckedIn: true, error: 'PASS_ALREADY_USED' });
+              return;
+            }
+            checkedInAt = String(update.rows[0].checked_in_at || new Date().toISOString());
+            await client.query(
+              `insert into public.stay_audit_events (allocation_id, event, detail, actor)
+               values (null, 'legacy_pass_checked_in', $1::jsonb, $2::uuid)`,
+              [JSON.stringify({
+                bookingId: String(row.id),
+                listingId: String(row.listing_id),
+                actorRole,
+                action: 'check_in',
+                previousState: 'confirmed',
+                newState: 'checked_in',
+                reason: 'Valid, unexpired booking pass presented by an authorized verifier.',
+              }), actorId],
+            );
+          }
+          await client.query('commit');
+          transactionOpen = false;
+          const success = verifiedResponse({
+            id: String(row.id),
+            listingId: String(row.listing_id),
+            listingTitle: String(row.listing_title || ''),
+            customerName: String(row.customer_name || ''),
+            scheduledDate: String(row.scheduled_date || ''),
+            timeSlot: String(payload.timeSlot || row.scheduled_time || ''),
+            showtime: typeof payload.showtime === 'string' ? payload.showtime : undefined,
+            seats,
+            screenName: typeof payload.screenName === 'string' ? payload.screenName : undefined,
+            passCode,
+            checkedInAt,
+          });
+          res.status(success.status).json(success.body);
+          return;
+        } finally {
+          if (transactionOpen) await client.query('rollback').catch(() => {});
+          client.release();
+        }
+      }
 
-    const existingCheckIn = store.checkedInPasses[booking.passCode];
-    if (markCheckedIn) {
-      if (existingCheckIn) {
-        res.status(409).json({
-          ok: false,
-          verified: true,
-          alreadyCheckedIn: true,
-          error: 'PASS_ALREADY_USED',
-          checkedInAt: existingCheckIn.checkedInAt,
-          message: `QR Pass ${booking.passCode} was already scanned and used at ${existingCheckIn.checkedInAt}.`,
-        });
+      if (IS_PRODUCTION_RUNTIME) {
+        res.status(503).json({ ok: false, verified: false, error: 'PASS_PERSISTENCE_UNAVAILABLE' });
         return;
       }
 
-      const checkedInAt = new Date().toISOString();
-      store.checkedInPasses[booking.passCode] = {
-        checkedInAt,
-        checkedInBy: String(verifierRole || 'provider_scanner'),
-      };
-      booking.checkedInAt = checkedInAt;
-      saveAuthoritativeStore(store);
-    }
+      const outcome = await withPassCheckInLock(async () => {
+        const store = loadAuthoritativeStore();
+        const currentUser = store.users.find((user) =>
+          user.supabaseUserId?.toLowerCase() === String(claims.supabaseUserId).toLowerCase() &&
+          user.id.toLowerCase() === claims.userId.toLowerCase()
+        );
+        if (!currentUser || currentUser.authProvider !== 'google' || currentUser.accountStatus !== 'active' || currentUser.role !== claims.role) {
+          return response(403, 'ACTIVE_PROFILE_REQUIRED');
+        }
+        if (currentUser.role !== 'provider' && currentUser.role !== 'admin') return response(403, 'PROVIDER_OR_ADMIN_REQUIRED');
+        const verifierRole: 'provider' | 'admin' = currentUser.role;
+        if (currentUser.role === 'provider' && (!currentUser.providerId || claims.providerId !== currentUser.providerId)) {
+          return response(403, 'SESSION_ROLE_MISMATCH');
+        }
 
-    res.json({
-      ok: true,
-      verified: true,
-      passCode: booking.passCode,
-      qrPassToken: booking.qrPassToken,
-      booking: {
-        id: booking.id,
-        listingId: booking.listingId,
-        listingTitle: booking.listingTitle,
-        customerName: booking.customerName,
-        scheduledDate: booking.scheduledDate,
-        timeSlot: booking.timeSlot,
-        showtime: booking.showtime,
-        seats: booking.seats,
-        screenName: booking.screenName,
-        foodAddons: booking.foodAddons,
-        totalAmount: booking.totalAmount,
-        paymentStatus: booking.paymentStatus,
-        status: booking.status,
-        checkedInAt: booking.checkedInAt || existingCheckIn?.checkedInAt || null,
-      },
-    });
+        const booking = store.bookings.find((record) =>
+          String(record.passCode || '').toUpperCase() === cleanCode ||
+          String(record.qrPassToken || '').toUpperCase() === rawToken.toUpperCase() ||
+          String(record.id || '').toUpperCase() === cleanCode
+        );
+        if (!booking) return response(404, 'PASS_NOT_FOUND');
+        if (currentUser.role === 'provider') {
+          const listing = store.providerListings[booking.listingId];
+          const ownsListing = Boolean(listing && (
+            listing.ownerUserId === currentUser.id ||
+            listing.ownerUserId === currentUser.supabaseUserId ||
+            (listing.providerId && listing.providerId === currentUser.providerId && booking.providerId === currentUser.providerId)
+          ));
+          if (!ownsListing) return response(403, 'FORBIDDEN_NOT_LISTING_OWNER');
+        }
+
+        const expected = signQrPassPayload({
+          passCode: booking.passCode,
+          bookingId: booking.id,
+          listingId: booking.listingId,
+          scheduledDate: booking.scheduledDate,
+          seats: booking.seats,
+        });
+        if (!providedSig || !safeTimingEqualHex(providedSig, expected.qrSignature) || !safeTimingEqualHex(String(booking.qrSignature || ''), expected.qrSignature)) {
+          return response(403, 'INVALID_OR_FORGED_QR_SIGNATURE');
+        }
+        if (booking.status === 'cancelled') return response(403, 'BOOKING_CANCELLED');
+        if (booking.paymentMode === 'pay_qr' && booking.paymentStatus !== 'verified') return response(403, 'PAYMENT_NOT_VERIFIED');
+        const expiry = typeof booking.expiresAtIso === 'string' ? Date.parse(booking.expiresAtIso) : Number.NaN;
+        if (!Number.isFinite(expiry)) return response(403, 'TICKET_EXPIRY_REQUIRED');
+        if (expiry <= Date.now()) return response(403, 'TICKET_EXPIRED');
+
+        const checkIn = store.checkedInPasses[booking.passCode];
+        if (booking.checkedInAt || checkIn) {
+          return { status: 409, body: { ok: false, verified: false, alreadyCheckedIn: true, error: 'PASS_ALREADY_USED' } };
+        }
+        if (booking.status !== 'confirmed') return response(409, 'PASS_NOT_CHECKIN_ELIGIBLE');
+
+        let checkedInAt: string | null = null;
+        if (markCheckedIn) {
+          checkedInAt = new Date().toISOString();
+          booking.checkedInAt = checkedInAt;
+          store.checkedInPasses[booking.passCode] = { checkedInAt, checkedInBy: currentUser.supabaseUserId || currentUser.id };
+          store.passVerificationAudit.push({
+            id: crypto.randomUUID(),
+            occurredAt: checkedInAt,
+            actorUserId: currentUser.supabaseUserId || currentUser.id,
+            actorRole: verifierRole,
+            action: 'check_in',
+            bookingId: booking.id,
+            listingId: booking.listingId,
+            previousState: 'confirmed',
+            newState: 'checked_in',
+            reason: 'Valid, unexpired booking pass presented by an authorized verifier.',
+          });
+          if (!saveAuthoritativeStore(store)) return response(503, 'PASS_PERSISTENCE_FAILED');
+        }
+        return verifiedResponse({
+          id: booking.id,
+          listingId: booking.listingId,
+          listingTitle: booking.listingTitle,
+          customerName: booking.customerName,
+          scheduledDate: booking.scheduledDate,
+          timeSlot: booking.timeSlot,
+          showtime: booking.showtime,
+          seats: booking.seats,
+          screenName: booking.screenName,
+          passCode: booking.passCode,
+          checkedInAt,
+        });
+      });
+      res.status(outcome.status).json(outcome.body);
+    } catch (error) {
+      logSafeError('passes', 'verify booking QR', error);
+      res.status(503).json({ ok: false, verified: false, error: 'PASS_VERIFICATION_UNAVAILABLE' });
+    }
   });
 
   // 10. STRICT CUSTOMER / PROVIDER / ADMIN ROLE ISOLATION ENDPOINTS (With Live Account Blocking Check)
