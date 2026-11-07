@@ -1,5 +1,6 @@
 import type express from 'express';
 import { PgBookingError, PgBookingRepository } from './pgBookingRepository';
+import { safeErrorCode } from './safeLogging';
 
 export interface PgBookingsApiDependencies {
   repository?: PgBookingRepository | null;
@@ -57,7 +58,7 @@ function sendError(response: express.Response, error: unknown) {
     return;
   }
   if (process.env.NODE_ENV === 'test') {
-    console.error('[pg-bookings] local test failure', String((error as any)?.code || 'NO_CODE'), String((error as any)?.message || 'NO_MESSAGE').slice(0, 240));
+    console.error('[pg-bookings] local test failure', safeErrorCode(error));
   } else {
     console.error('[pg-bookings] database operation failed', String((error as any)?.code || 'NO_CODE'));
   }
