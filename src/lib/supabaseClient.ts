@@ -8,7 +8,7 @@ import {
   PaymentTransaction,
   UserRole,
 } from '../types/marketplace';
-import { ensureListingPriceBreakdown } from '../data/seedData';
+import { ensureListingPriceBreakdown } from '../data/listingPrice';
 import { resolveSupabaseEnvironment } from './supabaseConfig';
 import { NATIVE_AUTH_REDIRECT_URL } from '../mobile/nativeOAuthCallback';
 
