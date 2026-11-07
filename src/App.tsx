@@ -1860,7 +1860,11 @@ function MarketplaceAppContent() {
               setUserRole(role);
               if (role === 'customer') setActiveView('marketplace');
               else if (role === 'provider') setActiveView('provider_portal');
-              else if (role === 'admin') setActiveView('admin_console');
+              else if (role === 'admin') {
+                try { window.sessionStorage.removeItem('bos_stay_checkout_v1'); } catch { /* ignore */ }
+                window.dispatchEvent(new Event('bos-admin-console-open'));
+                setActiveView('admin_console');
+              }
             }}
             activeView={activeView}
             comparedCount={comparedListingIds.length}
@@ -5596,7 +5600,7 @@ function MarketplaceAppContent() {
         className="fixed bottom-0 left-0 right-0 z-40 w-full max-w-full overflow-hidden bg-white dark:bg-slate-900 rounded-t-3xl border-t border-slate-200/90 dark:border-slate-800 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] box-border"
         style={{ height: 'calc(56px + env(safe-area-inset-bottom))' }}
       >
-        <div className={`max-w-md sm:max-w-2xl mx-auto h-[56px] px-1.5 sm:px-6 grid ${isAdminSession ? 'grid-cols-6' : 'grid-cols-5'} items-center`}>
+        <div className={`max-w-md sm:max-w-2xl mx-auto h-[56px] px-1.5 sm:px-6 grid grid-cols-6 items-center`}>
           {/* 1. Home */}
           <button
             type="button"
@@ -5792,41 +5796,62 @@ function MarketplaceAppContent() {
               <span className="mt-0.5 w-8 h-0.5 sm:h-1 rounded-full bg-[#3730A3] dark:bg-indigo-400" />
             )}
           </button>
-          {isAdminSession && (
-            <button
-              type="button"
-              data-testid="admin-console-tab"
-              aria-current={activeView === 'admin_console' ? 'page' : undefined}
-              onClick={() => {
-                setActiveBottomTab('admin');
-                setIsMyBookingsOpen(false);
-                setIsFooterProfileOpen(false);
-                setActiveView('admin_console');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="relative flex flex-col items-center justify-center gap-0.5 py-1 px-1 cursor-pointer group min-w-0"
+          <button
+            type="button"
+            data-testid="admin-console-tab"
+            aria-current={activeView === 'admin_console' ? 'page' : undefined}
+            onClick={async () => {
+              if (!isAdminSession) {
+                // Local development: one tap to the seeded admin profile.
+                if (import.meta.env.DEV || import.meta.env.VITE_BOS_LOCAL_DEV_AUTH === '1') {
+                  try {
+                    const response = await fetch('/api/auth/local-dev/session', {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ role: 'admin' }),
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (response.ok && data?.sessionToken) {
+                      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+                      window.location.hash = '#admin';
+                      window.location.reload();
+                      return;
+                    }
+                  } catch { /* fall through to the sign-in modal */ }
+                }
+                setIsAuthModalOpen(true);
+                return;
+              }
+              setActiveBottomTab('admin');
+              setIsMyBookingsOpen(false);
+              setIsFooterProfileOpen(false);
+              try { window.sessionStorage.removeItem('bos_stay_checkout_v1'); } catch { /* ignore */ }
+              window.dispatchEvent(new Event('bos-admin-console-open'));
+              setActiveView('admin_console');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="relative flex flex-col items-center justify-center gap-0.5 py-1 px-1 cursor-pointer group min-w-0"
+          >
+            <ShieldCheck
+              className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-transform duration-200 ${
+                activeBottomTab === 'admin' || activeView === 'admin_console'
+                  ? 'text-[#3730A3] scale-105'
+                  : 'text-slate-500 dark:text-slate-400 group-hover:text-[#3730A3]'
+              }`}
+            />
+            <span
+              className={`text-[10px] sm:text-xs tracking-tight leading-none truncate max-w-full ${
+                activeBottomTab === 'admin' || activeView === 'admin_console'
+                  ? 'font-black text-[#3730A3] dark:text-indigo-400'
+                  : 'font-bold text-slate-600 dark:text-slate-400 group-hover:text-[#3730A3]'
+              }`}
             >
-              <ShieldCheck
-                className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-transform duration-200 ${
-                  activeBottomTab === 'admin'
-                    ? 'text-[#3730A3] scale-105'
-                    : 'text-slate-500 dark:text-slate-400 group-hover:text-[#3730A3]'
-                }`}
-              />
-              <span
-                className={`text-[10px] sm:text-xs tracking-tight leading-none truncate max-w-full ${
-                  activeBottomTab === 'admin'
-                    ? 'font-black text-[#3730A3] dark:text-indigo-400'
-                    : 'font-bold text-slate-600 dark:text-slate-400 group-hover:text-[#3730A3]'
-                }`}
-              >
-                Admin
-              </span>
-              {activeBottomTab === 'admin' && (
-                <span className="mt-0.5 w-8 h-0.5 sm:h-1 rounded-full bg-[#3730A3] dark:bg-indigo-400" />
-              )}
-            </button>
-          )}
+              Admin
+            </span>
+            {(activeBottomTab === 'admin' || activeView === 'admin_console') && (
+              <span className="mt-0.5 w-8 h-0.5 sm:h-1 rounded-full bg-[#3730A3] dark:bg-indigo-400" />
+            )}
+          </button>
         </div>
       </nav>
 

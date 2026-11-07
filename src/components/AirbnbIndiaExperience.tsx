@@ -395,7 +395,25 @@ export function AirbnbIndiaExperience({
 
 
   useEffect(() => {
+    const closeCheckoutForConsole = () => {
+      setCheckoutOpen(false);
+      setCheckoutDraft(null);
+      try { window.sessionStorage.removeItem('bos_stay_checkout_v1'); } catch { /* ignore */ }
+    };
+    const onHash = () => {
+      if (window.location.hash.startsWith('#admin') || window.location.hash.startsWith('#provider')) closeCheckoutForConsole();
+    };
+    window.addEventListener('hashchange', onHash);
+    window.addEventListener('bos-admin-console-open', closeCheckoutForConsole);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('bos-admin-console-open', closeCheckoutForConsole);
+    };
+  }, []);
+
+  useEffect(() => {
     try {
+      if (window.location.hash.startsWith('#admin') || window.location.hash.startsWith('#provider')) return;
       const raw = window.sessionStorage.getItem('bos_stay_checkout_v1');
       if (!raw) return;
       const draft = JSON.parse(raw) as { item?: StaySearchItem; checkIn?: string; checkOut?: string; guests?: number };

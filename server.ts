@@ -1,7 +1,46 @@
 import express from 'express';
+import { createServer } from 'node:http';
 import dotenv from 'dotenv';
 import { hasAdminAuthorization } from './src/server/adminAuthorization';
 import { resolveSupabaseConfig } from './src/lib/supabaseConfig';
+import {
+  canLinkSupabaseAuthIdentity,
+  isValidSupabaseAuthUserId,
+  verifySupabaseGoogleIdentity,
+  verifySupabaseSuperAdmin,
+  manageSupabaseUserAccess,
+  listSupabaseUserProfiles,
+} from './src/server/supabaseGoogleIdentity';
+import { assertProductionPersistenceReady } from './src/server/persistencePolicy';
+import { closeSharedPostgresPool, initializePostgresRuntime } from './src/server/postgresPool';
+import { registerPlatformApi } from './src/server/platformApi';
+import { PlatformSettingsRepository, registerPlatformSettingsApi } from './src/server/platformSettingsApi';
+import { registerStayApi } from './src/server/stayApi';
+import { registerStayHostApi } from './src/server/stayHostApi';
+import { registerStayAdminApi } from './src/server/stayAdminApi';
+import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
+import { registerStaySearchApi } from './src/server/staySearchApi';
+import { registerStayPayments } from './src/server/stayPayments';
+import { ProviderListingRepository, type CinemaScreenRecord } from './src/server/providerListingRepository';
+import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/server/liveEditValidation';
+import { registerProviderListingsApi } from './src/server/providerListingsApi';
+import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
+import { registerServiceBookingApi } from './src/server/serviceBookingApi';
+import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
+import { ClassEnrollmentRepository } from './src/server/classEnrollmentRepository';
+import { registerClassEnrollmentApi } from './src/server/classEnrollmentApi';
+import { PgBookingRepository } from './src/server/pgBookingRepository';
+import { registerPgBookingsApi } from './src/server/pgBookingsApi';
+import { PgPaymentRepository } from './src/server/pgPaymentRepository';
+import { registerPgPaymentsApi } from './src/server/pgPaymentsApi';
+import { registerPgAdminApi } from './src/server/pgAdminApi';
+import { PlatformBuilderRepository, registerPlatformBuilderApi } from './src/server/platformBuilderRepository';
+
+import { VenueBookingRepository } from './src/server/venueBookingRepository';
+import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
+import { registerMediaValidationApi } from './src/server/mediaValidationApi';
+import { registerAccountClosureApi } from './src/server/accountClosureApi';
+import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -13,9 +52,26 @@ const __dirname = path.dirname(__filename);
 
 // Load the same local env file Vite uses. Existing process variables remain
 // authoritative; .env.local is considered before the base .env file.
-dotenv.config({ path: ['.env.local', '.env'], quiet: true });
+dotenv.config({
+  path: [path.join(__dirname, '.env.local'), path.join(__dirname, '.env')],
+  quiet: true,
+});
 
 const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
+
+/**
+ * Production never reads or writes the legacy JSON compatibility stores.
+ * Every route that still depends on one fails closed with a 503 instead of
+ * silently serving non-durable, non-transactional state.
+ */
+const IS_PRODUCTION_RUNTIME = process.env.NODE_ENV === 'production';
+const REVOKED_SESSION_SIGNATURES = new Set<string>();
+
+function assertJsonStoreAllowed(storeName: 'live_page_config' | 'marketplace'): void {
+  if (IS_PRODUCTION_RUNTIME) {
+    throw new Error(`PERSISTENCE_JSON_STORE_UNAVAILABLE_IN_PRODUCTION:${storeName}`);
+  }
+}
 
 interface ServerStoreData {
   published: Record<string, any> | null;
@@ -178,6 +234,7 @@ const DEFAULT_BILLING_RECORDS: ServerStoreData['billingRecords'] = [
 ];
 
 function loadServerStore(): ServerStoreData {
+  assertJsonStoreAllowed('live_page_config');
   try {
     if (fs.existsSync(DATA_FILE_PATH)) {
       const raw = fs.readFileSync(DATA_FILE_PATH, 'utf-8');
@@ -205,6 +262,7 @@ function loadServerStore(): ServerStoreData {
 }
 
 function saveServerStore(data: ServerStoreData): boolean {
+  assertJsonStoreAllowed('live_page_config');
   const temporaryPath = `${DATA_FILE_PATH}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), { encoding: 'utf-8', flag: 'wx' });
@@ -217,6 +275,17 @@ function saveServerStore(data: ServerStoreData): boolean {
 }
 
 async function startServer() {
+  // Prevent production from silently using the local JSON compatibility
+  // stores. A verified transactional PostgreSQL adapter is still required.
+  assertProductionPersistenceReady();
+
+  // Resolve and verify the canonical PostgreSQL target before constructing any
+  // API routes. A normal (non-test) process never listens with a missing,
+  // unreachable, unauthenticated, or stay-schema-incompatible database.
+  const pgRuntimePool = process.env.BOS_LISTINGS_DATABASE_URL || process.env.NODE_ENV !== 'test'
+    ? await initializePostgresRuntime()
+    : undefined;
+
   const configuredHmacSecret = (process.env.BOS_SERVER_HMAC_SECRET || '').trim();
   if (process.env.NODE_ENV === 'production' && !configuredHmacSecret) {
     throw new Error('BOS_SERVER_HMAC_SECRET_REQUIRED');
@@ -226,8 +295,168 @@ async function startServer() {
     console.warn('BOS_SERVER_HMAC_SECRET is unset; using an ephemeral development-only signing key.');
   }
 
+  // Listing persistence can use a disposable local PostgreSQL repository in
+  // development/test. An explicitly configured but unavailable DB fails
+  // startup; it never falls back to the JSON compatibility store.
+  const providerListingRepository = ProviderListingRepository.fromEnvironment();
+  // Classes & Training enrollment shares the single local PostgreSQL selector.
+  const classEnrollmentRepository = ClassEnrollmentRepository.fromEnvironment();
+  if (providerListingRepository) {
+    try {
+      await providerListingRepository.verifyConnection();
+    } catch {
+      await providerListingRepository.close();
+      throw new Error('BOS_LISTINGS_DATABASE_UNAVAILABLE');
+    }
+  }
+
+  // The Services booking lifecycle shares the same canonical local database.
+  // An explicitly configured but unavailable database fails startup rather
+  // than silently falling back to file state.
+  const serviceBookingRepository = ServiceBookingRepository.fromEnvironment();
+  if (serviceBookingRepository) {
+    try {
+      await serviceBookingRepository.verifyConnection();
+    } catch {
+      await serviceBookingRepository.close();
+      throw new Error('SERVICE_BOOKINGS_DATABASE_UNAVAILABLE');
+    }
+  }
+
+  // PG reservations use shared PostgreSQL inventory and remain pay-later.
+  // This repository never starts or verifies a payment provider transaction.
+  const pgBookingRepository = PgBookingRepository.fromEnvironment();
+  if (pgBookingRepository) {
+    try {
+      await pgBookingRepository.verifyConnection();
+    } catch {
+      await pgBookingRepository.close();
+      throw new Error('PG_BOOKINGS_POSTGRES_UNAVAILABLE');
+    }
+  }
+
+  // PG money movement uses the central pool while retaining its own narrow
+  // repository methods and provider-signed settlement paths.
+  const pgPaymentRepository = PgPaymentRepository.fromEnvironment();
+  if (pgPaymentRepository) {
+    try {
+      await pgPaymentRepository.verifyConnection();
+    } catch {
+      await pgPaymentRepository.close();
+      throw new Error('PG_PAYMENTS_DATABASE_UNAVAILABLE');
+    }
+  }
+
+  // Universal Live Builder configuration is PostgreSQL-authoritative. It is
+  // optional outside production so read-only routes still work without a DB,
+  // but every builder route fails closed with 503 when it is not attached.
+  const platformBuilderRepository = PlatformBuilderRepository.fromEnvironment();
+  const platformSettingsRepository = PlatformSettingsRepository.fromEnvironment();
+  if (platformBuilderRepository) {
+    try {
+      await platformBuilderRepository.verifyConnection();
+    } catch {
+      throw new Error('PLATFORM_BUILDER_DATABASE_UNAVAILABLE');
+    }
+  }
+
+  const venueBookingRepository = VenueBookingRepository.fromEnvironment();
+  if (venueBookingRepository) {
+    try {
+      await venueBookingRepository.verifyConnection();
+    } catch {
+      await venueBookingRepository.close();
+      throw new Error('VENUE_BOOKINGS_POSTGRES_UNAVAILABLE');
+    }
+  }
+
+  // Production has no JSON fallback for any marketplace domain, so every
+  // domain repository must be attached before the listener opens.
+  if (process.env.NODE_ENV === 'production') {
+    const missingRepositories = [
+      ['stay_search', pgRuntimePool],
+      ['listings', providerListingRepository],
+      ['classes', classEnrollmentRepository],
+      ['services', serviceBookingRepository],
+      ['pg_bookings', pgBookingRepository],
+      ['payments', pgPaymentRepository],
+      ['venues', venueBookingRepository],
+    ].filter(([, repository]) => !repository).map(([name]) => name);
+    if (missingRepositories.length > 0) {
+      throw new Error(`PRODUCTION_POSTGRES_REPOSITORY_REQUIRED:${missingRepositories.join(',')}`);
+    }
+  }
+
   const app = express();
-  app.use(express.json({ limit: '10mb' }));
+  app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    if (process.env.NODE_ENV === 'production') {
+      const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol;
+      if (req.secure || proto === 'https') {
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      }
+    }
+    next();
+  });
+  const PORT = Number(process.env.PORT) || 3000;
+  // Vite middleware mode does not own the HTTP server. Providing this parent
+  // server to Vite lets its dev WebSocket share the application port instead
+  // of advertising an unreachable standalone HMR port to browser clients.
+  const httpServer = createServer(app);
+
+  // Express 4 does not catch a rejected promise from an async route handler.
+  // Without this, one failing request would terminate the whole booking
+  // server as an unhandled rejection. Every handler is wrapped so that a
+  // failure becomes a normal error response on the request that caused it.
+  const wrapAsyncHandler = (handler: any) => {
+    // A four-argument function is an Express error handler and must keep its
+    // original shape; everything else may reject.
+    if (typeof handler !== 'function' || handler.length === 4) return handler;
+    return function wrappedAsyncHandler(this: any, ...handlerArgs: any[]) {
+      let result: any;
+      try {
+        result = handler.apply(this, handlerArgs);
+      } catch (error) {
+        return handlerArgs[2]?.(error);
+      }
+      if (result && typeof result.then === 'function') {
+        result.catch((error: unknown) => handlerArgs[2]?.(error));
+      }
+      return result;
+    };
+  };
+  for (const method of ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'all', 'use'] as const) {
+    const original = (app as any)[method].bind(app);
+    (app as any)[method] = (...routeArgs: any[]) => {
+      const wrapped = routeArgs.map((argument) => {
+        if (typeof argument === 'function') return wrapAsyncHandler(argument);
+        if (Array.isArray(argument)) return argument.map((entry) => (typeof entry === 'function' ? wrapAsyncHandler(entry) : entry));
+        return argument;
+      });
+      return original(...wrapped);
+    };
+  }
+  // Native Capacitor origins used by this app unless the server operator supplies
+  // an exact comma-separated BOS_NATIVE_APP_ORIGINS allowlist.
+  app.use(createNativeAppCorsMiddleware());
+  app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
+
+  // 0. PostgreSQL-backed live page configuration and admin module settings.
+  //    Registered first so that a database-backed process never answers these
+  //    from the JSON compatibility store; the JSON handlers below stay for
+  //    local development without a database.
+  if (platformSettingsRepository) {
+    registerPlatformSettingsApi(app, {
+      repository: platformSettingsRepository,
+      verifySession: (request) => verifySessionTokenFromRequest(request),
+    });
+  }
 
   // 1. GET Live Page Config (OTA endpoint consumed by Web, Android, and iOS clients)
   app.get('/api/live-page-config', (req, res) => {
@@ -850,7 +1079,14 @@ Task:
   // - Customer / Provider / Admin Role Isolation
   // ============================================================================
 
-  const AUTH_STORE_FILE_PATH = path.join(__dirname, 'authoritative-marketplace-store.json');
+  const AUTH_STORE_FILE_PATH =
+    process.env.NODE_ENV === 'test' && process.env.BOS_TEST_AUTHORITATIVE_STORE_PATH
+      ? path.resolve(process.env.BOS_TEST_AUTHORITATIVE_STORE_PATH)
+      : path.join(__dirname, 'authoritative-marketplace-store.json');
+
+  // Payment settlement is intentionally unavailable until a trusted provider webhook is implemented.
+  // This server-side kill switch cannot be enabled by a client request.
+  const TRUSTED_PAYMENT_PROVIDER_CONFIGURED = false;
 
   interface SeatLockEntry {
     key: string; // `${listingId}::${dateIso}::${showtime}::${seatId}`
@@ -868,14 +1104,21 @@ Task:
 
   interface PaymentIntentRecord {
     intentId: string;
-    userId: string;
+    ownerUserId: string;
     amount: number;
+    currency: 'INR';
+    purpose: 'booking' | 'subscription' | 'service';
+    listingId?: string;
     merchantVpa: string;
     planOrListing: string;
     status: 'created' | 'pending_provider_reconciliation' | 'verified' | 'rejected';
     utrNumber?: string;
     gatewaySignature?: string;
     paymentVerificationToken?: string;
+    settlementSource?: 'trusted_provider_webhook';
+    providerPaymentId?: string;
+    settledAt?: string;
+    consumedByBookingId?: string;
     createdAt: string;
     updatedAt: string;
   }
@@ -935,6 +1178,8 @@ Task:
 
   interface AuthoritativeUserRecord {
     id: string;
+    /** Supabase Auth UUID from the server-verified Google session, when linked. */
+    supabaseUserId?: string;
     name: string;
     email: string;
     phone: string;
@@ -1234,6 +1479,10 @@ Task:
     enquiries: AuthoritativeEnquiryRecord[];
     paymentIntents: Record<string, PaymentIntentRecord>;
     usedUtrs: Record<string, { intentId: string; status: string; recordedAt: string }>;
+    /** Razorpay payment ids already settled against exactly one order intent. */
+    usedRazorpayPaymentIds: Record<string, string>;
+    /** Provider webhook event ids, recorded once for idempotent callbacks. */
+    razorpayWebhookEvents: Record<string, { eventType?: string; intentId?: string; status?: string; receivedAt?: string }>;
     checkedInPasses: Record<string, { checkedInAt: string; checkedInBy: string }>;
     users: AuthoritativeUserRecord[];
     notifications: AuthoritativeNotificationRecord[];
@@ -1244,6 +1493,7 @@ Task:
   }
 
   function loadAuthoritativeStore(): AuthoritativeStore {
+    assertJsonStoreAllowed('marketplace');
     try {
       if (fs.existsSync(AUTH_STORE_FILE_PATH)) {
         const parsed = JSON.parse(fs.readFileSync(AUTH_STORE_FILE_PATH, 'utf-8'));
@@ -1253,6 +1503,8 @@ Task:
           enquiries: Array.isArray(parsed.enquiries) ? parsed.enquiries : [],
           paymentIntents: parsed.paymentIntents || {},
           usedUtrs: parsed.usedUtrs || {},
+          usedRazorpayPaymentIds: parsed.usedRazorpayPaymentIds || {},
+          razorpayWebhookEvents: parsed.razorpayWebhookEvents || {},
           checkedInPasses: parsed.checkedInPasses || {},
           users:
             Array.isArray(parsed.users) && parsed.users.length > 0
@@ -1280,6 +1532,8 @@ Task:
       enquiries: [],
       paymentIntents: {},
       usedUtrs: {},
+      usedRazorpayPaymentIds: {},
+      razorpayWebhookEvents: {},
       checkedInPasses: {},
       users: [...INITIAL_SEED_USERS],
       notifications: [...INITIAL_SEED_NOTIFICATIONS],
@@ -1290,11 +1544,19 @@ Task:
     };
   }
 
-  function saveAuthoritativeStore(store: AuthoritativeStore): void {
+  function saveAuthoritativeStore(store: AuthoritativeStore): boolean {
+    assertJsonStoreAllowed('marketplace');
+    const tempPath = `${AUTH_STORE_FILE_PATH}.tmp-${process.pid}`;
     try {
-      fs.writeFileSync(AUTH_STORE_FILE_PATH, JSON.stringify(store, null, 2), 'utf-8');
+      fs.writeFileSync(tempPath, JSON.stringify(store, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      fs.renameSync(tempPath, AUTH_STORE_FILE_PATH);
+      return true;
     } catch (err) {
       console.error('Failed to persist authoritative store:', err);
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch {}
+      return false;
     }
   }
 
@@ -1338,6 +1600,8 @@ Task:
 
   interface SessionClaims {
     userId: string;
+    /** Verified Supabase Auth identity, separate from legacy API user IDs. */
+    supabaseUserId?: string;
     email?: string;
     name?: string;
     role: 'customer' | 'provider' | 'admin';
@@ -1357,12 +1621,16 @@ Task:
   }
 
   function signSessionToken(claims: SessionClaims): string {
+    const requestedExpiry = Number(claims.expiresAt);
+    const expiresAt = Number.isFinite(requestedExpiry) && requestedExpiry > Date.now()
+      ? requestedExpiry
+      : Date.now() + 7 * 24 * 60 * 60 * 1000;
     const withExpiry: SessionClaims = {
       ...claims,
-      expiresAt: claims.expiresAt || Date.now() + 7 * 24 * 60 * 60 * 1000,
+      expiresAt,
     };
     const payloadB64 = Buffer.from(JSON.stringify(withExpiry), 'utf-8').toString('base64url');
-    const sig = computeHmac(payloadB64, 'SESSION_TOKEN');
+    const sig = computeHmac(payloadB64, 'SESSION_TOKEN_V2');
     return `${payloadB64}.${sig}`;
   }
 
@@ -1375,18 +1643,30 @@ Task:
 
   function verifySessionTokenFromRequest(req: express.Request): SessionClaims | null {
     const rawHeader = extractRawTokenFromRequest(req);
-    if (!rawHeader || !rawHeader.includes('.')) return null;
-    const [payloadB64, sig] = rawHeader.split('.');
-    if (!payloadB64 || !sig) return null;
-    const expectedSig = computeHmac(payloadB64, 'SESSION_TOKEN');
+    if (!rawHeader || rawHeader.length > 16384) return null;
+    const parts = rawHeader.split('.');
+    if (parts.length !== 2) return null;
+    const [payloadB64, sig] = parts;
+    if (!payloadB64 || !/^[a-f0-9]{64}$/i.test(sig)) return null;
+    const expectedSig = computeHmac(payloadB64, 'SESSION_TOKEN_V2');
     if (!safeTimingEqualHex(sig, expectedSig)) return null;
     try {
       const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8')) as SessionClaims;
-      if (!parsed || !parsed.userId || !['customer', 'provider', 'admin'].includes(parsed.role)) {
+      if (!parsed || typeof parsed.userId !== 'string' || !parsed.userId.trim() || !['customer', 'provider', 'admin'].includes(parsed.role)) {
         return null;
       }
-      if (parsed.expiresAt && parsed.expiresAt < Date.now()) {
+      if (typeof parsed.expiresAt !== 'number' || !Number.isFinite(parsed.expiresAt) || parsed.expiresAt <= Date.now()) {
         return null;
+      }
+      if (typeof parsed.issuedAt !== 'number' || !Number.isFinite(parsed.issuedAt) || parsed.issuedAt > Date.now() + 60_000) {
+        return null;
+      }
+      if (IS_PRODUCTION_RUNTIME) {
+        // Token revocation is never read from the local JSON file in
+        // production; the process keeps an in-memory revocation set for the
+        // lifetime of this instance.
+        if (REVOKED_SESSION_SIGNATURES.has(sig)) return null;
+        return parsed;
       }
       const store = loadAuthoritativeStore();
       if (store.revokedTokens && store.revokedTokens[sig]) {
@@ -1400,11 +1680,15 @@ Task:
 
   function hasCurrentAdminSession(claims: SessionClaims | null): boolean {
     if (!claims) return false;
+    // Production admin authority comes from the database-backed Supabase
+    // profile checks, never from the local compatibility store. Routes that
+    // still rely on this legacy check fail closed in production.
+    if (IS_PRODUCTION_RUNTIME) return false;
     const store = loadAuthoritativeStore();
     const currentUser = store.users.find(
       (user) =>
-        user.id.toLowerCase() === claims.userId.toLowerCase() ||
-        Boolean(claims.email && user.email.toLowerCase() === claims.email.toLowerCase())
+        (claims.supabaseUserId && user.supabaseUserId?.toLowerCase() === claims.supabaseUserId.toLowerCase()) ||
+        (!claims.supabaseUserId && user.id.toLowerCase() === claims.userId.toLowerCase())
     );
     if (!currentUser || currentUser.accountStatus !== 'active') return false;
     return hasAdminAuthorization(claims, currentUser.role);
@@ -1479,8 +1763,20 @@ Task:
   const SUPABASE_PROJECT_ID = serverSupabaseConfig.projectId;
   const SUPABASE_PROJECT_URL = serverSupabaseConfig.projectUrl;
   const SUPABASE_AUTH_CALLBACK_URL = serverSupabaseConfig.authCallbackUrl;
+  registerMediaValidationApi(app, {
+    projectUrl: SUPABASE_PROJECT_URL,
+    publishableKey: serverSupabaseConfig.publishableKey,
+    // Server-only. Never expose this value in Vite-prefixed variables or logs.
+    serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  });
+  registerAccountClosureApi(app, {
+    projectUrl: SUPABASE_PROJECT_URL,
+    publishableKey: serverSupabaseConfig.publishableKey,
+    serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  });
 
   function authenticateOrRegisterGoogleUser(params: {
+    supabaseUserId: string;
     email: string;
     name?: string;
     googleSub?: string;
@@ -1506,6 +1802,15 @@ Task:
         message: string;
       } {
     const cleanEmail = String(params.email || '').trim().toLowerCase();
+    const cleanSupabaseUserId = String(params.supabaseUserId || '').trim().toLowerCase();
+    if (!isValidSupabaseAuthUserId(cleanSupabaseUserId)) {
+      return {
+        ok: false,
+        status: 401,
+        error: 'INVALID_VERIFIED_AUTH_IDENTITY',
+        message: 'The verified Supabase Auth identity is invalid.',
+      };
+    }
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return {
         ok: false,
@@ -1519,22 +1824,26 @@ Task:
     const cleanSub = String(params.googleSub || `google-${cleanEmail}`).trim();
     const nowIso = new Date().toISOString();
 
-    const adminAllowlist = new Set([
-      'admin@bookourspace.in',
-      'monapatisravya28@gmail.com',
-      ...(process.env.BOS_ADMIN_EMAILS
-        ? process.env.BOS_ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase())
-        : []),
-    ]);
-
     // Check if user already exists by googleSub or email
     const existingUser = store.users.find(
       (u) =>
+        (u.supabaseUserId && u.supabaseUserId.toLowerCase() === cleanSupabaseUserId) ||
         u.email.toLowerCase() === cleanEmail ||
         (cleanSub && u.googleSub && u.googleSub === cleanSub)
     );
 
     if (existingUser) {
+      // Link a legacy record once to a verified Auth UUID. Once linked, a
+      // different identity cannot take it over through matching email data.
+      if (!canLinkSupabaseAuthIdentity(existingUser.supabaseUserId, cleanSupabaseUserId)) {
+        return {
+          ok: false,
+          status: 409,
+          error: 'AUTH_IDENTITY_ALREADY_LINKED',
+          message: 'This account is linked to a different verified sign-in identity.',
+        };
+      }
+
       // ENFORCE ACCOUNT BLOCKING: Immediately deny suspended or blocked accounts
       if (existingUser.accountStatus === 'suspended' || existingUser.accountStatus === 'blocked') {
         return {
@@ -1548,7 +1857,7 @@ Task:
 
       // Reject any unauthorized attempt to escalate an existing non-admin account to admin
       const reqRole = String(params.requestedRole || '').toLowerCase();
-      if (reqRole === 'admin' && existingUser.role !== 'admin' && !adminAllowlist.has(cleanEmail)) {
+      if (reqRole === 'admin' && existingUser.role !== 'admin') {
         return {
           ok: false,
           status: 403,
@@ -1559,6 +1868,7 @@ Task:
 
       // Existing user sign-in: preserve existing role and data by default
       existingUser.lastLoginAt = nowIso;
+      existingUser.supabaseUserId = cleanSupabaseUserId;
       existingUser.googleSub = existingUser.googleSub || cleanSub;
       if (params.name && params.name.trim() && !existingUser.name) {
         existingUser.name = params.name.trim();
@@ -1571,9 +1881,7 @@ Task:
       }
 
       // Ensure allowlisted super admin always retains admin role
-      if (adminAllowlist.has(cleanEmail)) {
-        existingUser.role = 'admin';
-      } else if (
+      if (
         params.allowRoleChange === true &&
         reqRole &&
         ['customer', 'provider'].includes(reqRole) &&
@@ -1585,10 +1893,18 @@ Task:
         }
       }
 
-      saveAuthoritativeStore(store);
+      if (!saveAuthoritativeStore(store)) {
+        return {
+          ok: false,
+          status: 503,
+          error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE',
+          message: 'The account could not be persisted. Please try again later.',
+        };
+      }
 
       const claims: SessionClaims = {
         userId: existingUser.id,
+        supabaseUserId: cleanSupabaseUserId,
         email: existingUser.email,
         name: existingUser.name,
         role: existingUser.role,
@@ -1613,9 +1929,10 @@ Task:
     }
 
     // Automatic New-User Registration via Google OAuth:
-    // Automatically creates a Customer profile ('customer') for new users (unless allowlisted Admin or explicit provider registration)
+    // Google signups always begin as customers. Provider promotion happens
+    // through the reviewed registration workflow; Admin requires bootstrap.
     const reqRole = String(params.requestedRole || 'customer').toLowerCase();
-    if (reqRole === 'admin' && !adminAllowlist.has(cleanEmail)) {
+    if (reqRole === 'admin') {
       return {
         ok: false,
         status: 403,
@@ -1624,9 +1941,7 @@ Task:
       };
     }
 
-    const assignedRole: 'customer' | 'provider' | 'admin' = adminAllowlist.has(cleanEmail)
-      ? 'admin'
-      : params.allowRoleChange === true && reqRole === 'provider'
+    const assignedRole: 'customer' | 'provider' = params.allowRoleChange === true && reqRole === 'provider'
       ? 'provider'
       : 'customer';
 
@@ -1640,9 +1955,10 @@ Task:
 
     const newUser: AuthoritativeUserRecord = {
       id: newId,
+      supabaseUserId: cleanSupabaseUserId,
       name: displayName,
       email: cleanEmail,
-      phone: (params.phone && params.phone.trim()) || '+91 98480 12345',
+      phone: (params.phone && params.phone.trim()) || '',
       role: assignedRole,
       providerId: assignedRole === 'provider' ? `prov-${newId.toLowerCase()}` : undefined,
       googleSub: cleanSub,
@@ -1653,16 +1969,14 @@ Task:
       verified: true,
       kycDocument: 'Google OAuth 2.0 Verified',
       accountStatus: 'active',
-      city: (params.city && params.city.trim()) || 'Hyderabad',
+      city: (params.city && params.city.trim()) || '',
       joinedAt: nowIso.slice(0, 10),
       lastLoginAt: nowIso,
       listingsCount: 0,
       bookingsCount: 0,
       totalSpentOrEarned: 0,
       permissions:
-        assignedRole === 'admin'
-          ? ['full_admin_access', 'approve_providers', 'manage_payments', 'manage_ads']
-          : assignedRole === 'provider'
+        assignedRole === 'provider'
           ? ['create_listing', 'respond_enquiries', 'receive_payouts']
           : ['book_services', 'post_reviews', 'chat_provider'],
       publishState: 'published',
@@ -1678,10 +1992,20 @@ Task:
       type: 'approval',
     });
 
-    saveAuthoritativeStore(store);
+    if (!saveAuthoritativeStore(store)) {
+      // Do not return an authenticated session for a user record that failed
+      // to persist in the current compatibility store.
+      return {
+        ok: false,
+        status: 503,
+        error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE',
+        message: 'The account could not be persisted. Please try again later.',
+      };
+    }
 
     const claims: SessionClaims = {
       userId: newUser.id,
+      supabaseUserId: cleanSupabaseUserId,
       email: newUser.email,
       name: newUser.name,
       role: newUser.role,
@@ -1721,366 +2045,155 @@ Task:
 
   // 1A. GET GOOGLE OAUTH AUTHORIZATION URL (Supabase OAuth + Popup Flow for Iframe Preview & Cloud Run)
   app.get('/api/auth/google/url', (req, res) => {
-    const requestedRole = String(req.query.role || 'customer').toLowerCase();
-    const requestOrigin =
-      String(req.query.origin || '').trim() ||
-      process.env.APP_URL?.replace(/\/+$/, '') ||
-      `${req.protocol}://${req.get('host')}`;
+    const requestOrigin = process.env.APP_URL?.replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
     const callbackUrl = `${requestOrigin}/auth/callback`;
-    const devCallbackUrl =
-      'https://ais-dev-2sp75t3mb2qar3lhuhwjxd-429336547561.asia-southeast1.run.app/auth/callback';
-    const sharedCallbackUrl =
-      'https://ais-pre-2sp75t3mb2qar3lhuhwjxd-429336547561.asia-southeast1.run.app/auth/callback';
-
-    // Only offer a Supabase authorize URL when a target is explicitly configured.
-    const supabaseAuthorizeUrl = SUPABASE_PROJECT_URL
-      ? `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-          `${callbackUrl}?role=${encodeURIComponent(requestedRole)}`
-        )}&access_type=offline&prompt=select_account`
+    const configured = Boolean(
+      SUPABASE_PROJECT_URL && SUPABASE_PROJECT_ID && serverSupabaseConfig.publishableKey
+    );
+    const supabaseAuthorizeUrl = configured
+      ? `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(callbackUrl)}&access_type=offline&prompt=select_account`
       : '';
-
-    const googleClientId =
-      process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
-    const isRealGoogleConfigured =
-      Boolean(googleClientId) &&
-      !googleClientId.includes('your-google-oauth-client-id');
-
-    // Already validated (and cleared when unconfigured) by resolveSupabaseConfig.
-    const supabasePublishableKey = serverSupabaseConfig.publishableKey;
-    const isSupabaseKeyConfigured =
-      Boolean(SUPABASE_PROJECT_URL) && Boolean(SUPABASE_PROJECT_ID) && Boolean(supabasePublishableKey);
-
-    const statePayload = Buffer.from(
-      JSON.stringify({
-        role: requestedRole,
-        origin: requestOrigin,
-        supabaseProjectId: SUPABASE_PROJECT_ID,
-        ts: Date.now(),
-      }),
-      'utf-8'
-    ).toString('base64url');
-
-    if (isRealGoogleConfigured) {
-      const params = new URLSearchParams({
-        client_id: googleClientId,
-        redirect_uri: callbackUrl,
-        response_type: 'code',
-        scope: 'openid email profile',
-        access_type: 'offline',
-        prompt: 'select_account',
-        state: statePayload,
-      });
-      res.json({
-        ok: true,
-        configured: true,
-        googleCloudConfigured: true,
-        supabaseConfigured: isSupabaseKeyConfigured,
-        supabaseProjectId: SUPABASE_PROJECT_ID,
-        supabaseUrl: SUPABASE_PROJECT_URL,
-        supabaseAuthorizeUrl,
-        supabaseAuthCallbackUrl: SUPABASE_AUTH_CALLBACK_URL,
-        authProvider: 'google',
-        url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
-        callbackUrl,
-        devCallbackUrl,
-        sharedCallbackUrl,
-      });
-      return;
-    }
-
-    // Return popup URL to the built-in Supabase + Google OAuth callback handler
-    const fallbackParams = new URLSearchParams({
-      oauth_picker: '1',
-      role: requestedRole,
-      state: statePayload,
-    });
-    res.json({
-      ok: true,
-      configured: isSupabaseKeyConfigured,
+    res.status(configured ? 200 : 503).json({
+      ok: configured,
+      configured,
       googleCloudConfigured: false,
-      supabaseConfigured: isSupabaseKeyConfigured,
-      supabaseProjectId: SUPABASE_PROJECT_ID,
-      supabaseUrl: SUPABASE_PROJECT_URL,
-      supabaseAuthorizeUrl,
-      supabaseAuthCallbackUrl: SUPABASE_AUTH_CALLBACK_URL,
+      supabaseConfigured: configured,
+      supabaseProjectId: SUPABASE_PROJECT_ID || undefined,
+      supabaseUrl: SUPABASE_PROJECT_URL || undefined,
+      supabaseAuthorizeUrl: supabaseAuthorizeUrl || undefined,
+      supabaseAuthCallbackUrl: SUPABASE_AUTH_CALLBACK_URL || undefined,
       authProvider: 'google',
-      url: `${callbackUrl}?${fallbackParams.toString()}`,
+      url: supabaseAuthorizeUrl || undefined,
       callbackUrl,
-      devCallbackUrl,
-      sharedCallbackUrl,
-      message: isSupabaseKeyConfigured
-        ? `Configured for the explicitly selected Supabase project ${SUPABASE_PROJECT_ID} Google OAuth popup flow.`
-        : 'Supabase is not configured; no live project is selected. The Google OAuth popup will use this server only.',
+      message: configured
+        ? 'Google sign-in is delegated to Supabase Auth for the explicitly configured project.'
+        : 'Google sign-in is unavailable until a valid Supabase Auth project is configured.',
     });
   });
 
   // 1B. SUPABASE & GOOGLE OAUTH CALLBACK HANDLER (/auth/callback & /auth/callback/)
-  app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
-    const code = String(req.query.code || '').trim();
-    const stateRaw = String(req.query.state || '').trim();
-    const oauthPicker = String(req.query.oauth_picker || '') === '1';
-    let requestedRole = String(req.query.role || 'customer').toLowerCase();
-
-    if (stateRaw) {
-      try {
-        const parsedState = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf-8'));
-        if (parsedState?.role) requestedRole = String(parsedState.role).toLowerCase();
-      } catch {
-        // ignore malformed state
-      }
+  app.get(['/auth/callback', '/auth/callback/'], (req, res) => {
+    // Let the Supabase client finish its PKCE/implicit callback in the SPA.
+    // URL-supplied email/name/sub fields are never used as authentication proof.
+    const safeQuery = new URLSearchParams();
+    for (const key of ['code', 'state', 'error', 'error_description']) {
+      const value = req.query[key];
+      if (typeof value === 'string' && value.length <= 4096) safeQuery.set(key, value);
     }
-
-    let googleEmail = String(req.query.google_email || req.query.email || '').trim();
-    let googleName = String(req.query.google_name || req.query.name || '').trim();
-    let googleSub = String(req.query.google_sub || req.query.sub || '').trim();
-    let googleAvatar = String(req.query.google_avatar || req.query.avatar || '').trim();
-
-    // If a real OAuth authorization code was returned by Google, exchange it for tokens and userinfo
-    const googleClientId =
-      process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
-    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-    if (code && googleClientId && googleClientSecret && !googleClientId.includes('your-google-oauth-client-id')) {
-      try {
-        const requestOrigin =
-          process.env.APP_URL?.replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
-        const callbackUrl = `${requestOrigin}/auth/callback`;
-        const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            code,
-            client_id: googleClientId,
-            client_secret: googleClientSecret,
-            redirect_uri: callbackUrl,
-            grant_type: 'authorization_code',
-          }),
-        });
-        const tokenData: any = await tokenResp.json();
-        if (tokenData && tokenData.access_token) {
-          const profileResp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-            headers: { Authorization: `Bearer ${tokenData.access_token}` },
-          });
-          const profileData: any = await profileResp.json();
-          if (profileData && profileData.email) {
-            googleEmail = String(profileData.email);
-            googleName = String(profileData.name || '');
-            googleSub = String(profileData.id || '');
-            googleAvatar = String(profileData.picture || '');
-          }
-        }
-      } catch (err) {
-        console.error('Google OAuth token exchange error:', err);
-      }
-    }
-
-    // When opened as a Supabase OAuth redirect (e.g. /auth/callback#access_token=...) or interactive popup picker
-    if (!googleEmail) {
-      const store = loadAuthoritativeStore();
-      const sampleAccounts = store.users.slice(0, 6);
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in with Google — BookOurSpace (Supabase ${SUPABASE_PROJECT_ID})</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
-    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 20px; max-width: 440px; width: 100%; padding: 24px; box-shadow: 0 20px 25px -5px rgba(15,23,42,0.1); }
-    .title { font-size: 18px; font-weight: 800; margin: 8px 0 4px; }
-    .sub { font-size: 12px; color: #64748b; margin-bottom: 16px; }
-    .acct { display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 8px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; cursor: pointer; text-decoration: none; color: inherit; box-sizing: border-box; }
-    .acct:hover { border-color: #4338ca; background: #eef2ff; }
-    .badge { font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: #e0e7ff; color: #3730a3; }
-    .blocked { background: #fee2e2; color: #991b1b; }
-    input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; margin-bottom: 10px; box-sizing: border-box; }
-    button.primary { width: 100%; padding: 11px; border: none; border-radius: 12px; background: #4338ca; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; }
-    .supa-btn { display: block; width: 100%; text-align: center; padding: 10px 12px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; font-weight: 800; font-size: 12px; text-decoration: none; box-sizing: border-box; }
-    .supa-btn:hover { background: #f1f5f9; border-color: #4338ca; }
-  </style>
-</head>
-<body>
-  <div class="card" id="oauth-card">
-    <div style="font-size:11px;font-weight:800;color:#4338ca;">GOOGLE OAUTH 2.0 • SUPABASE (${SUPABASE_PROJECT_ID})</div>
-    <div class="title">Sign in with Google</div>
-    <div class="sub" id="status-sub">New users automatically receive a Customer profile. Existing users keep their assigned role and data.</div>
-    <a class="supa-btn" href="${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-        `${req.protocol}://${req.get('host')}/auth/callback`
-      )}">
-      Redirect via Supabase Auth (${SUPABASE_PROJECT_ID}.supabase.co)
-    </a>
-    ${sampleAccounts
-      .map(
-        (u) => `
-      <a class="acct" href="/auth/callback?google_email=${encodeURIComponent(
-        u.email
-      )}&google_name=${encodeURIComponent(u.name)}&google_sub=${encodeURIComponent(
-          u.googleSub || `google-${u.id}`
-        )}">
-        <div>
-          <div style="font-weight:700;font-size:13px;">${u.name}</div>
-          <div style="font-size:11px;color:#64748b;">${u.email}</div>
-        </div>
-        <span class="badge ${
-          u.accountStatus === 'suspended' || u.accountStatus === 'blocked' ? 'blocked' : ''
-        }">${
-          u.accountStatus === 'suspended' || u.accountStatus === 'blocked'
-            ? u.accountStatus
-            : u.role
-        }</span>
-      </a>`
-      )
-      .join('')}
-    <hr style="border:none;border-top:1px solid #e2e8f0;margin:14px 0;" />
-    <form method="GET" action="/auth/callback">
-      <input type="email" name="google_email" required placeholder="new.customer@gmail.com" />
-      <input type="text" name="google_name" placeholder="Full Name (New Customer Auto-Registration)" />
-      <button type="submit" class="primary">Continue with Google</button>
-    </form>
-  </div>
-  <script>
-    (async function handleSupabaseHashCallback() {
-      try {
-        const hash = window.location.hash ? window.location.hash.substring(1) : '';
-        if (!hash) return;
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get('access_token');
-        if (!accessToken) return;
-        document.getElementById('status-sub').innerText = 'Verifying Supabase Google OAuth session...';
-        let email = '';
-        let name = '';
-        let sub = '';
-        let avatar = '';
-        const parts = accessToken.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-          email = payload.email || (payload.user_metadata && payload.user_metadata.email) || '';
-          name = (payload.user_metadata && (payload.user_metadata.full_name || payload.user_metadata.name)) || '';
-          sub = payload.sub || '';
-          avatar = (payload.user_metadata && (payload.user_metadata.avatar_url || payload.user_metadata.picture)) || '';
-        }
-        if (email) {
-          const resp = await fetch('/api/auth/google/authenticate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              authProvider: 'google',
-              supabaseProjectId: ${JSON.stringify(SUPABASE_PROJECT_ID)},
-              email,
-              name,
-              googleSub: sub,
-              avatarUrl: avatar
-            })
-          });
-          const data = await resp.json();
-          if (resp.ok && data.ok && window.opener) {
-            window.opener.postMessage({
-              type: 'OAUTH_AUTH_SUCCESS',
-              isNewUser: data.isNewUser,
-              user: data.user,
-              sessionToken: data.sessionToken,
-              redirectTarget: data.redirectTarget
-            }, '*');
-            window.close();
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('Supabase hash callback parse error:', e);
-      }
-    })();
-  </script>
-</body>
-</html>`);
-      return;
-    }
-
-    const authResult = authenticateOrRegisterGoogleUser({
-      email: googleEmail,
-      name: googleName,
-      googleSub,
-      avatarUrl: googleAvatar,
-      requestedRole,
-      allowRoleChange: false,
-    });
-
-    if (!authResult.ok) {
-      res.status(authResult.status).send(`<!DOCTYPE html>
-<html>
-  <body>
-    <script>
-      if (window.opener) {
-        window.opener.postMessage(${JSON.stringify({
-          type: 'OAUTH_AUTH_ERROR',
-          error: authResult.error,
-          accountStatus: authResult.accountStatus,
-          message: authResult.message,
-        })}, '*');
-        window.close();
-      } else {
-        document.body.innerText = ${JSON.stringify(authResult.message)};
-      }
-    </script>
-  </body>
-</html>`);
-      return;
-    }
-
-    res.send(`<!DOCTYPE html>
-<html>
-  <body>
-    <script>
-      if (window.opener) {
-        window.opener.postMessage(${JSON.stringify({
-          type: 'OAUTH_AUTH_SUCCESS',
-          isNewUser: authResult.isNewUser,
-          user: authResult.user,
-          sessionToken: authResult.sessionToken,
-          redirectTarget: authResult.redirectTarget,
-        })}, '*');
-        window.close();
-      } else {
-        window.location.href = '/';
-      }
-    </script>
-    <p>Google authentication successful. Closing window...</p>
-  </body>
-</html>`);
+    const query = safeQuery.toString();
+    const redirectPath = `/${query ? `?${query}` : ''}`;
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'self'");
+    res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Completing sign-in</title></head><body><p>Completing secure sign-in…</p><script>window.location.replace(${JSON.stringify(redirectPath)} + window.location.hash)</script></body></html>`);
   });
 
   // 1C. AUTHORITATIVE GOOGLE OAUTH AUTHENTICATE / AUTO-REGISTER ENDPOINT
-  app.post('/api/auth/google/authenticate', (req, res) => {
-    const {
-      email,
-      name,
-      googleSub,
-      avatarUrl,
-      phone,
-      requestedRole,
-      allowRoleChange,
-      city,
-      authProvider,
-    } = req.body || {};
-
-    // Enforce Google-only login policy
-    if (authProvider && String(authProvider).toLowerCase() !== 'google') {
-      res.status(400).json({
-        ok: false,
-        error: 'GOOGLE_OAUTH_ONLY',
-        message: 'Only Google OAuth authentication is permitted. Password and non-Google logins are disabled.',
-      });
+  app.post('/api/auth/google/authenticate', async (req, res) => {
+    const accessToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!accessToken) {
+      res.status(401).json({ ok: false, error: 'VERIFIED_GOOGLE_SESSION_REQUIRED', message: 'Sign in through the configured Google provider before requesting an application session.' });
+      return;
+    }
+    if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey) {
+      res.status(503).json({ ok: false, error: 'SUPABASE_AUTH_NOT_CONFIGURED', message: 'Google sign-in verification is unavailable until Supabase Auth is configured.' });
+      return;
+    }
+    const identity = await verifySupabaseGoogleIdentity({
+      projectUrl: SUPABASE_PROJECT_URL,
+      publishableKey: serverSupabaseConfig.publishableKey,
+      accessToken,
+    });
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'INVALID_GOOGLE_SESSION', message: 'Supabase Auth did not verify an active Google identity.' });
       return;
     }
 
+    // Production identity is PostgreSQL-only. The legacy JSON store is never
+    // read or written for a production sign-in: the verified Google identity
+    // maps to a durable profile row and the session role comes from that row.
+    if (IS_PRODUCTION_RUNTIME) {
+      if (!providerListingRepository) {
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
+        return;
+      }
+      try {
+        const identityActor = {
+          userId: '',
+          supabaseUserId: identity.id,
+          email: identity.email,
+          name: identity.name || identity.email,
+          googleSub: identity.googleSub,
+          avatarUrl: identity.avatarUrl,
+          authProvider: 'google' as const,
+          role: 'customer' as const,
+        };
+        const existingProfile = await providerListingRepository.profileForIdentity(identityActor);
+        const profile = existingProfile || await providerListingRepository.provisionGoogleProfile(identityActor);
+        const profileRole = String(profile.role) as SessionClaims['role'];
+        if (!['customer', 'provider', 'admin'].includes(profileRole) || profile.account_status !== 'active') {
+          res.status(403).json({ ok: false, error: 'AUTH_PROFILE_INACTIVE' });
+          return;
+        }
+        const providerId = profileRole === 'provider' ? `prov-${identity.id.slice(0, 8).toLowerCase()}` : undefined;
+        const claims: SessionClaims = {
+          userId: String(profile.id),
+          supabaseUserId: identity.id,
+          email: identity.email,
+          name: identity.name || profile.full_name || identity.email,
+          phone: '',
+          role: profileRole,
+          ...(providerId ? { providerId } : {}),
+          authProvider: 'google',
+          issuedAt: Date.now(),
+          expiresAt: Date.now() + 12 * 60 * 60_000,
+        };
+        res.status(existingProfile ? 200 : 201).json({
+          ok: true,
+          authProvider: 'google',
+          supabaseProjectId: SUPABASE_PROJECT_ID,
+          isNewUser: !existingProfile,
+          user: {
+            id: String(profile.id),
+            supabaseUserId: identity.id,
+            name: claims.name,
+            email: identity.email,
+            phone: '',
+            role: profileRole,
+            providerId,
+            googleSub: identity.googleSub || '',
+            authProvider: 'google',
+            verified: true,
+            accountStatus: 'active',
+            city: '',
+            avatarUrl: profile.avatar_url || identity.avatarUrl || '',
+            joinedAt: new Date().toISOString().slice(0, 10),
+            lastLoginAt: new Date().toISOString(),
+            listingsCount: 0,
+            bookingsCount: 0,
+            totalSpentOrEarned: 0,
+          },
+          sessionToken: signSessionToken(claims),
+          claims,
+          redirectTarget: resolveRoleRedirectTarget(profileRole),
+        });
+        return;
+      } catch (error) {
+        console.error('[auth] production profile provisioning failed:', (error as any)?.message || error);
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
+        return;
+      }
+    }
+
+    // Identity and email come only from Supabase Auth. New users are customers;
+    // existing server-assigned roles and the server-side admin allowlist remain authoritative.
     const result = authenticateOrRegisterGoogleUser({
-      email: String(email || ''),
-      name: name ? String(name) : undefined,
-      googleSub: googleSub ? String(googleSub) : undefined,
-      avatarUrl: avatarUrl ? String(avatarUrl) : undefined,
-      phone: phone ? String(phone) : undefined,
-      requestedRole: requestedRole ? String(requestedRole) : undefined,
-      allowRoleChange: Boolean(allowRoleChange),
-      city: city ? String(city) : undefined,
+      supabaseUserId: identity.id,
+      email: identity.email,
+      name: identity.name,
+      googleSub: identity.googleSub,
+      avatarUrl: identity.avatarUrl,
+      requestedRole: 'customer',
+      allowRoleChange: false,
     });
 
     if (!result.ok) {
@@ -2088,24 +2201,258 @@ Task:
       return;
     }
 
+    let responseSessionToken = result.sessionToken;
+    let responseClaims = result.claims;
+    let responseUser = result.user;
+    let responseRedirectTarget = result.redirectTarget;
+    if (providerListingRepository) {
+      try {
+        const profile = await providerListingRepository.provisionGoogleProfile({
+          userId: result.user.id,
+          supabaseUserId: identity.id,
+          email: identity.email,
+          name: identity.name,
+          googleSub: identity.googleSub,
+          avatarUrl: identity.avatarUrl,
+          authProvider: 'google',
+          role: 'customer',
+        });
+        const profileRole = String(profile.role) as SessionClaims['role'];
+        if (!['customer', 'provider', 'admin'].includes(profileRole) || profile.account_status !== 'active') {
+          res.status(403).json({ ok: false, error: 'AUTH_PROFILE_INACTIVE' });
+          return;
+        }
+        const store = loadAuthoritativeStore();
+        const storedUser = store.users.find((user) => user.id === result.user.id);
+        if (!storedUser) {
+          res.status(503).json({ ok: false, error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE' });
+          return;
+        }
+        storedUser.role = profileRole;
+        storedUser.supabaseUserId = identity.id;
+        if (profileRole === 'provider' && !storedUser.providerId) {
+          storedUser.providerId = `prov-${identity.id.slice(0, 8).toLowerCase()}`;
+        }
+        if (!saveAuthoritativeStore(store)) {
+          res.status(503).json({ ok: false, error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE' });
+          return;
+        }
+        responseUser = storedUser;
+        responseClaims = {
+          ...result.claims,
+          role: profileRole,
+          providerId: profileRole === 'provider' ? storedUser.providerId : undefined,
+        };
+        responseSessionToken = signSessionToken(responseClaims);
+        responseRedirectTarget = resolveRoleRedirectTarget(profileRole);
+      } catch (error) {
+        // Do not issue a browser session when configured durable identity
+        // provisioning failed. Error details may contain private SQL data.
+        const diagnostic = process.env.NODE_ENV === 'test'
+          ? (error instanceof Error ? error.message.slice(0, 240) : 'UNKNOWN_PROFILE_ERROR')
+          : undefined;
+        res.status(503).json({
+          ok: false,
+          error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE',
+          ...(diagnostic ? { diagnostic } : {}),
+        });
+        return;
+      }
+    }
+
     res.status(result.isNewUser ? 201 : 200).json({
       ok: true,
       authProvider: 'google',
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
-      user: result.user,
-      sessionToken: result.sessionToken,
-      claims: result.claims,
-      redirectTarget: result.redirectTarget,
+      user: responseUser,
+      sessionToken: responseSessionToken,
+      claims: responseClaims,
+      redirectTarget: responseRedirectTarget,
     });
   });
 
   // 1D. VERIFY ACTIVE SESSION & ENFORCE MID-SESSION ACCOUNT BLOCKING
-  app.get('/api/auth/me', (req, res) => {
+  // Missing browser-facing API surface (marketplace, cancellation quotes,
+  // refunds, Super Admin governance, SMS, Razorpay). Providers fail closed.
+  registerPlatformApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    loadStore: loadAuthoritativeStore,
+    saveStore: saveAuthoritativeStore,
+    signSession: signSessionToken,
+    hmacSecret: SERVER_HMAC_SECRET,
+    findBlockedUser: findBlockedUserInStore,
+    verifySuperAdmin: async (req) => {
+      const accessToken = String(req.headers['x-supabase-access-token'] || '').trim();
+      if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey || !accessToken) return null;
+      return verifySupabaseSuperAdmin({
+        projectUrl: SUPABASE_PROJECT_URL,
+        publishableKey: serverSupabaseConfig.publishableKey,
+        accessToken,
+      });
+    },
+    manageUserAccess: async (req, targetUserId, action, reason) => {
+      const accessToken = String(req.headers['x-supabase-access-token'] || '').trim();
+      if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey || !accessToken) return null;
+      return manageSupabaseUserAccess({
+        projectUrl: SUPABASE_PROJECT_URL,
+        publishableKey: serverSupabaseConfig.publishableKey,
+        accessToken,
+        targetUserId,
+        action,
+        reason,
+      });
+    },
+    providerListingRepository,
+    env: process.env,
+  });
+
+  // Public Stay discovery search, availability calendar and reviews. Registered
+  // before the inventory routes so the literal `/api/stays/search` path wins
+  // over the parameterised listing routes.
+  registerStaySearchApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+    pool: pgRuntimePool,
+  });
+
+  // Host-owned stay inventory, blocks, bookings and payout status.
+  registerStayHostApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  registerStayAdminApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  // Stay availability, holds, bookings and cancellations (PostgreSQL only).
+  registerStayApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  // Stay checkout, UPI intents, pay-after-service, signed settlement and refunds.
+  registerStayPayments(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  // PG payment obligations, UPI intents, provider-signed settlement,
+  // cancellation/refund quotes, owner check-in/out and admin adjustments.
+  // Registered before the generic PG booking routes so that the cancellation
+  // contract (409 + refund quote instead of a 200 with a failure body) is the
+  // one the browser sees.
+  // PG administrator operations, disputes, offline collection claims,
+  // server-backed invoices and the trusted provider settlement webhook.
+  // Registered first so that the explicit `payment-claim` route is matched
+  // before the generic `:action` wildcard below.
+  // Versioned, registry-driven page/module configuration. Registered before
+  // the payment wildcards so `/api/builder/*` is never shadowed.
+  registerPlatformBuilderApi(app, {
+    repository: platformBuilderRepository,
+    verifySession: verifySessionTokenFromRequest,
+  });
+
+  registerPgAdminApi(app, {
+    repository: pgPaymentRepository,
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  registerPgPaymentsApi(app, {
+    repository: pgPaymentRepository,
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  registerPgBookingsApi(app, {
+    repository: pgBookingRepository,
+    verifySession: verifySessionTokenFromRequest,
+  });
+
+  registerVenueBookingsApi(app, {
+    repository: venueBookingRepository,
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  // Local demo identities for the seeded stays database. Hard-disabled in
+  // production and limited to the two seeded accounts.
+  registerDevDemoSessionApi(app, {
+    signSession: signSessionToken,
+    env: process.env,
+  });
+
+  app.get('/api/auth/me', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
       return;
+    }
+
+    if (IS_PRODUCTION_RUNTIME) {
+      if (!providerListingRepository || !claims.supabaseUserId || claims.authProvider !== 'google') {
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
+        return;
+      }
+      try {
+        const profile = await providerListingRepository.profileForIdentity(claims);
+        if (!profile) {
+          res.status(503).json({ ok: false, error: 'AUTH_PROFILE_NOT_PROVISIONED' });
+          return;
+        }
+        const role = String(profile.role) as SessionClaims['role'];
+        if (!['customer', 'provider', 'admin'].includes(role) || profile.account_status !== 'active') {
+          res.status(403).json({ ok: false, error: 'AUTH_PROFILE_INACTIVE' });
+          return;
+        }
+        const providerId = role === 'provider'
+          ? claims.providerId || `prov-${claims.supabaseUserId.slice(0, 8).toLowerCase()}`
+          : undefined;
+        const refreshedClaims: SessionClaims = {
+          ...claims,
+          userId: String(profile.id),
+          role,
+          providerId,
+        };
+        res.json({
+          ok: true,
+          authenticated: true,
+          authProvider: 'google',
+          supabaseProjectId: SUPABASE_PROJECT_ID,
+          claims: refreshedClaims,
+          sessionToken: signSessionToken(refreshedClaims),
+          user: {
+            id: String(profile.id),
+            supabaseUserId: claims.supabaseUserId,
+            name: profile.full_name || claims.name || profile.email || 'BookOurSpace User',
+            email: profile.email || claims.email || '',
+            phone: claims.phone || '',
+            role,
+            providerId,
+            googleSub: String((claims as any).googleSub || ''),
+            authProvider: 'google',
+            verified: true,
+            accountStatus: 'active',
+            status: 'active',
+            city: '',
+            avatarUrl: profile.avatar_url || '',
+            joinedAt: new Date().toISOString().slice(0, 10),
+            lastLoginAt: new Date().toISOString(),
+            listingsCount: 0,
+            bookingsCount: 0,
+            totalSpentOrEarned: 0,
+          },
+          redirectTarget: resolveRoleRedirectTarget(role),
+        });
+        return;
+      } catch (error) {
+        console.error('[auth] production profile lookup failed:', (error as any)?.message || error);
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
+        return;
+      }
     }
 
     const store = loadAuthoritativeStore();
@@ -2126,7 +2473,72 @@ Task:
         (claims.email && u.email.toLowerCase() === claims.email.toLowerCase())
     );
 
-    const effectiveRole = matchedUser ? matchedUser.role : claims.role;
+    let effectiveRole = matchedUser ? matchedUser.role : claims.role;
+    let refreshedSessionToken: string | undefined;
+    if (providerListingRepository && claims.supabaseUserId && claims.authProvider === 'google') {
+      try {
+        const profile = await providerListingRepository.profileForIdentity(claims);
+        if (!profile) {
+          console.error('[auth] no profile row for the claimed identity', claims.supabaseUserId, claims.email);
+          res.status(503).json({ ok: false, error: 'AUTH_PROFILE_NOT_PROVISIONED' });
+          return;
+        }
+        effectiveRole = String(profile.role) as SessionClaims['role'];
+        if (!['customer', 'provider', 'admin'].includes(effectiveRole) || profile.account_status !== 'active') {
+          res.status(403).json({ ok: false, error: 'AUTH_PROFILE_INACTIVE' });
+          return;
+        }
+        if (matchedUser) {
+          matchedUser.role = effectiveRole;
+          matchedUser.supabaseUserId = claims.supabaseUserId;
+          if (effectiveRole === 'provider' && !matchedUser.providerId) {
+            matchedUser.providerId = `prov-${claims.supabaseUserId.slice(0, 8).toLowerCase()}`;
+          }
+          if (!saveAuthoritativeStore(store)) {
+            res.status(503).json({ ok: false, error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE' });
+            return;
+          }
+        }
+        const refreshedClaims: SessionClaims = {
+          ...claims,
+          role: effectiveRole as SessionClaims['role'],
+          providerId: effectiveRole === 'provider' ? matchedUser?.providerId || claims.providerId || `prov-${claims.supabaseUserId.slice(0, 8).toLowerCase()}` : undefined,
+        };
+        refreshedSessionToken = signSessionToken(refreshedClaims);
+      } catch (error) {
+        // A silent 503 hides the real reason, so it is logged before the
+        // fail-closed response.
+        console.error('[auth] profile lookup failed:', (error as any)?.message || error);
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
+        return;
+      }
+    }
+    // A durable PostgreSQL identity must not need a legacy JSON compatibility
+    // record to be usable in the browser. Without this fallback a verified
+    // Google/Supabase user whose profile exists only in PostgreSQL would get
+    // `user: null`, and the client would drop an otherwise valid session.
+    const verifiedSessionUser = matchedUser || {
+      id: claims.userId,
+      name: claims.name || claims.email || 'BookOurSpace User',
+      email: claims.email || '',
+      phone: claims.phone || '',
+      role: effectiveRole,
+      providerId: effectiveRole === 'provider'
+        ? claims.providerId || (claims.supabaseUserId ? `prov-${claims.supabaseUserId.slice(0, 8).toLowerCase()}` : undefined)
+        : undefined,
+      googleSub: String((claims as any).googleSub || ''),
+      authProvider: 'google',
+      verified: true,
+      accountStatus: 'active',
+      status: 'active',
+      city: '',
+      joinedAt: new Date().toISOString().slice(0, 10),
+      lastLoginAt: new Date().toISOString(),
+      listingsCount: 0,
+      bookingsCount: 0,
+      totalSpentOrEarned: 0,
+    };
+
     res.json({
       ok: true,
       authenticated: true,
@@ -2134,29 +2546,86 @@ Task:
       supabaseProjectId: SUPABASE_PROJECT_ID,
       claims: {
         ...claims,
-        role: effectiveRole,
+        role: effectiveRole as SessionClaims['role'],
       },
-      user: matchedUser || null,
+      ...(refreshedSessionToken ? { sessionToken: refreshedSessionToken } : {}),
+      user: verifiedSessionUser,
       redirectTarget: resolveRoleRedirectTarget(effectiveRole),
     });
   });
 
   // 1E. LOGOUT / REVOKE SESSION TOKEN
+
+  // Local development sign-in. Disabled in production and unless explicitly
+  // opted in; it only selects an existing seeded profile, never creates one.
+  app.post('/api/auth/local-dev/session', async (req, res) => {
+    if (process.env.NODE_ENV === 'production' || String(process.env.BOS_LOCAL_DEV_AUTH || '') !== '1') {
+      res.status(404).json({ ok: false, error: 'NOT_FOUND' });
+      return;
+    }
+    if (!pgRuntimePool) {
+      res.status(503).json({ ok: false, error: 'DATABASE_UNAVAILABLE' });
+      return;
+    }
+    const requested = String(req.body?.role || 'customer');
+    const role = requested === 'admin' ? 'admin' : requested === 'provider' ? 'provider' : 'customer';
+    try {
+      const result = await pgRuntimePool.query(
+        `select p.id, p.email, p.full_name, p.role, p.is_super_admin
+           from public.profiles p
+          where p.account_status = 'active'
+            and (case when $1 = 'admin' then (p.is_super_admin is true or p.role = 'admin') else p.role = $1 end)
+          order by (p.is_super_admin is true) desc, p.created_at asc
+          limit 1`,
+        [role],
+      );
+      const profile = result.rows[0];
+      if (!profile) {
+        res.status(404).json({ ok: false, error: 'LOCAL_DEMO_USER_NOT_FOUND' });
+        return;
+      }
+      const effectiveRole = profile.is_super_admin ? 'admin' : profile.role;
+      const sessionToken = signSessionToken({
+        userId: String(profile.id),
+        supabaseUserId: String(profile.id),
+        email: String(profile.email),
+        name: String(profile.full_name || profile.email),
+        phone: '',
+        role: effectiveRole as SessionClaims['role'],
+        authProvider: 'google',
+        issuedAt: Date.now(),
+        expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+      });
+      res.json({
+        ok: true,
+        sessionToken,
+        role: effectiveRole as SessionClaims['role'],
+        user: { id: profile.id, email: profile.email, name: profile.full_name || profile.email, role: effectiveRole },
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: 'LOCAL_DEV_SESSION_FAILED' });
+    }
+  });
+
   app.post('/api/auth/logout', (req, res) => {
     const rawHeader = extractRawTokenFromRequest(req);
     if (rawHeader && rawHeader.includes('.')) {
       const sig = rawHeader.split('.')[1];
       if (sig) {
-        const store = loadAuthoritativeStore();
-        store.revokedTokens[sig] = Date.now();
-        saveAuthoritativeStore(store);
+        if (IS_PRODUCTION_RUNTIME) {
+          REVOKED_SESSION_SIGNATURES.add(sig);
+        } else {
+          const store = loadAuthoritativeStore();
+          store.revokedTokens[sig] = Date.now();
+          saveAuthoritativeStore(store);
+        }
       }
     }
     res.json({ ok: true, loggedOut: true });
   });
 
   // 1E-2. PROTECTED ROUTE & ROLE-BASED NAVIGATION GUARD ENDPOINT
-  app.get('/api/auth/protected/:routeTarget', (req, res) => {
+  app.get('/api/auth/protected/:routeTarget', async (req, res) => {
     const routeTarget = String(req.params.routeTarget || 'marketplace').toLowerCase();
     if (routeTarget === 'marketplace') {
       res.json({
@@ -2179,6 +2648,55 @@ Task:
         message: 'Authentication required. Please sign in with Google to access this protected route.',
       });
       return;
+    }
+
+    if (IS_PRODUCTION_RUNTIME) {
+      if (!providerListingRepository || !claims.supabaseUserId || claims.authProvider !== 'google') {
+        res.status(503).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_UNAVAILABLE' });
+        return;
+      }
+      try {
+        const profile = await providerListingRepository.profileForIdentity(claims);
+        if (!profile) {
+          res.status(403).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_NOT_PROVISIONED', redirectTarget: 'marketplace' });
+          return;
+        }
+        const role = String(profile.role) as SessionClaims['role'];
+        if (!['customer', 'provider', 'admin'].includes(role) || profile.account_status !== 'active') {
+          res.status(403).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_INACTIVE', redirectTarget: 'marketplace' });
+          return;
+        }
+        const roleRedirect = resolveRoleRedirectTarget(role);
+        if (routeTarget === 'admin_console' && role !== 'admin') {
+          res.status(403).json({ ok: false, allowed: false, routeTarget, role, redirectTarget: roleRedirect, error: 'FORBIDDEN_ADMIN_ONLY' });
+          return;
+        }
+        if (routeTarget === 'provider_portal' && role !== 'provider' && role !== 'admin') {
+          res.status(403).json({ ok: false, allowed: false, routeTarget, role, redirectTarget: roleRedirect, error: 'FORBIDDEN_PROVIDER_OR_ADMIN_ONLY' });
+          return;
+        }
+        res.json({
+          ok: true,
+          allowed: true,
+          routeTarget,
+          role,
+          redirectTarget: roleRedirect,
+          user: {
+            id: String(profile.id),
+            supabaseUserId: claims.supabaseUserId,
+            name: profile.full_name || claims.name || profile.email || 'BookOurSpace User',
+            email: profile.email || claims.email || '',
+            role,
+            accountStatus: 'active',
+            authProvider: 'google',
+          },
+        });
+        return;
+      } catch (error) {
+        console.error('[auth] production route guard failed:', (error as any)?.message || error);
+        res.status(503).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_UNAVAILABLE' });
+        return;
+      }
     }
 
     const store = loadAuthoritativeStore();
@@ -2209,7 +2727,7 @@ Task:
         ok: false,
         allowed: false,
         routeTarget,
-        role: effectiveRole,
+        role: effectiveRole as SessionClaims['role'],
         redirectTarget: roleRedirect,
         error: 'FORBIDDEN_ADMIN_ONLY',
         message: `Role "${effectiveRole}" cannot access Admin Console. Redirecting to ${roleRedirect}.`,
@@ -2222,7 +2740,7 @@ Task:
         ok: false,
         allowed: false,
         routeTarget,
-        role: effectiveRole,
+        role: effectiveRole as SessionClaims['role'],
         redirectTarget: roleRedirect,
         error: 'FORBIDDEN_PROVIDER_OR_ADMIN_ONLY',
         message: `Role "${effectiveRole}" cannot access Provider Portal. Redirecting to ${roleRedirect}.`,
@@ -2241,60 +2759,26 @@ Task:
   });
 
   // 1F. ISSUE ROLE-ISOLATED SESSION TOKEN (Checks Account Blocking + Admin Passcode)
-  app.post('/api/auth/session', (req, res) => {
-    const { userId, email, name, role, providerId, phone, adminPasscode } = req.body || {};
-    const requestedRole = String(role || 'customer').toLowerCase();
-    if (!['customer', 'provider', 'admin'].includes(requestedRole)) {
-      res.status(400).json({ ok: false, error: 'INVALID_ROLE' });
-      return;
-    }
-
-    const store = loadAuthoritativeStore();
-    const blocked = findBlockedUserInStore(store, userId, email);
-    if (blocked) {
-      res.status(403).json({
-        ok: false,
-        error: 'ACCOUNT_BLOCKED',
-        accountStatus: blocked.accountStatus,
-        message: `Account "${blocked.name}" (${blocked.email}) is ${blocked.accountStatus.toUpperCase()}. Session creation denied.`,
-      });
-      return;
-    }
-
-    // Prevent arbitrary unverified self-escalation to admin unless valid admin key/passcode is supplied
-    if (requestedRole === 'admin') {
-      const expectedAdminPasscode = (process.env.BOS_ADMIN_PASSCODE || '').trim();
-      if (!expectedAdminPasscode || adminPasscode !== expectedAdminPasscode) {
-        res.status(403).json({
-          ok: false,
-          error: expectedAdminPasscode ? 'ADMIN_ESCALATION_DENIED' : 'ADMIN_AUTH_NOT_CONFIGURED',
-          message: 'Cannot self-escalate to admin role without verified admin credentials.',
-        });
-        return;
-      }
-    }
-
-    const claims: SessionClaims = {
-      userId: String(userId || `usr-${Date.now()}`),
-      email: email ? String(email) : undefined,
-      name: name ? String(name) : undefined,
-      role: requestedRole as SessionClaims['role'],
-      providerId: requestedRole === 'provider' ? String(providerId || userId || 'prov-1') : undefined,
-      phone: phone ? String(phone) : undefined,
-      authProvider: 'google',
-      issuedAt: Date.now(),
-    };
-
-    const token = signSessionToken(claims);
-    res.json({
-      ok: true,
-      sessionToken: token,
-      claims,
-      redirectTarget: resolveRoleRedirectTarget(claims.role),
+  app.post('/api/auth/session', (_req, res) => {
+    res.status(410).json({
+      ok: false,
+      error: 'UNVERIFIED_SESSION_ISSUANCE_DISABLED',
+      message: 'Application sessions can only be issued after server verification of a Supabase Google access token.',
     });
   });
 
-  // 2. GET AUTHORITATIVE SEAT LOCKS FOR A MOVIE / SHOWTIME
+  // Movies V1 is discovery and showtimes only. Refuse legacy seat/payment
+  // endpoints before they can read or mutate an existing ticket/hold.
+  app.use(['/api/seats', '/api/movies/bookings'], (_req, res) => {
+    res.status(410).json({
+      ok: false,
+      error: 'MOVIES_V1_DISPLAY_ONLY',
+      message: 'Movies V1 supports location-based discovery and showtimes only.',
+    });
+  });
+
+  // 2. Legacy movie-seat endpoints remain hard-disabled until booking is an
+  // approved product capability.
   app.get('/api/seats/locks', (req, res) => {
     const listingId = String(req.query.listingId || '').trim();
     const dateIso = String(req.query.dateIso || '').trim();
@@ -2482,96 +2966,60 @@ Task:
     res.json({ ok: true, releasedCount });
   });
 
-  // 5. SERVER-SIDE UPI PAYMENT INTENT CREATION
+  // 5. SERVER-SIDE PAYMENT INTENT CREATION
   app.post('/api/payments/create-intent', (req, res) => {
-    const { amount, merchantVpa, planOrListing, userId } = req.body || {};
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      res.status(400).json({ ok: false, error: 'INVALID_AMOUNT' });
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || claims.role !== 'customer') {
+      res.status(claims ? 403 : 401).json({
+        ok: false,
+        error: claims ? 'CUSTOMER_SESSION_REQUIRED' : 'UNAUTHORIZED_SESSION',
+        message: 'Sign in with a customer account before creating a payment intent.',
+      });
       return;
     }
 
-    const intentId = `INT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const nowIso = new Date().toISOString();
-    const store = loadAuthoritativeStore();
+    if (!TRUSTED_PAYMENT_PROVIDER_CONFIGURED) {
+      res.status(503).json({
+        ok: false,
+        error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+        message: 'Online payment verification is unavailable. Do not send payment; use an offline option if offered.',
+      });
+      return;
+    }
 
-    const record: PaymentIntentRecord = {
-      intentId,
-      userId: String(userId || 'guest'),
-      amount: numericAmount,
-      merchantVpa: String(merchantVpa || 'bookourspace@okhdfcbank').trim(),
-      planOrListing: String(planOrListing || 'BookOurSpace Service').trim(),
-      status: 'created',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    store.paymentIntents[intentId] = record;
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      intentId,
-      amount: record.amount,
-      merchantVpa: record.merchantVpa,
-      status: record.status,
-      createdAt: nowIso,
+    // Keep closed until intent creation is backed by a trusted provider and server-side quote.
+    res.status(503).json({
+      ok: false,
+      error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+      message: 'Online payment verification is unavailable.',
     });
   });
 
-  // 6. SIMULATED / GATEWAY NPCI WEBHOOK SETTLEMENT (Generates Authoritative Server Gateway Signature)
+  // 6. A client request is not a bank/provider webhook and cannot mint payment proof.
   app.post('/api/payments/webhook-settle', (req, res) => {
-    const { intentId, utrNumber, amount } = req.body || {};
-    const cleanIntentId = String(intentId || '').trim();
-    const cleanUtr = String(utrNumber || '').trim().replace(/\s+/g, '');
-
-    if (!cleanIntentId || !/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
-      res.status(400).json({
-        ok: false,
-        error: 'INVALID_SETTLEMENT_PAYLOAD',
-        message: 'Valid intentId and 12-to-22 character alphanumeric bank UTR are required.',
-      });
-      return;
-    }
-
-    const store = loadAuthoritativeStore();
-    const intent = store.paymentIntents[cleanIntentId];
-    if (!intent) {
-      res.status(404).json({ ok: false, error: 'PAYMENT_INTENT_NOT_FOUND' });
-      return;
-    }
-
-    const existingUtr = store.usedUtrs[cleanUtr];
-    if (existingUtr && existingUtr.intentId !== cleanIntentId) {
-      res.status(409).json({
-        ok: false,
-        error: 'DUPLICATE_UTR_REPLAY',
-        message: `UTR ${cleanUtr} has already been used for another transaction (${existingUtr.intentId}).`,
-      });
-      return;
-    }
-
-    const effectiveAmount = Number(amount ?? intent.amount);
-    const gatewaySignature = computeHmac(
-      `${cleanIntentId}|${effectiveAmount.toFixed(2)}|${cleanUtr}|${intent.merchantVpa}`,
-      'UPI_GATEWAY_WEBHOOK'
-    );
-
-    res.json({
-      ok: true,
-      intentId: cleanIntentId,
-      utrNumber: cleanUtr,
-      amount: effectiveAmount,
-      gatewaySignature,
+    res.status(410).json({
+      ok: false,
+      error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+      message: 'Settlement must be confirmed by an independently verified payment provider or bank reconciliation.',
     });
   });
 
-  // 7. SERVER-SIDE UPI PAYMENT VERIFICATION (Enforces: UTR alone != verified payment)
+  // 7. UTR submission records reconciliation only. It cannot establish settlement.
   app.post('/api/payments/verify-upi', (req, res) => {
-    const { intentId, utrNumber, gatewaySignature, amount, merchantVpa } = req.body || {};
+    const { intentId, utrNumber } = req.body || {};
+    const claims = verifySessionTokenFromRequest(req);
     const cleanIntentId = String(intentId || '').trim();
     const cleanUtr = String(utrNumber || '').trim().replace(/\s+/g, '');
-    const cleanSig = String(gatewaySignature || '').trim();
+
+    if (!claims || claims.role !== 'customer') {
+      res.status(claims ? 403 : 401).json({
+        ok: false,
+        verified: false,
+        error: claims ? 'CUSTOMER_SESSION_REQUIRED' : 'UNAUTHORIZED_SESSION',
+        message: 'Sign in with the customer account that owns this payment intent.',
+      });
+      return;
+    }
 
     if (!/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
       res.status(400).json({
@@ -2584,44 +3032,67 @@ Task:
     }
 
     const store = loadAuthoritativeStore();
-    let intent = cleanIntentId ? store.paymentIntents[cleanIntentId] : undefined;
+    const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
+    if (blocked) {
+      res.status(403).json({ ok: false, verified: false, error: 'ACCOUNT_BLOCKED' });
+      return;
+    }
+    const intent = cleanIntentId ? store.paymentIntents[cleanIntentId] : undefined;
+    if (!intent) {
+      res.status(404).json({ ok: false, verified: false, error: 'PAYMENT_INTENT_NOT_FOUND' });
+      return;
+    }
+    if (intent.ownerUserId !== claims.userId) {
+      res.status(403).json({ ok: false, verified: false, error: 'PAYMENT_INTENT_OWNER_MISMATCH' });
+      return;
+    }
+
+    // A customer retry can read a provider-verified result but cannot downgrade or change it.
+    if (intent.status === 'verified') {
+      if (intent.settlementSource !== 'trusted_provider_webhook' || !intent.providerPaymentId || !intent.settledAt) {
+        res.status(409).json({ ok: false, verified: false, error: 'UNTRUSTED_LEGACY_VERIFICATION' });
+        return;
+      }
+      if (intent.utrNumber !== cleanUtr) {
+        res.status(409).json({ ok: false, verified: false, error: 'VERIFIED_UTR_IMMUTABLE' });
+        return;
+      }
+      if (!TRUSTED_PAYMENT_PROVIDER_CONFIGURED) {
+        res.status(503).json({
+          ok: false,
+          verified: false,
+          status: 'pending_provider_reconciliation',
+          error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+          message: 'Payment verification is unavailable. No new payment confirmation was issued.',
+        });
+        return;
+      }
+      res.json({
+        ok: true,
+        verified: true,
+        status: 'verified',
+        intentId: intent.intentId,
+        utrNumber: intent.utrNumber,
+        amount: intent.amount,
+        paymentVerificationToken: intent.paymentVerificationToken,
+        message: 'Existing provider-verified payment remains verified.',
+      });
+      return;
+    }
 
     // Anti-replay: reject if UTR was already used on a different payment intent
     const existingUtr = store.usedUtrs[cleanUtr];
-    if (existingUtr && existingUtr.intentId !== cleanIntentId) {
+    if (existingUtr && (existingUtr.intentId !== cleanIntentId || existingUtr.status === 'verified')) {
       res.status(409).json({
         ok: false,
         verified: false,
-        error: 'DUPLICATE_UTR_REPLAY',
+        error: existingUtr.intentId !== cleanIntentId ? 'DUPLICATE_UTR_REPLAY' : 'VERIFIED_UTR_IMMUTABLE',
         message: `UTR ${cleanUtr} was already submitted for transaction ${existingUtr.intentId}. Replay rejected.`,
       });
       return;
     }
 
-    if (!intent) {
-      const generatedIntentId = cleanIntentId || `INT-${Date.now()}`;
-      intent = {
-        intentId: generatedIntentId,
-        userId: 'guest',
-        amount: Number(amount) || 1,
-        merchantVpa: String(merchantVpa || 'bookourspace@okhdfcbank').trim(),
-        planOrListing: 'Direct UPI Payment',
-        status: 'created',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      store.paymentIntents[generatedIntentId] = intent;
-    }
-
-    const expectedSig = computeHmac(
-      `${intent.intentId}|${intent.amount.toFixed(2)}|${cleanUtr}|${intent.merchantVpa}`,
-      'UPI_GATEWAY_WEBHOOK'
-    );
-
-    const hasValidGatewayProof = cleanSig.length > 0 && safeTimingEqualHex(cleanSig, expectedSig);
-
-    // CRITICAL SECURITY RULE: UTR alone != success!
-    if (!hasValidGatewayProof) {
+    if (!TRUSTED_PAYMENT_PROVIDER_CONFIGURED) {
       intent.utrNumber = cleanUtr;
       intent.status = 'pending_provider_reconciliation';
       intent.updatedAt = new Date().toISOString();
@@ -2630,48 +3101,27 @@ Task:
         status: 'pending_provider_reconciliation',
         recordedAt: intent.updatedAt,
       };
-      saveAuthoritativeStore(store);
-
-      res.status(202).json({
-        ok: true,
+      if (!saveAuthoritativeStore(store)) {
+        res.status(500).json({ ok: false, verified: false, error: 'PAYMENT_RECONCILIATION_PERSIST_FAILED' });
+        return;
+      }
+      res.status(503).json({
+        ok: false,
         verified: false,
         status: 'pending_provider_reconciliation',
+        error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
         intentId: intent.intentId,
         utrNumber: cleanUtr,
-        message:
-          'UTR recorded as Pending Bank Reconciliation. Submitting a UTR number alone does not mark payment as verified until bank/gateway webhook confirmation.',
+        message: 'Payment verification is unavailable. This UTR is unverified; no booking or paid status was created.',
       });
       return;
     }
 
-    // Cryptographic gateway/webhook signature verified
-    const verificationToken = computeHmac(
-      `${intent.intentId}|${cleanUtr}|VERIFIED|${intent.amount.toFixed(2)}`,
-      'PAYMENT_VERIFIED_TOKEN'
-    );
-
-    intent.utrNumber = cleanUtr;
-    intent.gatewaySignature = cleanSig;
-    intent.status = 'verified';
-    intent.paymentVerificationToken = verificationToken;
-    intent.updatedAt = new Date().toISOString();
-
-    store.usedUtrs[cleanUtr] = {
-      intentId: intent.intentId,
-      status: 'verified',
-      recordedAt: intent.updatedAt,
-    };
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      verified: true,
-      status: 'verified',
-      intentId: intent.intentId,
-      utrNumber: cleanUtr,
-      amount: intent.amount,
-      paymentVerificationToken: verificationToken,
-      message: 'Payment cryptographically verified via bank/gateway settlement signature.',
+    res.status(503).json({
+      ok: false,
+      verified: false,
+      status: 'pending_provider_reconciliation',
+      error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
     });
   });
 
@@ -2681,11 +3131,20 @@ Task:
     const sessionClaims = verifySessionTokenFromRequest(req);
     const store = loadAuthoritativeStore();
 
+    if (!sessionClaims || sessionClaims.role !== 'customer') {
+      res.status(sessionClaims ? 403 : 401).json({
+        ok: false,
+        error: sessionClaims ? 'CUSTOMER_SESSION_REQUIRED' : 'UNAUTHORIZED_SESSION',
+        message: 'A verified customer session is required to create a booking.',
+      });
+      return;
+    }
+
     // Enforce account blocking on bookings
     const blocked = findBlockedUserInStore(
       store,
-      sessionClaims?.userId || body.customerUserId,
-      sessionClaims?.email || body.customerEmail
+      sessionClaims.userId,
+      sessionClaims.email
     );
     if (blocked) {
       res.status(403).json({
@@ -2719,10 +3178,29 @@ Task:
       return;
     }
 
+    const screeningConfig = store.adminModules.movies_cinema_engine?.screens;
+    const movieScreens = Array.isArray(screeningConfig) && screeningConfig.length > 0
+      ? screeningConfig
+      : DEFAULT_CINEMA_SCREENS;
+    const isMovieBooking = movieScreens.some(
+      (screen: CinemaScreenConfig) => String(screen.listingId || '').trim() === listingId
+    ) || [body.module, body.moduleKey, body.entityType, body.categoryId]
+      .some((value) => /movie|cinema/i.test(String(value || '')));
+    if (isMovieBooking) {
+      res.status(410).json({
+        ok: false,
+        error: 'MOVIES_V1_DISPLAY_ONLY',
+        message: 'Movies V1 supports location-based discovery and showtimes only.',
+      });
+      return;
+    }
+
     pruneExpiredSeatHolds(store);
 
     // 8A. IDEMPOTENCY CHECK: Return existing booking if idempotencyKey was already processed
-    const existingByIdempotency = store.bookings.find((b) => b.idempotencyKey === idempotencyKey);
+    const existingByIdempotency = store.bookings.find(
+      (b) => b.idempotencyKey === idempotencyKey && b.customerUserId === sessionClaims.userId
+    );
     if (existingByIdempotency) {
       res.json({
         ok: true,
@@ -2738,6 +3216,22 @@ Task:
     const showtime = String(body.showtime || timeSlot).trim();
     const sessionId = String(body.sessionId || sessionClaims?.userId || 'direct-session').trim();
     const now = Date.now();
+
+    const configuredCinemaScreens = store.adminModules.movies_cinema_engine?.screens;
+    const cinemaScreens: CinemaScreenConfig[] = Array.isArray(configuredCinemaScreens) && configuredCinemaScreens.length > 0
+      ? configuredCinemaScreens
+      : DEFAULT_CINEMA_SCREENS;
+    const isMovieListing = cinemaScreens.some(
+      (screen: CinemaScreenConfig) => String(screen.listingId || '').trim() === listingId
+    );
+    if (seats.length > 0 && !isMovieListing) {
+      res.status(400).json({ ok: false, error: 'MOVIE_LISTING_REQUIRED', message: 'Seat bookings must reference a server-configured cinema.' });
+      return;
+    }
+    if (isMovieListing && (seats.length === 0 || !showtime)) {
+      res.status(400).json({ ok: false, error: 'MOVIE_SEATS_AND_SHOWTIME_REQUIRED' });
+      return;
+    }
 
     // 8B. MOVIE SEAT CONCURRENCY CHECK & ATOMIC RESERVATION
     if (seats.length > 0) {
@@ -2792,29 +3286,109 @@ Task:
       }
     }
 
-    // 8D. SERVER-SIDE PAYMENT STATUS RESOLUTION (Never trust client 'paid' boolean without intent verification)
+    // 8D. Apply payment requirements from server policy. Client flags are ignored.
+    if (body.paymentMode !== undefined && !['pay_later', 'pay_qr'].includes(String(body.paymentMode))) {
+      res.status(400).json({ ok: false, error: 'INVALID_PAYMENT_MODE' });
+      return;
+    }
     const paymentMode: 'pay_later' | 'pay_qr' = body.paymentMode === 'pay_qr' ? 'pay_qr' : 'pay_later';
     let paymentStatus: 'pay_later' | 'pending_verification' | 'verified' = 'pay_later';
-    const paymentIntentId = body.paymentIntentId ? String(body.paymentIntentId).trim() : undefined;
-    const paymentUtr = body.paymentUtr ? String(body.paymentUtr).trim() : undefined;
-
-    if (paymentMode === 'pay_qr') {
-      const intent = paymentIntentId ? store.paymentIntents[paymentIntentId] : undefined;
-      if (
-        intent &&
-        intent.status === 'verified' &&
-        (!body.paymentVerificationToken ||
-          intent.paymentVerificationToken === String(body.paymentVerificationToken))
-      ) {
-        paymentStatus = 'verified';
-      } else {
-        // Even if client claims QR paid or submits a raw UTR, server marks it pending_verification until webhook proof
-        paymentStatus = 'pending_verification';
-      }
+    const paymentIntentId = paymentMode === 'pay_qr' && body.paymentIntentId ? String(body.paymentIntentId).trim() : undefined;
+    const paymentUtr = paymentMode === 'pay_qr' && body.paymentUtr ? String(body.paymentUtr).trim() : undefined;
+    const paymentRequired = paymentMode === 'pay_qr' || isMovieListing || seats.length > 0;
+    if (isMovieListing && paymentMode !== 'pay_qr') {
+      res.status(402).json({
+        ok: false,
+        error: 'PAYMENT_REQUIRED',
+        message: 'Cinema tickets require verified online payment; offline booking is unavailable.',
+      });
+      return;
     }
 
-    // Strict Movie Checkout Rule: Never confirm booking when requireVerifiedPayment is set unless paymentStatus === 'verified'
-    if (body.requireVerifiedPayment === true && paymentStatus !== 'verified') {
+    let verifiedIntent: PaymentIntentRecord | undefined;
+    if (paymentRequired) {
+      if (!sessionClaims || sessionClaims.role !== 'customer') {
+        res.status(sessionClaims ? 403 : 401).json({
+          ok: false,
+          error: sessionClaims ? 'CUSTOMER_SESSION_REQUIRED' : 'UNAUTHORIZED_SESSION',
+          message: 'A signed-in customer session is required for payment-required bookings.',
+        });
+        return;
+      }
+
+      verifiedIntent = paymentIntentId ? store.paymentIntents[paymentIntentId] : undefined;
+      const intentUtrRecord = verifiedIntent?.utrNumber ? store.usedUtrs[verifiedIntent.utrNumber] : undefined;
+      const submittedToken = String(body.paymentVerificationToken || '');
+      const expectedToken = verifiedIntent?.utrNumber && verifiedIntent
+        ? computeHmac(
+            `${verifiedIntent.intentId}|${verifiedIntent.utrNumber}|VERIFIED|${verifiedIntent.amount.toFixed(2)}`,
+            'PAYMENT_VERIFIED_TOKEN'
+          )
+        : '';
+      const requestedAmount = Number(body.totalAmount);
+      const sameAmount = Number.isFinite(requestedAmount) && Math.round(requestedAmount * 100) ===
+        Math.round((verifiedIntent?.amount || 0) * 100);
+      const trustedSettlementRecord = Boolean(
+        verifiedIntent &&
+          verifiedIntent.status === 'verified' &&
+          verifiedIntent.settlementSource === 'trusted_provider_webhook' &&
+          verifiedIntent.providerPaymentId &&
+          verifiedIntent.settledAt &&
+          verifiedIntent.paymentVerificationToken &&
+          expectedToken &&
+          safeTimingEqualHex(verifiedIntent.paymentVerificationToken, expectedToken) &&
+          intentUtrRecord?.intentId === verifiedIntent.intentId &&
+          intentUtrRecord.status === 'verified'
+      );
+      const bindingMatches = Boolean(
+        verifiedIntent &&
+          verifiedIntent.currency === 'INR' &&
+          verifiedIntent.purpose === 'booking' &&
+          verifiedIntent.listingId === listingId &&
+          verifiedIntent.ownerUserId === sessionClaims.userId &&
+          sameAmount &&
+          submittedToken &&
+          verifiedIntent.paymentVerificationToken &&
+          safeTimingEqualHex(submittedToken, verifiedIntent.paymentVerificationToken)
+      );
+
+      if (!trustedSettlementRecord) {
+        res.status(402).json({
+          ok: false,
+          error: TRUSTED_PAYMENT_PROVIDER_CONFIGURED ? 'PAYMENT_NOT_VERIFIED' : 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+          paymentStatus: 'pending_verification',
+          message: TRUSTED_PAYMENT_PROVIDER_CONFIGURED
+            ? 'A trusted provider settlement matching this customer, listing, purpose, and amount is required.'
+            : 'Online payment verification is unavailable. No paid booking was created; choose an offline option if offered.',
+        });
+        return;
+      }
+      if (!bindingMatches) {
+        res.status(402).json({
+          ok: false,
+          error: 'PAYMENT_INTENT_BINDING_MISMATCH',
+          paymentStatus: 'pending_verification',
+          message: 'The verified payment does not belong to this customer, listing, purpose, or amount.',
+        });
+        return;
+      }
+      if (verifiedIntent?.consumedByBookingId) {
+        res.status(409).json({ ok: false, error: 'PAYMENT_INTENT_ALREADY_CONSUMED', message: 'This payment intent has already been used.' });
+        return;
+      }
+      if (!TRUSTED_PAYMENT_PROVIDER_CONFIGURED) {
+        res.status(503).json({
+          ok: false,
+          error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+          paymentStatus: 'pending_verification',
+          message: 'Online payment verification is disabled. No paid booking was created.',
+        });
+        return;
+      }
+      paymentStatus = 'verified';
+    }
+
+    if (paymentRequired && paymentStatus !== 'verified') {
       res.status(402).json({
         ok: false,
         error: 'PAYMENT_NOT_VERIFIED',
@@ -2862,7 +3436,7 @@ Task:
       }
     }
 
-    const customerUserId = String(sessionClaims?.userId || body.customerUserId || 'customer-guest');
+    const customerUserId = sessionClaims.userId;
     const expiresAtDate = new Date(`${scheduledDate}T23:59:59.000Z`);
     const expiresAtIso = Number.isNaN(expiresAtDate.getTime())
       ? new Date(now + 48 * 60 * 60 * 1000).toISOString()
@@ -2906,6 +3480,10 @@ Task:
     };
 
     store.bookings.unshift(newBooking);
+    if (paymentRequired && verifiedIntent) {
+      verifiedIntent.consumedByBookingId = bookingId;
+      verifiedIntent.updatedAt = new Date(now).toISOString();
+    }
 
     appendAuthoritativeNotification(store, {
       recipientUserId: customerUserId,
@@ -2916,7 +3494,10 @@ Task:
       linkId: newBooking.id,
     });
 
-    saveAuthoritativeStore(store);
+    if (!saveAuthoritativeStore(store)) {
+      res.status(500).json({ ok: false, error: 'BOOKING_PERSIST_FAILED', message: 'The booking was not confirmed because persistence failed.' });
+      return;
+    }
 
     res.status(201).json({
       ok: true,
@@ -3158,10 +3739,64 @@ Task:
   // ============================================================================
   // 11. AUTHORITATIVE USER MANAGEMENT & ACCOUNT BLOCKING API (/api/admin/users)
   // ============================================================================
-  app.get('/api/admin/users', (_req, res) => {
+  const mutateSupabaseUserFromRequest = async (
+    req: express.Request,
+    targetUserId: string,
+    action: 'promote' | 'demote' | 'set_provider' | 'suspend' | 'activate' | 'block' | 'require_verification' | 'verify' | 'unverify',
+    reason: string,
+  ) => {
+    const claims = verifySessionTokenFromRequest(req);
+    const accessToken = String(req.headers['x-supabase-access-token'] || '').trim();
+    if (!claims?.supabaseUserId || !SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey || !accessToken) return null;
+    return manageSupabaseUserAccess({
+      projectUrl: SUPABASE_PROJECT_URL,
+      publishableKey: serverSupabaseConfig.publishableKey,
+      accessToken,
+      expectedActorUserId: claims.supabaseUserId,
+      targetUserId,
+      action,
+      reason,
+    });
+  };
+
+  app.get('/api/admin/users', async (_req, res) => {
     const claims = verifySessionTokenFromRequest(_req);
     if (!claims) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (process.env.NODE_ENV === 'production') {
+      const accessToken = String(_req.headers['x-supabase-access-token'] || '').trim();
+      if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey || !accessToken || !claims.supabaseUserId) {
+        res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
+        return;
+      }
+      const profiles = await listSupabaseUserProfiles({
+        projectUrl: SUPABASE_PROJECT_URL,
+        publishableKey: serverSupabaseConfig.publishableKey,
+        accessToken,
+        expectedActorUserId: claims.supabaseUserId,
+      });
+      if (!profiles) {
+        res.status(403).json({ ok: false, error: 'CURRENT_DATABASE_ADMIN_REQUIRED' });
+        return;
+      }
+      res.json({
+        ok: true,
+        users: profiles.map((profile: any) => ({
+          id: profile.id,
+          supabaseUserId: profile.id,
+          name: profile.full_name || profile.email || 'Google user',
+          email: profile.email,
+          phone: profile.phone || '',
+          role: profile.role,
+          accountStatus: profile.account_status,
+          verified: profile.verified === true,
+          city: profile.city || '',
+          authProvider: 'google',
+        })),
+        source: 'supabase',
+      });
       return;
     }
     if (!hasCurrentAdminSession(claims)) {
@@ -3179,6 +3814,10 @@ Task:
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (process.env.NODE_ENV === 'production') {
+      res.status(409).json({ ok: false, error: 'GOOGLE_SIGNUP_REQUIRED', message: 'Managed user profiles are created only through verified Google sign-in.' });
       return;
     }
     if (!hasCurrentAdminSession(claims)) {
@@ -3199,9 +3838,9 @@ Task:
     }
 
     const store = loadAuthoritativeStore();
-    const role: 'customer' | 'provider' | 'admin' = ['customer', 'provider', 'admin'].includes(body.role)
-      ? body.role
-      : 'provider';
+    // Managed accounts must complete verified Google sign-in. This compatibility
+    // endpoint cannot mint provider/Admin roles from browser-supplied fields.
+    const role: 'customer' | 'provider' | 'admin' = 'customer';
     const id = String(body.id || `USR-${Date.now().toString().slice(-4)}`);
     const email =
       String(body.email || '').trim().toLowerCase() ||
@@ -3216,9 +3855,8 @@ Task:
       email,
       phone,
       role,
-      providerId: role === 'provider' ? `prov-${id.toLowerCase()}` : undefined,
       authProvider: 'google',
-      verified: body.verified !== undefined ? Boolean(body.verified) : role !== 'provider',
+      verified: false,
       kycDocument: String(body.kycDocument || 'Aadhaar + Trade KYC Verified'),
       accountStatus: body.accountStatus || 'active',
       city: String(body.city || 'Hyderabad'),
@@ -3228,13 +3866,7 @@ Task:
       bookingsCount: Number(body.bookingsCount) || 0,
       totalSpentOrEarned: Number(body.totalSpentOrEarned) || 0,
       gstin: body.gstin ? String(body.gstin) : undefined,
-      permissions: Array.isArray(body.permissions)
-        ? body.permissions
-        : role === 'admin'
-        ? ['full_admin_access']
-        : role === 'provider'
-        ? ['create_listing', 'respond_enquiries']
-        : ['book_services'],
+      permissions: ['book_services'],
       publishState: body.publishState === 'draft' ? 'draft' : 'published',
     };
 
@@ -3252,158 +3884,38 @@ Task:
     });
   });
 
-  app.patch('/api/admin/users/:id/status', (req, res) => {
-    const claims = verifySessionTokenFromRequest(req);
-    if (!claims) {
-      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
-      return;
-    }
-    if (!hasCurrentAdminSession(claims)) {
-      res.status(403).json({
-        ok: false,
-        error: 'FORBIDDEN_ADMIN_ONLY',
-        message: 'Only administrators can suspend, block, or reactivate user accounts.',
-      });
-      return;
-    }
-
-    const targetId = String(req.params.id || '').trim();
+  app.patch('/api/admin/users/:id/status', async (req, res) => {
+    if (!verifySessionTokenFromRequest(req)) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
     const nextStatus = String(req.body?.status || req.body?.accountStatus || '').trim();
-    if (!['active', 'suspended', 'blocked', 'pending_verification'].includes(nextStatus)) {
-      res.status(400).json({ ok: false, error: 'INVALID_ACCOUNT_STATUS' });
-      return;
-    }
-
-    const store = loadAuthoritativeStore();
-    const user = store.users.find(
-      (u) => u.id.toLowerCase() === targetId.toLowerCase() || u.email.toLowerCase() === targetId.toLowerCase()
-    );
-    if (!user) {
-      res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-      return;
-    }
-
-    user.accountStatus = nextStatus as AuthoritativeUserRecord['accountStatus'];
-
-    // If a provider is suspended or blocked, also reject/hide their authoritative provider listings
-    if (user.role === 'provider') {
-      for (const listing of Object.values(store.providerListings)) {
-        if (
-          listing.ownerUserId === user.id ||
-          listing.providerId === user.providerId ||
-          listing.providerPhone === user.phone
-        ) {
-          listing.status =
-            nextStatus === 'suspended' || nextStatus === 'blocked' ? 'rejected' : 'active';
-          listing.updatedAt = new Date().toISOString();
-        }
-      }
-    }
-
-    appendAuthoritativeNotification(store, {
-      recipientUserId: user.id,
-      targetRole: 'admin',
-      title:
-        nextStatus === 'suspended' || nextStatus === 'blocked'
-          ? `🚫 User Account ${nextStatus.toUpperCase()}: ${user.name}`
-          : `✅ User Account Reactivated: ${user.name}`,
-      message: `Account ${user.email} (${user.role}) status changed to ${nextStatus.toUpperCase()} by Super Admin.`,
-      type: 'security',
-    });
-
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      user: { ...user, status: user.accountStatus },
-      users: store.users.map((u) => ({ ...u, status: u.accountStatus })),
-    });
+    const action = ({ active: 'activate', suspended: 'suspend', blocked: 'block', pending_verification: 'require_verification' } as Record<string, any>)[nextStatus];
+    const reason = String(req.body?.reason || '').trim();
+    if (!action) return res.status(400).json({ ok: false, error: 'INVALID_ACCOUNT_STATUS' });
+    if (reason.length < 5) return res.status(400).json({ ok: false, error: 'AUDIT_REASON_REQUIRED' });
+    const user = await mutateSupabaseUserFromRequest(req, String(req.params.id || ''), action, reason);
+    if (!user) return res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
+    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, accountStatus: user.account_status, verified: user.verified }, source: 'supabase' });
   });
 
-  app.patch('/api/admin/users/:id/role', (req, res) => {
-    const claims = verifySessionTokenFromRequest(req);
-    if (!claims) {
-      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
-      return;
-    }
-    if (!hasCurrentAdminSession(claims)) {
-      res.status(403).json({
-        ok: false,
-        error: 'FORBIDDEN_ADMIN_ONLY',
-        message: 'Only administrators can modify user roles.',
-      });
-      return;
-    }
-
-    const targetId = String(req.params.id || '').trim();
+  app.patch('/api/admin/users/:id/role', async (req, res) => {
+    if (!verifySessionTokenFromRequest(req)) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
     const nextRole = String(req.body?.role || '').trim().toLowerCase();
-    if (!['customer', 'provider', 'admin'].includes(nextRole)) {
-      res.status(400).json({ ok: false, error: 'INVALID_ROLE' });
-      return;
-    }
-
-    const store = loadAuthoritativeStore();
-    const user = store.users.find(
-      (u) => u.id.toLowerCase() === targetId.toLowerCase() || u.email.toLowerCase() === targetId.toLowerCase()
-    );
-    if (!user) {
-      res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-      return;
-    }
-
-    user.role = nextRole as AuthoritativeUserRecord['role'];
-    if (user.role === 'provider' && !user.providerId) {
-      user.providerId = `prov-${user.id.toLowerCase()}`;
-    }
-
-    appendAuthoritativeNotification(store, {
-      recipientUserId: user.id,
-      targetRole: 'admin',
-      title: `🛡️ Role Updated: ${user.name}`,
-      message: `${user.name} (${user.email}) role changed to ${nextRole.toUpperCase()}.`,
-      type: 'security',
-    });
-
-    saveAuthoritativeStore(store);
-    res.json({
-      ok: true,
-      user,
-      users: store.users,
-    });
+    const action = ({ customer: 'demote', provider: 'set_provider', admin: 'promote' } as Record<string, any>)[nextRole];
+    const reason = String(req.body?.reason || '').trim();
+    if (!action) return res.status(400).json({ ok: false, error: 'INVALID_ROLE' });
+    if (reason.length < 5) return res.status(400).json({ ok: false, error: 'AUDIT_REASON_REQUIRED' });
+    const user = await mutateSupabaseUserFromRequest(req, String(req.params.id || ''), action, reason);
+    if (!user) return res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
+    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, accountStatus: user.account_status, verified: user.verified }, source: 'supabase' });
   });
 
-  app.patch('/api/admin/users/:id/verify', (req, res) => {
-    const claims = verifySessionTokenFromRequest(req);
-    if (!claims) {
-      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
-      return;
-    }
-    if (!hasCurrentAdminSession(claims)) {
-      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
-      return;
-    }
-
-    const targetId = String(req.params.id || '').trim();
-    const store = loadAuthoritativeStore();
-    const user = store.users.find(
-      (u) => u.id.toLowerCase() === targetId.toLowerCase() || u.email.toLowerCase() === targetId.toLowerCase()
-    );
-    if (!user) {
-      res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-      return;
-    }
-
-    user.verified = req.body?.verified !== undefined ? Boolean(req.body.verified) : !user.verified;
-    if (user.verified && user.accountStatus === 'pending_verification') {
-      user.accountStatus = 'active';
-    }
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      user,
-      users: store.users,
-    });
+  app.patch('/api/admin/users/:id/verify', async (req, res) => {
+    if (!verifySessionTokenFromRequest(req)) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const verified = req.body?.verified === true;
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 5) return res.status(400).json({ ok: false, error: 'AUDIT_REASON_REQUIRED' });
+    const user = await mutateSupabaseUserFromRequest(req, String(req.params.id || ''), verified ? 'verify' : 'unverify', reason);
+    if (!user) return res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
+    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, accountStatus: user.account_status, verified: user.verified }, source: 'supabase' });
   });
 
   // ============================================================================
@@ -3411,8 +3923,13 @@ Task:
   // ============================================================================
   app.get('/api/notifications', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    const roleFilter = String(req.query.role || claims?.role || 'customer').toLowerCase();
-    const userIdFilter = String(req.query.userId || claims?.userId || '').trim();
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const isAdmin = claims.role === 'admin' && hasCurrentAdminSession(claims);
+    if (claims.role === 'admin' && !isAdmin) return res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+    // Caller-provided role and userId are presentation hints only. Authorization
+    // and personal notification scope always come from the signed session.
+    const roleFilter = isAdmin ? 'admin' : claims.role;
+    const userIdFilter = claims.userId.trim();
 
     const store = loadAuthoritativeStore();
     const visible = store.notifications
@@ -3443,7 +3960,7 @@ Task:
     res.json({
       ok: true,
       notifications: visible,
-      campaigns: store.notificationCampaigns,
+      campaigns: isAdmin ? store.notificationCampaigns : [],
     });
   });
 
@@ -3546,14 +4063,17 @@ Task:
   });
 
   app.post('/api/notifications/read', (req, res) => {
-    const { id, notificationId, userId } = req.body || {};
     const claims = verifySessionTokenFromRequest(req);
-    const effectiveUserId = String(claims?.userId || userId || 'guest');
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const isAdmin = claims.role === 'admin' && hasCurrentAdminSession(claims);
+    if (claims.role === 'admin' && !isAdmin) return res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+    const { id, notificationId } = req.body || {};
+    const effectiveUserId = claims.userId.trim();
     const cleanId = String(notificationId || id || '').trim();
 
     const store = loadAuthoritativeStore();
     const target = store.notifications.find((n) => n.id === cleanId);
-    if (target) {
+    if (target && (isAdmin || !target.recipientUserId || target.recipientUserId === effectiveUserId)) {
       target.read = true;
       if (!target.readByUserIds.includes(effectiveUserId)) {
         target.readByUserIds.push(effectiveUserId);
@@ -3565,21 +4085,57 @@ Task:
 
   app.post('/api/notifications/clear', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const isAdmin = claims.role === 'admin' && hasCurrentAdminSession(claims);
+    if (claims.role === 'admin' && !isAdmin) return res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
     const store = loadAuthoritativeStore();
-    if (!claims || claims.role === 'admin') {
+    if (isAdmin) {
       store.notifications = [];
     } else {
-      store.notifications = store.notifications.filter(
-        (n) => n.recipientUserId && n.recipientUserId !== claims.userId
-      );
+      // A user can clear only notifications explicitly addressed to them.
+      // Broadcast records are shared and remain available to other users.
+      store.notifications = store.notifications.filter((n) => n.recipientUserId !== claims.userId);
     }
     saveAuthoritativeStore(store);
     res.json({ ok: true, notifications: store.notifications });
   });
 
   // ============================================================================
+  // 12B. HOME & LOCAL SERVICES BOOKING LIFECYCLE (/api/services/*)
+  // ============================================================================
+  if (serviceBookingRepository) {
+    registerServiceBookingApi(app, {
+      repository: serviceBookingRepository,
+      verifySession: verifySessionTokenFromRequest,
+    });
+  }
+
+  // Real slot availability, provider schedule/profile and server-verified UPI
+  // settlement. Fails closed with 503 when PostgreSQL is not configured.
+  registerServiceCommerceApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
+  // ============================================================================
+  // 12C. CLASSES & TRAINING BATCH + ENROLLMENT LIFECYCLE (/api/classes/*)
+  // ============================================================================
+  if (classEnrollmentRepository) {
+    registerClassEnrollmentApi(app, {
+      repository: classEnrollmentRepository,
+      verifySession: verifySessionTokenFromRequest,
+    });
+  }
+
+  // ============================================================================
   // 13. PROVIDER PERMISSIONS & LISTING OWNERSHIP ENFORCEMENT (/api/provider/listings)
   // ============================================================================
+  if (providerListingRepository) {
+    registerProviderListingsApi(app, {
+      repository: providerListingRepository,
+      verifySession: verifySessionTokenFromRequest,
+    });
+  } else {
   app.get('/api/provider/listings', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     const store = loadAuthoritativeStore();
@@ -3644,8 +4200,11 @@ Task:
       providerName: String(body.providerName || claims.name || 'Verified Provider'),
       providerPhone: String(body.providerPhone || claims.phone || '+91 98480 22338'),
       status: claims.role === 'admin' && body.status === 'active' ? 'active' : 'pending_approval',
-      isFeatured: Boolean(body.isFeatured),
-      isVerified: claims.role === 'admin',
+      // The JSON compatibility store cannot perform a fresh database check.
+      // Protected fields therefore require the signed Super Admin scope; a
+      // normal admin/provider token cannot self-feature or self-verify here.
+      isFeatured: claims.role === 'admin' && (claims as { scope?: string }).scope === 'super_admin' && Boolean(body.isFeatured),
+      isVerified: claims.role === 'admin' && (claims as { scope?: string }).scope === 'super_admin',
       updatedAt: new Date().toISOString(),
       payload: body.payload || {},
     };
@@ -3711,11 +4270,13 @@ Task:
 
     if (updates.title !== undefined) existing.title = String(updates.title);
     if (updates.price !== undefined) existing.price = Number(updates.price);
-    if (updates.isFeatured !== undefined) existing.isFeatured = Boolean(updates.isFeatured);
+    if (updates.isFeatured !== undefined && claims.role === 'admin' && (claims as { scope?: string }).scope === 'super_admin') {
+      existing.isFeatured = Boolean(updates.isFeatured);
+    }
     if (updates.status !== undefined && (claims.role === 'admin' || updates.status !== 'active')) {
       existing.status = updates.status;
     }
-    if (updates.isVerified !== undefined && claims.role === 'admin') {
+    if (updates.isVerified !== undefined && claims.role === 'admin' && (claims as { scope?: string }).scope === 'super_admin') {
       existing.isVerified = Boolean(updates.isVerified);
     }
     existing.updatedAt = new Date().toISOString();
@@ -3762,6 +4323,7 @@ Task:
     saveAuthoritativeStore(store);
     res.json({ ok: true, deletedId: listingId });
   });
+  }
 
   // ============================================================================
   // 14. ALL 17 ADMIN MODULES AUTHORITATIVE STATE SYNC (/api/admin/modules)
@@ -4029,81 +4591,222 @@ Task:
     return engine;
   }
 
-  // 15A. GET AUTHORITATIVE CINEMA INVENTORY, SCREENS, POLICIES, BOOKINGS, REFUNDS & AUDIT LOGS
-  app.get('/api/movies/inventory', (req, res) => {
-    const claims = verifySessionTokenFromRequest(req);
-    const store = loadAuthoritativeStore();
-    if (pruneExpiredSeatHolds(store)) {
-      saveAuthoritativeStore(store);
-    }
-    const engine = getCinemaModuleStore(store);
+  function normalizeCinemaScreenRecord(record: CinemaScreenRecord): any {
+    const tiers = Array.isArray(record.tiers) && record.tiers.length > 0
+      ? record.tiers
+      : (Array.isArray(record.seatTiers) ? record.seatTiers : []).map((tier: any) => ({
+          name: tier?.name,
+          rows: Array.isArray(tier?.rows) ? tier.rows : [],
+          price: tier?.price ?? Math.round(250 * Number(tier?.priceMultiplier ?? 1)),
+        }));
+    return {
+      id: record.screenId,
+      screenId: record.screenId,
+      listingId: record.listingId,
+      cinemaListingId: record.listingId,
+      cinemaName: record.cinemaName,
+      cinemaTitle: record.cinemaName,
+      area: record.area,
+      screenName: record.screenName,
+      format: record.format,
+      projectionFormat: record.format,
+      soundFormat: record.soundSystem,
+      soundSystem: record.soundSystem,
+      totalSeats: record.totalSeats,
+      tiers,
+      seatTiers: record.seatTiers,
+      wheelchairSeats: record.wheelchairSeats,
+      showtimes: record.showtimes,
+      cancellationAllowed: record.cancellationAllowed,
+      cancellationCutoffMins: record.cancellationCutoffMinutes,
+      cancellationCutoffMinutes: record.cancellationCutoffMinutes,
+      refundPercent: record.refundPercent,
+      convenienceFeePerSeat: record.convenienceFeePerSeat,
+      gstPercent: record.gstPercent,
+      fnbDeliveryEnabled: record.fnbDeliveryEnabled,
+      rowVersion: record.rowVersion,
+      updatedAt: record.updatedAt,
+    };
+  }
 
-    const normalizedScreens = engine.screens.map((s: any) => ({
-      ...s,
-      id: s.id || s.screenId,
-      screenId: s.screenId || s.id,
-      cinemaListingId: s.cinemaListingId || s.listingId,
-      listingId: s.listingId || s.cinemaListingId,
-      cinemaTitle: s.cinemaTitle || s.cinemaName,
-      cinemaName: s.cinemaName || s.cinemaTitle,
-      area: s.area || 'Hyderabad',
-      format: s.format || `${s.projectionFormat || '4K Laser'} · ${s.soundFormat || 'Dolby Atmos'}`,
-      soundSystem: s.soundSystem || s.soundFormat || 'Dolby Atmos',
-      totalSeats: s.totalSeats || 80,
-      tiers: Array.isArray(s.tiers)
-        ? s.tiers
-        : Array.isArray(s.seatTiers)
-        ? s.seatTiers.map((t: any) => ({
-            name: t.name,
-            rows: t.rows,
-            price: t.price || Math.round(250 * (t.priceMultiplier || 1)),
+  function normalizeStoredCinemaScreen(screen: any): any {
+    return {
+      ...screen,
+      id: screen.id || screen.screenId,
+      screenId: screen.screenId || screen.id,
+      cinemaListingId: screen.cinemaListingId || screen.listingId,
+      listingId: screen.listingId || screen.cinemaListingId,
+      cinemaTitle: screen.cinemaTitle || screen.cinemaName,
+      cinemaName: screen.cinemaName || screen.cinemaTitle,
+      area: screen.area || 'Hyderabad',
+      format: screen.format || screen.projectionFormat || '4K Laser · Dolby Atmos',
+      projectionFormat: screen.projectionFormat || screen.format,
+      soundFormat: screen.soundFormat || screen.soundSystem || 'Dolby Atmos',
+      soundSystem: screen.soundSystem || screen.soundFormat || 'Dolby Atmos',
+      totalSeats: screen.totalSeats || 80,
+      tiers: Array.isArray(screen.tiers)
+        ? screen.tiers
+        : Array.isArray(screen.seatTiers)
+        ? screen.seatTiers.map((tier: any) => ({
+            name: tier.name,
+            rows: tier.rows,
+            price: tier.price || Math.round(250 * (tier.priceMultiplier || 1)),
           }))
         : [],
-      cancellationAllowed: s.cancellationAllowed !== undefined ? s.cancellationAllowed : true,
-      cancellationCutoffMinutes: s.cancellationCutoffMinutes ?? s.cancellationCutoffMins ?? 120,
-      convenienceFeePerSeat: s.convenienceFeePerSeat ?? 28,
-      gstPercent: s.gstPercent ?? 18,
-    }));
+      cancellationAllowed: screen.cancellationAllowed !== undefined ? screen.cancellationAllowed : true,
+      cancellationCutoffMins: screen.cancellationCutoffMins ?? screen.cancellationCutoffMinutes ?? 120,
+      cancellationCutoffMinutes: screen.cancellationCutoffMinutes ?? screen.cancellationCutoffMins ?? 120,
+      convenienceFeePerSeat: screen.convenienceFeePerSeat ?? 28,
+      gstPercent: screen.gstPercent ?? 18,
+      fnbDeliveryEnabled: screen.fnbDeliveryEnabled === true,
+    };
+  }
 
-    const movieBookings = store.bookings.filter(
-      (b) =>
-        b.listingId.startsWith('movie-') ||
-        b.listingId.startsWith('listing-movie-') ||
-        (Array.isArray(b.seats) && b.seats.length > 0)
-    );
+  // 15A. PUBLIC CINEMA DISCOVERY — screens, offers and showtimes only.
+  //     Booking records, refunds, support tickets and audit logs are NOT part
+  //     of this response: it is anonymous and must never expose customer data.
+  app.get('/api/movies/inventory', async (_req, res) => {
+    // Keep the explicitly non-production fixture used by local UI/privacy
+    // tests. Production discovery never reads or mutates a JSON store.
+    if (!IS_PRODUCTION_RUNTIME && !providerListingRepository) {
+      const store = loadAuthoritativeStore();
+      if (pruneExpiredSeatHolds(store)) saveAuthoritativeStore(store);
+      const engine = getCinemaModuleStore(store);
+      res.json({
+        ok: true,
+        screens: engine.screens.map(normalizeStoredCinemaScreen),
+        offers: engine.promos,
+        promos: engine.promos,
+      });
+      return;
+    }
 
-    const visibleBookings =
-      !claims
-        ? movieBookings
-        : claims.role === 'admin' || claims.role === 'provider'
-        ? movieBookings
-        : movieBookings.filter((b) => b.customerUserId === claims.userId);
+    if (!providerListingRepository) {
+      res.status(503).json({
+        ok: false,
+        error: 'CINEMA_INVENTORY_UNAVAILABLE',
+        message: 'Cinema inventory requires the PostgreSQL listing repository.',
+      });
+      return;
+    }
 
-    const normalizedAuditLogs = (engine.auditLogs || []).map((l: any) => ({
-      ...l,
-      targetId: l.targetId || l.details || l.id,
-      createdAt: l.createdAt || l.timestamp || new Date().toISOString(),
-    }));
+    let normalizedScreens: any[];
+    try {
+      // Screen records and showtimes are authoritative PostgreSQL data. An
+      // empty catalogue stays empty instead of silently reviving JSON/demo
+      // screens in production.
+      const records = await providerListingRepository.listPublicCinemaScreens();
+      normalizedScreens = records.map(normalizeCinemaScreenRecord);
+    } catch {
+      res.status(503).json({
+        ok: false,
+        error: 'CINEMA_INVENTORY_UNAVAILABLE',
+        message: 'The PostgreSQL cinema screen inventory is unavailable.',
+      });
+      return;
+    }
 
     res.json({
       ok: true,
       screens: normalizedScreens,
-      offers: engine.promos,
-      promos: engine.promos,
-      bookings: visibleBookings,
-      refunds: engine.refunds || [],
-      supportTickets: (engine.supportTickets || []).map((t: any) => ({
-        ...t,
-        id: t.id || t.ticketId,
-        ticketId: t.ticketId || t.id,
-        description: t.description || t.message || t.subject,
-      })),
-      auditLogs: normalizedAuditLogs,
+      // Promotions remain the existing read-only product defaults until a
+      // database-backed admin configuration store is approved and installed.
+      offers: DEFAULT_MOVIE_PROMOS,
+      promos: DEFAULT_MOVIE_PROMOS,
     });
   });
 
-  // 15B. CREATE OR UPDATE CINEMA SCREEN, SEAT LAYOUT, SHOWTIMES & CANCELLATION POLICY (Provider / Admin Only)
-  app.put('/api/movies/screens', (req, res) => {
+  const isMovieBookingRecord = (booking: AuthoritativeBookingRecord): boolean =>
+    booking.listingId.startsWith('movie-') ||
+    booking.listingId.startsWith('listing-movie-') ||
+    (Array.isArray(booking.seats) && booking.seats.length > 0);
+
+  // Ticket projection for a customer's own history: no name, phone, email or address.
+  const customerMovieTicket = (booking: AuthoritativeBookingRecord) => ({
+    id: booking.id,
+    listingId: booking.listingId,
+    listingTitle: booking.listingTitle,
+    providerId: booking.providerId,
+    scheduledDate: booking.scheduledDate,
+    timeSlot: booking.timeSlot,
+    showtime: booking.showtime,
+    seats: booking.seats || [],
+    screenId: booking.screenId,
+    screenName: booking.screenName,
+    foodAddons: booking.foodAddons || [],
+    baseAmount: booking.baseAmount,
+    taxAmount: booking.taxAmount,
+    discountAmount: booking.discountAmount,
+    promoCode: booking.promoCode,
+    totalAmount: booking.totalAmount,
+    paymentMode: booking.paymentMode,
+    paymentStatus: booking.paymentStatus,
+    status: booking.status,
+    passCode: booking.passCode,
+    qrSignature: booking.qrSignature,
+    qrPassToken: booking.qrPassToken,
+    checkedInAt: booking.checkedInAt,
+    cancelledAt: booking.cancelledAt,
+    cancellationReason: booking.cancellationReason,
+    refundAmount: booking.refundAmount,
+    refundStatus: booking.refundStatus,
+    createdAt: booking.createdAt,
+  });
+
+  // 15A-2. A CUSTOMER'S OWN MOVIE BOOKINGS (session required, own records only).
+  app.get('/api/movies/my-bookings', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed session is required.' });
+      return;
+    }
+    if (claims.role !== 'customer') {
+      res.status(403).json({ ok: false, error: 'MOVIE_BOOKINGS_CUSTOMER_ONLY', message: 'Only a customer may read their own movie booking history here.' });
+      return;
+    }
+    const store = loadAuthoritativeStore();
+    const bookings = store.bookings
+      .filter((booking) => isMovieBookingRecord(booking) && booking.customerUserId === claims.userId)
+      .map(customerMovieTicket);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ ok: true, bookings });
+  });
+
+  // 15A-3. ADMIN MOVIE RECORDS — verified Admin session only (server-side).
+  app.get('/api/admin/movies/records', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed session is required.' });
+      return;
+    }
+    if (claims.role !== 'admin' || !hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY', message: 'Bookings, refunds, support tickets and audit logs require a verified Admin session.' });
+      return;
+    }
+    const store = loadAuthoritativeStore();
+    const engine = getCinemaModuleStore(store);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({
+      ok: true,
+      bookings: store.bookings.filter(isMovieBookingRecord),
+      refunds: engine.refunds || [],
+      supportTickets: (engine.supportTickets || []).map((ticket: any) => ({
+        ...ticket,
+        id: ticket.id || ticket.ticketId,
+        ticketId: ticket.ticketId || ticket.id,
+        description: ticket.description || ticket.message || ticket.subject,
+      })),
+      auditLogs: (engine.auditLogs || []).map((log: any) => ({
+        ...log,
+        targetId: log.targetId || log.details || log.id,
+        createdAt: log.createdAt || log.timestamp || new Date().toISOString(),
+      })),
+    });
+  });
+
+  // 15B. CINEMA SCREEN WRITES — PostgreSQL only, ownership/assignment checked,
+  //      optimistic concurrency + durable audit in the same transaction.
+  app.put('/api/movies/screens', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) {
       res.status(401).json({
@@ -4113,14 +4816,6 @@ Task:
       });
       return;
     }
-
-    const store = loadAuthoritativeStore();
-    const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
-    if (blocked) {
-      res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
-      return;
-    }
-
     if (claims.role !== 'provider' && claims.role !== 'admin') {
       res.status(403).json({
         ok: false,
@@ -4129,105 +4824,201 @@ Task:
       });
       return;
     }
-
-    const body = req.body || {};
-    const listingId = String(body.listingId || body.cinemaListingId || 'movie-hyd-1').trim();
-    const screenId = String(body.screenId || body.id || `scr-${listingId}`).trim();
-    const engine = getCinemaModuleStore(store);
-
-    const existingIdx = engine.screens.findIndex(
-      (s: any) =>
-        s.screenId === screenId ||
-        s.id === screenId ||
-        s.listingId === listingId ||
-        s.cinemaListingId === listingId
-    );
-    const prevScreen: any =
-      existingIdx >= 0 ? engine.screens[existingIdx] : DEFAULT_CINEMA_SCREENS[0];
-
-    const updatedScreen: any = {
-      ...prevScreen,
-      id: screenId,
-      screenId,
-      listingId,
-      cinemaListingId: listingId,
-      cinemaName: String(body.cinemaName || body.cinemaTitle || prevScreen.cinemaName).trim(),
-      cinemaTitle: String(body.cinemaTitle || body.cinemaName || prevScreen.cinemaName).trim(),
-      screenName: String(body.screenName || prevScreen.screenName).trim(),
-      soundFormat: String(body.soundFormat || body.soundSystem || prevScreen.soundFormat).trim(),
-      projectionFormat: String(body.projectionFormat || body.format || prevScreen.projectionFormat).trim(),
-      showtimes: Array.isArray(body.showtimes)
-        ? body.showtimes.map((t: any) => String(t).trim()).filter(Boolean)
-        : prevScreen.showtimes,
-      cancellationCutoffMins:
-        body.cancellationCutoffMins !== undefined
-          ? Math.max(0, Number(body.cancellationCutoffMins))
-          : body.cancellationCutoffMinutes !== undefined
-          ? Math.max(0, Number(body.cancellationCutoffMinutes))
-          : prevScreen.cancellationCutoffMins,
-      refundPercent:
-        body.refundPercent !== undefined
-          ? Math.min(100, Math.max(0, Number(body.refundPercent)))
-          : prevScreen.refundPercent,
-      fnbDeliveryEnabled:
-        body.fnbDeliveryEnabled !== undefined
-          ? Boolean(body.fnbDeliveryEnabled)
-          : prevScreen.fnbDeliveryEnabled,
-      wheelchairSeats: Array.isArray(body.wheelchairSeats)
-        ? body.wheelchairSeats.map((s: any) => String(s).trim().toUpperCase())
-        : prevScreen.wheelchairSeats,
-      seatTiers: Array.isArray(body.seatTiers) ? body.seatTiers : prevScreen.seatTiers,
-      tiers: Array.isArray(body.tiers)
-        ? body.tiers
-        : prevScreen.tiers ||
-          (prevScreen.seatTiers || []).map((t: any) => ({
-            name: t.name,
-            rows: t.rows,
-            price: Math.round(250 * (t.priceMultiplier || 1)),
-          })),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (existingIdx >= 0) {
-      engine.screens[existingIdx] = updatedScreen;
-    } else {
-      engine.screens.unshift(updatedScreen);
+    if (!providerListingRepository) {
+      res.status(503).json({
+        ok: false,
+        error: 'LIVE_EDIT_SECURITY_UNAVAILABLE',
+        message: 'Cinema screen edits require the PostgreSQL Live Edit security layer. No screen was changed.',
+      });
+      return;
     }
 
-    engine.auditLogs.unshift({
-      id: `MOV-AUD-${Date.now().toString().slice(-5)}`,
-      timestamp: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      actor: claims.name || claims.email || claims.userId,
-      role: claims.role,
-      action: 'UPDATED_SCREEN_AND_POLICY',
-      targetId: updatedScreen.screenId,
-      details: `Updated ${updatedScreen.cinemaName} (${updatedScreen.screenName}) — Refund Policy: ${updatedScreen.refundPercent}%.`,
-    });
+    const body = (req.body || {}) as Record<string, unknown>;
+    const requestedScreenId = String(body.screenId || body.id || '').trim();
+    const requestedListingId = String(body.listingId || body.cinemaListingId || '').trim();
 
-    saveAuthoritativeStore(store);
+    try {
+      const existingRecord = await providerListingRepository.findPublicCinemaScreen(
+        requestedScreenId || requestedListingId,
+      );
+      if (existingRecord) {
+        if (requestedScreenId && existingRecord.screenId !== requestedScreenId) {
+          res.status(400).json({
+            ok: false,
+            error: 'SCREEN_TARGET_MISMATCH',
+            message: 'The screen and listing identifiers do not refer to the same cinema screen.',
+          });
+          return;
+        }
+        if (requestedListingId && existingRecord.listingId !== requestedListingId) {
+          res.status(400).json({
+            ok: false,
+            error: 'SCREEN_TARGET_MISMATCH',
+            message: 'The screen and listing identifiers do not refer to the same cinema screen.',
+          });
+          return;
+        }
+      } else if (claims.role === 'provider') {
+        res.status(403).json({
+          ok: false,
+          error: 'FORBIDDEN_CINEMA_SCREEN',
+          message: 'This cinema screen is not owned by your account or covered by an assignment.',
+        });
+        return;
+      }
 
-    res.json({
-      ok: true,
-      screen: updatedScreen,
-      screens: engine.screens,
-      auditLogs: engine.auditLogs,
-    });
+      const previous = existingRecord
+        ? normalizeCinemaScreenRecord(existingRecord)
+        : {
+            screenId: requestedScreenId || `scr-${crypto.randomUUID()}`,
+            listingId: requestedListingId,
+            cinemaName: '',
+            screenName: '',
+            format: '',
+            projectionFormat: '',
+            soundFormat: '',
+            soundSystem: '',
+            showtimes: [],
+            cancellationCutoffMins: 0,
+            cancellationCutoffMinutes: 0,
+            refundPercent: 0,
+            convenienceFeePerSeat: 0,
+            gstPercent: 0,
+            fnbDeliveryEnabled: false,
+            wheelchairSeats: [],
+            tiers: [],
+            seatTiers: [],
+            totalSeats: 80,
+            cancellationAllowed: true,
+          };
+
+      let validated;
+      try {
+        validated = validateCinemaScreenUpdate(body, previous as Record<string, unknown>);
+      } catch (error) {
+        if (error instanceof LiveEditValidationError) {
+          res.status(400).json({ ok: false, error: error.code, message: error.message });
+          return;
+        }
+        throw error;
+      }
+
+      const screenId = existingRecord ? existingRecord.screenId : previous.screenId;
+      const listingId = existingRecord ? existingRecord.listingId : (requestedListingId || '');
+      if (!listingId) {
+        res.status(400).json({
+          ok: false,
+          error: 'INVALID_CINEMA_FIELDS',
+          message: 'A cinema listing id is required for a new screen.',
+        });
+        return;
+      }
+
+      const expectedUpdatedAt = existingRecord
+        ? String(body.expectedUpdatedAt || body.updatedAt || '').trim() || undefined
+        : undefined;
+
+      const saved = await providerListingRepository.saveCinemaScreen(claims, {
+        screenId,
+        listingId,
+        cinemaName: validated.cinemaName,
+        screenName: validated.screenName,
+        area: String(body.area || previous.area || 'Hyderabad').trim() || 'Hyderabad',
+        format: validated.projectionFormat,
+        soundSystem: validated.soundFormat,
+        totalSeats: validated.totalSeats,
+        tiers: validated.tiers,
+        wheelchairSeats: validated.wheelchairSeats,
+        showtimes: validated.showtimes,
+        cancellationAllowed: validated.cancellationAllowed,
+        cancellationCutoffMinutes: validated.cancellationCutoffMins,
+        refundPercent: validated.refundPercent,
+        convenienceFeePerSeat: validated.convenienceFeePerSeat,
+        gstPercent: validated.gstPercent,
+        fnbDeliveryEnabled: validated.fnbDeliveryEnabled,
+        expectedUpdatedAt,
+      });
+
+      res.json({
+        ok: true,
+        screen: normalizeCinemaScreenRecord(saved.screen),
+        auditEventId: saved.auditEventId,
+        unchanged: saved.unchanged === true,
+      });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || 'CINEMA_SCREEN_UPDATE_FAILED');
+      const status =
+        Number(error?.status) ||
+        Number(error?.httpStatus) ||
+        (code === 'FORBIDDEN_CINEMA_SCREEN' ? 403 : 500);
+      const messages: Record<string, string> = {
+        FORBIDDEN_CINEMA_SCREEN: 'This cinema screen is not owned by your account or covered by an assignment.',
+        CONCURRENT_MODIFICATION: 'This cinema screen changed after you opened it. Reload before saving.',
+        ACTIVE_PROFILE_REQUIRED: 'An active, server-verified profile is required.',
+        SESSION_ROLE_MISMATCH: 'The signed session role does not match the current database profile.',
+        AUDIT_PERSISTENCE_FAILED: 'The cinema screen change was not saved because its audit event could not be persisted.',
+        INVALID_CINEMA_FIELDS: 'One or more cinema screen fields are invalid.',
+        CINEMA_SCREEN_NOT_FOUND: 'The cinema screen no longer exists.',
+        SUPER_ADMIN_REQUIRED: 'This operation requires a fresh Super Admin check.',
+      };
+      res.status(status).json({
+        ok: false,
+        error: code,
+        message: messages[code] || 'The cinema screen edit failed. No unconfirmed change was reported.',
+      });
+    }
+  });
+
+  // 15B2. VERIFIED CINEMA OWNERSHIP ASSIGNMENT (Super Admin only).
+  app.post('/api/movies/screens/:screenId/owner', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (claims.role !== 'admin') {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_REQUIRED' });
+      return;
+    }
+    if (!providerListingRepository) {
+      res.status(503).json({ ok: false, error: 'LIVE_EDIT_SECURITY_UNAVAILABLE' });
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'ownerUserId')) {
+      res.status(400).json({ ok: false, error: 'OWNER_USER_ID_REQUIRED' });
+      return;
+    }
+    const ownerUserId = req.body?.ownerUserId == null ? null : String(req.body.ownerUserId).trim();
+    try {
+      const result = await providerListingRepository.setCinemaScreenOwner(
+        claims,
+        String(req.params.screenId || '').trim(),
+        ownerUserId,
+      );
+      res.json({ ok: true, ...result });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || 'CINEMA_OWNER_ASSIGNMENT_FAILED');
+      const status = Number(error?.status) || Number(error?.httpStatus) || 500;
+      res.status(status).json({ ok: false, error: code, message: code });
+    }
   });
 
   // 15C. ATOMIC TICKET CANCELLATION, SEAT LOCK RELEASE & REFUND ENGINE
   app.post('/api/movies/bookings/:id/cancel', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     const bookingIdOrPass = String(req.params.id || '').trim();
-    const { reason = 'Customer requested cancellation', sessionId, customerPhone } = req.body || {};
+    const { reason = 'Customer requested cancellation' } = req.body || {};
+
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed customer or authorized provider session is required.' });
+      return;
+    }
 
     const store = loadAuthoritativeStore();
-    if (claims) {
-      const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
-      if (blocked) {
-        res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
-        return;
-      }
+    const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
+    if (blocked) {
+      res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
+      return;
     }
 
     const booking = store.bookings.find(
@@ -4245,17 +5036,14 @@ Task:
       return;
     }
 
-    const cleanReqPhone = String(customerPhone || '').replace(/\D/g, '');
-    const cleanBookingPhone = String(booking.customerPhone || '').replace(/\D/g, '');
-
-    // Verify ownership or provider/admin privileges
-    const isOwner =
-      (claims && booking.customerUserId === claims.userId) ||
-      (sessionId && booking.customerUserId === String(sessionId)) ||
-      (cleanReqPhone && cleanReqPhone === cleanBookingPhone) ||
-      !claims;
-    const isProviderOrAdmin =
-      claims && (claims.role === 'admin' || claims.role === 'provider');
+    // Ownership is established only by a signed server session. Body phone/session IDs
+    // are user input and cannot authorize cancellation.
+    const isOwner = Boolean(claims && booking.customerUserId === claims.userId && claims.role === 'customer');
+    const isAuthorizedAdmin = Boolean(claims && claims.role === 'admin' && hasCurrentAdminSession(claims));
+    const isAuthorizedProvider = Boolean(
+      claims && claims.role === 'provider' && claims.providerId && booking.providerId === claims.providerId
+    );
+    const isProviderOrAdmin = isAuthorizedAdmin || isAuthorizedProvider;
 
     if (!isOwner && !isProviderOrAdmin) {
       res.status(403).json({
@@ -4287,13 +5075,18 @@ Task:
       return;
     }
 
+    // Cancellation does not equal a financial refund. Until a real provider refund
+    // workflow is configured, preserve the booking and seat locks for paid bookings.
+    if (booking.paymentStatus !== 'pay_later') {
+      res.status(503).json({
+        ok: false,
+        error: 'REFUND_PROVIDER_NOT_CONFIGURED',
+        message: 'Cancellation cannot complete because no verified refund provider is configured. The booking and seats were left unchanged.',
+      });
+      return;
+    }
+
     const engine = getCinemaModuleStore(store);
-    const screenConfig: any = engine.screens.find(
-      (s: any) => s.listingId === booking.listingId || s.cinemaListingId === booking.listingId
-    );
-    const refundPercent = screenConfig ? screenConfig.refundPercent : 80;
-    const refundAmount = Math.round((booking.totalAmount * refundPercent) / 100);
-    const cancellationFee = Math.max(0, booking.totalAmount - refundAmount);
 
     // Atomically release all locked seats for this booking so other users can book them immediately
     const releasedSeats: string[] = [];
@@ -4316,60 +5109,49 @@ Task:
 
     const nowIso = new Date().toISOString();
     booking.status = 'cancelled';
-    booking.paymentStatus = 'refunded';
     booking.cancelledAt = nowIso;
     booking.cancellationReason = String(reason);
-    booking.refundAmount = refundAmount;
-    booking.refundStatus = 'completed';
-
-    const refundRecord = {
-      id: `RFD-MOV-${Date.now().toString().slice(-6)}`,
-      refundId: `RFD-MOV-${Date.now().toString().slice(-6)}`,
+    const cancellationRecord = {
+      id: `MOV-CANCEL-${crypto.randomUUID()}`,
       bookingId: booking.id,
       passCode: booking.passCode,
-      listingId: booking.listingId,
-      listingTitle: booking.listingTitle,
-      customerUserId: booking.customerUserId,
-      customerName: booking.customerName,
-      originalAmount: booking.totalAmount,
-      refundPercent,
-      cancellationFee,
-      refundAmount,
       releasedSeats,
       reason: String(reason),
-      status: 'processed',
+      status: 'cancelled_without_payment',
       processedAt: nowIso,
     };
-
-    engine.refunds.unshift(refundRecord);
     engine.auditLogs.unshift({
       id: `MOV-AUD-${Date.now().toString().slice(-5)}`,
       timestamp: nowIso,
       createdAt: nowIso,
       actor: claims?.name || booking.customerName || 'Customer',
       role: claims?.role || 'customer',
-      action: 'BOOKING_CANCELLED_AND_REFUNDED',
+      action: 'UNPAID_BOOKING_CANCELLED',
       targetId: booking.passCode,
-      details: `Cancelled ${booking.passCode} (${booking.listingTitle}). Released seats [${releasedSeats.join(', ')}]. Refunded ₹${refundAmount} (${refundPercent}% policy).`,
+      details: `Cancelled unpaid booking ${booking.passCode} (${booking.listingTitle}). Released seats [${releasedSeats.join(', ')}]. No payment or refund was recorded.`,
     });
 
     appendAuthoritativeNotification(store, {
       recipientUserId: booking.customerUserId,
       targetRole: 'all_users',
-      title: `💸 Movie Ticket Cancelled & ₹${refundAmount} Refund Processed`,
-      message: `Pass ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released. Refund ₹${refundAmount} (${refundPercent}%) initiated to source UPI.`,
-      type: 'payment',
+      title: 'Movie booking cancelled',
+      message: `Pass ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released. No payment or refund was recorded.`,
+      type: 'booking',
       linkId: booking.id,
     });
 
-    saveAuthoritativeStore(store);
+    if (!saveAuthoritativeStore(store)) {
+      res.status(500).json({ ok: false, error: 'CANCELLATION_PERSIST_FAILED', message: 'Cancellation could not be persisted; no cancellation confirmation was issued.' });
+      return;
+    }
 
     res.json({
       ok: true,
       booking,
-      refund: refundRecord,
+      refund: null,
+      cancellation: cancellationRecord,
       releasedSeats,
-      message: `Ticket ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released and ₹${refundAmount} (${refundPercent}%) refunded.`,
+      message: `Unpaid ticket ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released. No refund was due.`,
     });
   });
 
@@ -4481,12 +5263,19 @@ Task:
     res.json({ ok: true, ticket: target, supportTicket: target });
   });
 
-
   // Vite dev middleware or production static serving
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
+    // HMR must never fight for a fixed port: honour DISABLE_HMR (tests, CI) and
+    // allow an explicit port so parallel runs cannot collide with another process.
+    const hmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: { server: httpServer },
+        ws: { server: httpServer },
+        hmr: hmrDisabled ? false : undefined,
+        watch: hmrDisabled ? null : {},
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -4498,10 +5287,53 @@ Task:
     });
   }
 
-  const PORT = Number(process.env.PORT) || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  // A rejected request must never take the booking server down, and it must
+  // never leak an internal message to the browser.
+  app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[server] unhandled request failure:', error?.message || error);
+    if (res.headersSent) return;
+    if (String(error?.message || '').startsWith('PERSISTENCE_JSON_STORE_UNAVAILABLE_IN_PRODUCTION')) {
+      res.status(503).json({
+        ok: false,
+        error: 'PERSISTENCE_JSON_STORE_UNAVAILABLE_IN_PRODUCTION',
+        message: 'This operation still depends on the legacy JSON compatibility store, which is disabled in production. No data was read or written.',
+      });
+      return;
+    }
+    res.status(500).json({ ok: false, error: 'INTERNAL_ERROR', message: 'The request could not be completed. Nothing was charged.' });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`BookOurSpace Full-Stack Server running on http://0.0.0.0:${PORT}`);
   });
+  httpServer.on('close', () => {
+    void closeSharedPostgresPool();
+  });
+  if (providerListingRepository) {
+    httpServer.on('close', () => {
+      void providerListingRepository.close();
+    });
+  }
+  if (serviceBookingRepository) {
+    httpServer.on('close', () => {
+      void serviceBookingRepository.close();
+    });
+  }
+  if (pgBookingRepository) {
+    httpServer.on('close', () => {
+      void pgBookingRepository.close();
+    });
+  }
+  if (pgPaymentRepository) {
+    httpServer.on('close', () => {
+      void pgPaymentRepository.close();
+    });
+  }
+  if (venueBookingRepository) {
+    httpServer.on('close', () => {
+      void venueBookingRepository.close();
+    });
+  }
 }
 
 startServer();

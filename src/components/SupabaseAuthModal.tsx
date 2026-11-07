@@ -62,6 +62,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [localDevLoading, setLocalDevLoading] = useState<'admin' | 'customer' | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
@@ -171,6 +172,31 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const showLocalDevSignIn = Boolean(import.meta.env.DEV) || import.meta.env.VITE_BOS_LOCAL_DEV_AUTH === '1';
+
+  const handleLocalDevSignIn = async (role: 'admin' | 'customer') => {
+    setLocalDevLoading(role);
+    setErrorMsg(null);
+    try {
+      const response = await fetch('/api/auth/local-dev/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.sessionToken) {
+        setErrorMsg(data?.message || 'Local demo sign-in is unavailable. Enable BOS_LOCAL_DEV_AUTH on the server.');
+        return;
+      }
+      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      window.location.reload();
+    } catch {
+      setErrorMsg('Local demo sign-in failed. Check that the API server is running.');
+    } finally {
+      setLocalDevLoading(null);
+    }
+  };
 
   const handlePopupGoogleSignIn = async () => {
     setErrorMsg(null);
@@ -469,6 +495,32 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
           </div>
         ) : (
           <div className="space-y-4">
+            {showLocalDevSignIn && (
+              <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/70 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                <p className="text-[10px] font-black uppercase tracking-wide text-amber-800 dark:text-amber-200">Local development sign-in</p>
+                <p className="mt-1 text-[11px] leading-4 text-amber-900/80 dark:text-amber-100/80">
+                  Supabase Google is not configured on this machine. Choose a seeded local profile to test the app and the admin console.
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={localDevLoading !== null}
+                    onClick={() => void handleLocalDevSignIn('customer')}
+                    className="min-h-[38px] rounded-xl border border-amber-300 bg-white px-2 text-[11px] font-bold text-amber-900 disabled:opacity-50 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200"
+                  >
+                    {localDevLoading === 'customer' ? 'Signing in…' : 'Continue as Customer'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={localDevLoading !== null}
+                    onClick={() => void handleLocalDevSignIn('admin')}
+                    className="min-h-[38px] rounded-xl bg-amber-500 px-2 text-[11px] font-bold text-white disabled:opacity-50"
+                  >
+                    {localDevLoading === 'admin' ? 'Signing in…' : 'Continue as Admin'}
+                  </button>
+                </div>
+              </div>
+            )}
             {/* Official Google OAuth Popup Button */}
             <button
               type="button"

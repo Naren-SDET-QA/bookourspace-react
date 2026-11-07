@@ -234,6 +234,26 @@ export function StayCheckoutPage({
             </div>
           </section>
 
+          {quote && (
+            <details open className="rounded-2xl border border-[#ebebeb] p-4 dark:border-slate-800 lg:hidden">
+              <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold">
+                <span>Price details</span>
+                <span>{formatPaise(quote.totalPaise)}</span>
+              </summary>
+              <div className="mt-3 space-y-1.5 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-[#717171] dark:text-slate-400">{formatPaise(quote.basePricePaise)} × {quote.nights} night{quote.nights === 1 ? '' : 's'}{quote.units > 1 ? ` × ${quote.units} rooms` : ''}</span>
+                  <span>{formatPaise(quote.subtotalPaise ?? quote.basePricePaise * quote.nights * quote.units)}</span>
+                </div>
+                {Boolean(quote.cleaningFeePaise) && <div className="flex justify-between gap-3"><span className="text-[#717171] dark:text-slate-400">Cleaning fee</span><span>{formatPaise(quote.cleaningFeePaise || 0)}</span></div>}
+                {Boolean(quote.serviceFeePaise) && <div className="flex justify-between gap-3"><span className="text-[#717171] dark:text-slate-400">Service fee</span><span>{formatPaise(quote.serviceFeePaise || 0)}</span></div>}
+                {Boolean(quote.taxesPaise) && <div className="flex justify-between gap-3"><span className="text-[#717171] dark:text-slate-400">Taxes</span><span>{formatPaise(quote.taxesPaise || 0)}</span></div>}
+                <div className="flex justify-between gap-3 border-t border-[#ebebeb] pt-2 font-bold dark:border-slate-800"><span>Total (INR)</span><span>{formatPaise(quote.totalPaise)}</span></div>
+              </div>
+              <p className="mt-2 text-[11px] text-[#717171] dark:text-slate-400">You won't be charged yet. The server confirms availability and the final total before a booking exists.</p>
+            </details>
+          )}
+
           <section className="rounded-2xl border border-[#ebebeb] p-4 dark:border-slate-800">
             <div className="flex items-center gap-3">
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#222222] text-xs font-bold text-white dark:bg-white dark:text-slate-900">2</span>
@@ -327,7 +347,7 @@ export function StayCheckoutPage({
                 {Boolean(quote.serviceFeePaise) && <div className="flex justify-between"><span>Service fee</span><span>{formatPaise(quote.serviceFeePaise || 0)}</span></div>}
                 {Boolean(quote.taxesPaise) && <div className="flex justify-between"><span>Taxes</span><span>{formatPaise(quote.taxesPaise || 0)}</span></div>}
                 <div className="flex justify-between border-t border-[#ebebeb] pt-2 text-sm font-bold dark:border-slate-800"><span>Total (INR)</span><span>{formatPaise(quote.totalPaise)}</span></div>
-                <p className="pt-1 text-[10px] text-[#717171] dark:text-slate-400">Calculated by the server for {quote.units} room{quote.units === 1 ? '' : 's'}.</p>
+                <p className="pt-1 text-[10px] text-[#717171] dark:text-slate-400">You won't be charged yet · calculated by the server for {quote.units} room{quote.units === 1 ? '' : 's'}.</p>
               </div>
             )}
 
