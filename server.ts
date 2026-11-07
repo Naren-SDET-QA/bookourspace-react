@@ -2569,16 +2569,25 @@ Task:
     }
     const requested = String(req.body?.role || 'customer');
     const role = requested === 'admin' ? 'admin' : requested === 'provider' ? 'provider' : 'customer';
+    const requestedEmail = String(req.body?.email || '').trim().toLowerCase();
     try {
-      const result = await pgRuntimePool.query(
-        `select p.id, p.email, p.full_name, p.role, p.is_super_admin
-           from public.profiles p
-          where p.account_status = 'active'
-            and (case when $1 = 'admin' then (p.is_super_admin is true or p.role = 'admin') else p.role = $1 end)
-          order by (p.is_super_admin is true) desc, p.created_at asc
-          limit 1`,
-        [role],
-      );
+      const result = requestedEmail
+        ? await pgRuntimePool.query(
+            `select p.id, p.email, p.full_name, p.role, p.is_super_admin
+               from public.profiles p
+              where p.account_status = 'active' and lower(p.email) = $1
+              limit 1`,
+            [requestedEmail],
+          )
+        : await pgRuntimePool.query(
+            `select p.id, p.email, p.full_name, p.role, p.is_super_admin
+               from public.profiles p
+              where p.account_status = 'active'
+                and (case when $1 = 'admin' then (p.is_super_admin is true or p.role = 'admin') else p.role = $1 end)
+              order by (p.is_super_admin is true) desc, p.created_at asc
+              limit 1`,
+            [role],
+          );
       const profile = result.rows[0];
       if (!profile) {
         res.status(404).json({ ok: false, error: 'LOCAL_DEMO_USER_NOT_FOUND' });
