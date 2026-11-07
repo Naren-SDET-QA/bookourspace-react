@@ -137,7 +137,9 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
   useEffect(() => {
     if (!authUser) return;
     setGuestName((current) => current || authUser.name || '');
-    setGuestEmail(authUser.email || '');
+    // Keep a typed email when the profile does not expose one; otherwise the
+    // verified Google address is authoritative.
+    setGuestEmail((current) => (authUser.email ? authUser.email : current || ''));
     setGuestPhone((current) => current || authUser.phone || '');
   }, [authUser?.id, authUser?.name, authUser?.email]);
 
@@ -271,7 +273,7 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
       setError('Choose a room type and dates before booking.');
       return;
     }
-    if (!isAuthenticated || !authUser || authUser.authProvider !== 'google') {
+    if (!isAuthenticated || !authUser) {
       setError('Sign in with a verified account to reserve this stay.');
       return;
     }
@@ -670,8 +672,13 @@ export const StayCheckoutPanel: React.FC<StayCheckoutPanelProps> = ({
               <input
                 type="email"
                 value={guestEmail}
-                readOnly
-                disabled={disabled || !authUser?.email}
+                readOnly={Boolean(authUser?.email)}
+                disabled={disabled}
+                onChange={(event) => {
+                  if (authUser?.email) return;
+                  setGuestEmail(event.target.value);
+                  setError(null);
+                }}
                 required
                 aria-label="Guest email"
                 aria-invalid={guestTouched && Boolean(!guestValidation.ok && guestValidation.emailError)}

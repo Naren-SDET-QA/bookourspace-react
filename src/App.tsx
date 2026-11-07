@@ -140,6 +140,8 @@ const VoiceRegistrationModal = lazy(() => import('./components/VoiceRegistration
 const VoiceSearchModal = lazy(() => import('./components/VoiceSearchModal').then((module) => ({ default: module.VoiceSearchModal })));
 const ReviewSubmissionModal = lazy(() => import('./components/ReviewSubmissionModal').then((module) => ({ default: module.ReviewSubmissionModal })));
 const RunningBatchesModal = lazy(() => import('./components/RunningBatchesModal').then((module) => ({ default: module.RunningBatchesModal })));
+import { SimpleLoginPage } from './components/SimpleLoginPage';
+
 const SupabaseAuthModal = lazy(() => import('./components/SupabaseAuthModal').then((module) => ({ default: module.SupabaseAuthModal })));
 const ProfileScreen = lazy(() => import('./components/ProfileScreen').then((module) => ({ default: module.ProfileScreen })));
 import {
@@ -341,6 +343,7 @@ function MarketplaceAppContent() {
   const [isQuickBookOpen, setIsQuickBookOpen] = useState<boolean>(false);
   const [showMoviesClassicGrid, setShowMoviesClassicGrid] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isLoginPageOpen, setIsLoginPageOpen] = useState<boolean>(() => window.location.hash.replace('#', '').toLowerCase() === 'login');
   const [isProviderOnboardingOpen, setIsProviderOnboardingOpen] = useState(false);
   const [entryExperience, setEntryExperience] = useState<'loading' | 'welcome' | 'ready'>('loading');
   const serverAuthReady = useRef(false);
@@ -387,6 +390,11 @@ function MarketplaceAppContent() {
   useEffect(() => {
     const applySectionHash = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'login') {
+        setIsLoginPageOpen(true);
+        return;
+      }
+      setIsLoginPageOpen(false);
       if (hash === 'pg' || hash.startsWith('pg/')) {
         setActiveMarketSection('pg_hostels');
         setIsPGSectionOpen(true);
@@ -1907,7 +1915,7 @@ function MarketplaceAppContent() {
             activeView={activeView}
             comparedCount={comparedListingIds.length}
             onOpenCompareModal={() => setIsCompareModalOpen(true)}
-            onOpenGoogleSignIn={() => setIsAuthModalOpen(true)}
+            onOpenGoogleSignIn={() => { window.location.hash = 'login'; }}
             onExitAdminConsole={() => setActiveView('marketplace')}
             externalLoginModalOpen={false}
             selectedArea={selectedArea}
@@ -6407,6 +6415,22 @@ function MarketplaceAppContent() {
         selected={{ city: selectedCity, area: selectedArea, label: selectedLocationLabel || undefined }}
         onSelect={handleSelectLocation}
       />
+
+      {/* SIMPLE FULL-PAGE SIGN-IN */}
+      {isLoginPageOpen && (
+        <SimpleLoginPage
+          onClose={() => {
+            setIsLoginPageOpen(false);
+            if (window.location.hash.toLowerCase() === '#login') {
+              window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#stays`);
+            }
+          }}
+          onGoogle={() => {
+            setIsLoginPageOpen(false);
+            setIsAuthModalOpen(true);
+          }}
+        />
+      )}
 
       {/* SUPABASE AUTHENTICATION MODAL */}
       <SupabaseAuthModal
