@@ -102,6 +102,8 @@ interface CraftoTopServicesBarProps {
   onOpenVoiceSearch: () => void;
   userRole?: 'customer' | 'provider' | 'admin';
   onSelectRole?: (role: 'customer' | 'provider' | 'admin') => void;
+  /** When the admin console is open, the header button toggles back to the marketplace. */
+  onExitAdminConsole?: () => void;
   activeView?: 'marketplace' | 'provider_portal' | 'admin_console';
   comparedCount?: number;
   onOpenCompareModal?: () => void;
@@ -156,6 +158,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   onOpenVoiceSearch,
   userRole = 'customer',
   onSelectRole,
+  onExitAdminConsole,
   activeView = 'marketplace',
   comparedCount = 0,
   onOpenCompareModal,
@@ -586,9 +589,12 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 <button
                   type="button"
                   data-testid="admin-console-entry"
-                  aria-label="Open Admin Console"
+                  aria-label={activeView === 'admin_console' ? 'Back to Marketplace' : 'Open Admin Console'}
                   aria-current={activeView === 'admin_console' ? 'page' : undefined}
-                  onClick={() => onSelectRole('admin')}
+                  onClick={() => {
+                    if (activeView === 'admin_console' && onExitAdminConsole) onExitAdminConsole();
+                    else onSelectRole('admin');
+                  }}
                   className={`h-7 w-7 sm:h-9 sm:w-auto sm:px-3 rounded-full flex items-center justify-center gap-1.5 border text-[#1E1B4B] dark:text-white shrink-0 transition ${
                     activeView === 'admin_console'
                       ? 'bg-indigo-950 text-white border-indigo-950 dark:bg-indigo-800 dark:border-indigo-700'
@@ -596,7 +602,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   }`}
                 >
                   <ShieldCheck className="w-4 h-4 text-amber-500 shrink-0" aria-hidden="true" />
-                  <span className="hidden md:inline whitespace-nowrap text-[11px] font-black">Admin Console</span>
+                  <span className="hidden md:inline whitespace-nowrap text-[11px] font-black">{activeView === 'admin_console' ? 'Marketplace' : 'Admin Console'}</span>
                 </button>
               )}
 

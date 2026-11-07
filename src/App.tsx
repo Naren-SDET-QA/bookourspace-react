@@ -354,6 +354,16 @@ function MarketplaceAppContent() {
     }
   }, [isAccountBlocked, activeView]);
 
+  // Leaving the console must clear the #admin hash; otherwise the hash router
+  // reopens the console on the next render and the admin can never browse the
+  // marketplace. The header button acts as the Admin <-> Marketplace toggle.
+  useEffect(() => {
+    if (activeView === 'admin_console') return;
+    if (window.location.hash.toLowerCase().startsWith('#admin')) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+  }, [activeView]);
+
   useEffect(() => {
     if (activeView === 'admin_console' && !isAdminSession) {
       setActiveView(authUser?.role === 'provider' ? 'provider_portal' : 'marketplace');
@@ -1870,6 +1880,7 @@ function MarketplaceAppContent() {
             comparedCount={comparedListingIds.length}
             onOpenCompareModal={() => setIsCompareModalOpen(true)}
             onOpenGoogleSignIn={() => setIsAuthModalOpen(true)}
+            onExitAdminConsole={() => setActiveView('marketplace')}
             externalLoginModalOpen={false}
             selectedArea={selectedArea}
             onSelectArea={(area) => {
@@ -2779,13 +2790,22 @@ function MarketplaceAppContent() {
                 >
                   Live Page Editor
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveView('marketplace')}
-                  className="rounded-xl bg-slate-100 px-3.5 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-                >
-                  Back to Marketplace
-                </button>
+                <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900" role="group" aria-label="Admin workspace toggle">
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('marketplace')}
+                    className="rounded-lg px-3 py-1 text-[11px] font-bold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    Marketplace
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed="true"
+                    className="rounded-lg bg-indigo-600 px-3 py-1 text-[11px] font-bold text-white"
+                  >
+                    Admin Console
+                  </button>
+                </div>
               </div>
             </div>
 
