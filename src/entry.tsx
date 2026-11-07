@@ -1,18 +1,6 @@
 import './index.css';
-
-async function bootstrapApplication() {
-  if (typeof window !== 'undefined') {
-    // Cache and service-worker maintenance is independent from rendering.
-    // The HTML performs the compatibility cleanup in the background; waiting
-    // here kept React and the Guest → Home path behind an unrelated 1.5s gate.
-    void (window as unknown as { __swReady?: Promise<boolean> }).__swReady?.catch(() => false);
-  }
-
-  // App.tsx is the largest first-route chunk. Start its network fetch beside
-  // the small runtime bootstrap rather than waiting until React mounts the
-  // lazy root in main.tsx; the module is still evaluated through React.lazy.
-  void import('./App.tsx').catch(() => undefined);
-  await import('./main.tsx');
-}
-
-bootstrapApplication();
+// Keep the critical module graph static so Vite can preload React, the shared
+// provider and the Home route while the entry HTML/CSS are being delivered.
+// The interactive HTML Guest/Google surface stays visible until App selects
+// the destination, so startup never needs to wait on service-worker cleanup.
+import './main.tsx';
