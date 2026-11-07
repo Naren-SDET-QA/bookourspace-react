@@ -97,8 +97,18 @@ test.describe('Google-only session and role boundaries', () => {
   });
 
   test('a verified OAuth result returns the application to Home', async ({ page }) => {
+    await page.addInitScript(() => {
+      const target = window as Window & { __bosOAuthRedirectListenerReady?: boolean };
+      const addEventListener = window.addEventListener.bind(window);
+      window.addEventListener = ((type: string, ...args: any[]) => {
+        if (type === 'bos-google-oauth-redirect') target.__bosOAuthRedirectListenerReady = true;
+        return (addEventListener as (...a: any[]) => void)(type, ...args);
+      }) as typeof window.addEventListener;
+    });
     await page.goto('/#services', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#root > *')).toBeAttached({ timeout: 30_000 });
+    await expect.poll(() => page.evaluate(() => Boolean(
+      (window as Window & { __bosOAuthRedirectListenerReady?: boolean }).__bosOAuthRedirectListenerReady,
+    ))).toBe(true);
 
     await page.evaluate(() => {
       window.dispatchEvent(new CustomEvent('bos-google-oauth-redirect', {
