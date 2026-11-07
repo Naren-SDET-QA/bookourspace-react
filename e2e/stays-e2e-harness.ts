@@ -251,6 +251,9 @@ export async function startStaysHarness(options: {
         ...process.env,
         NODE_ENV: 'test',
         PORT: String(apiPort),
+        // Tests use the current source snapshot without Vite replacing modules
+        // mid-journey when another local task edits the worktree.
+        DISABLE_HMR: 'true',
         BOS_SERVER_HMAC_SECRET: TEST_HMAC_SECRET,
         BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,
         BOS_LISTINGS_DATABASE_URL: connectionString,
@@ -565,9 +568,13 @@ export async function startStaysHarness(options: {
     } catch {
       throw new Error('dist/index.html is missing. Run `npm run build` before the browser journey.');
     }
+    // Snapshot the build into this harness's owned temp directory. A concurrent
+    // build must not replace lazy-loaded chunks halfway through the browser run.
+    const isolatedDistDirectory = path.join(tempRoot, 'dist');
+    await fs.cp(distDirectory, isolatedDistDirectory, { recursive: true, errorOnExist: true });
     const uiApp = express();
-    uiApp.use(express.static(distDirectory, { fallthrough: true }));
-    uiApp.get('*', (_request, response) => response.sendFile(path.join(distDirectory, 'index.html')));
+    uiApp.use(express.static(isolatedDistDirectory, { fallthrough: true }));
+    uiApp.get('*', (_request, response) => response.sendFile(path.join(isolatedDistDirectory, 'index.html')));
     const startedUiServer = await new Promise<ReturnType<typeof uiApp.listen>>((resolve, reject) => {
       const server = uiApp.listen(0, '127.0.0.1', () => resolve(server));
       server.once('error', reject);

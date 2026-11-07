@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Locator, type Page, type ViewportSize } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page, type Route, type ViewportSize } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import {
   COURSE_ID,
@@ -72,29 +72,13 @@ function authUserFor(user: TestUser) {
   };
 }
 
-async function newPage(
-  browser: Browser,
-  user: TestUser,
-  viewport: ViewportSize = DESKTOP,
-): Promise<{ page: Page; pageErrors: string[]; close: () => Promise<void> }> {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
-  await context.addInitScript(
-    ({ token, storedUser }) => {
-      try {
-        localStorage.setItem('bos_session_token_v1', token);
-        localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(storedUser));
-      } catch {
-        // Ignore storage failures on non-origin documents.
-      }
-    },
-    { token: sessionToken(user), storedUser: authUserFor(user) },
-  );
-  const page = await context.newPage();
-  const pageErrors: string[] = [];
-  page.on('pageerror', (error) => pageErrors.push(error.message));
-  // The UI origin proxies /api to the real Express server. External resources
-  // are blocked so the test cannot depend on the network or a CDN.
-  await page.route('**/*', async (route) => {
+function isBenignRouteError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Route is already handled|Request context disposed|Target (page, context or browser has been )?closed|Test ended|Protocol error|Connection closed/i.test(message);
+}
+
+async function proxyHarnessRequest(route: Route): Promise<void> {
+  try {
     const target = new URL(route.request().url());
     if (target.origin === harness.uiUrl) {
       if (target.pathname.startsWith('/api/')) {
@@ -108,7 +92,42 @@ async function newPage(
       return;
     }
     await route.abort('blockedbyclient');
+  } catch (error) {
+    // Vite, a late navigation, or Chromium settling a redirected request can
+    // complete the route before fulfill/continue/abort. That race is not a
+    // product failure; uncaught it flakes the Classes journey.
+    if (isBenignRouteError(error)) return;
+    throw error;
+  }
+}
+
+async function newPage(
+  browser: Browser,
+  user: TestUser,
+  viewport: ViewportSize = DESKTOP,
+): Promise<{ page: Page; pageErrors: string[]; close: () => Promise<void> }> {
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: 1,
+    serviceWorkers: 'block',
   });
+  await context.addInitScript(
+    ({ token, storedUser }) => {
+      try {
+        localStorage.setItem('bos_session_token_v1', token);
+        localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(storedUser));
+      } catch {
+        // Ignore storage failures on non-origin documents.
+      }
+    },
+    { token: sessionToken(user), storedUser: authUserFor(user) },
+  );
+  // Context routes cover every page and avoid a page.route / service-worker
+  // double-handle of the same request ("Route is already handled!").
+  await context.route('**/*', proxyHarnessRequest);
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   return {
     page,
     pageErrors,
@@ -116,7 +135,7 @@ async function newPage(
       // Let in-flight route handlers finish against their owned API context
       // before disposing the browser context; otherwise a late route.fetch()
       // can fail with "Request context disposed" during cleanup.
-      await page.unrouteAll({ behavior: 'wait' });
+      await context.unrouteAll({ behavior: 'wait' }).catch(() => undefined);
       await context.close();
     },
   };
