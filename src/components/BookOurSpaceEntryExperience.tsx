@@ -79,7 +79,12 @@ export default function BookOurSpaceEntryExperience({
               <button
                 type="button"
                 data-testid="entry-google-sign-in"
-                onClick={onGoogleSignIn}
+                onClick={(event) => {
+                  // Safari/WebKit does not focus a button on click, so without
+                  // this the auth dialog has no opener to return focus to.
+                  event.currentTarget.focus();
+                  onGoogleSignIn();
+                }}
                 aria-describedby="bos-entry-access-note"
                 className="bos-entry-google"
               >

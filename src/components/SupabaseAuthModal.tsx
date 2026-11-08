@@ -67,6 +67,9 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // Last element the user pressed. Safari/WebKit does not focus buttons on
+  // click, so this is the only reliable opener to return focus to.
+  const lastPointerOpenerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
@@ -133,8 +136,25 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   // The sign-in surface is a modal dialog: Escape closes it, Tab stays inside,
   // focus moves to the close control, and focus returns to the opener on exit.
   useEffect(() => {
+    // While the dialog is open the focus trap owns focus; remember only the
+    // control that opened it.
+    if (isOpen) return;
+    const rememberOpener = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      lastPointerOpenerRef.current =
+        target?.closest<HTMLElement>('button, a[href], [tabindex]') || null;
+    };
+    document.addEventListener('pointerdown', rememberOpener, true);
+    return () => document.removeEventListener('pointerdown', rememberOpener, true);
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return;
-    const previousFocus = document.activeElement as HTMLElement | null;
+    const active = document.activeElement as HTMLElement | null;
+    const activeIsUseful = Boolean(active && active !== document.body && active !== document.documentElement);
+    // Prefer a real focused control; otherwise fall back to what the user
+    // clicked so WebKit still returns focus to the opener.
+    const previousFocus = activeIsUseful ? active : lastPointerOpenerRef.current;
     const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -166,7 +186,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       window.clearTimeout(focusTimer);
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
-      previousFocus?.focus?.();
+      // A control removed while the dialog was open can no longer take focus.
+      if (previousFocus?.isConnected) previousFocus.focus?.();
     };
   }, [isOpen]);
 
