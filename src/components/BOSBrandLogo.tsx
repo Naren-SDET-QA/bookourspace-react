@@ -56,10 +56,17 @@ export const BOSBrandLogo: React.FC<BOSBrandLogoProps> = ({
     activeTheme.brandLogoEmblemUrl ||
     '/assets/optimized/brand-emblem-512.webp';
   const tagline = activeTheme.brandTagline || 'FIND • BOOK • ENJOY';
+  const spinGlobe = activeTheme.showGlobeAnimation !== false;
+  const useClassicBosLetters = activeTheme.brandLockupStyle === 'classic_bos_letters';
   const useOfficialLogo =
-    !activeTheme.brandLogoEmblemUrl ||
-    activeTheme.brandLogoEmblemUrl === '/assets/optimized/brand-emblem-512.webp' ||
-    activeTheme.brandLogoEmblemUrl === BOS_OFFICIAL_LOGO_STATIC;
+    !useClassicBosLetters &&
+    (!activeTheme.brandLogoEmblemUrl ||
+      activeTheme.brandLogoEmblemUrl === '/assets/optimized/brand-emblem-512.webp' ||
+      activeTheme.brandLogoEmblemUrl === BOS_OFFICIAL_LOGO_STATIC);
+  const letterOSrc =
+    logoSrc === BOS_OFFICIAL_LOGO_STATIC || logoSrc.includes('bos-logo-lockup')
+      ? '/assets/optimized/brand-emblem-512.webp'
+      : logoSrc;
   const verifiedControl = (
     <button
       type="button"
@@ -92,8 +99,83 @@ export const BOSBrandLogo: React.FC<BOSBrandLogoProps> = ({
       className="flex items-center gap-1.5 cursor-pointer select-none min-w-0 group"
       title={`BOS — BookOurSpace (${tagline})`}
     >
-      {useOfficialLogo ? (
+      {useClassicBosLetters && (
+        <style>{`
+          @keyframes bosGlobeRotate360 {
+            0% { transform: perspective(500px) rotateY(0deg); }
+            50% { transform: perspective(500px) rotateY(180deg) scale(1.06); }
+            100% { transform: perspective(500px) rotateY(360deg); }
+          }
+          .bos-globe-letter-o {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transform-style: preserve-3d;
+            animation: bosGlobeRotate360 3.6s linear infinite;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .bos-globe-letter-o { animation: none; }
+          }
+        `}</style>
+      )}
+      {useClassicBosLetters ? (
+        <>
+          <div
+            style={{ borderColor: `${activeTheme.primaryBrandColor}40` }}
+            className={`relative flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border-2 shadow-sm px-1.5 py-1 shrink-0 ${
+              compact ? 'h-8' : 'h-9 sm:h-10'
+            }`}
+          >
+            <div className="flex items-center font-black tracking-tighter leading-none select-none">
+              <span
+                style={{ color: activeTheme.primaryBrandColor }}
+                className="text-base sm:text-xl font-black"
+              >
+                B
+              </span>
+              <span
+                style={{ backgroundColor: activeTheme.accentColor }}
+                className={`${
+                  spinGlobe ? 'bos-globe-letter-o' : 'inline-flex items-center justify-center'
+                } mx-0.5 relative w-5 h-5 sm:w-6 sm:h-6 rounded-full p-0.5 shadow-[0_0_10px_rgba(245,158,11,0.55)] ring-1 ring-amber-300`}
+              >
+                <img
+                  src={letterOSrc}
+                  alt=""
+                  className="w-full h-full object-contain rounded-full bg-white"
+                />
+              </span>
+              <span
+                style={{ color: activeTheme.primaryBrandColor }}
+                className="text-base sm:text-xl font-black"
+              >
+                S
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-col leading-none min-w-0">
+            <span
+              className="font-black text-sm sm:text-xl tracking-tight truncate flex items-center"
+              translate="no"
+            >
+              <span className="text-[#0F172A] dark:text-white">Book</span>
+              <span
+                style={{ color: activeTheme.accentColor }}
+                className={`${spinGlobe ? 'bos-globe-letter-o' : ''} inline-flex items-center justify-center font-black mx-[0.5px]`}
+              >
+                O
+              </span>
+              <span style={{ color: activeTheme.accentColor }}>ur</span>
+              <span style={{ color: activeTheme.primaryBrandColor }}>Space</span>
+            </span>
+            <span className="mt-1 text-[7px] font-black tracking-wider text-slate-500 uppercase truncate">
+              {tagline}
+            </span>
+          </div>
+        </>
+      ) : useOfficialLogo ? (
         <BOSOfficialLogo
+          animated={spinGlobe}
           className={compact ? 'w-[min(42vw,150px)] sm:w-[150px]' : 'w-[min(54vw,210px)] sm:w-[210px]'}
           alt="BookOurSpace official logo"
         />
@@ -101,7 +183,7 @@ export const BOSBrandLogo: React.FC<BOSBrandLogoProps> = ({
         <div className="flex items-center gap-1.5 min-w-0">
           <BOSRotatingLocationSymbol
             src={logoSrc}
-            animate={false}
+            animate={spinGlobe}
             alt="Custom BookOurSpace brand emblem"
             className={compact ? 'h-7 w-6.5' : 'h-9 w-8'}
           />

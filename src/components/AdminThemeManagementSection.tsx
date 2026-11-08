@@ -124,6 +124,10 @@ const BUILTIN_LOGO_EMBLEMS = [
     label: 'Official BookOurSpace Logo Lockup',
     url: BOS_OFFICIAL_LOGO_STATIC,
   },
+  {
+    label: 'Classic Golden Pin Emblem',
+    url: '/assets/aistudio/image_c82d47dd.png',
+  },
 ];
 
 export const AdminThemeManagementSection: React.FC<
@@ -163,6 +167,7 @@ export const AdminThemeManagementSection: React.FC<
     draftTheme.brandLogoEmblemUrl !== savedTheme.brandLogoEmblemUrl ||
     draftTheme.brandTagline !== savedTheme.brandTagline ||
     draftTheme.showGlobeAnimation !== savedTheme.showGlobeAnimation ||
+    (draftTheme.brandLockupStyle || 'official') !== (savedTheme.brandLockupStyle || 'official') ||
     draftTheme.borderRadiusStyle !== savedTheme.borderRadiusStyle ||
     draftTheme.compactDensity !== savedTheme.compactDensity;
 
@@ -736,6 +741,36 @@ export const AdminThemeManagementSection: React.FC<
                   />
                   <span>360° Rotating Globe 'O'</span>
                 </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="font-bold text-slate-600 dark:text-slate-300 text-[11px] uppercase tracking-wider">
+                  Header lockup
+                </span>
+                {(
+                  [
+                    { id: 'official' as const, label: 'Official BookOurSpace logo' },
+                    { id: 'classic_bos_letters' as const, label: 'Classic BOS letter globe' },
+                  ]
+                ).map((lockup) => (
+                  <button
+                    key={lockup.id}
+                    type="button"
+                    onClick={() =>
+                      setDraftTheme({
+                        ...draftTheme,
+                        brandLockupStyle: lockup.id,
+                      })
+                    }
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer ${
+                      (draftTheme.brandLockupStyle || 'official') === lockup.id
+                        ? 'bg-indigo-100 dark:bg-indigo-950 border-indigo-500 text-indigo-900 dark:text-indigo-200'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    {lockup.label}
+                  </button>
+                ))}
               </div>
             </div>
 
