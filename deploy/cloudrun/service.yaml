@@ -1,0 +1,129 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: bookourspace-api
+  labels:
+    app: bookourspace
+    environment: production
+  annotations:
+    # Ingress is allowed from the internet, but Cloud Run IAM still decides who
+    # may invoke the service. Keep the default private binding unless the owner
+    # explicitly approves a public allUsers invoker.
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      labels:
+        app: bookourspace
+        environment: production
+      annotations:
+        # Cost guardrails: scale to zero when idle, hard ceiling of two tasks.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: "gen2"
+    spec:
+      serviceAccountName: "${SERVICE_ACCOUNT}"
+      containerConcurrency: 20
+      timeoutSeconds: 300
+      containers:
+        - name: api
+          image: "${IMAGE}"
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /api/live
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 30
+            failureThreshold: 3
+          env:
+            - name: NODE_ENV
+              value: production
+            # Filled from `gcloud run services describe ... status.url` after the
+            # first revision. Never hard-code a hostname here.
+            - name: APP_URL
+              value: "${APP_URL}"
+            - name: SUPABASE_URL
+              value: "https://obkfgxjzlscungkhbyvq.supabase.co"
+            - name: SUPABASE_PROJECT_ID
+              value: "obkfgxjzlscungkhbyvq"
+            - name: VITE_SUPABASE_PROJECT_ID
+              value: "obkfgxjzlscungkhbyvq"
+            - name: VITE_SUPABASE_URL
+              value: "https://obkfgxjzlscungkhbyvq.supabase.co"
+            - name: SUPABASE_PUBLISHABLE_KEY
+              value: "${SUPABASE_PUBLISHABLE_KEY}"
+            - name: VITE_SUPABASE_PUBLISHABLE_KEY
+              value: "${SUPABASE_PUBLISHABLE_KEY}"
+            - name: BOS_LISTINGS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bos-listings-database-url
+                  key: latest
+            - name: BOS_SERVER_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bos-server-hmac-secret
+                  key: latest
+            - name: SUPABASE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secret-key
+                  key: latest
+            # Exact Capacitor origins; never a wildcard.
+            - name: BOS_NATIVE_APP_ORIGINS
+              value: "capacitor://localhost,https://localhost"
+            # Production must never accept demo bookings, demo auth or sandbox money.
+            - name: BOS_STAY_INCLUDE_DEMO
+              value: "0"
+            - name: BOS_STAY_ALLOW_DEMO_BOOKING
+              value: "0"
+            - name: BOS_PAYMENT_SANDBOX
+              value: "0"
+            - name: BOS_UPI_SANDBOX
+              value: "0"
+            - name: BOS_VENUE_PAYMENT_SANDBOX
+              value: "0"
+            - name: BOS_LOCAL_DEV_AUTH
+              value: "0"
+            - name: VITE_ENABLE_DEMO_DATA
+              value: "false"
+            - name: VITE_BOS_LOCAL_DEV_AUTH
+              value: "0"
+            - name: BOS_ALLOW_OWNER_MANUAL_SETTLEMENT
+              value: "false"
+            # Live Razorpay (optional until payment go-live is approved).
+            # Create Secret Manager secrets before uncommenting:
+            # razorpay-key-id, razorpay-key-secret, razorpay-webhook-secret.
+            # - name: RAZORPAY_KEY_ID
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: razorpay-key-id
+            #       key: latest
+            # - name: RAZORPAY_KEY_SECRET
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: razorpay-key-secret
+            #       key: latest
+            # - name: RAZORPAY_WEBHOOK_SECRET
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: razorpay-webhook-secret
+            #       key: latest
