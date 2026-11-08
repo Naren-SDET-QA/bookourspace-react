@@ -11,6 +11,7 @@ import {
   Share2,
   Copy,
   Check,
+  Download,
   Phone,
   MessageSquare,
   Sparkles,
@@ -20,6 +21,8 @@ import {
 import { useMarketplace } from '../context/MarketplaceContext';
 import { MarketplaceListing } from '../types/marketplace';
 import { AppLanguage, getListingTitle } from '../utils/translations';
+import { downloadGSTInvoicePDF } from '../utils/gstInvoiceGenerator';
+import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 
 export type QuickActionModalType =
   | null
@@ -42,8 +45,14 @@ export interface WalletLedgerEntry {
 export const UserWalletAndLedgerSection: React.FC<{
   currentLang?: AppLanguage;
 }> = ({ currentLang = 'en' }) => {
+  const { transactions } = useMarketplace();
   const [topUpAmount, setTopUpAmount] = useState(500);
   const [topUpMessage, setTopUpMessage] = useState<string | null>(null);
+  // Seed/localStorage marketplace_transactions are not a settlement ledger.
+  // GST PDFs are offered only for non-demo success rows that already carry an invoice number.
+  const verifiedReceipts = DEMO_DATA_ENABLED
+    ? []
+    : transactions.filter((tx) => tx.status === 'success' && Boolean(tx.invoiceNumber) && !String(tx.id).startsWith('tx-'));
 
   const handleAddFunds = () => {
     setTopUpMessage('Wallet top-up is unavailable until a trusted payment and ledger service is configured. No funds were added.');
@@ -124,9 +133,54 @@ export const UserWalletAndLedgerSection: React.FC<{
       {/* Transaction History & Ledger */}
       <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
         <div className="text-[11px] font-black uppercase tracking-wider text-slate-500">
-          Financial history unavailable
+          {verifiedReceipts.length > 0
+            ? `GST receipts (${verifiedReceipts.length})`
+            : 'Financial history unavailable'}
         </div>
-        <p className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">No trusted financial ledger is connected. Payment, wallet, refund and invoice actions remain unavailable.</p>
+        {verifiedReceipts.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">No trusted financial ledger is connected. Wallet top-up remains unavailable. GST PDFs appear here after a verified marketplace payment.</p>
+        ) : (
+          verifiedReceipts.map((tx) => (
+            <div
+              key={tx.id}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs"
+            >
+              <div className="min-w-0">
+                <div className="font-black text-slate-900 dark:text-white truncate">
+                  {tx.description || tx.planName}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  {tx.date} • {tx.invoiceNumber} • {tx.paymentMethod}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-black text-slate-800 dark:text-slate-100">
+                  ₹{tx.amount.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadGSTInvoicePDF({
+                      invoiceNumber: tx.invoiceNumber || `BOS-GST-${tx.id}`,
+                      transactionId: tx.id,
+                      date: tx.date,
+                      customerName: 'BookOurSpace customer',
+                      customerPhone: '',
+                      planOrItemName: tx.planName || tx.description,
+                      baseAmount: Math.round(tx.amount / 1.18),
+                      totalAmount: tx.amount,
+                      paymentMethod: tx.paymentMethod || 'Verified payment',
+                    })
+                  }
+                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 cursor-pointer"
+                  title="Download GST Invoice PDF"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,20 @@
-import React, { useId } from 'react';
+import React, { useEffect, useId, useState } from 'react';
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() =>
+    typeof window !== 'undefined' &&
+    Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+  );
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!mq) return;
+    const sync = () => setReduced(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return reduced;
+}
 
 export const BOS_OFFICIAL_LOGO_STATIC = '/assets/brand/bos-logo-lockup.webp';
 // The animated overlay uses the same artwork at a responsive 2x size so it
@@ -26,6 +42,7 @@ export default function BOSOfficialLogo({
 }: BOSOfficialLogoProps) {
   const id = useId().replace(/:/g, '');
   const clipId = `bos-logo-pin-${id}`;
+  const showPinRotor = animated && !usePrefersReducedMotion();
 
   return (
     <span className={`bos-official-logo ${className}`} role="img" aria-label={alt}>
@@ -40,7 +57,7 @@ export default function BOSOfficialLogo({
         decoding="async"
         fetchPriority={loading === 'eager' ? 'high' : 'auto'}
       />
-      {animated && (
+      {showPinRotor && (
         <svg
           className="bos-official-logo__pin-rotor"
           data-testid="bos-logo-pin-rotor"

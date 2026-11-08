@@ -9,6 +9,8 @@ export interface AdminThemeSettings {
   brandLogoEmblemUrl: string;
   brandTagline: string;
   showGlobeAnimation: boolean;
+  /** official = current BookOurSpace lockup; classic_bos_letters = zip B [rotating O] S badge */
+  brandLockupStyle: 'official' | 'classic_bos_letters';
   borderRadiusStyle: 'rounded' | 'sharp' | 'pill';
   compactDensity: boolean;
   presetName: string;
@@ -28,6 +30,7 @@ export const DEFAULT_THEME_SETTINGS: AdminThemeSettings = {
   brandLogoEmblemUrl: '/assets/optimized/brand-emblem-512.webp',
   brandTagline: 'FIND • BOOK • ENJOY',
   showGlobeAnimation: true,
+  brandLockupStyle: 'official',
   borderRadiusStyle: 'rounded',
   compactDensity: false,
   presetName: 'BookOurSpace Signature Indigo & Saffron',
