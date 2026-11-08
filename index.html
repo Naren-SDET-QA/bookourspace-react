@@ -23,9 +23,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <noscript><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
     <style>
-      #bos-prelaunch-screen{position:fixed;inset:0;z-index:9999}
+      #bos-prelaunch-screen{position:fixed;inset:0;z-index:200}
       #bos-prelaunch-screen[hidden]{display:none}
-      #bos-quick-home-shell{position:fixed;inset:0;z-index:9998;overflow:auto;background:#f5f4fb;color:#0f172a;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
+      #bos-quick-home-shell{position:fixed;inset:0;z-index:199;overflow:auto;background:#f5f4fb;color:#0f172a;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
       #bos-quick-home-shell[hidden]{display:none}
       .bos-quick-home-header{position:sticky;top:0;z-index:1;background:rgba(255,255,255,.96);padding:12px 0;backdrop-filter:blur(12px)}
       .bos-quick-home-row{display:flex;gap:8px;max-width:760px;margin:auto}
@@ -63,7 +63,7 @@
     </script>
   </head>
   <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-purple-500 selection:text-white">
-    <div id="bos-prelaunch-screen" class="bos-entry-screen fixed inset-0 z-[9999] flex min-h-[100dvh] items-center justify-center overflow-x-hidden overflow-y-auto text-[#F8FAFC]" data-testid="bookourspace-welcome" aria-label="Start using BookOurSpace">
+    <div id="bos-prelaunch-screen" class="bos-entry-screen fixed inset-0 z-[200] flex min-h-[100dvh] items-center justify-center overflow-x-hidden overflow-y-auto text-[#F8FAFC]" data-testid="bookourspace-welcome" aria-label="Start using BookOurSpace">
       <div class="bos-entry-backdrop" aria-hidden="true">
         <div class="bos-entry-aurora bos-entry-aurora--teal"></div>
         <div class="bos-entry-aurora bos-entry-aurora--violet"></div>

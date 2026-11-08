@@ -5578,6 +5578,22 @@ Task:
     res.status(500).json({ ok: false, error: 'INTERNAL_ERROR', message: 'The request could not be completed. Nothing was charged.' });
   });
 
+  if (process.env.NODE_ENV === 'production' && process.env.BOS_POSTGRES_LOCAL_TEST_MODE !== 'true') {
+    const appUrl = String(process.env.APP_URL || '').trim();
+    if (!appUrl) {
+      throw new Error('PRODUCTION_APP_URL_REQUIRED');
+    }
+    let parsedAppUrl: URL;
+    try {
+      parsedAppUrl = new URL(appUrl);
+    } catch {
+      throw new Error('PRODUCTION_APP_URL_INVALID');
+    }
+    if (parsedAppUrl.protocol !== 'https:') {
+      throw new Error('PRODUCTION_APP_URL_HTTPS_REQUIRED');
+    }
+  }
+
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`BookOurSpace Full-Stack Server running on http://0.0.0.0:${PORT}`);
   });

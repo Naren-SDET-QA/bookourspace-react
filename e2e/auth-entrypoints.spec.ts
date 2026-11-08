@@ -2,6 +2,18 @@ import { expect, test } from '@playwright/test';
 
 const MUMBAI_PROJECT = 'obkfgxjzlscungkhbyvq';
 
+/** Hold the Vite entry (dev) or hashed production bundle so the HTML boot shell stays interactive. */
+async function delayAppBootstrap(page: import('@playwright/test').Page, ms = 1200) {
+  let delayed = false;
+  await page.route(/\/(?:src\/(?:entry|main)\.tsx|assets\/index-[^/?]+\.js)(?:\?|$)/, async (route) => {
+    if (!delayed) {
+      delayed = true;
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    await route.continue();
+  });
+}
+
 async function openApp(page: import('@playwright/test').Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#root > *')).toBeAttached({ timeout: 30_000 });
@@ -63,10 +75,7 @@ test.describe('signed-out Google sign-in entry points', () => {
     // quick-home shell immediately (no welcome flash), which is covered by the
     // test above. This test exercises choosing Guest while React still loads.
     await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
-    await page.route('**/src/main.tsx', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      await route.continue();
-    });
+    await delayAppBootstrap(page);
     await page.goto('/', { waitUntil: 'commit' });
     await page.getByTestId('entry-continue-guest').click();
     const quickHome = page.locator('#bos-quick-home-shell');
@@ -84,10 +93,7 @@ test.describe('signed-out Google sign-in entry points', () => {
   test('a returning guest gets the quick home shell without a welcome flash', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(() => localStorage.setItem('bos_entry_choice_v1', 'guest'));
-    await page.route('**/src/main.tsx', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      await route.continue();
-    });
+    await delayAppBootstrap(page);
     await page.goto('/', { waitUntil: 'commit' });
     // The static boot shell must honour the stored choice: no sign-in screen
     // that detaches under the user's tap while React finishes loading.

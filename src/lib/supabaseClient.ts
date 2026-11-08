@@ -1393,7 +1393,9 @@ export async function fetchServerMarketplaceListings(): Promise<{
   try {
     const response = await fetch('/api/marketplace/listings', { headers: { Accept: 'application/json' } });
     const data = await response.json();
-    if (!response.ok || !Array.isArray(data?.listings)) return { source: data?.source || null, listings: [] };
+    if (!response.ok || data?.source !== 'postgresql' || !Array.isArray(data?.listings)) {
+      return { source: data?.source || null, listings: [] };
+    }
     const listings = data.listings
       .filter((row: any) => row?.status === 'active' && row?.id && row?.categoryId && row?.subcategory)
       .map((row: any) => {

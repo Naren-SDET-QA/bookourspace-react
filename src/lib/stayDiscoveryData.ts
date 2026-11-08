@@ -180,7 +180,7 @@ export async function fetchStayProperties(options: {
     const response = await fetch('/api/marketplace/listings', { headers: { Accept: 'application/json' } });
     if (response.ok) {
       const payload = await response.json();
-      if ((payload?.source === 'postgresql' || payload?.source === 'authoritative-store') && Array.isArray(payload.listings)) {
+      if (payload?.source === 'postgresql' && Array.isArray(payload.listings)) {
         const destination = options.destination.trim().toLocaleLowerCase();
         postgresListings = payload.listings
           .filter((listing: any) => listing?.status === 'active' && isStayCategory(listing.categoryId))

@@ -55,8 +55,12 @@ test('cold Guest Home exposes search and all six modules in under 3 seconds', as
   // renders the quick-home shell immediately (covered separately). Start fresh
   // here so this test exercises the cold-load click path.
   await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
-  await page.route('**/src/main.tsx', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  let delayed = false;
+  await page.route(/\/(?:src\/(?:entry|main)\.tsx|assets\/index-[^/?]+\.js)(?:\?|$)/, async (route) => {
+    if (!delayed) {
+      delayed = true;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     await route.continue();
   });
   const started = Date.now();
