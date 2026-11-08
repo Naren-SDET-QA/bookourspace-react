@@ -24,6 +24,9 @@ function normalizedBackendOrigin(raw: string | undefined, isDev: boolean): strin
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
     throw new TypeError('Native API origin must use HTTPS (HTTP is allowed only for local development).');
   }
+  if (url.hostname.endsWith('.supabase.co') || url.hostname.endsWith('.supabase.in')) {
+    throw new TypeError('VITE_NATIVE_API_ORIGIN must be the BookOurSpace HTTPS API origin, not Supabase.');
+  }
   return url.origin;
 }
 

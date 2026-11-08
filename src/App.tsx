@@ -1561,13 +1561,15 @@ function MarketplaceAppContent() {
 
   useEffect(() => {
     // Keep the lightweight HTML entry usable while the application boots.
-    // Remove it only after Guest, Google or a restored account has selected
-    // the real application surface.
-    if (entryExperience === 'ready' || isAuthModalOpen || DEMO_DATA_ENABLED) {
+    // React owns welcome as soon as it paints, and owns the marketplace once
+    // the visitor has chosen Guest or a restored session. Opening Google must
+    // not leave production without a welcome surface after the dialog closes.
+    const reactOwnsWelcome = entryExperience !== 'ready' && !authUser;
+    if (entryExperience === 'ready' || reactOwnsWelcome || isAuthModalOpen) {
       document.getElementById('bos-prelaunch-screen')?.remove();
       document.getElementById('bos-quick-home-shell')?.remove();
     }
-  }, [entryExperience, isAuthModalOpen]);
+  }, [entryExperience, isAuthModalOpen, authUser]);
 
   // Share the selected header city with experiences that maintain their own
   // category-level filtering and data loading.
@@ -2176,7 +2178,7 @@ function MarketplaceAppContent() {
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
       <BOSGlobeLoadingScreen />
 
-      {DEMO_DATA_ENABLED && entryExperience !== 'ready' && !authUser && (
+      {entryExperience !== 'ready' && !authUser && (
         <Suspense fallback={null}>
           <BookOurSpaceEntryExperience
             mode={entryExperience}

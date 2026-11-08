@@ -62,6 +62,9 @@ test('native API fails closed without an origin and rejects insecure remote orig
     });
     assert.equal(String(url), `${origin}/api/users`);
   }
+  assert.throws(() => routeNativeApiRequest('/api/users', undefined, {
+    native: true, backendOrigin: 'https://obkfgxjzlscungkhbyvq.supabase.co', isDev: false, currentOrigin,
+  }), /not Supabase/);
 });
 
 test('non-API and cross-origin requests are not rerouted', () => {

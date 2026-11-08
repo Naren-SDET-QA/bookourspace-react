@@ -11,6 +11,11 @@ test('customer marketplace hydrates only approved PostgreSQL listings', async ()
   assert.match(context, /fetch\('\/api\/marketplace\/listings'/);
   assert.match(context, /data\.source !== 'postgresql'/);
   assert.match(context, /mapPostgresPublicListing/);
+  const stayDiscovery = await read('../src/lib/stayDiscoveryData.ts');
+  assert.match(stayDiscovery, /payload\?\.source === 'postgresql'/);
+  assert.equal(stayDiscovery.includes("payload?.source === 'authoritative-store'"), false);
+  const client = await read('../src/lib/supabaseClient.ts');
+  assert.match(client, /data\?\.source !== 'postgresql'/);
 
   const mappingStart = context.indexOf('function mapPostgresPublicListing');
   const effectStart = context.indexOf('// One PostgreSQL source');

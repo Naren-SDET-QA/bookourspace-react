@@ -268,6 +268,10 @@ export function registerPlatformApi(app: express.Express, deps: PlatformApiDeps)
       }
       return;
     }
+    if (process.env.NODE_ENV === 'production') {
+      res.status(503).json({ ok: false, error: 'LISTING_REPOSITORY_UNAVAILABLE' });
+      return;
+    }
     const store = deps.loadStore();
     const listings = Object.values(store.providerListings || {})
       .filter((listing: any) => listing && listing.status === 'active')
@@ -315,6 +319,10 @@ export function registerPlatformApi(app: express.Express, deps: PlatformApiDeps)
       } catch {
         res.status(503).json({ ok: false, error: 'LISTING_REPOSITORY_UNAVAILABLE' });
       }
+      return;
+    }
+    if (process.env.NODE_ENV === 'production') {
+      res.status(503).json({ ok: false, error: 'LISTING_REPOSITORY_UNAVAILABLE' });
       return;
     }
     const store = deps.loadStore();
