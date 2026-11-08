@@ -82,7 +82,15 @@ test('/api/health fails closed when PostgreSQL is not attached', async () => {
     assert.equal(response.status, 503);
     assert.equal(body.ok, false);
     assert.equal(body.error, 'DATABASE_UNAVAILABLE');
-    assert.equal(/postgres:\/\/|password=/i.test(JSON.stringify(body) + output), false);
+    const live = await fetch(`http://127.0.0.1:${port}/health/live`);
+    const liveBody = await live.json();
+    assert.equal(live.status, 200);
+    assert.equal(liveBody.ok, true);
+    assert.equal(liveBody.probe, 'liveness');
+    assert.equal(liveBody.service, 'bookourspace-api');
+    const ready = await fetch(`http://127.0.0.1:${port}/api/health`);
+    assert.equal(ready.status, 503);
+    assert.equal(/postgres:\/\/|password=/i.test(JSON.stringify(body) + JSON.stringify(liveBody) + output), false);
   } finally {
     child.kill('SIGTERM');
     await new Promise((resolve) => child.on('exit', resolve));

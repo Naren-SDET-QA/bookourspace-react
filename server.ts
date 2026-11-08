@@ -448,9 +448,16 @@ async function startServer() {
       return original(...wrapped);
     };
   }
-  // Unauthenticated liveness/readiness probe. Registered before rate limiting and
-  // CORS so Cloud Run probes always receive the true database state.
-  app.get(['/api/health', '/health'], async (_req, res) => {
+  // Liveness is process-only: a transient PostgreSQL outage must not make Cloud
+  // Run restart an otherwise healthy container. Canonical path: GET /health/live.
+  app.get(['/health/live', '/api/live', '/api/health/live', '/live'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).json({ ok: true, service: 'bookourspace-api', probe: 'liveness' });
+  });
+
+  // Database readiness. Canonical path: GET /api/health. Cloud Run readiness
+  // probe uses this so production traffic is not routed while PostgreSQL is down.
+  app.get(['/api/health', '/api/ready', '/health'], async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!pgRuntimePool) {
       res.status(503).json({ ok: false, error: 'DATABASE_UNAVAILABLE' });
