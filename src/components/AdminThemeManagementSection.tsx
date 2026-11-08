@@ -24,6 +24,7 @@ import {
   applyThemeSettingsToDocument,
 } from '../utils/adminEnterpriseStore';
 import { BOSBrandLogo } from './BOSBrandLogo';
+import { BOS_OFFICIAL_LOGO_STATIC } from './BOSOfficialLogo';
 
 interface AdminThemeManagementSectionProps {
   savedTheme: AdminThemeSettings;
@@ -111,14 +112,17 @@ const ENTERPRISE_THEME_PRESETS: {
   },
 ];
 
+// Two distinct, real choices. Each entry must point at a different asset: a
+// duplicate URL made both quick-select buttons render as selected and produced
+// duplicate React keys when the list was mapped.
 const BUILTIN_LOGO_EMBLEMS = [
   {
     label: 'Official BOS Globe Map-Pin Emblem',
     url: '/assets/optimized/brand-emblem-512.webp',
   },
   {
-    label: 'Classic Golden Pin Emblem',
-    url: '/assets/optimized/brand-emblem-512.webp',
+    label: 'Official BookOurSpace Logo Lockup',
+    url: BOS_OFFICIAL_LOGO_STATIC,
   },
 ];
 

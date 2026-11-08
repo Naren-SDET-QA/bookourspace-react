@@ -33,15 +33,26 @@ test('refused protected views fall back without granting a role', () => {
 test('a hash deep link cannot manufacture an admin role', async () => {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  const adminHashBlock = source.slice(
-    source.indexOf("hash === 'admin' || hash.startsWith('admin/')"),
-    source.indexOf("hash === 'admin' || hash.startsWith('admin/')") + 400
-  );
-  assert.ok(adminHashBlock.includes('if (!isAdminSession)'), 'admin hash must be guarded by an admin session');
+  const adminStart = source.indexOf("hash === 'admin' || hash.startsWith('admin/')");
+  assert.ok(adminStart > 0, 'the admin hash branch must exist');
+  // Slice to the branch boundary instead of a fixed character window so a
+  // descriptive comment can never hide (or accidentally satisfy) the guard.
+  const adminEnd = source.indexOf("} else if (!hash.startsWith('venue-'))", adminStart);
+  assert.ok(adminEnd > adminStart, 'the admin hash branch must end before the fallback branch');
+  const adminHashBlock = source.slice(adminStart, adminEnd);
+
+  const guardIndex = adminHashBlock.indexOf('if (!isAdminSession)');
+  assert.ok(guardIndex > 0, 'admin hash must be guarded by an admin session');
+
+  // The role and console view may only be granted after the guard, never as an
+  // unconditional side effect of the hash itself.
+  const beforeGuard = adminHashBlock.slice(0, guardIndex);
   assert.ok(
-    !/hash === 'admin'[\s\S]{0,80}setUserRole\('admin'\);\s*setActiveView\('admin_console'\);/.test(
-      source.slice(source.indexOf("hash === 'admin'"), source.indexOf("hash === 'admin'") + 200)
-    ),
-    'the admin hash must not grant the admin role unconditionally'
+    !/setUserRole\('admin'\)/.test(beforeGuard),
+    'the admin hash must not grant the admin role before the session guard'
+  );
+  assert.ok(
+    !/setActiveView\('admin_console'\)/.test(beforeGuard),
+    'the admin hash must not open the console before the session guard'
   );
 });

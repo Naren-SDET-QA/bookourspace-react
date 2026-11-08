@@ -109,7 +109,13 @@ grant usage on schema auth to anon, authenticated, service_role;
 create table if not exists auth.users (
   id uuid primary key,
   email text,
-  raw_user_meta_data jsonb not null default '{}'::jsonb
+  raw_user_meta_data jsonb not null default '{}'::jsonb,
+  banned_until timestamptz,
+  updated_at timestamptz not null default now()
+);
+create table if not exists auth.sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade
 );
 create or replace function auth.uid() returns uuid language sql stable as $$
   select coalesce(
@@ -130,6 +136,11 @@ create extension if not exists pgcrypto;
 SQL
 
 echo "=== 3. baseline + migrations ==="
+# The storage stub is shared by every local harness: migrations create bucket
+# policies and SECURITY DEFINER functions that reference storage.objects, which
+# a bare PostgreSQL cluster does not provide.
+pq -d "$DB" -q -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/tests/lib/bos_storage_stub.sql" >/dev/null 2>&1 \
+   || fail "storage stub"
 pq -d "$DB" -q -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/schema_and_rls.sql" \
    > "$OUT/baseline.out" 2> "$OUT/baseline.err" || { grep -E "ERROR|DETAIL" "$OUT/baseline.err" | head -5 >&2; fail "baseline schema"; }
 for MIG_FILE in "$REPO_ROOT"/supabase/migrations/*.sql; do

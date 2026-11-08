@@ -10,12 +10,6 @@ export default defineConfig(() => {
     // dev server so concurrent Vite processes cannot invalidate each other's
     // `/node_modules/.vite/deps/*` imports.
     ...(process.env.BOS_VITE_CACHE_DIR ? { cacheDir: process.env.BOS_VITE_CACHE_DIR } : {}),
-    server: {
-      // Capacitor copies the built web app into these native project trees.
-      // Those generated files are not Vite source modules; watching them can
-      // trigger full-page reloads while lazy route chunks are being fetched.
-      watch: { ignored: ['**/android/**', '**/ios/**'] },
-    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
@@ -75,7 +69,10 @@ export default defineConfig(() => {
       // writes must never trigger a dev-server reload while a booking modal or
       // checkout page is open.
       watch: {
-        ignored: ['**/.local/**', '**/test-results/**', '**/playwright-report/**'],
+        // Capacitor copies the built web app into these native project trees.
+        // Those generated files are not Vite source modules; watching them can
+        // trigger full-page reloads while lazy route chunks are being fetched.
+        ignored: ['**/.local/**', '**/test-results/**', '**/playwright-report/**', '**/android/**', '**/ios/**'],
       },
     },
   };

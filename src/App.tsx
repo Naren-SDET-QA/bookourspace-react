@@ -494,11 +494,13 @@ function MarketplaceAppContent() {
         setIsHotelsStayExperienceOpen(false);
       } else if (hash === 'admin' || hash.startsWith('admin/')) {
         // A URL hash is unauthenticated input and must never grant a role.
-        // Keep the hash while the persisted server session is still hydrating;
-        // otherwise a valid admin deep link is erased before /api/auth/me resolves.
+        // Keep the hash while the persisted session is still hydrating or
+        // being replaced: erasing it as soon as a stale non-admin identity is
+        // observed loses a valid admin deep link before /api/auth/me resolves
+        // (for example right after an account switch). The console itself only
+        // opens for an admin session, so the retained hash grants nothing.
         if (!authUser) return;
         if (!isAdminSession) {
-          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
           setActiveView('marketplace');
           return;
         }

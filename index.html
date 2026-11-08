@@ -24,6 +24,7 @@
     <noscript><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
     <style>
       #bos-prelaunch-screen{position:fixed;inset:0;z-index:9999}
+      #bos-prelaunch-screen[hidden]{display:none}
       #bos-quick-home-shell{position:fixed;inset:0;z-index:9998;overflow:auto;background:#f5f4fb;color:#0f172a;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
       #bos-quick-home-shell[hidden]{display:none}
       .bos-quick-home-header{position:sticky;top:0;z-index:1;background:rgba(255,255,255,.96);padding:12px 0;backdrop-filter:blur(12px)}
@@ -168,6 +169,24 @@
         window.__bosEntryActionsReady = true;
         google.addEventListener('click', function () { choose('google'); });
         guest.addEventListener('click', function () { choose('guest'); });
+        // A returning visitor already chose guest (or has a stored account):
+        // show the lightweight home shell immediately instead of flashing the
+        // sign-in welcome while the React bundle boots. React removes both
+        // shells once it takes over.
+        try {
+          var savedChoice = localStorage.getItem('bos_entry_choice_v1');
+          if (savedChoice === 'guest' || savedChoice === 'signed-in') {
+            var welcomeScreen = document.getElementById('bos-prelaunch-screen');
+            var quickHomeScreen = document.getElementById('bos-quick-home-shell');
+            if (welcomeScreen) {
+              welcomeScreen.hidden = true;
+              // The head CSS is not the only thing that can set display:flex,
+              // so hide it inline as well until React removes the element.
+              welcomeScreen.style.display = 'none';
+            }
+            if (quickHomeScreen) quickHomeScreen.hidden = false;
+          }
+        } catch (e) {}
       })();
     </script>
     <script type="module" src="/src/entry.tsx"></script>

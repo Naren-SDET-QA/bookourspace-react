@@ -56,7 +56,13 @@ create table if not exists auth.users (
   raw_app_meta_data jsonb not null default '{}'::jsonb,
   email_confirmed_at timestamptz,
   last_sign_in_at timestamptz,
+  banned_until timestamptz,
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
+);
+create table if not exists auth.sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade
 );
 create table if not exists auth.identities (
   id uuid primary key,

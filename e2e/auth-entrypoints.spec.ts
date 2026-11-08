@@ -59,6 +59,10 @@ test.describe('signed-out Google sign-in entry points', () => {
 
   test('fast Guest Home keeps search and module choices while React finishes loading', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    // Start as a first-time visitor: a stored guest choice now shows the
+    // quick-home shell immediately (no welcome flash), which is covered by the
+    // test above. This test exercises choosing Guest while React still loads.
+    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.route('**/src/main.tsx', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       await route.continue();
@@ -75,6 +79,21 @@ test.describe('signed-out Google sign-in entry points', () => {
     const appHeader = page.getByTestId('universal-marketplace-header');
     await expect(appHeader.getByRole('searchbox')).toHaveValue('early mobile search');
     await expect(appHeader.getByRole('button', { name: 'Classes', exact: true })).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('a returning guest gets the quick home shell without a welcome flash', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => localStorage.setItem('bos_entry_choice_v1', 'guest'));
+    await page.route('**/src/main.tsx', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await route.continue();
+    });
+    await page.goto('/', { waitUntil: 'commit' });
+    // The static boot shell must honour the stored choice: no sign-in screen
+    // that detaches under the user's tap while React finishes loading.
+    await expect(page.locator('#bos-quick-home-shell')).toBeVisible();
+    await expect(page.getByTestId('bookourspace-welcome')).toBeHidden();
+    await expect(page.getByTestId('entry-continue-guest')).toBeHidden();
   });
 
   test('welcome uses the Flutter dark brand surface and stays usable at mobile and desktop sizes', async ({ page }) => {

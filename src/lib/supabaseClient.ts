@@ -10,6 +10,7 @@ import {
 } from '../types/marketplace';
 import { ensureListingPriceBreakdown } from '../data/listingPrice';
 import { resolveSupabaseEnvironment } from './supabaseConfig';
+import { decideVerifiedSessionWrite, verifiedResponseStillApplies } from './sessionVerificationGuard';
 import { NATIVE_AUTH_REDIRECT_URL } from '../mobile/nativeOAuthCallback';
 
 // Browser and server share one strict resolver. It requires an explicit URL,
@@ -897,7 +898,10 @@ export async function verifyProtectedRouteAccess(
   }
 }
 
-export async function fetchCurrentAuthSession(): Promise<{
+/** Bound the re-verification loop when the stored session keeps changing. */
+const MAX_SESSION_RECHECKS = 2;
+
+export async function fetchCurrentAuthSession(recheck = 0): Promise<{
   ok: boolean;
   authenticated: boolean;
   httpStatus: number;
@@ -911,12 +915,30 @@ export async function fetchCurrentAuthSession(): Promise<{
   if (!token) {
     return { ok: true, authenticated: false, httpStatus: 401 };
   }
+
+  /**
+   * The stored session changed while this request was in flight. The response
+   * describes the previous identity, so it must neither be persisted nor
+   * applied to the UI. Verify whatever is stored now instead.
+   */
+  const verifyCurrentSession = () => {
+    if (recheck >= MAX_SESSION_RECHECKS) {
+      return { ok: false, authenticated: false, httpStatus: 409, error: 'SESSION_CHANGED_DURING_VERIFICATION' };
+    }
+    return fetchCurrentAuthSession(recheck + 1);
+  };
+
   try {
     const resp = await fetch('/api/auth/me', {
       headers: buildAuthHeaders(),
     });
     const data = await resp.json();
     if (resp.status === 403 && data.error === 'ACCOUNT_BLOCKED') {
+      if (!verifiedResponseStillApplies(token, getStoredAuthoritativeSessionToken())) {
+        // A blocked identity that is no longer signed in must not sign out the
+        // replacement session.
+        return verifyCurrentSession();
+      }
       setStoredAuthoritativeSession(null, null);
       return {
         ok: false,
@@ -928,7 +950,19 @@ export async function fetchCurrentAuthSession(): Promise<{
       };
     }
     if (resp.ok && data.ok && data.user) {
-      setStoredAuthoritativeSession(data.sessionToken || token, data.user);
+      const currentToken = getStoredAuthoritativeSessionToken();
+      const decision = decideVerifiedSessionWrite({
+        sentToken: token,
+        currentToken,
+        refreshedToken: data.sessionToken,
+      });
+      if (decision.action === 'unauthenticated') {
+        return { ok: true, authenticated: false, httpStatus: 401 };
+      }
+      if (decision.action === 'reverify') {
+        return verifyCurrentSession();
+      }
+      setStoredAuthoritativeSession(decision.token, data.user);
       return {
         ok: true,
         authenticated: true,
