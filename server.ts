@@ -448,6 +448,22 @@ async function startServer() {
       return original(...wrapped);
     };
   }
+  // Unauthenticated liveness/readiness probe. Registered before rate limiting and
+  // CORS so Cloud Run probes always receive the true database state.
+  app.get(['/api/health', '/health'], async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!pgRuntimePool) {
+      res.status(503).json({ ok: false, error: 'DATABASE_UNAVAILABLE' });
+      return;
+    }
+    try {
+      await pgRuntimePool.query('select 1 as healthy');
+      res.status(200).json({ ok: true, service: 'bookourspace-api' });
+    } catch {
+      res.status(503).json({ ok: false, error: 'DATABASE_UNAVAILABLE' });
+    }
+  });
+
   // Native Capacitor origins used by this app unless the server operator supplies
   // an exact comma-separated BOS_NATIVE_APP_ORIGINS allowlist.
   app.use(createNativeAppCorsMiddleware());
