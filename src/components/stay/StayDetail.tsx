@@ -782,7 +782,7 @@ export function StayDetail({
                 <ChevronLeft className="h-6 w-6" aria-hidden="true" />
               </button>
             )}
-            <img src={item.images[lightbox]} alt={`${item.name} photo ${lightbox + 1}`} className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />
+            <SafeImage category="stays" src={item.images[lightbox]} alt={`${item.name} photo ${lightbox + 1}`} className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />
             {item.images.length > 1 && (
               <button type="button" onClick={() => setLightbox((lightbox + 1) % item.images.length)} className="absolute right-3 inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" aria-label="Next photo">
                 <ChevronRight className="h-6 w-6" aria-hidden="true" />

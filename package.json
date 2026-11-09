@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "bash scripts/dev-with-stays-db.sh",
+    "dev": "tsx server.ts",
+    "dev:local": "bash scripts/dev-with-stays-db.sh",
     "dev:web": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",

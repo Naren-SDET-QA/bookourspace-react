@@ -285,9 +285,14 @@ async function startServer() {
   assertProductionPersistenceReady();
 
   // Resolve and verify the canonical PostgreSQL target before constructing any
-  // API routes. A normal (non-test) process never listens with a missing,
-  // unreachable, unauthenticated, or stay-schema-incompatible database.
-  const pgRuntimePool = process.env.BOS_LISTINGS_DATABASE_URL || process.env.NODE_ENV !== 'test'
+  // database-backed API routes. Production always requires PostgreSQL. A
+  // database-free development process is allowed to serve the Vite frontend
+  // and read-only compatibility routes so AI Studio can preview the UI without
+  // weakening production persistence or authorization gates.
+  const hasConfiguredPostgresTarget = Boolean(
+    String(process.env.BOS_LISTINGS_DATABASE_URL || process.env.BOS_PG_URL || '').trim(),
+  );
+  const pgRuntimePool = process.env.NODE_ENV === 'production' || hasConfiguredPostgresTarget
     ? await initializePostgresRuntime()
     : undefined;
 
