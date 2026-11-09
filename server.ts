@@ -287,9 +287,12 @@ async function startServer() {
   // Google AI Studio previews do not provide the production PostgreSQL pool.
   // In that preview only, allow the UI/server to boot in read-only demo mode;
   // Cloud Run production still fails closed and readiness reports 503.
-  const aiStudioPreview = process.env.BOS_AI_STUDIO_PREVIEW === '1'
+  // Never allow this preview fallback on Cloud Run (K_SERVICE is set there).
+  const aiStudioPreview = !process.env.K_SERVICE && (
+    process.env.BOS_AI_STUDIO_PREVIEW === '1'
     || process.cwd().startsWith('/app/applet')
-    || process.env.AI_STUDIO === 'true';
+    || process.env.AI_STUDIO === 'true'
+  );
   let pgRuntimePool: Awaited<ReturnType<typeof initializePostgresRuntime>> | undefined;
   try {
     pgRuntimePool = process.env.BOS_LISTINGS_DATABASE_URL || process.env.NODE_ENV !== 'test'
