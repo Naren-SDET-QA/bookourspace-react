@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SafeImage from './SafeImage';
 import { isRenderableListingImageSource } from '../lib/media/signedStorageUrl';
 import {
@@ -7,6 +7,9 @@ import {
   BadgeCheck,
   Building2,
   CalendarDays,
+  Copy,
+  MessageCircle,
+  Share2,
   Check,
   Clock,
   GraduationCap,
@@ -34,6 +37,9 @@ import {
 import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 import { fetchClassBatches, type ClassBatch } from '../lib/classesApi';
 import { ClassEnrollmentModal, MyClassesPanel } from './ClassEnrollmentFlow';
+import { SectionStyleTabs, type SectionStyleNumber } from './sectionStyle/SectionStyleTabs';
+import { saveStylePreference } from '../lib/sectionStyleSettings';
+import { StyleThreeList } from './sectionStyle/StyleThreeList';
 import type { MarketplaceListing } from '../types/marketplace';
 
 interface ClassesTimingsExperienceProps {
@@ -41,8 +47,8 @@ interface ClassesTimingsExperienceProps {
   listings?: MarketplaceListing[];
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
-  /** 'cards' keeps the course-card grid; 'timetable' renders a weekly schedule. */
-  style?: 'cards' | 'timetable';
+  /** 'cards' keeps the course-card grid; 'timetable' renders a weekly schedule; 'style3' is the compact list. */
+  style?: 'cards' | 'timetable' | 'style3';
 }
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -311,100 +317,303 @@ function CourseCard({ item, onOpen }: { item: CourseListing; onOpen: () => void 
   );
 }
 
+type CourseReviewEntry = {
+  id: string;
+  name: string;
+  rating: number;
+  comment: string;
+  date: string;
+};
+
+const COURSE_REVIEWS_KEY = 'bos_course_reviews_v1';
+
+function loadCourseReviews(courseId: string): CourseReviewEntry[] {
+  try {
+    const all = JSON.parse(localStorage.getItem(COURSE_REVIEWS_KEY) || '{}') as Record<string, unknown>;
+    const list = all[courseId];
+    return Array.isArray(list)
+      ? list.filter((entry): entry is CourseReviewEntry => Boolean(entry) && typeof entry === 'object' && typeof (entry as CourseReviewEntry).comment === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCourseReview(courseId: string, review: CourseReviewEntry) {
+  try {
+    const all = JSON.parse(localStorage.getItem(COURSE_REVIEWS_KEY) || '{}') as Record<string, unknown>;
+    const existing = Array.isArray(all[courseId]) ? all[courseId] as CourseReviewEntry[] : [];
+    all[courseId] = [review, ...existing].slice(0, 20);
+    localStorage.setItem(COURSE_REVIEWS_KEY, JSON.stringify(all));
+  } catch {
+    /* Review stays visible for this session even if storage is unavailable. */
+  }
+}
+
+function DetailTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-[#ece8fb] bg-white px-2.5 py-2">
+      <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wide text-[#7c3aed]">
+        {icon}{label}
+      </span>
+      <p className="mt-0.5 line-clamp-2 text-[11.5px] font-extrabold leading-4 text-[#1e1b4b]">{value}</p>
+    </div>
+  );
+}
+
 function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClose: () => void; onEnroll: () => void }) {
+  const [reviews, setReviews] = useState<CourseReviewEntry[]>(() => loadCourseReviews(item.id));
+  const [showReview, setShowReview] = useState(false);
+  const [reviewName, setReviewName] = useState('');
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState('');
+  const [shareNote, setShareNote] = useState('');
+  const reviewRef = useRef<HTMLDivElement | null>(null);
+
+  const localAverage = reviews.length
+    ? Math.round((reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length) * 10) / 10
+    : null;
+  const displayRating = localAverage ?? item.rating;
+  const displayReviewCount = (item.reviews ?? 0) + reviews.length;
+  const phone = (item.providerPhone || '').replace(/\D/g, '');
+  const whatsappText = `Hi ${item.provider || 'there'}, I am interested in "${item.title}" at ${item.area}${item.city ? `, ${item.city}` : ''}. Is a demo/trial available?`;
+  const whatsappHref = `https://wa.me/${phone}?text=${encodeURIComponent(whatsappText)}`;
+
+  const share = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: item.title, text: `${item.title} — ${item.provider}`, url });
+        return;
+      }
+    } catch {
+      /* Fall through to clipboard */
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareNote('Link copied');
+      window.setTimeout(() => setShareNote(''), 2000);
+    } catch {
+      setShareNote('Copy the URL from the address bar');
+    }
+  };
+
+  const focusReviews = () => {
+    setShowReview(true);
+    window.setTimeout(() => reviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  };
+
+  const submitReview = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!reviewComment.trim()) return;
+    const entry: CourseReviewEntry = {
+      id: `review-${Date.now()}`,
+      name: reviewName.trim() || 'Verified learner',
+      rating: reviewRating,
+      comment: reviewComment.trim(),
+      date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+    };
+    const next = [entry, ...reviews];
+    setReviews(next);
+    saveCourseReview(item.id, entry);
+    setReviewName('');
+    setReviewComment('');
+    setReviewRating(5);
+    setShowReview(false);
+  };
+
+  const timingText = item.batches.length
+    ? item.batches.map((batch) => [batch.slot, batch.days].filter(Boolean).join(' · ')).join(' | ')
+    : 'Timing on request';
+  const capacityText = item.seats !== null
+    ? `${item.seats} ${item.liveCalendar ? 'seats left' : 'students'}`
+    : 'Capacity on request';
+
   return (
     <div data-testid="class-detail-modal" className="fixed inset-0 z-[95] flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="course-title" onClick={onClose}>
-      <div className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl bg-white sm:max-h-[88vh] sm:max-w-2xl sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
-        <div className="relative">
-          <SafeImage src={item.image} alt={item.title} category="classes" className="h-40 w-full object-cover sm:h-48" sizes="(max-width: 640px) 90vw, 420px" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-          <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-800">
-            <X className="h-4 w-4" />
-          </button>
-          <div className="absolute bottom-3 left-3 right-3">
-            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold text-white ${item.demo ? 'bg-[#f59e0b]' : item.liveCalendar ? 'bg-emerald-600' : 'bg-[#7c3aed]'}`}>
-              {item.demo
-                ? 'DEMO'
-                : item.liveCalendar
-                  ? `Live calendar · ${item.liveBatchCount} batch${item.liveBatchCount === 1 ? '' : 'es'}`
-                  : item.verified
-                    ? 'Admin approved · Verified'
-                    : 'Admin approved listing'} · {item.category}
+      <div className="flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[90vh] sm:max-w-3xl sm:rounded-3xl" onClick={(event) => event.stopPropagation()}>
+        {/* Fixed top bar: category, featured, share, close */}
+        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#ece8fb] bg-white px-3 py-2.5 sm:px-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-[#f5f3ff] px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-[#6d28d9]">{item.category}</span>
+            {item.verified && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-900">
+                <Sparkles className="h-3 w-3" /> Featured
+              </span>
+            )}
+            {item.liveCalendar && (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-800">
+                {item.liveBatchCount || item.batches.length} live batch{(item.liveBatchCount || item.batches.length) === 1 ? '' : 'es'}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" onClick={() => void share()} aria-label="Share course" className="inline-flex h-8 items-center gap-1 rounded-full border border-[#ece8fb] px-2.5 text-[10.5px] font-bold text-[#4c1d95] hover:bg-[#f5f3ff]">
+              <Share2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Share</span>
+            </button>
+            <button type="button" onClick={onClose} aria-label="Close" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#ece8fb] text-slate-600 hover:bg-[#f5f3ff]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+
+        {shareNote && <div aria-live="polite" className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-1.5 text-[10.5px] font-bold text-emerald-800">{shareNote}</div>}
+
+        {/* Scrollable content */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="relative">
+            <SafeImage src={item.image} alt={item.title} category="classes" className="h-52 w-full object-cover sm:h-64" sizes="(max-width: 640px) 100vw, 768px" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
+            <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-black text-[#4c1d95] shadow-sm">
+              <BadgeCheck className="h-3 w-3" /> {item.verified ? 'Verified provider' : 'Admin approved listing'}
             </span>
-            <h2 id="course-title" className="mt-1 text-[17px] font-black leading-tight text-white">{item.title}</h2>
-            <p className="text-[11.5px] text-white/85">{item.provider} · {item.area}, {item.city}</p>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-2 gap-1.5">
-            <Highlight label="Time" value={item.batches.map((b) => b.slot).join(' · ') || 'Not provided'} icon={<Clock className="h-2.5 w-2.5" />} />
-            <Highlight label="Mode" value={item.mode} icon={modeIcon(item.mode)} />
-            <Highlight label="Location" value={[item.area, item.city].filter(Boolean).join(' · ') || 'Not provided'} icon={<MapPin className="h-2.5 w-2.5" />} />
-            <Highlight label={item.demo ? 'Amount' : item.liveCalendar ? 'From' : 'Listed price'} value={item.free ? 'Free' : courseFeeLabel(item)} icon={<Star className="h-2.5 w-2.5" />} />
           </div>
 
-          <p className="mt-3 text-[12.5px] leading-5 text-[#475569]">{item.description}</p>
-
-          {item.batches.length > 0 && <div className="mt-3 rounded-2xl border border-[#ece8fb] p-3">
-            <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Batches & timings</h3>
-            <div className="mt-1.5 space-y-1.5">
-              {item.batches.map((b) => (
-                <div key={`${b.slot}-${b.days}`} className="flex items-center justify-between gap-2 rounded-lg bg-[#f5f3ff] px-2.5 py-1.5">
-                  <span className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-[#4c1d95]">
-                    <Clock className="h-3 w-3" /> {b.slot} · {b.days}
-                  </span>
-                  <span className="text-[11px] font-semibold text-[#4c1d95]">{b.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>}
-
-          {(item.demo || item.faculty.name || item.feePlans.length > 0) && <div className="mt-3 rounded-2xl border border-[#ece8fb] p-3">
-            <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">{item.demo ? 'Fee plans' : 'Provider listed price'}</h3>
-            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
-              {item.feePlans.map((p) => (
-                <div key={p.label} className="flex items-center justify-between rounded-lg border border-[#ece8fb] px-2.5 py-1.5">
-                  <span className="text-[11px] font-semibold text-[#475569]">{p.label}</span>
-                  <span className="text-[12px] font-extrabold text-[#6d28d9]">{p.amount === 0 ? 'Free' : `${formatINR(p.amount)}${unitLabel(p.unit)}`}</span>
-                </div>
-              ))}
-            </div>
-          </div>}
-
-          {(item.faculty.name || item.eligibility || item.certification) && <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-2xl border border-[#ece8fb] p-3">
-              <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Faculty</h3>
-              <div className="mt-1.5 flex items-center gap-2">
-                {item.faculty.photo ? (
-                  <SafeImage src={item.faculty.photo} alt={item.faculty.name} category="classes" className="h-9 w-9 rounded-full object-cover" sizes="36px" />
-                ) : (
-                  <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f5f3ff] text-[11px] font-black text-[#6d28d9]">
-                    {(item.faculty.name || 'Faculty').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()}
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-[12px] font-bold text-[#1e1b4b]">{item.faculty.name}</p>
-                  <p className="truncate text-[10.5px] text-[#64748b]">{item.faculty.experience}</p>
-                </div>
+          <div className="p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h2 id="course-title" className="text-lg font-black leading-tight text-[#1e1b4b] sm:text-xl">{item.title}</h2>
+                <p className="mt-1 text-[12px] font-semibold text-[#64748b]">{item.provider} · {[item.area, item.city].filter(Boolean).join(', ')}</p>
+              </div>
+              <div className="rounded-2xl bg-[#f5f3ff] px-3.5 py-2 text-right">
+                <span className="text-[8.5px] font-black uppercase tracking-wider text-[#7c3aed]">Pricing</span>
+                <div className="text-xl font-black text-[#1e1b4b]">{item.free ? 'Free' : formatINR(item.fee)}</div>
+                {!item.free && <div className="text-[9.5px] font-bold text-[#6d28d9]">{item.feeUnit === 'course' ? 'onwards' : unitLabel(item.feeUnit)}</div>}
               </div>
             </div>
-            <div className="rounded-2xl border border-[#ece8fb] p-3">
-              <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Eligibility & certification</h3>
-              <p className="mt-1 text-[11px] text-[#475569]">{item.eligibility}</p>
-              <p className="mt-0.5 inline-flex items-center gap-1 text-[10.5px] font-semibold text-[#6d28d9]"><Award className="h-3 w-3" /> {item.certification}</p>
+
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] font-semibold text-[#64748b]">
+              <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 text-[#7c3aed]" /> {[item.area, item.city].filter(Boolean).join(', ')}</span>
+              {typeof displayRating === 'number' && displayRating > 0 && (
+                <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {displayRating.toFixed(1)} ({displayReviewCount} reviews)</span>
+              )}
+              {item.distanceKm !== null && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 text-[#7c3aed]" /> {item.distanceKm.toFixed(1)} km away</span>}
+              <button type="button" onClick={() => void share()} className="inline-flex items-center gap-1 text-[#6d28d9] underline-offset-2 hover:underline"><Copy className="h-3 w-3" /> Copy link</button>
             </div>
-          </div>}
 
-          <div className="mt-3 flex flex-wrap gap-1.5 text-[10.5px] font-semibold text-[#64748b]">{item.duration && <span className="rounded-full bg-[#f8fafc] px-2 py-0.5">Duration: {item.duration}</span>}{item.seats !== null && <span className="rounded-full bg-[#f8fafc] px-2 py-0.5">{item.liveCalendar ? 'Seats left' : 'Seats'}: {item.seats}</span>}{item.ageGroup && <span className="rounded-full bg-[#f8fafc] px-2 py-0.5">Age: {item.ageGroup}</span>}{item.startDate && <span className="rounded-full bg-[#f8fafc] px-2 py-0.5">Start: {item.startDate}</span>}</div>
+            <section className="mt-4">
+              <h3 className="text-[10px] font-black uppercase tracking-wider text-[#94a3b8]">Description & details</h3>
+              <p className="mt-1 text-[12px] leading-5 text-[#475569]">{item.description || 'Course details are provided by the training provider.'}</p>
+            </section>
+
+            <section className="mt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-[13px] font-black text-[#1e1b4b]">Classes & Courses Details</h3>
+                <div className="flex flex-wrap gap-1">
+                  {item.verified && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-700">Admin approved</span>}
+                  {item.demo && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-black text-amber-700">Demo listing</span>}
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-3">
+                <DetailTile icon={<Building2 className="h-2.5 w-2.5" />} label="Delivery mode" value={item.mode} />
+                <DetailTile icon={<MapPin className="h-2.5 w-2.5" />} label="Platform / campus" value={[item.area, item.city].filter(Boolean).join(', ') || 'Not provided'} />
+                <DetailTile icon={<Users className="h-2.5 w-2.5" />} label="Batch capacity" value={capacityText} />
+                <DetailTile icon={<Users className="h-2.5 w-2.5" />} label="Age group & level" value={item.ageGroup || 'All learners'} />
+                <DetailTile icon={<CalendarDays className="h-2.5 w-2.5" />} label="Course duration" value={item.duration || 'Contact provider'} />
+                <DetailTile icon={<Clock className="h-2.5 w-2.5" />} label="Timings & days" value={timingText} />
+                <DetailTile icon={<Star className="h-2.5 w-2.5" />} label="Fee & installments" value={item.feePlans.length ? item.feePlans.map((plan) => `${plan.label}: ${plan.amount === 0 ? 'Free' : `${formatINR(plan.amount)}${unitLabel(plan.unit)}`}`).join(' · ') : (item.free ? 'Free' : courseFeeLabel(item))} />
+                <DetailTile icon={<Award className="h-2.5 w-2.5" />} label="Certificate" value={item.certification || 'Provider certificate'} />
+                <DetailTile icon={<BadgeCheck className="h-2.5 w-2.5" />} label="Eligibility" value={item.eligibility || 'Open to all'} />
+                {item.startDate && <DetailTile icon={<CalendarDays className="h-2.5 w-2.5" />} label="Starts" value={item.startDate} />}
+                {item.modeOptions.length > 0 && <DetailTile icon={<Video className="h-2.5 w-2.5" />} label="Available modes" value={item.modeOptions.join(' · ')} />}
+                <DetailTile icon={<GraduationCap className="h-2.5 w-2.5" />} label="Faculty" value={[item.faculty.name, item.faculty.experience].filter(Boolean).join(' · ') || 'Real-time corporate trainers'} />
+              </div>
+            </section>
+
+            {item.batches.length > 0 && (
+              <div className="mt-4 rounded-2xl border border-[#ece8fb] p-3">
+                <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Batches & timings</h3>
+                <div className="mt-1.5 space-y-1.5">
+                  {item.batches.map((batch) => (
+                    <div key={`${batch.slot}-${batch.days}`} className="flex items-center justify-between gap-2 rounded-lg bg-[#f5f3ff] px-2.5 py-1.5">
+                      <span className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-[#4c1d95]"><Clock className="h-3 w-3" /> {batch.slot} · {batch.days}</span>
+                      <span className="text-[11px] font-semibold text-[#4c1d95]">{batch.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(item.faculty.name || item.faculty.photo || item.verified) && (
+              <div className="mt-4 rounded-2xl border border-[#ece8fb] bg-[#faf9ff] p-3">
+                <h3 className="inline-flex items-center gap-1 text-[12px] font-extrabold text-[#1e1b4b]"><Award className="h-3.5 w-3.5 text-[#7c3aed]" /> Verified teacher credentials</h3>
+                <div className="mt-2 flex items-center gap-2">
+                  {item.faculty.photo ? (
+                    <SafeImage src={item.faculty.photo} alt={item.faculty.name || 'Faculty'} category="classes" className="h-10 w-10 rounded-full object-cover" sizes="40px" />
+                  ) : (
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f5f3ff] text-[11px] font-black text-[#6d28d9]">{(item.faculty.name || 'T').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-[12px] font-bold text-[#1e1b4b]">{item.faculty.name || 'Real-time corporate trainers'}</p>
+                    <p className="truncate text-[10.5px] text-[#64748b]">{item.faculty.experience || 'Industry verified faculty'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={reviewRef} id="course-reviews" className="mt-4 scroll-mt-4 rounded-2xl border border-[#ece8fb] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Reviews</h3>
+                  <p className="text-[10px] text-[#64748b]">{displayReviewCount > 0 ? `${displayReviewCount} learner review${displayReviewCount === 1 ? '' : 's'}${typeof displayRating === 'number' ? ` · ${displayRating.toFixed(1)} average` : ''}` : 'No written reviews yet'}</p>
+                </div>
+                <button type="button" onClick={() => setShowReview((open) => !open)} className="inline-flex h-7 items-center gap-1 rounded-full border border-[#7c3aed]/30 bg-[#f5f3ff] px-2.5 text-[10px] font-black text-[#6d28d9]">
+                  <Star className="h-3 w-3" /> Write a review
+                </button>
+              </div>
+
+              {showReview && (
+                <form onSubmit={submitReview} className="mt-2 rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-2.5">
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((value) => (
+                      <button key={value} type="button" onClick={() => setReviewRating(value)} aria-label={`${value} star${value === 1 ? '' : 's'}`} aria-pressed={reviewRating === value} className="p-0.5">
+                        <Star className={`h-4 w-4 ${value <= reviewRating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+                      </button>
+                    ))}
+                  </div>
+                  <input value={reviewName} onChange={(event) => setReviewName(event.target.value)} placeholder="Your name (optional)" className="mt-1.5 w-full rounded-lg border border-[#ece8fb] px-2 py-1.5 text-[11px] outline-none focus:border-[#7c3aed]" />
+                  <textarea value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} placeholder="Share your experience with this course…" rows={2} required className="mt-1.5 w-full rounded-lg border border-[#ece8fb] px-2 py-1.5 text-[11px] outline-none focus:border-[#7c3aed]" />
+                  <button type="submit" className="mt-1.5 inline-flex h-8 items-center gap-1 rounded-lg bg-[#7c3aed] px-3 text-[11px] font-black text-white"><MessageCircle className="h-3 w-3" /> Submit review</button>
+                </form>
+              )}
+
+              {reviews.length > 0 ? (
+                <div className="mt-2 space-y-1.5">
+                  {reviews.map((review) => (
+                    <div key={review.id} className="rounded-xl bg-[#f8fafc] px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10.5px] font-bold text-[#1e1b4b]">{review.name}</span>
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600"><Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {review.rating}.0</span>
+                      </div>
+                      <p className="mt-0.5 text-[10.5px] leading-4 text-[#475569]">{review.comment}</p>
+                      <p className="mt-0.5 text-[9px] text-[#94a3b8]">{review.date}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 rounded-xl bg-[#f8fafc] px-2.5 py-2 text-[10.5px] text-[#64748b]">Be the first to review this course. Reviews are stored on this device in demo mode.</p>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="border-t border-[#ece8fb] p-3">
-          <button type="button" onClick={onEnroll} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#7c3aed] text-[13px] font-bold text-white transition hover:bg-[#6d28d9]">
-            <GraduationCap className="h-4 w-4" /> {item.demo ? 'Demo enquiry preview' : 'Select batch & enroll'}
-          </button>
-          <p className="mt-1.5 text-center text-[9.5px] text-[#64748b]">{item.demo ? 'Demo only — no enquiry was sent.' : 'Batches come from the trainer\'s admin-approved calendar. Seat, fee and payment status are confirmed by the server.'}</p>
-        </div>
+        {/* Fixed bottom bar: WhatsApp, Review, Enroll */}
+        <footer className="shrink-0 border-t border-[#ece8fb] bg-white p-2.5 sm:p-3">
+          <div className="grid grid-cols-3 gap-2">
+            <a href={whatsappHref} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp about this course" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-[11px] font-black text-emerald-800 hover:bg-emerald-100">
+              <MessageCircle className="h-4 w-4" /> WhatsApp
+            </a>
+            <button type="button" onClick={focusReviews} aria-label="Review this course" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[#7c3aed]/30 bg-[#f5f3ff] text-[11px] font-black text-[#6d28d9] hover:bg-[#ede9fe]">
+              <Star className="h-4 w-4" /> Review
+            </button>
+            <button type="button" onClick={onEnroll} aria-label="Select batch & enroll" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#7c3aed] text-[11px] font-black text-white hover:bg-[#6d28d9]">
+              <GraduationCap className="h-4 w-4" /> Enroll
+            </button>
+          </div>
+          <p className="mt-1.5 text-center text-[9px] leading-3 text-[#64748b]">
+            {item.demo ? 'Demo only — no enquiry or payment was sent.' : 'Batches come from the trainer’s admin-approved calendar. Seat, fee and payment status are confirmed by the server.'}
+          </p>
+        </footer>
       </div>
     </div>
   );
@@ -424,6 +633,7 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
     category: listing.subcategory || listing.categoryId,
     description: listing.description,
     provider: listing.providerName,
+    providerPhone: listing.providerPhone || '',
     providerId: '',
     area: listing.location.area,
     city: listing.location.city,
@@ -450,6 +660,8 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
 }
 
 export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
+  const [activeStyle, setActiveStyle] = useState<'cards' | 'timetable' | 'style3'>(style);
+  useEffect(() => { setActiveStyle(style); }, [style]);
   const [mode, setMode] = useState<'All' | CourseMode>('All');
   const [timing, setTiming] = useState<'All' | TimingSlot>('All');
   const [feeBand, setFeeBand] = useState<'All' | 'Free' | 'Under3k' | '3k8k' | '8kPlus'>('All');
@@ -595,6 +807,18 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
         </div>
       </header>
 
+      <SectionStyleTabs
+        active={activeStyle === 'timetable' ? 2 : activeStyle === 'style3' ? 3 : 1}
+        onChange={(value: SectionStyleNumber) => {
+          const next = value === 1 ? 'cards' : value === 2 ? 'timetable' : 'style3';
+          saveStylePreference('classes', next);
+          setActiveStyle(next);
+          window.location.hash = `classes/style${value}`;
+        }}
+        label="Classes display style"
+        className="border-b border-[#ece8fb] bg-white/90"
+      />
+
       {/* Results */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-3 py-3 sm:px-5">
@@ -609,7 +833,22 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
               <p className="mt-2 text-[13px] font-bold text-[#1e1b4b]">No courses match these filters</p>
               <p className="mt-0.5 text-[11px] text-[#64748b]">{DEMO_DATA_ENABLED ? 'Try clearing a filter or searching a different area.' : 'No admin-approved courses match these filters. Enrollment and payment are not available.'}</p>
             </div>
-          ) : style === 'timetable' ? (
+          ) : activeStyle === 'style3' ? (
+            <StyleThreeList
+              label="Classes style 3 list"
+              items={results.map((course) => ({
+                id: course.id,
+                title: course.title,
+                subtitle: [course.provider, course.area || course.city].filter(Boolean).join(' · '),
+                meta: [course.mode, course.duration].filter(Boolean).join(' · '),
+                price: course.free ? 'Free' : `₹${course.fee.toLocaleString('en-IN')}`,
+                image: course.image || null,
+                badge: course.demo ? 'Sample' : course.verified ? 'Verified' : undefined,
+                onClick: () => setSelected(course),
+              }))}
+              emptyLabel="No courses match these filters."
+            />
+          ) : activeStyle === 'timetable' ? (
             <ClassTimetable courses={results} onOpen={setSelected} />
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -623,6 +862,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
 
       {selected && (
         <CourseDetail
+          key={selected.id}
           item={selected}
           onClose={() => { setSelected(null); setEnrolled(null); }}
           onEnroll={() => {
