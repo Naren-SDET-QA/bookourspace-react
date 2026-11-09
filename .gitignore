@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.local/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.aistudio/artifacts/
+supabase/.temp/
+live-page-config.json
+authoritative-marketplace-store.json

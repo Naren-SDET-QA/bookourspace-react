@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Hotel stay illustration">
+  <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#e0e7ff"/><stop offset="1" stop-color="#fff7ed"/></linearGradient></defs>
+  <rect width="640" height="360" fill="url(#g)"/><path d="M105 320V92q0-18 18-18h394q18 0 18 18v228z" fill="#fff" stroke="#8b5cf6" stroke-width="8"/>
+  <path d="M141 120h358v89H141z" fill="#ede9fe"/><path d="M160 140h54v44h-54zm86 0h54v44h-54zm86 0h54v44h-54zm86 0h54v44h-54z" fill="#bfdbfe" stroke="#8b5cf6" stroke-width="5"/>
+  <path d="M287 240h66v80h-66z" fill="#7c3aed"/><path d="M0 320h640v40H0z" fill="#fcd34d"/><path d="M294 274h52" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M286 75V46h68v29" fill="#fbbf24" stroke="#7c3aed" stroke-width="6"/>
+</svg>
