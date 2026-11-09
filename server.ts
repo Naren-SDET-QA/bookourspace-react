@@ -488,6 +488,45 @@ async function startServer() {
   }));
   app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
 
+  // A database-free process is a frontend preview by default. The legacy JSON
+  // compatibility routes remain available only to the test harness or to an
+  // explicitly opted-in local development process. NODE_ENV=staging can never
+  // enable this mode, so a missing database cannot become a staging fallback.
+  const localJsonCompatibilityEnabled =
+    process.env.NODE_ENV === 'test' ||
+    (process.env.NODE_ENV === 'development' && process.env.BOS_ENABLE_LOCAL_JSON_COMPATIBILITY === '1');
+  const databaseFreeFrontendPreview = !hasConfiguredPostgresTarget && !localJsonCompatibilityEnabled;
+  const isAllowedDatabaseFreePreviewRoute = (req: express.Request): boolean => {
+    const path = req.path;
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      return (
+        /^\/api\/(health|ready|live)$/.test(path) ||
+        path === '/api/auth/google/url' ||
+        path === '/api/live-page-config' ||
+        /^\/api\/modules$/.test(path) ||
+        /^\/api\/marketplace\/(listings|categories)(?:\/[^/]+)?$/.test(path) ||
+        /^\/api\/locations\//.test(path) ||
+        (path === '/api/movies/inventory' && process.env.VITE_ENABLE_DEMO_DATA === 'true')
+      );
+    }
+    return (
+      path === '/api/ai/quick-book' ||
+      path === '/api/auth/logout' ||
+      /^\/api\/locations\/(nearest|external\/autocomplete|external\/resolve)$/.test(path)
+    );
+  };
+  app.use((req, res, next) => {
+    if (!databaseFreeFrontendPreview || !req.path.startsWith('/api/') || isAllowedDatabaseFreePreviewRoute(req)) {
+      next();
+      return;
+    }
+    res.status(503).json({
+      ok: false,
+      error: 'DATABASE_REQUIRED_FOR_SERVER_ROUTE',
+      message: 'This preview serves the frontend only. Configure the development PostgreSQL target for server-backed routes.',
+    });
+  });
+
   // 0. PostgreSQL-backed live page configuration and admin module settings.
   //    Exactly one route owner is registered per process: PostgreSQL when
   //    configured, otherwise the local-only JSON compatibility handlers.

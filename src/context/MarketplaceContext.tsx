@@ -112,6 +112,8 @@ interface MarketplaceContextType {
   supabaseSession: Session | null;
   supabaseProfile: SupabaseProfile | null;
   authUser: AuthoritativeGoogleUser | null;
+  /** True after the first server-authoritative session check has completed. */
+  authoritativeSessionChecked: boolean;
   isAccountBlocked: boolean;
   blockedReason: string | null;
   loginWithGoogle: (params: {
@@ -244,6 +246,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Persisted browser identity is only a cache. The signed server session below
   // must be revalidated before any role is shown or used.
   const [authUser, setAuthUser] = useState<AuthoritativeGoogleUser | null>(null);
+  const [authoritativeSessionChecked, setAuthoritativeSessionChecked] = useState(false);
   const [isAccountBlocked, setIsAccountBlocked] = useState<boolean>(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const [userRole, setUserRoleState] = useState<UserRole>('customer');
@@ -839,7 +842,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }, 1200);
     };
 
-    void verifySessionAndSync();
+    void verifySessionAndSync().finally(() => {
+      if (mounted) setAuthoritativeSessionChecked(true);
+    });
     const intervalId = setInterval(() => {
       void verifySessionAndSync();
     }, 12000);
@@ -1804,6 +1809,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         supabaseSession,
         supabaseProfile,
         authUser,
+        authoritativeSessionChecked,
         isAccountBlocked,
         blockedReason,
         loginWithGoogle,
