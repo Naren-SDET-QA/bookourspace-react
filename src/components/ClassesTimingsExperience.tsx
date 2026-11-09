@@ -303,7 +303,7 @@ function CourseCard({ item, onOpen }: { item: CourseListing; onOpen: () => void 
           <Highlight label="Time" value={nextBatch ? nextBatch.label : 'Not provided'} icon={<Clock className="h-2.5 w-2.5" />} />
           <Highlight label="Mode" value={item.mode} icon={modeIcon(item.mode)} />
           <Highlight label="Location" value={item.area} icon={<MapPin className="h-2.5 w-2.5" />} />
-          <Highlight label={item.demo ? 'Amount' : item.liveCalendar ? 'From' : 'Listed price'} value={item.free ? 'Free' : courseFeeLabel(item)} icon={<Star className="h-2.5 w-2.5" />} />
+          <Highlight label="Starting" value={item.free ? 'Free' : courseFeeLabel(item)} icon={<Star className="h-2.5 w-2.5" />} />
         </div>
 
         <div className="mt-auto flex items-center justify-between gap-2 pt-2.5">
@@ -600,19 +600,6 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
               </div>
             )}
 
-            {item.feePlans.length > 0 && (
-              <div className="rounded-2xl border border-[#ece8fb] p-3">
-                <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Fee plans</h3>
-                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
-                  {item.feePlans.map((plan) => (
-                    <div key={plan.label} className="flex items-center justify-between rounded-lg border border-[#ece8fb] px-2.5 py-1.5">
-                      <span className="text-[11px] font-semibold text-[#475569]">{plan.label}</span>
-                      <span className="text-[12px] font-extrabold text-[#6d28d9]">{plan.amount === 0 ? 'Free' : `${formatINR(plan.amount)}${unitLabel(plan.unit)}`}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {(item.faculty.name || item.faculty.photo || item.verified) && (
               <div className="rounded-2xl border border-[#ece8fb] bg-[#faf9ff] p-3">
