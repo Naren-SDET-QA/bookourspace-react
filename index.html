@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Zoom is deliberately not blocked: pinch-zoom is required for WCAG 1.4.4 on mobile. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BookOurSpace" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/assets/brand/bos-favicon-v2.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/bos-apple-touch-icon-v2.png" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#4f46e5" />
+    <title>Universal Services & Listings Marketplace</title>
+    <meta name="description" content="Multi-entity marketplace for services, jobs, rentals, properties, vehicles, and school admissions with configurable platform fees, provider subscriptions, customer booking, and super admin governance." />
+    <meta property="og:title" content="Universal Services & Listings Marketplace" />
+    <meta property="og:description" content="Multi-entity marketplace for services, jobs, rentals, properties, vehicles, and school admissions with configurable platform fees, provider subscriptions, customer booking, and super admin governance." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="image" href="/assets/brand/bos-logo-lockup-1120-bea9629c0067.webp" imagesrcset="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" imagesizes="(max-width: 622px) 90vw, 560px" fetchpriority="high">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
+    <style>
+      #bos-prelaunch-screen{position:fixed;inset:0;z-index:200}
+      #bos-prelaunch-screen[hidden]{display:none}
+      #bos-quick-home-shell{position:fixed;inset:0;z-index:199;overflow:auto;background:#f5f4fb;color:#0f172a;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
+      #bos-quick-home-shell[hidden]{display:none}
+      .bos-quick-home-header{position:sticky;top:0;z-index:1;background:rgba(255,255,255,.96);padding:12px 0;backdrop-filter:blur(12px)}
+      .bos-quick-home-row{display:flex;gap:8px;max-width:760px;margin:auto}
+      .bos-quick-home-row input{min-width:0;flex:1;border:1px solid #dbe1ef;border-radius:999px;padding:10px 14px;font:600 14px system-ui;color:#0f172a}
+      .bos-quick-home-modules{display:flex;gap:8px;max-width:760px;margin:8px auto 0;overflow-x:auto;padding-bottom:4px}
+      .bos-quick-home-modules button{flex:none;min-height:40px;border:1px solid #dbe1ef;border-radius:10px;background:#fff;padding:0 12px;font:700 12px system-ui;color:#334155}
+      .bos-quick-home-modules button[aria-current=page]{background:#4f46e5;border-color:#4f46e5;color:white}
+      .bos-quick-home-content{max-width:760px;margin:22px auto;padding:18px;border:1px solid #e2e8f0;border-radius:18px;background:#fff}
+      .bos-quick-home-content h1{margin:0 0 6px;font:800 20px system-ui}
+      .bos-quick-home-content p{margin:0;color:#64748b;font:500 13px/1.5 system-ui}
+      @media(prefers-color-scheme:dark){#bos-quick-home-shell{background:#0a0c20;color:#f8fafc}.bos-quick-home-header{background:rgba(10,12,32,.96)}.bos-quick-home-row input,.bos-quick-home-modules button,.bos-quick-home-content{background:#111827;border-color:#334155;color:#f8fafc}.bos-quick-home-content p{color:#cbd5e1}}
+    </style>
+    <script>
+      window.__swReady = (async function () {
+        try {
+          if ('caches' in window) {
+            var keys = await caches.keys();
+            await Promise.all(
+              keys.filter(function (k) { return k !== 'crafto-marketplace-data-v2'; }).map(function (k) { return caches.delete(k); })
+            );
+          }
+          if ('serviceWorker' in navigator) {
+            var hadController = !!navigator.serviceWorker.controller;
+            var regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(function (r) { return r.unregister(); }));
+            if (hadController && !sessionStorage.getItem('__sw_purged_v4')) {
+              sessionStorage.setItem('__sw_purged_v4', '1');
+              window.location.reload();
+              return false;
+            }
+          }
+        } catch (e) {}
+        return true;
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-purple-500 selection:text-white">
+    <div id="bos-prelaunch-screen" class="bos-entry-screen fixed inset-0 z-[200] flex min-h-[100dvh] items-center justify-center overflow-x-hidden overflow-y-auto text-[#F8FAFC]" data-testid="bookourspace-welcome" aria-label="Start using BookOurSpace">
+      <div class="bos-entry-backdrop" aria-hidden="true">
+        <div class="bos-entry-aurora bos-entry-aurora--teal"></div>
+        <div class="bos-entry-aurora bos-entry-aurora--violet"></div>
+        <div class="bos-entry-aurora bos-entry-aurora--orange"></div>
+      </div>
+      <section class="bos-entry-panel">
+        <div class="bos-entry-logo-stage">
+          <div class="bos-entry-logo-plate">
+            <span class="bos-official-logo bos-entry-official-logo" role="img" aria-label="BookOurSpace — Find, Book, Enjoy">
+              <img src="/assets/brand/bos-logo-lockup.webp" srcset="/assets/brand/bos-logo-lockup-560-5771e9b215e6.webp 560w, /assets/brand/bos-logo-lockup-1120-bea9629c0067.webp 1120w" sizes="(max-width: 622px) 90vw, 560px" width="1560" height="320" alt="" fetchpriority="high" decoding="async" />
+              <svg class="bos-official-logo__pin-rotor" data-testid="bos-logo-pin-rotor" viewBox="0 0 1560 320" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <defs><clipPath id="bos-prelaunch-pin" clipPathUnits="userSpaceOnUse"><path d="M259 76 C213 76 179 109 179 151 C179 198 232 249 259 273 C286 249 339 198 339 151 C339 109 305 76 259 76 Z" /></clipPath></defs>
+                <path d="M259 76 C213 76 179 109 179 151 C179 198 232 249 259 273 C286 249 339 198 339 151 C339 109 305 76 259 76 Z" fill="#fff" />
+                <g class="bos-official-logo__spin">
+                  <image class="bos-official-logo__face bos-official-logo__face--front" href="/assets/brand/bos-logo-lockup-1120-bea9629c0067.webp" x="0" y="0" width="1560" height="320" clip-path="url(#bos-prelaunch-pin)" />
+                  <image class="bos-official-logo__face bos-official-logo__face--back" href="/assets/brand/bos-logo-lockup-1120-bea9629c0067.webp" x="0" y="0" width="1560" height="320" clip-path="url(#bos-prelaunch-pin)" />
+                </g>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="bos-entry-content">
+          <h1 class="sr-only">Sign in to BookOurSpace</h1>
+          <p class="bos-entry-subtitle">Sign in to continue booking spaces.</p>
+          <p id="bos-entry-access-note" class="bos-entry-helper">New Google accounts get a profile automatically. Access levels are assigned securely.</p>
+          <div id="bos-prelaunch-actions" class="bos-entry-actions" aria-label="Choose how to continue">
+            <button id="bos-prelaunch-google" data-testid="entry-google-sign-in" type="button" class="bos-entry-google" aria-describedby="bos-entry-access-note"><span class="bos-entry-google-icon" aria-hidden="true">G</span><span>Continue with Google</span></button>
+            <div class="bos-entry-divider" role="separator" aria-label="or"><span>OR</span></div>
+            <button id="bos-prelaunch-guest" data-testid="entry-continue-guest" type="button" class="bos-entry-guest"><span aria-hidden="true">⌖</span><span>Explore Spaces as Guest</span></button>
+          </div>
+          <p class="bos-entry-trust"><span aria-hidden="true">✓</span><span>Google-verified sign-in. Browse first; sign in when you’re ready to book or save favorites.</span></p>
+          <p id="bos-prelaunch-status" class="bos-entry-caption" aria-live="polite">Sign in with Google or browse as a guest.</p>
+        </div>
+      </section>
+    </div>
+    <main id="bos-quick-home-shell" hidden aria-label="BookOurSpace Home">
+      <header class="bos-quick-home-header">
+        <div class="bos-quick-home-row">
+          <button type="button" id="bos-quick-home-location" aria-label="Select city or locality">All Cities</button>
+          <input id="bos-quick-home-search" type="search" aria-label="Search PGs, classes, halls, services, stay, movies" placeholder="Search spaces, classes, services…" autocomplete="off" />
+        </div>
+        <nav class="bos-quick-home-modules" aria-label="Marketplace modules">
+          <button type="button" data-bos-module="pg_hostels" aria-current="page">PG's</button>
+          <button type="button" data-bos-module="classes">Classes</button>
+          <button type="button" data-bos-module="venues">Halls</button>
+          <button type="button" data-bos-module="services">Services</button>
+          <button type="button" data-bos-module="hotel_stay">Stay</button>
+          <button type="button" data-bos-module="movies">Movies</button>
+        </nav>
+      </header>
+      <section class="bos-quick-home-content" aria-live="polite">
+        <h1>Find your space</h1>
+        <p>Search across all six BookOurSpace modules. Published listings are loading.</p>
+      </section>
+    </main>
+    <div id="root"></div>
+    <script>
+      (function () {
+        var actions = document.getElementById('bos-prelaunch-actions');
+        var status = document.getElementById('bos-prelaunch-status');
+        var google = document.getElementById('bos-prelaunch-google');
+        var guest = document.getElementById('bos-prelaunch-guest');
+        function choose(action) {
+          if (!actions || !status || !google || !guest) return;
+          google.disabled = action === 'guest';
+          guest.disabled = true;
+          actions.setAttribute('aria-busy', 'true');
+          status.textContent = action === 'guest' ? 'Opening BookOurSpace…' : 'Opening secure Google sign-in…';
+          if (action === 'guest') {
+            var welcome = document.getElementById('bos-prelaunch-screen');
+            var quickHome = document.getElementById('bos-quick-home-shell');
+            if (welcome) welcome.hidden = true;
+            if (quickHome) quickHome.hidden = false;
+          }
+          window.__bosBootEntryAction = action;
+          try {
+            if (action === 'guest') localStorage.setItem('bos_entry_choice_v1', 'guest');
+            else sessionStorage.setItem('bos_boot_auth_requested_v1', '1');
+          } catch (e) {}
+          window.dispatchEvent(new CustomEvent('bos-boot-entry-choice', { detail: { action: action } }));
+        }
+        var quickSearch = document.getElementById('bos-quick-home-search');
+        if (quickSearch) quickSearch.addEventListener('input', function () {
+          window.__bosQuickHomeSearch = quickSearch.value;
+          window.dispatchEvent(new CustomEvent('bos-quick-home-search', { detail: { value: quickSearch.value } }));
+        });
+        var quickLocation = document.getElementById('bos-quick-home-location');
+        if (quickLocation) quickLocation.addEventListener('click', function () {
+          window.__bosQuickHomeOpenLocation = true;
+          window.dispatchEvent(new CustomEvent('bos-quick-home-location'));
+        });
+        document.querySelectorAll('[data-bos-module]').forEach(function (button) {
+          button.addEventListener('click', function () {
+            var section = button.getAttribute('data-bos-module');
+            if (!section) return;
+            window.__bosQuickHomeModule = section;
+            window.dispatchEvent(new CustomEvent('bos-quick-home-module', { detail: { section: section } }));
+            document.querySelectorAll('[data-bos-module]').forEach(function (item) {
+              item.setAttribute('aria-current', item === button ? 'page' : 'false');
+            });
+          });
+        });
+        window.__bosEntryActionsReady = true;
+        google.addEventListener('click', function () { choose('google'); });
+        guest.addEventListener('click', function () { choose('guest'); });
+        // A returning visitor already chose guest (or has a stored account):
+        // show the lightweight home shell immediately instead of flashing the
+        // sign-in welcome while the React bundle boots. React removes both
+        // shells once it takes over.
+        try {
+          var savedChoice = localStorage.getItem('bos_entry_choice_v1');
+          if (savedChoice === 'guest' || savedChoice === 'signed-in') {
+            var welcomeScreen = document.getElementById('bos-prelaunch-screen');
+            var quickHomeScreen = document.getElementById('bos-quick-home-shell');
+            if (welcomeScreen) {
+              welcomeScreen.hidden = true;
+              // The head CSS is not the only thing that can set display:flex,
+              // so hide it inline as well until React removes the element.
+              welcomeScreen.style.display = 'none';
+            }
+            if (quickHomeScreen) quickHomeScreen.hidden = false;
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" src="/src/entry.tsx"></script>
+  </body>
+</html>

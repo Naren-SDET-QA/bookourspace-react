@@ -1,0 +1,11 @@
+{
+  "name": "BookOurSpace — Universal Services & Listings Marketplace",
+  "description": "Full-stack marketplace for PGs, classes, function halls, home services, stays and movies, with server-authoritative bookings, admin controls, and Style 1/2/3 layouts.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

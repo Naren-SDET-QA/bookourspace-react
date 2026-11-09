@@ -1,0 +1,471 @@
+import { ServiceItem, ServiceProvider, UserProfile, RealtimeNotification } from '../types';
+
+export const serviceCatalog: ServiceItem[] = [
+  // --- HOME SERVICES (CORE FOCUS) ---
+  {
+    id: 'painter',
+    titleKey: 'tradePainter',
+    category: 'home',
+    icon: 'Palette',
+    iconBg: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 border border-amber-500/30',
+    iconColor: '#F59E0B',
+    descriptionKey: 'Wall putty, acrylic emulsion, texture painting & waterproofing',
+    popularTradeBadge: 'Near You',
+    defaultRate: '₹450/hr'
+  },
+  {
+    id: 'tiler',
+    titleKey: 'tradeTiler',
+    category: 'home',
+    icon: 'Layers',
+    iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/30',
+    iconColor: '#10B981',
+    descriptionKey: 'Vitrified tiles, granite laying, bathroom tiles & grout sealing',
+    popularTradeBadge: 'High Demand',
+    defaultRate: '₹500/hr'
+  },
+  {
+    id: 'electrician',
+    titleKey: 'tradeElectrician',
+    category: 'home',
+    icon: 'Zap',
+    iconBg: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 border border-indigo-500/30',
+    iconColor: '#6366F1',
+    descriptionKey: 'Wiring, MCB tripping, fan installation, switchboard repair',
+    popularTradeBadge: 'Immediate',
+    defaultRate: '₹350/hr'
+  },
+  {
+    id: 'docker',
+    titleKey: 'tradeDocker',
+    category: 'home',
+    icon: 'Package',
+    iconBg: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400 border border-orange-500/30',
+    iconColor: '#F97316',
+    descriptionKey: 'Heavy furniture shifting, luggage loading & tempo cargo support',
+    popularTradeBadge: 'Available',
+    defaultRate: '₹400/hr'
+  },
+  {
+    id: 'plumber',
+    titleKey: 'tradePlumber',
+    category: 'home',
+    icon: 'Wrench',
+    iconBg: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 border border-blue-500/30',
+    iconColor: '#3B82F6',
+    descriptionKey: 'Leakage fixing, pipe replacement, bathroom fixtures, pump repair',
+    defaultRate: '₹350/hr'
+  },
+  {
+    id: 'carpenter',
+    titleKey: 'tradeCarpenter',
+    category: 'home',
+    icon: 'Hammer',
+    iconBg: 'bg-amber-700/10 text-amber-700 dark:bg-amber-600/20 dark:text-amber-300 border border-amber-700/30',
+    iconColor: '#B45309',
+    descriptionKey: 'Door hinge fixing, custom wardrobes, wooden repair & handles',
+    defaultRate: '₹450/hr'
+  },
+  {
+    id: 'ac_repair',
+    titleKey: 'tradeAcRepair',
+    category: 'home',
+    icon: 'Wind',
+    iconBg: 'bg-sky-500/10 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400 border border-sky-500/30',
+    iconColor: '#0EA5E9',
+    descriptionKey: 'AC deep jet cleaning, gas charging, cooling issue, PCB repair',
+    popularTradeBadge: 'Express',
+    defaultRate: '₹550/visit'
+  },
+  {
+    id: 'appliance_repair',
+    titleKey: 'tradeAppliance',
+    category: 'home',
+    icon: 'Tv',
+    iconBg: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400 border border-teal-500/30',
+    iconColor: '#14B8A6',
+    descriptionKey: 'Washing machine, refrigerator, microwave oven & geyser service',
+    defaultRate: '₹400/hr'
+  },
+  {
+    id: 'pest_control',
+    titleKey: 'tradePestControl',
+    category: 'home',
+    icon: 'ShieldAlert',
+    iconBg: 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400 border border-rose-500/30',
+    iconColor: '#E11D48',
+    descriptionKey: 'Cockroach herbal gel, termite anti-drilling & bedbug treatment',
+    defaultRate: '₹800/apt'
+  },
+  {
+    id: 'waterproofing',
+    titleKey: 'tradeWaterproofing',
+    category: 'home',
+    icon: 'Droplets',
+    iconBg: 'bg-cyan-600/10 text-cyan-600 dark:bg-cyan-600/20 dark:text-cyan-400 border border-cyan-600/30',
+    iconColor: '#0891B2',
+    descriptionKey: 'Roof crack filling, terrace chemical coating & damp wall treatment',
+    defaultRate: '₹600/hr'
+  },
+  {
+    id: 'cleaner',
+    titleKey: 'tradeCleaner',
+    category: 'home',
+    icon: 'Sparkles',
+    iconBg: 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400 border border-purple-500/30',
+    iconColor: '#9333EA',
+    descriptionKey: 'Kitchen deep sanitization, sofa shampooing, floor scrubbing',
+    defaultRate: '₹300/hr'
+  },
+  {
+    id: 'gardener',
+    titleKey: 'tradeGardener',
+    category: 'home',
+    icon: 'Trees',
+    iconBg: 'bg-lime-500/10 text-lime-600 dark:bg-lime-500/20 dark:text-lime-400 border border-lime-500/30',
+    iconColor: '#84CC16',
+    descriptionKey: 'Lawn mowing, plant pruning, balcony pot setup, pest treatment',
+    defaultRate: '₹250/hr'
+  },
+
+  // --- SCHOOL & LOCAL EDUCATION SERVICES ---
+  {
+    id: 'school_driver',
+    titleKey: 'tradeSchoolDriver',
+    category: 'school',
+    icon: 'Bus',
+    iconBg: 'bg-yellow-500/10 text-yellow-600 dark:bg-yellow-500/20 dark:text-yellow-400 border border-yellow-500/30',
+    iconColor: '#EAB308',
+    descriptionKey: 'Verified van and bus drivers with verified police check for children',
+    popularTradeBadge: 'Top Safety',
+    defaultRate: '₹600/trip'
+  },
+  {
+    id: 'tutor',
+    titleKey: 'tradeTutor',
+    category: 'school',
+    icon: 'BookOpen',
+    iconBg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400 border border-violet-500/30',
+    iconColor: '#8B5CF6',
+    descriptionKey: 'Classes 1 to 10 CBSE/State Board Mathematics, Science & Languages',
+    popularTradeBadge: 'Top Rated',
+    defaultRate: '₹400/hr'
+  },
+  {
+    id: 'tailor',
+    titleKey: 'tradeTailor',
+    category: 'school',
+    icon: 'Scissors',
+    iconBg: 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400 border border-rose-500/30',
+    iconColor: '#F43F5E',
+    descriptionKey: 'School uniform stitching, blazer alterations, badges & repairs',
+    defaultRate: '₹250/unit'
+  },
+  {
+    id: 'lab_assistant',
+    titleKey: 'tradeLabAssistant',
+    category: 'school',
+    icon: 'FlaskConical',
+    iconBg: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400 border border-teal-500/30',
+    iconColor: '#14B8A6',
+    descriptionKey: 'Assistance for science models, robotics kits, exhibitions & chart works',
+    defaultRate: '₹350/hr'
+  },
+  {
+    id: 'stationery',
+    titleKey: 'tradeStationery',
+    category: 'school',
+    icon: 'Printer',
+    iconBg: 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400 border border-purple-500/30',
+    iconColor: '#A855F7',
+    descriptionKey: 'Bulk school project spiral binding, charts, stationery delivery',
+    defaultRate: '₹150/order'
+  },
+  {
+    id: 'child_aide',
+    titleKey: 'tradeChildAide',
+    category: 'school',
+    icon: 'HeartHandshake',
+    iconBg: 'bg-pink-500/10 text-pink-600 dark:bg-pink-500/20 dark:text-pink-400 border border-pink-500/30',
+    iconColor: '#EC4899',
+    descriptionKey: 'Trained assistant for children needing special guidance or companion',
+    defaultRate: '₹500/hr'
+  },
+
+  // --- HOSPITAL & HEALTHCARE LOCAL SERVICES ---
+  {
+    id: 'home_nurse',
+    titleKey: 'tradeHomeNurse',
+    category: 'hospital',
+    icon: 'Stethoscope',
+    iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/30',
+    iconColor: '#10B981',
+    descriptionKey: 'Certified GNM/B.Sc Nurse for IV fluid, wound dressing, vitals & injections',
+    popularTradeBadge: 'Certified',
+    defaultRate: '₹600/visit'
+  },
+  {
+    id: 'caretaker',
+    titleKey: 'tradeCaretaker',
+    category: 'hospital',
+    icon: 'UserCheck',
+    iconBg: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 border border-indigo-500/30',
+    iconColor: '#6366F1',
+    descriptionKey: '12hr/24hr Bedside elderly attendant, feeding, mobility & diaper assistance',
+    popularTradeBadge: '24/7 Avail',
+    defaultRate: '₹800/shift'
+  },
+  {
+    id: 'ambulance',
+    titleKey: 'tradeAmbulance',
+    category: 'hospital',
+    icon: 'Siren',
+    iconBg: 'bg-red-500/10 text-red-600 dark:bg-red-500/20 dark:text-red-400 border border-red-500/30',
+    iconColor: '#EF4444',
+    descriptionKey: 'Oxygen-equipped rapid emergency response ambulance nearby',
+    popularTradeBadge: 'Emergency',
+    defaultRate: '₹1500/base'
+  },
+  {
+    id: 'physiotherapist',
+    titleKey: 'tradePhysio',
+    category: 'hospital',
+    icon: 'Activity',
+    iconBg: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400 border border-teal-500/30',
+    iconColor: '#0D9488',
+    descriptionKey: 'Post-surgery rehabilitation, paralysis therapy, back & joint pain relief',
+    defaultRate: '₹700/session'
+  },
+  {
+    id: 'lab_sample',
+    titleKey: 'tradeLabSample',
+    category: 'hospital',
+    icon: 'TestTube2',
+    iconBg: 'bg-blue-600/10 text-blue-600 dark:bg-blue-600/20 dark:text-blue-400 border border-blue-600/30',
+    iconColor: '#2563EB',
+    descriptionKey: 'Sterile blood, urine & diagnostic sample pickup at home',
+    defaultRate: '₹150/test'
+  },
+  {
+    id: 'medicine_delivery',
+    titleKey: 'tradeMedicine',
+    category: 'hospital',
+    icon: 'Pill',
+    iconBg: 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400 border border-rose-500/30',
+    iconColor: '#E11D48',
+    descriptionKey: 'Urgent 30-minute prescription medicine pickup from pharmacy',
+    defaultRate: '₹100/run'
+  }
+];
+
+export const initialProviders: ServiceProvider[] = [
+  {
+    id: 'prov-1',
+    name: 'K. Ramu Naidu (రాము)',
+    trade: 'tiler',
+    category: 'home',
+    rating: 4.9,
+    reviewCount: 84,
+    distanceKm: 0.8,
+    locationName: 'Jubilee Hills / Madhapur',
+    hourlyRate: 480,
+    phone: '9848022345',
+    avatar: 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 12,
+    completedJobs: 340,
+    bio: '12 years expertise in Italian marble, vitrified tiles & bathroom leveling. Direct voice contact, transparent pricing.',
+    availableToday: true,
+    languages: ['Telugu', 'Hindi'],
+    voiceDurationSec: 14,
+    voiceTranscription: 'నమస్కారం, నా పేరు రాము. నేను 12 సంవత్సరాలుగా టైల్స్ మరియు మార్బుల్ ఫిక్సింగ్ చేస్తున్నాను. ఏ పని అయినా వెంటనే వచ్చి చేస్తాను. ఫోన్ చేయండి.'
+  },
+  {
+    id: 'prov-2',
+    name: 'Shiva Kumar (శివ పెయింటర్)',
+    trade: 'painter',
+    category: 'home',
+    rating: 4.8,
+    reviewCount: 112,
+    distanceKm: 1.2,
+    locationName: 'Kukatpally / KPHB',
+    hourlyRate: 420,
+    phone: '9988112233',
+    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 9,
+    completedJobs: 275,
+    bio: 'Royal luxury emulsion, exterior waterproofing, texture designs. Clean finishing with zero paint stains on floor.',
+    availableToday: true,
+    languages: ['Telugu', 'Hindi', 'English'],
+    voiceDurationSec: 18,
+    voiceTranscription: 'హలో అండి, నేను శివ పెయింటర్. వాల్ పుట్టి, రాయల్ ప్లే టెక్స్చర్ మరియు వాటర్‌ప్రూఫింగ్ పనులు అత్యుత్తమంగా చేస్తాను. నా వాయిస్ విన్నందుకు ధన్యవాదాలు.'
+  },
+  {
+    id: 'prov-3',
+    name: 'Mohammed Ghouse (గౌస్ ఎలక్ట్రీషియన్)',
+    trade: 'electrician',
+    category: 'home',
+    rating: 4.95,
+    reviewCount: 160,
+    distanceKm: 0.4,
+    locationName: 'Banjara Hills, Rd 12',
+    hourlyRate: 350,
+    phone: '9700345678',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 15,
+    completedJobs: 520,
+    bio: 'Certified wireman. Inverter connection, short circuit troubleshooting, appliance motor check. Reach in 15 mins.',
+    availableToday: true,
+    languages: ['Telugu', 'Hindi', 'Urdu'],
+    voiceDurationSec: 12,
+    voiceTranscription: 'సలామ్ వాలైకుం, గౌస్ ఎలక్ట్రీషియన్. ఇన్వర్టర్, వైరింగ్ సమస్యలు 20 నిమిషాల్లో వచ్చి పరిష్కరిస్తాను.'
+  },
+  {
+    id: 'prov-4',
+    name: 'Venkatesh & Team (డాకర్స్ & హమాలీ)',
+    trade: 'docker',
+    category: 'home',
+    rating: 4.7,
+    reviewCount: 95,
+    distanceKm: 2.1,
+    locationName: 'Begumpet / Secunderabad',
+    hourlyRate: 380,
+    phone: '9849112288',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 8,
+    completedJobs: 410,
+    bio: '4-man loading crew. Safe handling of refrigerators, washing machines, sofas, Godrej almirahs without scratches.',
+    availableToday: true,
+    languages: ['Telugu'],
+    voiceDurationSec: 15,
+    voiceTranscription: 'మేము 4 గురు కుర్రాళ్ళం ఉన్నాము. ఎంత బరువైన బీరువా అయినా సురక్షితంగా పై అంతస్తుకి ఎక్కిస్తాము.'
+  },
+  {
+    id: 'prov-7',
+    name: 'Suresh Babu (ఏసీ టెక్నీషియన్)',
+    trade: 'ac_repair',
+    category: 'home',
+    rating: 4.9,
+    reviewCount: 128,
+    distanceKm: 1.1,
+    locationName: 'Hitech City / Kondapur',
+    hourlyRate: 500,
+    phone: '9848123999',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 10,
+    completedJobs: 490,
+    bio: 'Split & window AC jet service, gas top-up (R32/R410A), inverter PCB board repair with 30-day warranty.',
+    availableToday: true,
+    languages: ['Telugu', 'English'],
+    voiceDurationSec: 14,
+    voiceTranscription: 'నమస్తే, సురేష్ ఏసీ సర్వీస్. గ్యాస్ లీకేజ్, కూలింగ్ సమస్యలు గంటలో సాల్వ్ చేస్తాను.'
+  },
+  {
+    id: 'prov-5',
+    name: 'Sister Mary Teresa (హోమ్ నర్స్)',
+    trade: 'home_nurse',
+    category: 'hospital',
+    rating: 5.0,
+    reviewCount: 68,
+    distanceKm: 1.8,
+    locationName: 'Somajiguda / Punjagutta',
+    hourlyRate: 600,
+    phone: '9885544332',
+    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 11,
+    completedJobs: 190,
+    bio: 'Registered nurse. Experienced in post-operative care, tracheostomy care, insulin administration, catheter care.',
+    availableToday: true,
+    languages: ['Telugu', 'English', 'Tamil'],
+    voiceDurationSec: 16,
+    voiceTranscription: 'Hello, I am Nurse Mary. I provide gentle clinical home care, BP/Sugar monitoring, and post-surgery rehabilitation.'
+  },
+  {
+    id: 'prov-6',
+    name: 'Raju Goud (స్కూల్ వ్యాన్ డ్రైవర్)',
+    trade: 'school_driver',
+    category: 'school',
+    rating: 4.9,
+    reviewCount: 77,
+    distanceKm: 1.5,
+    locationName: 'Ameerpet / SR Nagar',
+    hourlyRate: 550,
+    phone: '9959887766',
+    avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=250&q=80',
+    isVerified: true,
+    experienceYears: 14,
+    completedJobs: 310,
+    bio: 'Commercial badge driver with clean police verification record. Safe speed, AC Maruti Eeco van with GPS tracker.',
+    availableToday: true,
+    languages: ['Telugu', 'Hindi'],
+    voiceDurationSec: 13,
+    voiceTranscription: 'పిల్లల భద్రత మా బాధ్యత. జీపీఎస్ ఉన్న వ్యాన్. సకాలంలో స్కూల్ కి చేర్చుతాను.'
+  }
+];
+
+export const initialUserProfile: UserProfile = {
+  id: 'user-narendra',
+  name: 'NARENDRA',
+  phone: '9966191813',
+  email: 'narendra.tech@crafto.services',
+  avatar: '/assets/optimized/profile-avatar-256.webp',
+  title: 'Local Service Specialist & Technician Hub ⚡ | 10+ Yrs Experience',
+  tagline: 'Empowering local blue-collar workers with instant bookings and voice profiles',
+  isProvider: true,
+  providerDetails: {
+    businessName: 'Narendra Pro Electrical & Smart Home Services',
+    trade: 'electrician',
+    category: 'home',
+    experience: 10,
+    hourlyRate: 450,
+    address: 'Madhapur, Hitech City, Hyderabad, 500081',
+    voiceBioText: 'నమస్కారం! నా పేరు నరేంద్ర. నాణ్యమైన సాంకేతిక సేవలు అందించడమే మా లక్ష్యం.',
+  },
+  quotesCount: 12,
+  language: 'te',
+  serviceRadiusKm: 12,
+  operatingHours: '8:00 AM - 9:00 PM (All 7 Days)'
+};
+
+export const sampleNotifications: RealtimeNotification[] = [
+  {
+    id: 'notif-1',
+    title: '⚡ అత్యవసర ఎలక్ట్రీషియన్ కావాలి (Emergency Request)',
+    message: 'బంజారాహిల్స్ రోడ్ నం. 10 లో మెయిన్ MCB కాలిపోయింది. వెంటనే సహాయం కావాలి.',
+    time: '2 నిమిషాల క్రితం',
+    type: 'urgent_request',
+    read: false,
+    actionRequired: true,
+    requestData: {
+      clientName: 'శ్రీధర్ రావు (Sridhar Rao)',
+      trade: 'electrician',
+      distance: '0.9 కి.మీ',
+      location: 'Plot 42, Road 10, Banjara Hills',
+      urgency: 'high',
+      rate: '₹500/hr'
+    }
+  },
+  {
+    id: 'notif-2',
+    title: '🎨 కొత్త పెయింటింగ్ బుకింగ్ (2BHK Painting)',
+    message: 'మాదాపూర్ హైటెక్ సిటీలో 2BHK డబుల్ కోట్ రంగులు వేయడానికి అపాయింట్‌మెంట్ కోరారు.',
+    time: '14 నిమిషాల క్రితం',
+    type: 'booking_confirmed',
+    read: false,
+    actionRequired: false
+  },
+  {
+    id: 'notif-3',
+    title: '🧱 ఫ్లోరింగ్ టైలర్ బుకింగ్ ధృవీకరించబడింది',
+    message: 'బాల్కనీ టైల్స్ ఫిక్సింగ్ కోసం వర్కర్ బుకింగ్ పూర్తయింది.',
+    time: '1 గంట క్రితం',
+    type: 'payment_received',
+    read: true,
+    actionRequired: false
+  }
+];
