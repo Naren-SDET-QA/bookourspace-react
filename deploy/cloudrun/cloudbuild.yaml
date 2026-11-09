@@ -1,0 +1,44 @@
+steps:
+  - name: gcr.io/cloud-builders/gcloud
+    id: validate-public-build-config
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -z "${_VITE_SUPABASE_PUBLISHABLE_KEY}" ] || [ "${_VITE_SUPABASE_PUBLISHABLE_KEY}" = "REPLACE_WITH_PUBLIC_SUPABASE_PUBLISHABLE_KEY" ]; then
+          echo "Set _VITE_SUPABASE_PUBLISHABLE_KEY to the public Supabase publishable/anon key."
+          exit 1
+        fi
+  # Build only. Deploying is a separate, human-approved step in README.md.
+  - name: gcr.io/cloud-builders/docker
+    id: build-api-image
+    args:
+      - build
+      - --pull
+      - --no-cache
+      - -f
+      - deploy/cloudrun/Dockerfile
+      - -t
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/bookourspace/api:$SHORT_SHA
+      - --build-arg
+      - VITE_SUPABASE_URL=${_VITE_SUPABASE_URL}
+      - --build-arg
+      - VITE_SUPABASE_PROJECT_ID=obkfgxjzlscungkhbyvq
+      - --build-arg
+      - VITE_SUPABASE_PUBLISHABLE_KEY=${_VITE_SUPABASE_PUBLISHABLE_KEY}
+      - --build-arg
+      - VITE_SUPABASE_ANON_KEY=${_VITE_SUPABASE_PUBLISHABLE_KEY}
+      - --build-arg
+      - VITE_ENABLE_DEMO_DATA=false
+      - .
+
+images:
+  - asia-south1-docker.pkg.dev/$PROJECT_ID/bookourspace/api:$SHORT_SHA
+
+substitutions:
+  _VITE_SUPABASE_URL: "https://obkfgxjzlscungkhbyvq.supabase.co"
+  _VITE_SUPABASE_PUBLISHABLE_KEY: "REPLACE_WITH_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY

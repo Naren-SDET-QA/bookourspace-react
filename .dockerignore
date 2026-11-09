@@ -1,0 +1,29 @@
+# Keep the production build context small and secret-free.
+.git
+.gitignore
+node_modules
+dist
+.local
+test-results
+playwright-report
+coverage
+android
+ios
+e2e
+tests
+supabase
+docs
+screenshots
+brand-assets
+patches/.cache
+*.log
+*.md
+.DS_Store
+
+# Never bake local environment files or runtime JSON stores into an image.
+.env
+.env.*
+**/.env
+**/.env.*
+authoritative-marketplace-store.json
+live-page-config.json

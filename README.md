@@ -1,49 +1,58 @@
-# BookOurSpace — Final AI Studio repo
+# BookOurSpace — Final Full Repository
 
-Full-stack BookOurSpace marketplace: PGs, Classes, Function Halls, Home Services, Stays, Movies, admin controls, bookings, Style 1/2/3 layouts and the dynamic Classes course-detail sheet.
+Full-stack BookOurSpace marketplace for PGs, Classes, Function Halls, Home Services, Stays and Movies — with server-authoritative bookings, admin controls, Style 1/2/3 layouts and the dynamic Classes course detail sheet.
 
-## Open in Google AI Studio
+This `main` branch is the **complete repository**: application, server, tests, e2e, Android/iOS Capacitor projects, deployment configuration and Supabase migrations.
 
-1. Open **https://ai.studio/apps** and create/import an app.
-2. AI Studio imports from a **GitHub repository** (recommended) or you can paste this project into a new AI Studio app.
-3. Add the required values in **AI Studio → Settings → Secrets** (never in committed files):
-   - `BOS_LISTINGS_DATABASE_URL` — Supabase Mumbai pooler URL with `sslmode=verify-full`
-   - `BOS_SERVER_HMAC_SECRET` — 64+ random characters
-   - `SUPABASE_SECRET_KEY` — server-only Supabase secret key
-   - `VITE_SUPABASE_URL=https://obkfgxjzlscungkhbyvq.supabase.co`
-   - `VITE_SUPABASE_PROJECT_ID=obkfgxjzlscungkhbyvq`
-   - `VITE_SUPABASE_PUBLISHABLE_KEY` — public publishable/anon key
-   - `GEMINI_API_KEY` — AI Studio usually injects this automatically
-4. Run `npm install`, then `npm run dev`.
+## Google AI Studio
 
-`npm run dev` starts the full Express + Vite server. It requires the PostgreSQL URL above because the app is server-authoritative and intentionally fails closed without a database. For a local machine, `npm run dev:local` starts the bundled local PostgreSQL workflow instead.
+Import **Naren-SDET-QA/bookourspace-react → main** into a **new** AI Studio app. AI Studio imports a snapshot and does not sync an existing app.
 
-## What is included
+Add in **AI Studio → Settings → Secrets**:
 
-- Complete `src/`, `server.ts`, `public/`, `index.html`, Vite/TypeScript configs
-- All six modules and their booking/inventory APIs
-- Supabase schema and migrations in `supabase/`
-- Seed/preflight scripts in `scripts/`
-- Style 1/2/3 layouts and Classes course detail
-- AI Studio `.aistudio/` metadata and `metadata.json`
+- `BOS_LISTINGS_DATABASE_URL` — Supabase Mumbai pooler URL with `sslmode=verify-full`
+- `BOS_SERVER_HMAC_SECRET` — 64+ random characters
+- `SUPABASE_SECRET_KEY` — server-only
+- `VITE_SUPABASE_URL=https://obkfgxjzlscungkhbyvq.supabase.co`
+- `VITE_SUPABASE_PROJECT_ID=obkfgxjzlscungkhbyvq`
+- `VITE_SUPABASE_PUBLISHABLE_KEY` — public publishable/anon key
+- `GEMINI_API_KEY` — usually injected by AI Studio
 
-## What is intentionally excluded
+Then `npm install` and `npm run dev`. The server intentionally fails closed without PostgreSQL.
 
-- `node_modules/`, `dist/`, logs, screenshots and local runtime JSON
-- tests/e2e, native Android/iOS projects, Cloud Run deployment files
-- all `.env` / secret files
-
-These are development/deployment extras. No application runtime feature was removed.
-
-## Security
-
-Never put a database password, HMAC secret, service-role key or `sb_secret_` value in any `VITE_*` variable. Only the public Supabase URL/project/publishable key and public Razorpay key id belong in client variables.
-
-## Local verification
+## Full local development
 
 ```bash
 npm install
+npm run dev:local   # starts the bundled local PostgreSQL workflow
 npm run lint
 npm run build
-npm run dev:local   # local PostgreSQL + app
+npm test            # unit/API tests
+npm run e2e         # Playwright Chromium
 ```
+
+`npm run dev` starts the server directly and expects a configured PostgreSQL URL; use `dev:local` on a developer machine.
+
+## Native
+
+```bash
+npm run cap:sync
+npm run cap:open:android
+npm run cap:open:ios
+```
+
+Android/iOS source is included. Release signing keys, `android/local.properties`, keystores and store credentials are intentionally not committed.
+
+## Included
+
+- Complete `src/`, `server.ts`, `public/`
+- Style 1/2/3 and dynamic Classes detail
+- `tests/`, `e2e/`, Playwright config
+- Android and iOS Capacitor projects (source only)
+- `deploy/` Cloud Run/native production configuration
+- Full `supabase/` migrations and test tooling
+- `scripts/`, `patches/`, AI Studio metadata
+
+## Security
+
+Never put a database password, HMAC secret, service-role key or `sb_secret_` value in any `VITE_*` variable. Only public client IDs/URLs belong there.
