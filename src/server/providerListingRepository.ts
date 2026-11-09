@@ -215,6 +215,27 @@ function cleanPayload(value: unknown): Record<string, unknown> {
   return visit(value, 0) as Record<string, unknown>;
 }
 
+export function mergeReadyPublicListingMedia(
+  payload: unknown,
+  references: unknown,
+): Record<string, unknown> {
+  const cleaned = cleanPayload(payload);
+  const existing = Array.isArray(cleaned.images)
+    ? cleaned.images.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const media = Array.isArray(references)
+    ? references.filter((value): value is string => (
+      typeof value === 'string'
+      && /^storage:\/\/bos-public-media\/[^?#\\\u0000-\u001f\u007f]+$/.test(value)
+      && !value.includes('..')
+      && !value.slice('storage://'.length).includes('//')
+    ))
+    : [];
+  if (!media.length) return cleaned;
+  cleaned.images = [...new Set([...existing, ...media])].slice(0, 20);
+  return cleaned;
+}
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -295,7 +316,7 @@ function toRecord(row: any): ProviderListingRecord {
       : 'not_reported',
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at || ''),
     updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at || ''),
-    payload: cleanPayload(payload),
+    payload: mergeReadyPublicListingMedia(payload, row.public_media_images),
   };
 }
 
@@ -753,9 +774,23 @@ export class ProviderListingRepository {
     return this.transaction(actor, async (client) => {
       await this.requireActiveProfile(client, actor);
       const { rows } = await client.query(
-        `select l.*, p.full_name as provider_name, p.phone as provider_phone
+        `select l.*, p.full_name as provider_name, p.phone as provider_phone,
+                coalesce(media.images, '[]'::jsonb) as public_media_images
            from public.listings l
            left join public.profiles p on p.id = l.owner_id
+           left join lateral (
+             select jsonb_agg(
+                      'storage://' || asset.bucket_id || '/' || asset.object_path
+                      order by asset.display_order, asset.created_at, asset.id
+                    ) as images
+               from public.media_assets asset
+              where asset.owner_id = l.owner_id
+                and asset.parent_type = 'provider_listing'
+                and asset.parent_id = l.id
+                and asset.bucket_id = 'bos-public-media'
+                and asset.privacy = 'public'
+                and asset.processing_status = 'ready'
+           ) media on true
           where l.owner_id = auth.uid()
              or (
                public.is_admin()
@@ -810,8 +845,22 @@ export class ProviderListingRepository {
     }
     return this.transaction(null, async (client) => {
       const { rows } = await client.query(
-        `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone
+        `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone,
+                coalesce(media.images, '[]'::jsonb) as public_media_images
            from public.listings l
+           left join lateral (
+             select jsonb_agg(
+                      'storage://' || asset.bucket_id || '/' || asset.object_path
+                      order by asset.display_order, asset.created_at, asset.id
+                    ) as images
+               from public.media_assets asset
+              where asset.owner_id = l.owner_id
+                and asset.parent_type = 'provider_listing'
+                and asset.parent_id = l.id
+                and asset.bucket_id = 'bos-public-media'
+                and asset.privacy = 'public'
+                and asset.processing_status = 'ready'
+           ) media on true
           where ${clauses.join(' and ')}
           order by l.updated_at desc, l.id
           limit 500`,
@@ -829,8 +878,22 @@ export class ProviderListingRepository {
     if (!listingId) return null;
     return this.transaction(null, async (client) => {
       const { rows } = await client.query(
-        `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone
+        `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone,
+                coalesce(media.images, '[]'::jsonb) as public_media_images
            from public.listings l
+           left join lateral (
+             select jsonb_agg(
+                      'storage://' || asset.bucket_id || '/' || asset.object_path
+                      order by asset.display_order, asset.created_at, asset.id
+                    ) as images
+               from public.media_assets asset
+              where asset.owner_id = l.owner_id
+                and asset.parent_type = 'provider_listing'
+                and asset.parent_id = l.id
+                and asset.bucket_id = 'bos-public-media'
+                and asset.privacy = 'public'
+                and asset.processing_status = 'ready'
+           ) media on true
           where l.id = $1 and l.status = 'active'
           limit 1`,
         [listingId],
@@ -1651,9 +1714,23 @@ export class ProviderListingRepository {
 
   private async fetchRecordById(client: PoolClient, id: string): Promise<any | null> {
     const { rows } = await client.query(
-      `select l.*, p.full_name as provider_name, p.phone as provider_phone
+      `select l.*, p.full_name as provider_name, p.phone as provider_phone,
+              coalesce(media.images, '[]'::jsonb) as public_media_images
          from public.listings l
          left join public.profiles p on p.id = l.owner_id
+         left join lateral (
+           select jsonb_agg(
+                    'storage://' || asset.bucket_id || '/' || asset.object_path
+                    order by asset.display_order, asset.created_at, asset.id
+                  ) as images
+             from public.media_assets asset
+            where asset.owner_id = l.owner_id
+              and asset.parent_type = 'provider_listing'
+              and asset.parent_id = l.id
+              and asset.bucket_id = 'bos-public-media'
+              and asset.privacy = 'public'
+              and asset.processing_status = 'ready'
+         ) media on true
         where l.id = $1
         limit 1`,
       [id],
