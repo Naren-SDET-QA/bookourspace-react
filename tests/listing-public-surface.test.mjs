@@ -72,6 +72,10 @@ test('public details are served from the canonical repository and are active-onl
   assert.match(api, /app\.get\('\/api\/marketplace\/listings\/:id'/);
   assert.match(api, /findPublicById/);
   assert.match(api, /LISTING_NOT_FOUND/);
+  assert.match(api, /verificationdocuments/,
+    'public listing sanitization must remove private verification document metadata');
+  assert.match(api, /PRIVATE_STORAGE_REFERENCE/,
+    'public listing sanitization must remove private Storage image references');
 
   const repository = await read('../src/server/providerListingRepository.ts');
   assert.match(repository, /l\.status = 'active'/);

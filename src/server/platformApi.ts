@@ -35,7 +35,16 @@ export interface PlatformApiDeps {
   manageUserAccess?: (req: express.Request, targetUserId: string, action: 'promote' | 'demote' | 'suspend' | 'activate' | 'verify', reason: string) => Promise<any | null>;
 }
 
-const SENSITIVE_KEY = /(phone|whatsapp|email|contact|address|gstin|owneruserid|token|secret)/i;
+const SENSITIVE_KEY = /(phone|whatsapp|email|contact|address|gstin|owneruserid|token|secret|verificationdocuments|verification_documents|documentreference|document_reference)/i;
+const PRIVATE_STORAGE_REFERENCE = /(?:^storage:\/\/bos-private[^/]*\/|\/storage\/v1\/object\/(?:public\/|sign\/|authenticated\/)?bos-private[^/]*\/)/i;
+const IMAGE_REFERENCE_KEY = /^(images?|photos?|photo|imageurl|coverimage|cover)$/i;
+
+function containsPrivateStorageReference(value: unknown): boolean {
+  if (typeof value === 'string') return PRIVATE_STORAGE_REFERENCE.test(value);
+  if (Array.isArray(value)) return value.some(containsPrivateStorageReference);
+  if (value && typeof value === 'object') return Object.values(value).some(containsPrivateStorageReference);
+  return false;
+}
 
 function sanitize(value: any, depth = 0): any {
   if (depth > 4 || value === null || typeof value !== 'object') return value;
@@ -43,6 +52,14 @@ function sanitize(value: any, depth = 0): any {
   const out: Record<string, any> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (SENSITIVE_KEY.test(key)) continue;
+    if (IMAGE_REFERENCE_KEY.test(key) && containsPrivateStorageReference(entry)) {
+      if (Array.isArray(entry)) {
+        out[key] = entry
+          .filter((candidate) => !containsPrivateStorageReference(candidate))
+          .map((candidate) => sanitize(candidate, depth + 1));
+      }
+      continue;
+    }
     out[key] = sanitize(entry, depth + 1);
   }
   return out;

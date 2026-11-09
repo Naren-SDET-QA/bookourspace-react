@@ -91,11 +91,7 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
         await client.query("select set_config('request.jwt.claim.sub', '', true)");
         await client.query("select set_config('request.jwt.claim.role', 'anon', true)");
         await client.query("select set_config('request.jwt.claims', '{\"role\":\"anon\"}', true)");
-        // Demo inventory must be evaluated by the same gate as the detail and
-        // checkout pages. Without this local-preview GUC, stay_availability()
-        // returns no units for every demo stay, so selecting dates silently
-        // drops all of them from the search feed even though they book fine.
-        // The flag is never enabled in production.
+        // The local demo gate must match checkout. Production never enables it.
         if (allowDemoBooking) {
           await client.query("select set_config('bos.allow_demo_booking', 'on', true)");
         }
@@ -278,9 +274,26 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
         if (!host.rows[0]) return { missing: true as const };
         const listings = await client.query(
           `select l.id as listing_id, sp.name, sp.property_type, sp.place_type, sp.city, sp.area,
-                  sp.base_price_paise, sp.guest_favourite, l.payload
+                  sp.base_price_paise, sp.guest_favourite,
+                  jsonb_set(
+                    coalesce(l.payload, '{}'::jsonb), '{images}',
+                    coalesce(media.images, coalesce(l.payload->'images', '[]'::jsonb)), true
+                  ) as payload
              from public.stay_properties sp
              join public.listings l on l.id = sp.listing_id
+             left join lateral (
+               select jsonb_agg(
+                        'storage://' || asset.bucket_id || '/' || asset.object_path
+                        order by asset.display_order, asset.created_at, asset.id
+                      ) as images
+                 from public.media_assets asset
+                where asset.owner_id = l.owner_id
+                  and asset.parent_type = 'provider_listing'
+                  and asset.parent_id = l.id
+                  and asset.bucket_id = 'bos-public-media'
+                  and asset.privacy = 'public'
+                  and asset.processing_status = 'ready'
+             ) media on true
             where sp.owner_user_id = $1 and sp.is_active and l.status = 'active'
               and l.is_verified is true and l.verified_by is not null
               and l.payload->>'stayLifecycle' = 'approved'
@@ -534,9 +547,6 @@ async function runSearch(
   if (query.listingIds.length) {
     clauses.push(`p.listing_id = any(${param(query.listingIds)}::text[])`);
   }
-  // Every card in the feed must be bookable. A demo stay is only kept when
-  // the explicit local preview allows demo bookings; otherwise it would be a
-  // dead end that the checkout refuses.
   if (options.excludeDemo || options.allowDemoBooking !== true) {
     clauses.push(`coalesce(l.payload->>'demo', 'false') <> 'true'`);
   }
@@ -560,7 +570,11 @@ async function runSearch(
         p.cleaning_fee_paise, p.service_fee_bps, p.owner_user_id as host_id,
         public.stay_accessibility_keys(p.accessibility) as accessibility_keys,
         public.stay_language_keys(p.host_languages) as language_keys,
-        l.title as listing_title, l.price as listing_price, l.price_unit, l.payload,
+        l.title as listing_title, l.price as listing_price, l.price_unit,
+        jsonb_set(
+          coalesce(l.payload, '{}'::jsonb), '{images}',
+          coalesce(media.images, coalesce(l.payload->'images', '[]'::jsonb)), true
+        ) as payload,
         host.full_name as host_name, host.avatar_url as host_avatar_url,
         stats.min_price_paise, stats.room_count, stats.room_types,
         stats.max_guests, stats.max_bedrooms, stats.max_beds, stats.max_bathrooms,
@@ -572,6 +586,19 @@ async function runSearch(
         and l.is_verified is true and l.verified_by is not null
         and l.payload->>'stayLifecycle' = 'approved'
       join public.public_provider_profile_projection host on host.id = p.owner_user_id and host.verified is true
+      left join lateral (
+        select jsonb_agg(
+                 'storage://' || asset.bucket_id || '/' || asset.object_path
+                 order by asset.display_order, asset.created_at, asset.id
+               ) as images
+          from public.media_assets asset
+         where asset.owner_id = l.owner_id
+           and asset.parent_type = 'provider_listing'
+           and asset.parent_id = l.id
+           and asset.bucket_id = 'bos-public-media'
+           and asset.privacy = 'public'
+           and asset.processing_status = 'ready'
+      ) media on true
       left join lateral (
         select
           min(rt.base_price_paise) as min_price_paise,
@@ -607,9 +634,8 @@ async function runSearch(
         where r.listing_id = p.listing_id
       ) rev on true
       where p.is_active
-      -- Keep the feed identical to the checkout gate: the property and the
-      -- listing must share one owner, there must be active bookable inventory,
-      -- and a sold-out stay is never advertised as bookable.
+      -- Keep the feed aligned with the checkout gate: only owned, active
+      -- inventory is advertised as bookable.
       and l.owner_id = p.owner_user_id
       and exists (
         select 1
