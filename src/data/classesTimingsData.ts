@@ -72,6 +72,8 @@ export interface CourseListing {
   category: CourseCategory | string;
   description: string;
   provider: string;
+  /** Optional provider WhatsApp number; absent means open WhatsApp contact picker. */
+  providerPhone?: string;
   /** Owner id — providers may manage only their own courses. */
   providerId: string;
   area: string;
