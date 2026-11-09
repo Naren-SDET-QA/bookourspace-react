@@ -284,17 +284,32 @@ async function startServer() {
   // stores. A verified transactional PostgreSQL adapter is still required.
   assertProductionPersistenceReady();
 
-  // Resolve and verify the canonical PostgreSQL target before constructing any
-  // database-backed API routes. Production always requires PostgreSQL. A
-  // database-free development process is allowed to serve the Vite frontend
-  // and read-only compatibility routes so AI Studio can preview the UI without
-  // weakening production persistence or authorization gates.
+  // Google AI Studio previews do not provide the production PostgreSQL pool.
+  // In that preview only, allow the UI/server to boot in read-only demo mode;
+  // Cloud Run production still fails closed and readiness reports 503.
+  // Never allow this preview fallback on Cloud Run (K_SERVICE is set there).
+  const aiStudioPreview = !process.env.K_SERVICE && (
+    process.env.BOS_AI_STUDIO_PREVIEW === '1'
+    || process.cwd().startsWith('/app/applet')
+    || process.env.AI_STUDIO === 'true'
+  );
   const hasConfiguredPostgresTarget = Boolean(
     String(process.env.BOS_LISTINGS_DATABASE_URL || process.env.BOS_PG_URL || '').trim(),
   );
-  const pgRuntimePool = process.env.NODE_ENV === 'production' || hasConfiguredPostgresTarget
-    ? await initializePostgresRuntime()
-    : undefined;
+  let pgRuntimePool: Awaited<ReturnType<typeof initializePostgresRuntime>> | undefined;
+  if (process.env.NODE_ENV === 'production' || hasConfiguredPostgresTarget) {
+    try {
+      pgRuntimePool = await initializePostgresRuntime();
+    } catch (error) {
+      if (!aiStudioPreview) throw error;
+      console.warn('[ai-studio] PostgreSQL is unavailable; starting in demo mode without server persistence.');
+      // Repository factories read these later. Clearing them here prevents an
+      // unreachable configured URL from failing startup a second time.
+      delete process.env.BOS_LISTINGS_DATABASE_URL;
+      delete process.env.BOS_PG_URL;
+      pgRuntimePool = undefined;
+    }
+  }
 
   const configuredHmacSecret = (process.env.BOS_SERVER_HMAC_SECRET || '').trim();
   if (process.env.NODE_ENV === 'production' && !configuredHmacSecret) {
