@@ -204,8 +204,9 @@ export function applyLiveBatches(course: CourseListing, batches: ClassBatch[]): 
   if (onlineBatches.length) {
     feePlans.push({ label: 'Online fee', amount: Math.min(...onlineBatches.map((batch) => batch.onlineFee)), unit: first.feeUnit as FeePlan['unit'], mode: 'Online' });
   }
-  if (offlineBatches.length) {
-    feePlans.push({ label: 'Offline fee', amount: Math.min(...offlineBatches.map((batch) => liveBatchFee(batch))), unit: first.feeUnit as FeePlan['unit'], mode: 'Offline' });
+  const offlineFees = offlineBatches.map((batch) => batch.offlineFee).filter((fee) => fee > 0);
+  if (offlineFees.length) {
+    feePlans.push({ label: 'Offline fee', amount: Math.min(...offlineFees), unit: first.feeUnit as FeePlan['unit'], mode: 'Offline' });
   }
   const fee = Math.min(...batches.map(liveBatchFee));
   const seatsLeft = batches.reduce((total, batch) => total + Math.max(0, batch.seatsLeft), 0);

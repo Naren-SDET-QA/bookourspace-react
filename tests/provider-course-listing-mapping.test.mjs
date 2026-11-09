@@ -80,3 +80,34 @@ test('live class starting price uses the cheapest active batch, not calendar ord
   assert.equal(result.fee, 1800);
   assert.equal(result.feePlans[0].amount, 1800);
 });
+
+test('hybrid batch offline fee uses the offline price, not the cheaper online price', () => {
+  const course = mapProviderCourse({
+    id: 'listing-class-hybrid-price',
+    title: 'Hybrid pricing test',
+    categoryId: 'class-academic',
+    subcategory: 'Academic',
+    entityType: 'course',
+    price: 5000,
+    priceUnit: 'per course',
+    providerName: 'Actual Tutor',
+    status: 'active',
+    isVerified: true,
+    isFeatured: false,
+    location: { city: 'Actual City', area: 'Actual Area' },
+    images: [],
+    customFieldValues: {},
+  });
+  const result = applyLiveBatches(course, [{
+    id: 'batch-hybrid', listingId: course.id, title: 'Hybrid batch', deliveryMode: 'hybrid',
+    startDate: '2027-02-01', endDate: null, startTime: '18:00', endTime: '20:00',
+    daysOfWeek: 'Mon', capacity: 10, waitlistCapacity: 0, confirmedCount: 0,
+    waitlistCount: 0, seatsLeft: 10, waitlistLeft: 0, onlineFee: 1000, offlineFee: 2000,
+    feeUnit: 'course', timezone: 'Asia/Kolkata', durationLabel: '', area: 'Actual Area',
+    facultyName: 'Trainer', facultyExperience: '', holidays: [], exams: [], status: 'active',
+    reviewNote: null, createdAt: '', updatedAt: '',
+  }]);
+
+  assert.equal(result.fee, 1000);
+  assert.equal(result.feePlans.find((plan) => plan.mode === 'Offline')?.amount, 2000);
+});

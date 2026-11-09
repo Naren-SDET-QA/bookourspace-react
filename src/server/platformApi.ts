@@ -46,9 +46,15 @@ function containsPrivateStorageReference(value: unknown): boolean {
   return false;
 }
 
-function sanitize(value: any, depth = 0): any {
-  if (depth > 4 || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((entry) => sanitize(entry, depth + 1));
+export function sanitize(value: any, depth = 0): any {
+  // A listing payload may contain arbitrary provider-defined keys. Remove
+  // private Storage references by value, not only when the key looks like an
+  // image field; a signed private URL is still a bearer credential wherever
+  // it appears in the public response.
+  if (typeof value === 'string') return PRIVATE_STORAGE_REFERENCE.test(value) ? undefined : value;
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > 4) return containsPrivateStorageReference(value) ? undefined : value;
+  if (Array.isArray(value)) return value.map((entry) => sanitize(entry, depth + 1)).filter((entry) => entry !== undefined);
   const out: Record<string, any> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (SENSITIVE_KEY.test(key)) continue;
@@ -60,7 +66,8 @@ function sanitize(value: any, depth = 0): any {
       }
       continue;
     }
-    out[key] = sanitize(entry, depth + 1);
+    const sanitized = sanitize(entry, depth + 1);
+    if (sanitized !== undefined) out[key] = sanitized;
   }
   return out;
 }
