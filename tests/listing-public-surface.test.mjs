@@ -81,3 +81,19 @@ test('public details are served from the canonical repository and are active-onl
   assert.match(repository, /l\.status = 'active'/);
   assert.match(repository, /setStatusForAdmin/);
 });
+
+test('public payload sanitization removes private Storage URLs under arbitrary keys', async () => {
+  const { sanitize } = await import('../src/server/platformApi.ts');
+  const publicPayload = sanitize({
+    attachments: [
+      'https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/object/sign/bos-private-documents/owner/id.pdf?token=redacted',
+      'storage://bos-public-media/owner/listing/original.jpg',
+    ],
+    objectPath: 'storage://bos-private-profile-media/owner/avatar.webp',
+    gallery: { cover: 'https://images.example.test/cover.jpg' },
+  });
+  assert.deepEqual(publicPayload, {
+    attachments: ['storage://bos-public-media/owner/listing/original.jpg'],
+    gallery: { cover: 'https://images.example.test/cover.jpg' },
+  });
+});
