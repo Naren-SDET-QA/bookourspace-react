@@ -18,7 +18,7 @@ Add in **AI Studio → Settings → Secrets**:
 - `VITE_SUPABASE_PUBLISHABLE_KEY` — public publishable/anon key
 - `GEMINI_API_KEY` — usually injected by AI Studio
 
-Then `npm install` and `npm run dev`. The server intentionally fails closed without PostgreSQL.
+Then `npm install` and `npm run dev`. The server intentionally fails closed without PostgreSQL in production. Inside Google AI Studio (`/app/applet`) it now boots in **demo mode without a database** so the preview loads; set `BOS_LISTINGS_DATABASE_URL` (or `BOS_AI_STUDIO_PREVIEW=1` explicitly) to enable server-authoritative features.
 
 ## Full local development
 
