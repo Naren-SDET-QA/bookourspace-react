@@ -412,7 +412,7 @@ function MarketplaceAppContent() {
   const [homeSearchFocused, setHomeSearchFocused] = useState(false);
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
-  const { favoriteIds, toggleFavorite, supabaseUser, authUser, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
+  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
 
@@ -439,12 +439,13 @@ function MarketplaceAppContent() {
   }, [activeView]);
 
   useEffect(() => {
+    if (!authoritativeSessionChecked) return;
     if (activeView === 'admin_console' && !isAdminSession) {
       setActiveView(authUser?.role === 'provider' ? 'provider_portal' : 'marketplace');
     } else if (activeView === 'provider_portal' && (!authUser || authUser.role === 'customer')) {
       setActiveView('marketplace');
     }
-  }, [authUser, activeView, isAdminSession]);
+  }, [authUser, activeView, authoritativeSessionChecked, isAdminSession]);
 
   useEffect(() => {
     if (activeMarketSection === 'hotel_stay' && !isHotelsStayExperienceOpen) {

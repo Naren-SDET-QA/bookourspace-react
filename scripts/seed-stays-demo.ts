@@ -16,6 +16,7 @@ if (!connectionString) {
 }
 
 const HOST_ID = 'a11a0000-1111-4111-8111-000000000001';
+const ADMIN_ID = 'a11a0000-1111-4111-8111-000000000005';
 const CUSTOMER_IDS = [
   'a11a0000-1111-4111-8111-000000000002',
   'a11a0000-1111-4111-8111-000000000003',
@@ -109,6 +110,22 @@ async function main() {
     }
 
     await client.query('BEGIN');
+    // The local catalog is deliberately marked as demo data. Its lifecycle
+    // trigger requires a Super Admin transition, just as production does;
+    // authenticate this throwaway seed transaction as the local demo host
+    // instead of weakening the database guard.
+    await client.query(
+      `insert into auth.users (id, email, raw_user_meta_data)
+       values ($1, 'demo.admin@bookourspace.local', '{}') on conflict (id) do nothing`,
+      [ADMIN_ID],
+    );
+    await client.query(
+      `update public.profiles set full_name = 'BookOurSpace Demo Admin', role = 'admin',
+          account_status = 'active', verified = true, is_super_admin = true
+        where id = $1`,
+      [ADMIN_ID],
+    );
+    await client.query(`select set_config('test.uid', $1, true)`, [ADMIN_ID]);
     // Guest display names must pass the same booking-contact validator the
     // checkout enforces (letters, spaces, apostrophes and hyphens only), so the
     // prefilled name on "Confirm and pay" is never rejected out of the box.
