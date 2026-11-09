@@ -72,8 +72,28 @@ test('public details are served from the canonical repository and are active-onl
   assert.match(api, /app\.get\('\/api\/marketplace\/listings\/:id'/);
   assert.match(api, /findPublicById/);
   assert.match(api, /LISTING_NOT_FOUND/);
+  assert.match(api, /verificationdocuments/,
+    'public listing sanitization must remove private verification document metadata');
+  assert.match(api, /PRIVATE_STORAGE_REFERENCE/,
+    'public listing sanitization must remove private Storage image references');
 
   const repository = await read('../src/server/providerListingRepository.ts');
   assert.match(repository, /l\.status = 'active'/);
   assert.match(repository, /setStatusForAdmin/);
+});
+
+test('public payload sanitization removes private Storage URLs under arbitrary keys', async () => {
+  const { sanitize } = await import('../src/server/platformApi.ts');
+  const publicPayload = sanitize({
+    attachments: [
+      'https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/object/sign/bos-private-documents/owner/id.pdf?token=redacted',
+      'storage://bos-public-media/owner/listing/original.jpg',
+    ],
+    objectPath: 'storage://bos-private-profile-media/owner/avatar.webp',
+    gallery: { cover: 'https://images.example.test/cover.jpg' },
+  });
+  assert.deepEqual(publicPayload, {
+    attachments: ['storage://bos-public-media/owner/listing/original.jpg'],
+    gallery: { cover: 'https://images.example.test/cover.jpg' },
+  });
 });

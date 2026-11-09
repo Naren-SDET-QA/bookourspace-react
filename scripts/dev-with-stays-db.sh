@@ -71,6 +71,16 @@ else
   done
 fi
 
+# Match the hosted public media metadata grant used by the stay search query.
+# This is applied only to the throwaway loopback database; Storage policies
+# and private-document access are never changed.
+"${PSQL[@]}" -d "$DB_NAME" -q <<'SQL'
+grant select on public.listings to anon, authenticated;
+grant select (id, owner_id, parent_type, parent_id, bucket_id, object_path,
+              variants, privacy, processing_status, display_order, created_at)
+  on public.media_assets to anon, authenticated;
+SQL
+
 LOC_COUNT=$("${PSQL[@]}" -d "$DB_NAME" -tAc "select coalesce(to_regclass('public.india_locations')::text, '')")
 if [ -n "$LOC_COUNT" ]; then
   LOC_ROWS=$("${PSQL[@]}" -d "$DB_NAME" -tAc "select count(*) from public.india_locations")

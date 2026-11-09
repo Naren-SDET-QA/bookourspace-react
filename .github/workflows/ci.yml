@@ -1,0 +1,92 @@
+name: BookOurSpace CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, codex/consolidate-pr1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bookourspace-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Unit, lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit and API tests
+        run: npm test
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Scan the checked-out commit for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: detect --source . --no-banner --redact --log-opts="--max-count=1"
+
+  chromium:
+    name: Chromium E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install PostgreSQL server binaries for the disposable harness
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql postgresql-client
+          echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run isolated Chromium E2E suite
+        env:
+          BOS_PLAYWRIGHT_PORT: 4621
+          BOS_PLAYWRIGHT_DB_PORT: 14621
+          BOS_PLAYWRIGHT_DB_DATA_DIR: /tmp/bookourspace-playwright-db-4621
+        run: npm run e2e -- --project=chromium --workers=1 --retries=0
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bookourspace-playwright-results
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            playwright-report/

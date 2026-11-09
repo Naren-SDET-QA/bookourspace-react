@@ -8,7 +8,7 @@ This `main` branch is the **complete repository**: application, server, tests, e
 
 Import **Naren-SDET-QA/bookourspace-react → main** into a **new** AI Studio app. AI Studio imports a snapshot and does not sync an existing app.
 
-Add in **AI Studio → Settings → Secrets**:
+Add in **AI Studio → Settings → Secrets** when server-backed routes are needed:
 
 - `BOS_LISTINGS_DATABASE_URL` — Supabase Mumbai pooler URL with `sslmode=verify-full`
 - `BOS_SERVER_HMAC_SECRET` — 64+ random characters
@@ -18,7 +18,9 @@ Add in **AI Studio → Settings → Secrets**:
 - `VITE_SUPABASE_PUBLISHABLE_KEY` — public publishable/anon key
 - `GEMINI_API_KEY` — usually injected by AI Studio
 
-Then `npm install` and `npm run dev`. The server intentionally fails closed without PostgreSQL.
+Then `npm install` and `npm run dev`. The development frontend preview starts without
+PostgreSQL; readiness reports unavailable until a database is configured. Production
+still fails closed without PostgreSQL and the server HMAC secret.
 
 ## Full local development
 
@@ -31,7 +33,8 @@ npm test            # unit/API tests
 npm run e2e         # Playwright Chromium
 ```
 
-`npm run dev` starts the server directly and expects a configured PostgreSQL URL; use `dev:local` on a developer machine.
+`npm run dev` starts the server directly. Set `BOS_LISTINGS_DATABASE_URL` for
+server-backed development routes, or use `dev:local` on a developer machine.
 
 ## Native
 
