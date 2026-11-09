@@ -43,6 +43,8 @@ import { SectionStyleTabs, type SectionStyleNumber } from './sectionStyle/Sectio
 import { saveStylePreference } from '../lib/sectionStyleSettings';
 import { StyleThreeList } from './sectionStyle/StyleThreeList';
 import type { MarketplaceListing } from '../types/marketplace';
+import { canContactOwner } from '../lib/servicesStayRules';
+import { useOwnerContact } from '../lib/useOwnerContact';
 
 interface ClassesTimingsExperienceProps {
   onClose: () => void;
@@ -185,7 +187,7 @@ function liveBatchFee(batch: ClassBatch): number {
 }
 
 /** Replace displayed demo timing/price metadata with the live PostgreSQL calendar. */
-function applyLiveBatches(course: CourseListing, batches: ClassBatch[]): CourseListing {
+export function applyLiveBatches(course: CourseListing, batches: ClassBatch[]): CourseListing {
   if (batches.length === 0) return course;
   const first = batches[0];
   const timings: BatchTiming[] = batches.map((batch) => ({
@@ -196,14 +198,17 @@ function applyLiveBatches(course: CourseListing, batches: ClassBatch[]): CourseL
     label: `${timeLabel(batch.startTime)} – ${timeLabel(batch.endTime)}`,
   }));
   const modes = Array.from(new Set(batches.map(liveBatchMode)));
+  const onlineBatches = batches.filter((batch) => batch.deliveryMode === 'online' || batch.deliveryMode === 'recorded');
+  const offlineBatches = batches.filter((batch) => batch.deliveryMode === 'offline' || batch.deliveryMode === 'hybrid');
   const feePlans: FeePlan[] = [];
-  if (modes.includes('Online') || modes.includes('Recorded')) {
-    feePlans.push({ label: 'Online fee', amount: first.onlineFee, unit: first.feeUnit as FeePlan['unit'], mode: 'Online' });
+  if (onlineBatches.length) {
+    feePlans.push({ label: 'Online fee', amount: Math.min(...onlineBatches.map((batch) => batch.onlineFee)), unit: first.feeUnit as FeePlan['unit'], mode: 'Online' });
   }
-  if (modes.includes('Offline') || modes.includes('Hybrid')) {
-    feePlans.push({ label: 'Offline fee', amount: first.offlineFee, unit: first.feeUnit as FeePlan['unit'], mode: 'Offline' });
+  const offlineFees = offlineBatches.map((batch) => batch.offlineFee).filter((fee) => fee > 0);
+  if (offlineFees.length) {
+    feePlans.push({ label: 'Offline fee', amount: Math.min(...offlineFees), unit: first.feeUnit as FeePlan['unit'], mode: 'Offline' });
   }
-  const fee = liveBatchFee(first);
+  const fee = Math.min(...batches.map(liveBatchFee));
   const seatsLeft = batches.reduce((total, batch) => total + Math.max(0, batch.seatsLeft), 0);
   return {
     ...course,
@@ -374,7 +379,21 @@ function PosterTile({ icon, label, value, note }: { icon: React.ReactNode; label
   );
 }
 
-function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClose: () => void; onEnroll: () => void }) {
+function CourseDetail({
+  item,
+  onClose,
+  onEnroll,
+  onWhatsApp,
+  whatsappAvailable,
+  whatsappBusy,
+}: {
+  item: CourseListing;
+  onClose: () => void;
+  onEnroll: () => void;
+  onWhatsApp: () => void;
+  whatsappAvailable: boolean;
+  whatsappBusy: boolean;
+}) {
   const [reviews, setReviews] = useState<CourseReviewEntry[]>(() => loadCourseReviews(item.id));
   const [showReview, setShowReview] = useState(false);
   const [reviewName, setReviewName] = useState('');
@@ -388,10 +407,6 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
     : null;
   const displayRating = localAverage ?? item.rating;
   const displayReviewCount = (item.reviews ?? 0) + reviews.length;
-  const phone = (item.providerPhone || '').replace(/\D/g, '');
-  const whatsappText = `Hi ${item.provider || 'there'}, I am interested in "${item.title}" at ${item.area}${item.city ? `, ${item.city}` : ''}. Is a demo/trial available?`;
-  const whatsappHref = `https://wa.me/${phone}?text=${encodeURIComponent(whatsappText)}`;
-
   const share = async () => {
     const url = window.location.href;
     try {
@@ -573,9 +588,9 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[10.5px] font-bold text-[#1e1b4b]">Level: <span className="font-black text-[#6d28d9]">{levelLabel}</span></p>
-                <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-3 py-1.5 text-[9.5px] font-black text-slate-950 shadow-sm hover:bg-amber-300">
+                <button type="button" onClick={onWhatsApp} disabled={!whatsappAvailable || whatsappBusy} className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-3 py-1.5 text-[9.5px] font-black text-slate-950 shadow-sm hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50">
                   <PlayCircle className="h-3.5 w-3.5" /> {trialLabel}
-                </a>
+                </button>
               </div>
             </div>
           </div>
@@ -666,9 +681,9 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
         {/* Fixed bottom bar: WhatsApp, Review, Enroll */}
         <footer className="shrink-0 border-t border-[#ece8fb] bg-white p-2.5 sm:p-3">
           <div className="grid grid-cols-3 gap-2">
-            <a href={whatsappHref} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp about this course" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-[11px] font-black text-emerald-800 hover:bg-emerald-100">
+            <button type="button" onClick={onWhatsApp} disabled={!whatsappAvailable || whatsappBusy} aria-label="WhatsApp about this course" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-[11px] font-black text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">
               <MessageCircle className="h-4 w-4" /> WhatsApp
-            </a>
+            </button>
             <button type="button" onClick={focusReviews} aria-label="Review this course" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[#7c3aed]/30 bg-[#f5f3ff] text-[11px] font-black text-[#6d28d9] hover:bg-[#ede9fe]">
               <Star className="h-4 w-4" /> Review
             </button>
@@ -746,11 +761,16 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
   const [calendarVersion, setCalendarVersion] = useState(0);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
+  const owner = useOwnerContact('classes');
   const providerCourses = useMemo(() => listings
     .filter((listing) => listing.status === 'active' && (listing.categoryId === 'classes' || listing.categoryId.startsWith('class-')))
     .map(mapProviderCourse), [listings]);
   const providerCourseKey = providerCourses.map((course) => course.id).sort().join('|');
   const refreshCalendar = () => setCalendarVersion((version) => version + 1);
+  const openCourse = (course: CourseListing) => {
+    setSelected(course);
+    if (!course.demo) void owner.open(course.id);
+  };
 
   // Discovery reads the real, admin-approved batch calendar for each approved
   // course. A failed call leaves the course visible but without invented seats.
@@ -910,16 +930,16 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
                 price: course.free ? 'Free' : `₹${course.fee.toLocaleString('en-IN')}`,
                 image: course.image || null,
                 badge: course.demo ? 'Sample' : course.verified ? 'Verified' : undefined,
-                onClick: () => setSelected(course),
+                onClick: () => openCourse(course),
               }))}
               emptyLabel="No courses match these filters."
             />
           ) : activeStyle === 'timetable' ? (
-            <ClassTimetable courses={results} onOpen={setSelected} />
+            <ClassTimetable courses={results} onOpen={openCourse} />
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {results.map((c) => (
-                <CourseCard key={c.id} item={c} onOpen={() => setSelected(c)} />
+                <CourseCard key={c.id} item={c} onOpen={() => openCourse(c)} />
               ))}
             </div>
           )}
@@ -931,6 +951,12 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
           key={selected.id}
           item={selected}
           onClose={() => { setSelected(null); setEnrolled(null); }}
+          whatsappAvailable={!selected.demo && canContactOwner(owner.access, owner.details, owner.isSignedIn, 'whatsapp')}
+          whatsappBusy={owner.busy || owner.state === 'loading'}
+          onWhatsApp={() => {
+            const message = `Hi, I am interested in "${selected.title}" at ${selected.area}${selected.city ? `, ${selected.city}` : ''}. Is a demo/trial available?`;
+            void owner.contact('whatsapp', message);
+          }}
           onEnroll={() => {
             if (selected.demo) setEnrolled(selected.id);
             else setEnrollCourse(selected);

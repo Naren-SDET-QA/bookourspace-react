@@ -8,6 +8,7 @@ import {
   listingImageSources,
   MEDIA_URL_TTL_SECONDS,
   parseStorageObjectReference,
+  storageReferenceForSource,
 } from '../src/lib/media/signedStorageUrl.ts';
 
 test('listing image sources keep original HTTPS photos and ready public Storage refs', () => {
@@ -69,6 +70,26 @@ test('storage references accept only approved buckets and safe canonical object 
     'storage://bos-public-media/user/file.png?token=unsafe',
     'storage://bos-public-media/user\\file.png',
   ]) assert.equal(parseStorageObjectReference(value), null, value);
+});
+
+test('Supabase object URLs normalize to canonical refs, including relative paths', () => {
+  const projectUrl = 'https://obkfgxjzlscungkhbyvq.supabase.co';
+  assert.equal(
+    storageReferenceForSource('/storage/v1/object/bos-public-media/owner/listing/original.jpg?download=1', projectUrl),
+    'storage://bos-public-media/owner/listing/original.jpg',
+  );
+  assert.equal(
+    storageReferenceForSource(`${projectUrl}/storage/v1/object/public/bos-public-media/owner/listing/original.jpg`, projectUrl),
+    'storage://bos-public-media/owner/listing/original.jpg',
+  );
+  assert.equal(
+    storageReferenceForSource('/storage/v1/object/bos-private-documents/owner/id.pdf', projectUrl),
+    'storage://bos-private-documents/owner/id.pdf',
+  );
+  assert.equal(
+    storageReferenceForSource('https://other.supabase.co/storage/v1/object/public/bos-public-media/owner/listing/original.jpg', projectUrl),
+    null,
+  );
 });
 
 test('signed URLs are in-memory cached, deduplicated, and can be explicitly refreshed', async () => {

@@ -312,6 +312,13 @@ export async function startStaysHarness(options: {
     for (const migration of migrations) {
       await psql(['-f', path.join(migrationDir, migration)]);
     }
+    // The local roles need the same public listing read grant that hosted
+    // Supabase supplies alongside its RLS policy. Keep this limited to the
+    // disposable harness; no hosted policy or grant is changed.
+    await psql(['-c', `grant select on public.listings to anon, authenticated;
+      grant select (id, owner_id, parent_type, parent_id, bucket_id, object_path,
+                    variants, privacy, processing_status, display_order, created_at)
+        on public.media_assets to anon, authenticated`]);
 
     pool = new Pool({ connectionString, max: 4 });
     const users = Object.values(USERS);

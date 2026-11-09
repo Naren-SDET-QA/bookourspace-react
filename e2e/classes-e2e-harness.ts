@@ -295,6 +295,10 @@ export async function startClassesHarness(): Promise<ClassesHarness> {
     for (const migration of migrations) {
       await psql(['-f', path.join(migrationDir, migration)]);
     }
+    // The disposable cluster uses the same anon/authenticated roles as the
+    // hosted RLS contract. Grant only the public read surface needed by the
+    // real marketplace query; hosted grants/policies are never changed here.
+    await psql(['-c', 'grant select on public.listings, public.media_assets to anon, authenticated']);
 
     pool = new Pool({ connectionString, max: 4 });
     const users = Object.values(USERS);

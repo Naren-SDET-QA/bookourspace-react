@@ -28,6 +28,8 @@ if (engineInstalled(webkit)) projects.push({ name: 'webkit', use: { browserName:
 // 4517. The isolated webServer below starts a local-only app on this port.
 const localWebPort = process.env.BOS_PLAYWRIGHT_PORT || '4547';
 const localViteCacheDir = process.env.BOS_VITE_CACHE_DIR || `/tmp/bookourspace-react-vite-${localWebPort}`;
+const localDbPort = process.env.BOS_PLAYWRIGHT_DB_PORT || String(Number(localWebPort) + 10_000);
+const localDbDataDir = process.env.BOS_PLAYWRIGHT_DB_DATA_DIR || `/tmp/bookourspace-playwright-db-${localWebPort}`;
 const defaultBaseURL = `http://127.0.0.1:${localWebPort}`;
 const externalBaseURL = process.env.E2E_BASE_URL;
 
@@ -59,7 +61,10 @@ export default defineConfig({
   // run; never reuse a server owned by another workspace or agent. An explicit
   // E2E_BASE_URL remains caller-owned and is not replaced by a local process.
   webServer: externalBaseURL ? undefined : {
-    command: 'npm run dev:web',
+    // The browser suite includes location-directory and stay journeys. The
+    // existing local harness seeds both into a throwaway PostgreSQL cluster;
+    // this is test infrastructure, not the normal no-PostgreSQL dev preview.
+    command: 'npm run dev:local',
     url: defaultBaseURL,
     reuseExistingServer: false,
     timeout: 120_000,
@@ -68,7 +73,13 @@ export default defineConfig({
       ...(process.env.BOS_DEV_DB_PORT ? { BOS_DEV_DB_PORT: process.env.BOS_DEV_DB_PORT } : {}),
       ...(process.env.BOS_LISTINGS_DATABASE_URL ? { BOS_LISTINGS_DATABASE_URL: process.env.BOS_LISTINGS_DATABASE_URL } : {}),
       PORT: localWebPort,
+      BOS_DEV_DB_PORT: localDbPort,
+      BOS_DEV_DB_DATA_DIR: localDbDataDir,
       BOS_VITE_CACHE_DIR: localViteCacheDir,
+      // SafeImage and module smoke tests use clearly labelled local fixtures.
+      // This flag is injected only into the isolated Playwright server and is
+      // never part of the production build configuration.
+      VITE_ENABLE_DEMO_DATA: 'true',
       // Keep browser tests stable when another local task is editing source:
       // HMR can replace a lazy module during a journey and reset React state.
       // Vite still serves the current modules; only its websocket reload path

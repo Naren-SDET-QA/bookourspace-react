@@ -35,24 +35,28 @@ export function parseStorageObjectReference(value: string): StorageObjectReferen
 export function isSupabaseStorageSource(value: string): boolean {
   if (value.startsWith('storage://')) return true;
   try {
-    return /\/storage\/v1\/object\/(?:public|sign|authenticated)\//.test(new URL(value).pathname);
+    const url = value.startsWith('/')
+      ? new URL(value, SUPABASE_PROJECT_URL)
+      : new URL(value);
+    return /\/storage\/v1\/object\/(?:public|sign|authenticated|[^/]+)\//.test(url.pathname);
   } catch {
     return false;
   }
 }
 
-function storageReferenceForSource(value: string): string | null {
+export function storageReferenceForSource(value: string, projectUrl = SUPABASE_PROJECT_URL): string | null {
   if (value.startsWith('storage://')) return parseStorageObjectReference(value) ? value : null;
   let url: URL;
   let configuredOrigin: string;
   try {
-    url = new URL(value);
-    configuredOrigin = new URL(SUPABASE_PROJECT_URL).origin;
+    configuredOrigin = new URL(projectUrl).origin;
+    url = new URL(value, configuredOrigin);
   } catch {
     return null;
   }
   if (!configuredOrigin || url.origin !== configuredOrigin) return null;
-  const match = url.pathname.match(/^\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/);
+  const match = url.pathname.match(/^\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/)
+    || url.pathname.match(/^\/storage\/v1\/object\/([^/]+)\/(.+)$/);
   if (!match) return null;
   try {
     const bucket = decodeURIComponent(match[1]);
@@ -85,6 +89,9 @@ export function isRenderableListingImageSource(value: unknown): value is string 
   if (LOCAL_LISTING_ASSET.test(source) && !source.includes('..')) return true;
   if (source.startsWith('storage://')) {
     return parseStorageObjectReference(source)?.bucket === 'bos-public-media';
+  }
+  if (source.startsWith('/storage/v1/object/')) {
+    return isPublicImageStorageSource(source);
   }
   try {
     const url = new URL(source);
