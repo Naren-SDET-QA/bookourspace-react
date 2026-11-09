@@ -9,6 +9,8 @@ import {
   CalendarDays,
   Copy,
   MessageCircle,
+  Monitor,
+  PlayCircle,
   Share2,
   Check,
   Clock,
@@ -361,6 +363,17 @@ function DetailTile({ icon, label, value }: { icon: React.ReactNode; label: stri
   );
 }
 
+function PosterTile({ icon, label, value, note }: { icon: React.ReactNode; label: string; value: string; note?: string }) {
+  return (
+    <div className="flex min-w-0 flex-col items-center rounded-xl px-1.5 py-2 text-center">
+      <span className="mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#f3e8ff] text-[#6d28d9]">{icon}</span>
+      <span className="text-[10.5px] font-black leading-3 text-[#1e1b4b]">{label}</span>
+      <span className="mt-0.5 line-clamp-2 text-[9.5px] font-semibold leading-3 text-[#64748b]">{value}</span>
+      {note && <span className="mt-0.5 text-[8.5px] font-bold leading-3 text-[#dc2626]">{note}</span>}
+    </div>
+  );
+}
+
 function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClose: () => void; onEnroll: () => void }) {
   const [reviews, setReviews] = useState<CourseReviewEntry[]>(() => loadCourseReviews(item.id));
   const [showReview, setShowReview] = useState(false);
@@ -428,6 +441,29 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
   const capacityText = item.seats !== null
     ? `${item.seats} ${item.liveCalendar ? 'seats left' : 'students'}`
     : 'Capacity on request';
+  const providerInitials = (item.provider || 'BOS').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+  const modeLabel = (mode: CourseMode) => mode === 'Online'
+    ? 'Live Online'
+    : mode === 'Offline'
+      ? `Classroom${item.area ? ` (${item.area})` : ''}`
+      : mode === 'Hybrid'
+        ? 'Hybrid (Classroom + Online)'
+        : mode === 'Recorded'
+          ? 'Recorded'
+          : mode;
+  const modeChips: Array<{ label: string; icon: React.ReactNode }> = [];
+  for (const mode of [item.mode, ...item.modeOptions]) {
+    if (!mode || mode === 'Not specified') continue;
+    const label = modeLabel(mode);
+    if (modeChips.some((chip) => chip.label === label)) continue;
+    modeChips.push({
+      label,
+      icon: mode === 'Online' ? <Video className="h-3.5 w-3.5" /> : mode === 'Hybrid' ? <Monitor className="h-3.5 w-3.5" /> : <Building2 className="h-3.5 w-3.5" />,
+    });
+  }
+  const trialLabel = item.demo ? 'Free Trial Available' : 'Free Trial on Request';
+  const levelLabel = item.ageGroup || item.eligibility || 'Beginner to Job-Ready';
+  const firstBatch = item.batches[0];
 
   return (
     <div data-testid="class-detail-modal" className="fixed inset-0 z-[95] flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="course-title" onClick={onClose}>
@@ -460,68 +496,98 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
         {shareNote && <div aria-live="polite" className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-1.5 text-[10.5px] font-bold text-emerald-800">{shareNote}</div>}
 
         {/* Scrollable content */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="relative">
-            <SafeImage src={item.image} alt={item.title} category="classes" className="h-52 w-full object-cover sm:h-64" sizes="(max-width: 640px) 100vw, 768px" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
-            <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-black text-[#4c1d95] shadow-sm">
-              <BadgeCheck className="h-3 w-3" /> {item.verified ? 'Verified provider' : 'Admin approved listing'}
-            </span>
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[#fbfaff]">
+          <div className="relative overflow-hidden bg-gradient-to-br from-[#f5f0ff] via-white to-[#fff1f8] px-4 pb-5 pt-4 sm:px-5">
+            <div aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-violet-200/50 blur-3xl" />
+            <div aria-hidden className="pointer-events-none absolute -bottom-16 -left-12 h-40 w-40 rounded-full bg-fuchsia-200/40 blur-3xl" />
+
+            <div className="relative">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-[15px] font-black text-[#6d28d9] shadow-sm ring-1 ring-violet-100">{providerInitials}</span>
+                  <div className="min-w-0">
+                    <p className="truncate text-[15px] font-black leading-4 text-[#2e1065]">{item.provider || 'BookOurSpace Training'}</p>
+                    <p className="text-[9.5px] font-semibold text-[#7c3aed]">Verified training provider · {item.city || 'India'}</p>
+                  </div>
+                </div>
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-amber-200 bg-white px-2 py-1 text-[8.5px] font-black leading-3 text-amber-800 shadow-sm">
+                  <Award className="h-3.5 w-3.5 text-amber-500" /> {item.verified ? 'Verified' : 'Training'} Institute
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 id="course-title" className="text-[22px] font-black leading-6 text-[#2e1065] sm:text-[26px] sm:leading-7">{item.title}</h2>
+                  <p className="mt-1 text-[11px] font-semibold text-[#64748b]">{item.provider} · {item.category}</p>
+                </div>
+                <div className="relative shrink-0 pt-2">
+                  <span className="absolute -top-0.5 left-2 rounded-md bg-amber-400 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-slate-950 shadow-sm">Course Fee</span>
+                  <div className="min-w-[116px] rounded-2xl bg-gradient-to-br from-[#6d28d9] to-[#4c1d95] px-3.5 pb-2 pt-4 text-right text-white shadow-lg">
+                    <div className="text-[22px] font-black leading-6">{item.free ? 'Free' : formatINR(item.fee)}</div>
+                    {!item.free && <div className="text-[9px] font-bold text-violet-100">onwards</div>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {modeChips.map((chip) => (
+                  <span key={chip.label} className="inline-flex items-center gap-1 rounded-full border border-violet-100 bg-white/90 px-2.5 py-1 text-[9.5px] font-bold text-[#4c1d95] shadow-sm">
+                    <span className="text-[#7c3aed]">{chip.icon}</span> {chip.label}
+                  </span>
+                ))}
+              </div>
+
+              <div className="mt-3 grid grid-cols-3 divide-x divide-violet-100 rounded-xl border border-violet-100 bg-white/90 py-2 shadow-sm">
+                <div className="flex min-w-0 items-center gap-1.5 px-2">
+                  <MapPin className="h-4 w-4 shrink-0 text-[#7c3aed]" />
+                  <span className="line-clamp-2 text-[9.5px] font-bold leading-3 text-[#1e1b4b]">{[item.area, item.city].filter(Boolean).join(', ') || 'Location on request'}</span>
+                </div>
+                <div className="flex min-w-0 items-center gap-1.5 px-2">
+                  <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" />
+                  <span className="text-[9.5px] font-bold leading-3 text-[#1e1b4b]">{typeof displayRating === 'number' && displayRating > 0 ? `${displayRating.toFixed(1)} (${displayReviewCount} reviews)` : 'New course'}</span>
+                </div>
+                <div className="flex min-w-0 items-center gap-1.5 px-2">
+                  <MapPin className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <span className="text-[9.5px] font-bold leading-3 text-emerald-700">{item.distanceKm !== null ? `${item.distanceKm.toFixed(1)} km away` : 'Distance on request'}</span>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-violet-100 bg-white p-2 shadow-sm">
+                <div className="grid grid-cols-2 divide-x divide-y divide-violet-50 sm:grid-cols-4">
+                  <PosterTile icon={<Users className="h-4 w-4" />} label="Students" value={item.seats !== null ? `${item.seats} students` : 'Open intake'} note={item.seats !== null && item.liveCalendar ? `Seats left: ${item.seats}` : undefined} />
+                  <PosterTile icon={<CalendarDays className="h-4 w-4" />} label="Duration" value={item.duration || 'On request'} />
+                  <PosterTile icon={<Clock className="h-4 w-4" />} label="Timings" value={firstBatch ? firstBatch.days : 'Mon – Sat'} note={firstBatch?.slot} />
+                  <PosterTile icon={<Award className="h-4 w-4" />} label="Certificate" value={item.certification || 'Verified certificate'} />
+                  <PosterTile icon={<Video className="h-4 w-4" />} label="Learning modes" value={modeChips.map((chip) => chip.label).join(' · ') || item.mode} />
+                  <PosterTile icon={<GraduationCap className="h-4 w-4" />} label="Trainers" value={item.faculty.name || 'Real-time corporate trainers'} note={item.faculty.experience || undefined} />
+                  <PosterTile icon={<BadgeCheck className="h-4 w-4" />} label="Level" value={levelLabel} />
+                  <PosterTile icon={<PlayCircle className="h-4 w-4" />} label="Free trial" value={trialLabel} />
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 rounded-full bg-gradient-to-r from-[#6d28d9] via-[#7c3aed] to-[#a21caf] px-3.5 py-2.5 text-white shadow-md">
+                <Users className="h-4 w-4 shrink-0" />
+                <span className="text-[12px] font-black">Real-Time Corporate Trainers</span>
+                <span className="ml-auto hidden truncate text-[8.5px] font-semibold text-violet-100 sm:block">{item.faculty.name || item.provider}</span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[10.5px] font-bold text-[#1e1b4b]">Level: <span className="font-black text-[#6d28d9]">{levelLabel}</span></p>
+                <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-3 py-1.5 text-[9.5px] font-black text-slate-950 shadow-sm hover:bg-amber-300">
+                  <PlayCircle className="h-3.5 w-3.5" /> {trialLabel}
+                </a>
+              </div>
+            </div>
           </div>
 
-          <div className="p-4 sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <h2 id="course-title" className="text-lg font-black leading-tight text-[#1e1b4b] sm:text-xl">{item.title}</h2>
-                <p className="mt-1 text-[12px] font-semibold text-[#64748b]">{item.provider} · {[item.area, item.city].filter(Boolean).join(', ')}</p>
-              </div>
-              <div className="rounded-2xl bg-[#f5f3ff] px-3.5 py-2 text-right">
-                <span className="text-[8.5px] font-black uppercase tracking-wider text-[#7c3aed]">Pricing</span>
-                <div className="text-xl font-black text-[#1e1b4b]">{item.free ? 'Free' : formatINR(item.fee)}</div>
-                {!item.free && <div className="text-[9.5px] font-bold text-[#6d28d9]">{item.feeUnit === 'course' ? 'onwards' : unitLabel(item.feeUnit)}</div>}
-              </div>
-            </div>
-
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] font-semibold text-[#64748b]">
-              <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 text-[#7c3aed]" /> {[item.area, item.city].filter(Boolean).join(', ')}</span>
-              {typeof displayRating === 'number' && displayRating > 0 && (
-                <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {displayRating.toFixed(1)} ({displayReviewCount} reviews)</span>
-              )}
-              {item.distanceKm !== null && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 text-[#7c3aed]" /> {item.distanceKm.toFixed(1)} km away</span>}
-              <button type="button" onClick={() => void share()} className="inline-flex items-center gap-1 text-[#6d28d9] underline-offset-2 hover:underline"><Copy className="h-3 w-3" /> Copy link</button>
-            </div>
-
-            <section className="mt-4">
+          <div className="space-y-3 px-4 pb-5 pt-3 sm:px-5">
+            <section>
               <h3 className="text-[10px] font-black uppercase tracking-wider text-[#94a3b8]">Description & details</h3>
               <p className="mt-1 text-[12px] leading-5 text-[#475569]">{item.description || 'Course details are provided by the training provider.'}</p>
             </section>
 
-            <section className="mt-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-[13px] font-black text-[#1e1b4b]">Classes & Courses Details</h3>
-                <div className="flex flex-wrap gap-1">
-                  {item.verified && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-700">Admin approved</span>}
-                  {item.demo && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-black text-amber-700">Demo listing</span>}
-                </div>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-3">
-                <DetailTile icon={<Building2 className="h-2.5 w-2.5" />} label="Delivery mode" value={item.mode} />
-                <DetailTile icon={<MapPin className="h-2.5 w-2.5" />} label="Platform / campus" value={[item.area, item.city].filter(Boolean).join(', ') || 'Not provided'} />
-                <DetailTile icon={<Users className="h-2.5 w-2.5" />} label="Batch capacity" value={capacityText} />
-                <DetailTile icon={<Users className="h-2.5 w-2.5" />} label="Age group & level" value={item.ageGroup || 'All learners'} />
-                <DetailTile icon={<CalendarDays className="h-2.5 w-2.5" />} label="Course duration" value={item.duration || 'Contact provider'} />
-                <DetailTile icon={<Clock className="h-2.5 w-2.5" />} label="Timings & days" value={timingText} />
-                <DetailTile icon={<Star className="h-2.5 w-2.5" />} label="Fee & installments" value={item.feePlans.length ? item.feePlans.map((plan) => `${plan.label}: ${plan.amount === 0 ? 'Free' : `${formatINR(plan.amount)}${unitLabel(plan.unit)}`}`).join(' · ') : (item.free ? 'Free' : courseFeeLabel(item))} />
-                <DetailTile icon={<Award className="h-2.5 w-2.5" />} label="Certificate" value={item.certification || 'Provider certificate'} />
-                <DetailTile icon={<BadgeCheck className="h-2.5 w-2.5" />} label="Eligibility" value={item.eligibility || 'Open to all'} />
-                {item.startDate && <DetailTile icon={<CalendarDays className="h-2.5 w-2.5" />} label="Starts" value={item.startDate} />}
-                {item.modeOptions.length > 0 && <DetailTile icon={<Video className="h-2.5 w-2.5" />} label="Available modes" value={item.modeOptions.join(' · ')} />}
-                <DetailTile icon={<GraduationCap className="h-2.5 w-2.5" />} label="Faculty" value={[item.faculty.name, item.faculty.experience].filter(Boolean).join(' · ') || 'Real-time corporate trainers'} />
-              </div>
-            </section>
-
             {item.batches.length > 0 && (
-              <div className="mt-4 rounded-2xl border border-[#ece8fb] p-3">
+              <div className="rounded-2xl border border-[#ece8fb] p-3">
                 <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Batches & timings</h3>
                 <div className="mt-1.5 space-y-1.5">
                   {item.batches.map((batch) => (
@@ -534,8 +600,22 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
               </div>
             )}
 
+            {item.feePlans.length > 0 && (
+              <div className="rounded-2xl border border-[#ece8fb] p-3">
+                <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Fee plans</h3>
+                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+                  {item.feePlans.map((plan) => (
+                    <div key={plan.label} className="flex items-center justify-between rounded-lg border border-[#ece8fb] px-2.5 py-1.5">
+                      <span className="text-[11px] font-semibold text-[#475569]">{plan.label}</span>
+                      <span className="text-[12px] font-extrabold text-[#6d28d9]">{plan.amount === 0 ? 'Free' : `${formatINR(plan.amount)}${unitLabel(plan.unit)}`}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {(item.faculty.name || item.faculty.photo || item.verified) && (
-              <div className="mt-4 rounded-2xl border border-[#ece8fb] bg-[#faf9ff] p-3">
+              <div className="rounded-2xl border border-[#ece8fb] bg-[#faf9ff] p-3">
                 <h3 className="inline-flex items-center gap-1 text-[12px] font-extrabold text-[#1e1b4b]"><Award className="h-3.5 w-3.5 text-[#7c3aed]" /> Verified teacher credentials</h3>
                 <div className="mt-2 flex items-center gap-2">
                   {item.faculty.photo ? (
@@ -551,7 +631,7 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
               </div>
             )}
 
-            <div ref={reviewRef} id="course-reviews" className="mt-4 scroll-mt-4 rounded-2xl border border-[#ece8fb] p-3">
+            <div ref={reviewRef} id="course-reviews" className="scroll-mt-4 rounded-2xl border border-[#ece8fb] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-[12px] font-extrabold text-[#1e1b4b]">Reviews</h3>
@@ -596,7 +676,6 @@ function CourseDetail({ item, onClose, onEnroll }: { item: CourseListing; onClos
             </div>
           </div>
         </div>
-
         {/* Fixed bottom bar: WhatsApp, Review, Enroll */}
         <footer className="shrink-0 border-t border-[#ece8fb] bg-white p-2.5 sm:p-3">
           <div className="grid grid-cols-3 gap-2">
