@@ -270,9 +270,26 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
         if (!host.rows[0]) return { missing: true as const };
         const listings = await client.query(
           `select l.id as listing_id, sp.name, sp.property_type, sp.place_type, sp.city, sp.area,
-                  sp.base_price_paise, sp.guest_favourite, l.payload
+                  sp.base_price_paise, sp.guest_favourite,
+                  jsonb_set(
+                    coalesce(l.payload, '{}'::jsonb), '{images}',
+                    coalesce(media.images, '[]'::jsonb), true
+                  ) as payload
              from public.stay_properties sp
              join public.listings l on l.id = sp.listing_id
+             left join lateral (
+               select jsonb_agg(
+                        'storage://' || asset.bucket_id || '/' || asset.object_path
+                        order by asset.display_order, asset.created_at, asset.id
+                      ) as images
+                 from public.media_assets asset
+                where asset.owner_id = l.owner_id
+                  and asset.parent_type = 'provider_listing'
+                  and asset.parent_id = l.id
+                  and asset.bucket_id = 'bos-public-media'
+                  and asset.privacy = 'public'
+                  and asset.processing_status = 'ready'
+             ) media on true
             where sp.owner_user_id = $1 and sp.is_active and l.status = 'active'
               and l.is_verified is true and l.verified_by is not null
               and l.payload->>'stayLifecycle' = 'approved'
@@ -549,7 +566,11 @@ async function runSearch(
         p.cleaning_fee_paise, p.service_fee_bps, p.owner_user_id as host_id,
         public.stay_accessibility_keys(p.accessibility) as accessibility_keys,
         public.stay_language_keys(p.host_languages) as language_keys,
-        l.title as listing_title, l.price as listing_price, l.price_unit, l.payload,
+        l.title as listing_title, l.price as listing_price, l.price_unit,
+        jsonb_set(
+          coalesce(l.payload, '{}'::jsonb), '{images}',
+          coalesce(media.images, '[]'::jsonb), true
+        ) as payload,
         host.full_name as host_name, host.avatar_url as host_avatar_url,
         stats.min_price_paise, stats.room_count, stats.room_types,
         stats.max_guests, stats.max_bedrooms, stats.max_beds, stats.max_bathrooms,
@@ -561,6 +582,19 @@ async function runSearch(
         and l.is_verified is true and l.verified_by is not null
         and l.payload->>'stayLifecycle' = 'approved'
       join public.public_provider_profile_projection host on host.id = p.owner_user_id and host.verified is true
+      left join lateral (
+        select jsonb_agg(
+                 'storage://' || asset.bucket_id || '/' || asset.object_path
+                 order by asset.display_order, asset.created_at, asset.id
+               ) as images
+          from public.media_assets asset
+         where asset.owner_id = l.owner_id
+           and asset.parent_type = 'provider_listing'
+           and asset.parent_id = l.id
+           and asset.bucket_id = 'bos-public-media'
+           and asset.privacy = 'public'
+           and asset.processing_status = 'ready'
+      ) media on true
       left join lateral (
         select
           min(rt.base_price_paise) as min_price_paise,

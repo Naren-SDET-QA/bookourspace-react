@@ -4,6 +4,7 @@ import { ArrowLeft, CalendarDays, CheckCircle2, LockKeyhole, ShieldCheck, Users 
 import type { StayProperty } from '../../lib/stayDiscoveryData';
 import { fetchStayBookingReceipt, formatPaise, type StayQuote, type StayReceipt } from '../../lib/stayCheckoutClient';
 import { StayCheckoutPanel } from '../StayCheckoutPanel';
+import SafeImage from '../SafeImage';
 import { StayReceiptModal } from './StayReceiptModal';
 
 function formatDate(iso: string): string {
@@ -327,7 +328,7 @@ export function StayCheckoutPage({
           <div className="rounded-2xl border border-[#ebebeb] p-4 shadow-sm dark:border-slate-800">
             <div className="flex gap-3">
               {image ? (
-                <img src={image} alt={property.name} className="h-20 w-24 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                <SafeImage category="stays" src={image} alt={property.name} className="h-20 w-24 rounded-xl object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <div className="h-20 w-24 rounded-xl bg-[#f2f0ee] dark:bg-slate-800" />
               )}

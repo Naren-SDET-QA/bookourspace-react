@@ -18,3 +18,7 @@ View your app in AI Studio: https://ai.studio/apps/7e78b4bb-8c86-4499-b419-b61d2
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+The development frontend preview does not require PostgreSQL. Server-backed
+development routes use `BOS_LISTINGS_DATABASE_URL` or `BOS_PG_URL` when either
+variable is configured.
