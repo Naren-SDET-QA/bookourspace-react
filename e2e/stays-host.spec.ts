@@ -74,6 +74,13 @@ async function openApp(browser: Browser, token: string): Promise<{ page: Page; c
   return { page, context };
 }
 
+async function closeApp(context: BrowserContext): Promise<void> {
+  // Stop new route callbacks immediately. A slow API request must not consume
+  // the whole test timeout while Playwright waits for context disposal.
+  await context.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => undefined);
+  await context.close().catch(() => undefined);
+}
+
 async function api(path: string, token: string, init: RequestInit = {}) {
   const response = await fetch(`${harness.apiUrl}${path}`, {
     ...init,
@@ -139,7 +146,7 @@ test('host edits room pricing and the public search immediately reflects it', as
     expect(search.body.ok, JSON.stringify(search.body)).toBe(true);
     expect(search.body.items[0].priceFromPaise).toBe(260000);
   } finally {
-    await context.close();
+    await closeApp(context);
   }
 });
 
@@ -190,7 +197,7 @@ test('host checks a guest in, collects payment, checks out and the guest reviews
     expect(publicReviews.body.reviewCount).toBe(3);
   } finally {
     await page.goto('about:blank').catch(() => undefined);
-    await context.close();
+    await closeApp(context);
   }
 });
 
@@ -271,7 +278,7 @@ test('request-to-book holds inventory, host approves, guest self checks in and o
     await dialog.getByRole('button', { name: 'Approve request' }).first().click();
     await expect(dialog).toContainText('Request approved', { timeout: 20_000 });
   } finally {
-    await context.close();
+    await closeApp(context);
   }
 
   const approved = await harness.query(`select status, payment_status from public.bookings where id = $1`, [bookingId]);
@@ -289,7 +296,7 @@ test('request-to-book holds inventory, host approves, guest self checks in and o
     await trips.getByRole('button', { name: 'Self check-out' }).first().click();
     await expect(trips).toContainText('Checkout complete', { timeout: 20_000 });
   } finally {
-    await guestContext.close();
+    await closeApp(guestContext);
   }
   const completed = await harness.query(`select status from public.bookings where id = $1`, [bookingId]);
   expect(completed[0].status).toBe('completed');
@@ -424,6 +431,6 @@ test('guest sends a request from the detail panel and opens the host profile', a
     const body = await profile.innerText();
     expect(body).not.toMatch(/@example|phone|email/i);
   } finally {
-    await context.close().catch(() => undefined);
+    await closeApp(context);
   }
 });
