@@ -91,9 +91,13 @@ test('Google AI Studio-style preview signs real venue media in the Halls shell',
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ signedURL: '/assets/fallbacks/venues.svg' }),
+      body: JSON.stringify({ signedURL: '/assets/aistudio/WhatsApp_Image_2026-10-17_at_7.17.13_PM_64b54ca7.jpeg' }),
     });
   });
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/assets/aistudio/**', (route) => route.fulfill({
+    path: 'public/assets/aistudio/WhatsApp_Image_2026-10-17_at_7.17.13_PM_64b54ca7.jpeg',
+    contentType: 'image/jpeg',
+  }));
   await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/rest/v1/media_assets**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -132,7 +136,9 @@ test('Google AI Studio-style preview signs real venue media in the Halls shell',
   await agendaImages.first().scrollIntoViewIfNeeded();
   expect(signedRequests, 'AI Studio preview must request a signed Storage URL').toBeGreaterThan(0);
   await expect(agendaImages.first()).toHaveAttribute('data-image-source-status', 'authorized-media');
-  await expect(agendaImages.first()).toHaveAttribute('src', /\/assets\/fallbacks\/venues\.svg$/);
+  await expect(agendaImages.first()).toHaveAttribute('src', /\/assets\/aistudio\/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
+  await expect(agendaImages.first()).toHaveAttribute('data-image-state', 'loaded');
+  expect(await agendaImages.first().evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
 
   const signedRequestsBeforeReload = signedRequests;
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -146,7 +152,9 @@ test('Google AI Studio-style preview signs real venue media in the Halls shell',
     timeout: 10_000,
   }).toBeGreaterThan(signedRequestsBeforeReload);
   await expect(reloadedAgendaImage).toHaveAttribute('data-image-source-status', 'authorized-media');
-  await expect(reloadedAgendaImage).toHaveAttribute('src', /\/assets\/fallbacks\/venues\.svg$/);
+  await expect(reloadedAgendaImage).toHaveAttribute('src', /\/assets\/aistudio\/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
+  await expect(reloadedAgendaImage).toHaveAttribute('data-image-state', 'loaded');
+  expect(await reloadedAgendaImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
 });
 
 test('AI Studio preview decodes a re-signed Storage photo at natural size', async ({ page }) => {
