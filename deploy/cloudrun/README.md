@@ -81,15 +81,17 @@ key, or `sb_secret_` key.
 ## 3. Build the image (no deploy)
 
 ```bash
+export SUPABASE_PROJECT_ID="<dedicated production Supabase project ref>"
 export SUPABASE_PUBLISHABLE_KEY="<public publishable/anon key>"
 gcloud builds submit \
   --project "$PROJECT_ID" \
   --config deploy/cloudrun/cloudbuild.yaml \
-  --substitutions "_VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY}"
+  --substitutions "_VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY},_VITE_SUPABASE_PROJECT_ID=${SUPABASE_PROJECT_ID}"
 ```
 
-The build fails if the public Supabase key is still the placeholder. The image
-is pushed to:
+The build fails if the public Supabase key is still the placeholder, and also
+when the project reference is missing, still a placeholder, or one the runtime
+guard designates as a development/legacy project. The image is pushed to:
 
 ```
 asia-south1-docker.pkg.dev/${PROJECT_ID}/bookourspace/api:${SHORT_SHA}
@@ -105,6 +107,7 @@ replaced immediately in step 5.
 ```bash
 export IMAGE="asia-south1-docker.pkg.dev/${PROJECT_ID}/bookourspace/api:<sha>"
 export SERVICE_ACCOUNT="bookourspace-api@${PROJECT_ID}.iam.gserviceaccount.com"
+export SUPABASE_PROJECT_ID="<dedicated production Supabase project ref>"   # required by service.yaml; never the development project
 export SUPABASE_PUBLISHABLE_KEY="<public publishable/anon key>"
 export APP_URL="https://bootstrap.invalid"   # temporary; never documented as canonical
 
@@ -211,7 +214,9 @@ gcloud run services update-traffic "$SERVICE" --region "$REGION" \
 
 - `APP_URL` cannot be known until Cloud Run creates the service; use the
   temporary bootstrap only for the first revision.
-- Supabase pooler URL, HMAC secret and service-role/secret key must be supplied
-  by the owner; they are not in this repository.
+- Supabase production project reference, pooler URL, HMAC secret and
+  service-role/secret key must be supplied by the owner; they are not in this
+  repository. Production startup rejects an undeclared target and refuses the
+  development project.
 - Billing account, project ID, domain/OAuth redirect approval and public-access
   decision are owner inputs.

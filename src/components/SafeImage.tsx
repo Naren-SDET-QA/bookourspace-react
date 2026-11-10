@@ -13,6 +13,27 @@ const fallbackFor: Record<SafeImageCategory, string> = {
   general: '/assets/fallbacks/general.svg',
 };
 
+// These hosts are used only by disposable database/security fixtures. They
+// are intentionally non-routable and must never be requested by a browser.
+// Real listing media continues through the normal HTTPS or signed Storage
+// path below; this is not a general URL allow/deny list.
+const UNAVAILABLE_DEMO_IMAGE_HOSTS = new Set([
+  'images.example.com',
+  'cdn.example.test',
+  'media.example.test',
+]);
+
+export function isKnownUnavailableDemoImageSource(value: unknown): boolean {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    const base = typeof window === 'undefined' ? 'http://localhost/' : window.location.origin;
+    const url = new URL(value.trim(), base);
+    return url.protocol === 'https:' && UNAVAILABLE_DEMO_IMAGE_HOSTS.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 const localResponsiveSets: Record<string, string> = {
   '/assets/optimized/profile-avatar-256.webp':
     '/assets/optimized/profile-avatar-128.webp 128w, /assets/optimized/profile-avatar-256.webp 256w',
@@ -73,6 +94,7 @@ export default function SafeImage({
   ...imageProps
 }: SafeImageProps) {
   const cleanSource = typeof src === 'string' ? src.trim() : '';
+  const unavailableDemoSource = isKnownUnavailableDemoImageSource(cleanSource);
   const localFallback = fallbackFor[category];
   const sizes = requestedSizes || (
     cleanSource.includes('profile-avatar-')
@@ -126,12 +148,14 @@ export default function SafeImage({
   }, [cleanSource, localFallback, resetKey]);
 
   const storageSource = isSupabaseStorageSource(cleanSource);
-  const resolvedSource = fallbackStage === 0
-    ? storageSource ? signedSource || localFallback : cleanSource
+  const resolvedSource = unavailableDemoSource
+    ? localFallback
+    : fallbackStage === 0
+      ? storageSource ? signedSource || localFallback : cleanSource
     : fallbackStage === 1
       ? localFallback
       : fallbackFor.general;
-  const resolvedSrcSet = fallbackStage === 0
+  const resolvedSrcSet = unavailableDemoSource ? undefined : fallbackStage === 0
     ? storageSource
       ? signedSrcSet || undefined
       : srcSet || responsiveSourceSet(cleanSource)
@@ -150,6 +174,7 @@ export default function SafeImage({
       fetchPriority={priority ? 'high' : 'auto'}
       decoding={decoding}
       data-safe-image="true"
+      data-image-source-status={unavailableDemoSource ? 'unavailable-demo-fallback' : storageSource ? 'authorized-media' : 'external-or-local'}
       data-image-state={loaded ? 'loaded' : 'loading'}
       className={`${className} ${loaded ? '' : 'animate-pulse bg-gradient-to-br from-indigo-100 via-white to-amber-100'}`.trim()}
       onLoad={(event) => {

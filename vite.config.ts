@@ -4,12 +4,23 @@ import path from 'node:path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  // Demo fixtures are never injected by the build. Every build — including the
+  // Google AI Studio /app/applet preview — serves real data unless an operator
+  // explicitly opts in through VITE_ENABLE_DEMO_DATA (development) or
+  // VITE_ENABLE_DEMO_DATA plus VITE_AI_STUDIO_DEMO (hosted preview).
+  // Keep the normal localhost server out of Vite's shared node_modules/.vite
+  // cache. Playwright, previews, and another dev server can otherwise rewrite
+  // the optimized Leaflet bundle while a lazy section is importing it, which
+  // produces a transient 504 "Outdated Optimize Dep" and rejects the whole
+  // section import. Tests may still provide an explicit isolated cache dir.
+  const viteCacheDir = process.env.BOS_VITE_CACHE_DIR
+    || path.join(process.cwd(), '.local', `vite-cache-${process.env.PORT || '3000'}`);
   return {
     plugins: [react(), tailwindcss()],
     // Isolate Playwright's optimized dependency cache from the user's regular
     // dev server so concurrent Vite processes cannot invalidate each other's
     // `/node_modules/.vite/deps/*` imports.
-    ...(process.env.BOS_VITE_CACHE_DIR ? { cacheDir: process.env.BOS_VITE_CACHE_DIR } : {}),
+    cacheDir: viteCacheDir,
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

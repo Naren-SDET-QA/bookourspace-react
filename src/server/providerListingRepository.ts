@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { inferLiveEditModule } from '../lib/liveEdit/moduleInference';
 import { LiveEditValidationError, validateListingPatch } from './liveEditValidation';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
-import { closeSharedPostgresPool, getSharedPostgresPool } from './postgresPool';
+import {
+  closeSharedPostgresPool,
+  getSharedPostgresPool,
+  loadApprovedPublicListingMedia,
+} from './postgresPool';
 import { findEmbeddedDataUrl } from './mediaInputGuard';
 
 export interface ProviderListingActor {
@@ -418,6 +422,7 @@ export class ProviderListingRepository {
   private async transaction<T>(
     actor: ProviderListingActor | null,
     operation: (client: PoolClient) => Promise<T>,
+    afterAnonCommit?: (client: PoolClient, result: T) => Promise<T>,
   ): Promise<T> {
     const client = await this.pool.connect();
     try {
@@ -436,6 +441,9 @@ export class ProviderListingRepository {
       await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(claims)]);
       const result = await operation(client);
       await client.query('COMMIT');
+      if (!actor && afterAnonCommit) {
+        return await afterAnonCommit(client, result);
+      }
       return result;
     } catch (error) {
       try {
@@ -843,31 +851,31 @@ export class ProviderListingRepository {
       values.push(filters.maxPrice);
       clauses.push(`l.price <= $${values.length}`);
     }
-    return this.transaction(null, async (client) => {
-      const { rows } = await client.query(
-        `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone,
-                coalesce(media.images, '[]'::jsonb) as public_media_images
-           from public.listings l
-           left join lateral (
-             select jsonb_agg(
-                      'storage://' || asset.bucket_id || '/' || asset.object_path
-                      order by asset.display_order, asset.created_at, asset.id
-                    ) as images
-               from public.media_assets asset
-              where asset.owner_id = l.owner_id
-                and asset.parent_type = 'provider_listing'
-                and asset.parent_id = l.id
-                and asset.bucket_id = 'bos-public-media'
-                and asset.privacy = 'public'
-                and asset.processing_status = 'ready'
-           ) media on true
-          where ${clauses.join(' and ')}
-          order by l.updated_at desc, l.id
-          limit 500`,
-        values,
-      );
-      return rows.map(toRecord);
-    });
+    return this.transaction(
+      null,
+      async (client) => {
+        const { rows } = await client.query(
+          `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone
+             from public.listings l
+            where ${clauses.join(' and ')}
+            order by l.updated_at desc, l.id
+            limit 500`,
+          values,
+        );
+        return rows.map(toRecord);
+      },
+      async (client, records) => {
+        const mediaByListingId = await loadApprovedPublicListingMedia(
+          client,
+          records.map((record) => record.id),
+        );
+        if (mediaByListingId.size === 0) return records;
+        return records.map((record) => ({
+          ...record,
+          payload: mergeReadyPublicListingMedia(record.payload, mediaByListingId.get(record.id) || []),
+        }));
+      },
+    );
   }
 
   /**
@@ -876,30 +884,29 @@ export class ProviderListingRepository {
    */
   async findPublicById(listingId: string): Promise<ProviderListingRecord | null> {
     if (!listingId) return null;
-    return this.transaction(null, async (client) => {
-      const { rows } = await client.query(
-        `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone,
-                coalesce(media.images, '[]'::jsonb) as public_media_images
-           from public.listings l
-           left join lateral (
-             select jsonb_agg(
-                      'storage://' || asset.bucket_id || '/' || asset.object_path
-                      order by asset.display_order, asset.created_at, asset.id
-                    ) as images
-               from public.media_assets asset
-              where asset.owner_id = l.owner_id
-                and asset.parent_type = 'provider_listing'
-                and asset.parent_id = l.id
-                and asset.bucket_id = 'bos-public-media'
-                and asset.privacy = 'public'
-                and asset.processing_status = 'ready'
-           ) media on true
-          where l.id = $1 and l.status = 'active'
-          limit 1`,
-        [listingId],
-      );
-      return rows[0] ? toRecord(rows[0]) : null;
-    });
+    return this.transaction(
+      null,
+      async (client) => {
+        const { rows } = await client.query(
+          `select l.*, l.payload #>> '{provider,name}' as provider_name, null::text as provider_phone
+             from public.listings l
+            where l.id = $1 and l.status = 'active'
+            limit 1`,
+          [listingId],
+        );
+        return rows[0] ? toRecord(rows[0]) : null;
+      },
+      async (client, record) => {
+        if (!record) return null;
+        const mediaByListingId = await loadApprovedPublicListingMedia(client, [record.id]);
+        const media = mediaByListingId.get(record.id);
+        if (!media?.length) return record;
+        return {
+          ...record,
+          payload: mergeReadyPublicListingMedia(record.payload, media),
+        };
+      },
+    );
   }
 
   /**

@@ -137,18 +137,41 @@ for (const file of frontendFiles) {
 }
 check('no privileged credential is present in any frontend source file', true);
 
-const envFiles = fs.readdirSync(root).filter((name) => name.startsWith('.env'));
-const trackedEnv = envFiles.filter((name) => {
-  try {
-    return fs.readFileSync(path.join(root, '.gitignore'), 'utf-8').includes('.env*');
-  } catch {
-    return false;
+function isIgnoredByGitignore(filename, gitignoreText) {
+  const rules = gitignoreText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+
+  let ignored = false;
+  for (const rule of rules) {
+    const negated = rule.startsWith('!');
+    const pattern = (negated ? rule.slice(1) : rule).replace(/^\/+/, '');
+    const regex = new RegExp(
+      `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`,
+    );
+    if (regex.test(filename)) {
+      ignored = !negated;
+    }
   }
-});
+  return ignored;
+}
+
+const gitignoreText = (() => {
+  try {
+    return fs.readFileSync(path.join(root, '.gitignore'), 'utf-8');
+  } catch {
+    return '';
+  }
+})();
+
+const envFiles = fs.readdirSync(root).filter((name) => name.startsWith('.env'));
+const localSecretEnvFiles = envFiles.filter((name) => name !== '.env.example');
+const ignoredLocalEnvFiles = localSecretEnvFiles.filter((name) => isIgnoredByGitignore(name, gitignoreText));
 check(
   'every local env file is ignored by git',
-  envFiles.every((name) => trackedEnv.includes(name)),
-  envFiles.join(', '),
+  localSecretEnvFiles.every((name) => ignoredLocalEnvFiles.includes(name)),
+  localSecretEnvFiles.join(', ') || '(none)',
 );
 
 console.log('\n=== 4. role authority comes from the database ===');

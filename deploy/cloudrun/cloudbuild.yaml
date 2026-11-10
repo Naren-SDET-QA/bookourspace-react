@@ -9,6 +9,16 @@ steps:
           echo "Set _VITE_SUPABASE_PUBLISHABLE_KEY to the public Supabase publishable/anon key."
           exit 1
         fi
+        if [ -z "${_VITE_SUPABASE_PROJECT_ID}" ] || [ "${_VITE_SUPABASE_PROJECT_ID}" = "REPLACE_WITH_PRODUCTION_SUPABASE_PROJECT_REF" ]; then
+          echo "Set _VITE_SUPABASE_PROJECT_ID to the dedicated production Supabase project reference."
+          exit 1
+        fi
+        # The runtime guard owns the deny list; the build refuses any reference
+        # it declares as development, so no ref is repeated in this file.
+        if grep -Eq "['\"]${_VITE_SUPABASE_PROJECT_ID}['\"]" src/server/supabaseProductionGuard.ts; then
+          echo "Refusing to build production with a development Supabase project reference."
+          exit 1
+        fi
   # Build only. Deploying is a separate, human-approved step in README.md.
   - name: gcr.io/cloud-builders/docker
     id: build-api-image
@@ -21,9 +31,9 @@ steps:
       - -t
       - asia-south1-docker.pkg.dev/$PROJECT_ID/bookourspace/api:$SHORT_SHA
       - --build-arg
-      - VITE_SUPABASE_URL=${_VITE_SUPABASE_URL}
+      - VITE_SUPABASE_URL=https://${_VITE_SUPABASE_PROJECT_ID}.supabase.co
       - --build-arg
-      - VITE_SUPABASE_PROJECT_ID=obkfgxjzlscungkhbyvq
+      - VITE_SUPABASE_PROJECT_ID=${_VITE_SUPABASE_PROJECT_ID}
       - --build-arg
       - VITE_SUPABASE_PUBLISHABLE_KEY=${_VITE_SUPABASE_PUBLISHABLE_KEY}
       - --build-arg
@@ -36,7 +46,7 @@ images:
   - asia-south1-docker.pkg.dev/$PROJECT_ID/bookourspace/api:$SHORT_SHA
 
 substitutions:
-  _VITE_SUPABASE_URL: "https://obkfgxjzlscungkhbyvq.supabase.co"
+  _VITE_SUPABASE_PROJECT_ID: "REPLACE_WITH_PRODUCTION_SUPABASE_PROJECT_REF"
   _VITE_SUPABASE_PUBLISHABLE_KEY: "REPLACE_WITH_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
 
 options:

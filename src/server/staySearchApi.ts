@@ -1,7 +1,7 @@
 import type express from 'express';
 import { types, type Pool, type PoolClient } from 'pg';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
-import { getSharedPostgresPool } from './postgresPool';
+import { getSharedPostgresPool, loadApprovedPublicListingMedia } from './postgresPool';
 import {
   istTodayIso,
   parseStaySearchQuery,
@@ -80,7 +80,10 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
 
   const pool = deps.pool || getSharedPostgresPool(connectionString, env);
 
-  async function withActor<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
+  async function withActor<T>(
+    run: (client: PoolClient) => Promise<T>,
+    afterCommit?: (client: PoolClient, out: T) => Promise<T>,
+  ): Promise<T> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let client: PoolClient | undefined;
       let failure: any;
@@ -97,7 +100,7 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
         }
         const out = await run(client);
         await client.query('COMMIT');
-        return out;
+        return afterCommit ? await afterCommit(client, out) : out;
       } catch (error: any) {
         failure = error;
         if (client) {
@@ -118,6 +121,23 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
     throw new Error('STAY_SEARCH_RETRY_EXHAUSTED');
   }
 
+  async function attachApprovedStayMedia(client: PoolClient, rows: any[]): Promise<void> {
+    if (rows.length === 0) return;
+    const mediaByListingId = await loadApprovedPublicListingMedia(
+      client,
+      rows.map((row: any) => String(row.listing_id || '')),
+      { requireStayApproved: true },
+    );
+    if (mediaByListingId.size === 0) return;
+    for (const row of rows) {
+      const images = mediaByListingId.get(String(row.listing_id || ''));
+      if (images?.length) {
+        const existingPayload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+        row.payload = { ...existingPayload, images };
+      }
+    }
+  }
+
   async function hotelsModuleEnabled(client: PoolClient): Promise<boolean> {
     const result = await client.query(
       `select is_enabled from public.platform_module_flags where module_key = 'hotels'`,
@@ -131,16 +151,24 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
     const query = parsed.query;
 
     try {
-      const result = await withActor(async (client) => {
-        if (!(await hotelsModuleEnabled(client))) {
-          return { moduleDisabled: true as const };
-        }
-        // Database rows are authoritative. Demo inventory is excluded by
-        // default in every environment and can appear only through an explicit
-        // local preview opt-in; a repository error never selects fixtures.
-        const excludeDemo = env.NODE_ENV === 'production' || env.BOS_STAY_INCLUDE_DEMO !== '1';
-        return { page: await runSearch(client, query, { excludeDemo, allowDemoBooking }), excludeDemo };
-      });
+      const result = await withActor(
+        async (client) => {
+          if (!(await hotelsModuleEnabled(client))) {
+            return { moduleDisabled: true as const };
+          }
+          // Database rows are authoritative. Demo inventory is excluded by
+          // default in every environment and can appear only through an explicit
+          // local preview opt-in; a repository error never selects fixtures.
+          const excludeDemo = env.NODE_ENV === 'production' || env.BOS_STAY_INCLUDE_DEMO !== '1';
+          return { page: await runSearch(client, query, { excludeDemo, allowDemoBooking }), excludeDemo };
+        },
+        async (client, out) => {
+          if (!('moduleDisabled' in out)) {
+            await attachApprovedStayMedia(client, out.page.rows);
+          }
+          return out;
+        },
+      );
       if ('moduleDisabled' in result) {
         return bad(res, 409, 'MODULE_DISABLED', 'Hotels & Stays is currently switched off.');
       }
@@ -248,66 +276,58 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
     const hostId = String(req.params.hostId || '').trim().toLowerCase();
     if (!UUID.test(hostId)) return bad(res, 400, 'INVALID_HOST_ID', 'That host could not be resolved.');
     try {
-      const payload = await withActor(async (client) => {
-        const host = await client.query(
-          `select pp.id, pp.full_name, pp.avatar_url, pp.city, pp.verified,
-                  coalesce((
-                    select array_agg(distinct lang)
-                      from public.stay_properties sp, unnest(sp.host_languages) lang
-                     where sp.owner_user_id = pp.id and sp.is_active
-                  ), '{}'::text[]) as host_languages,
-                  (select count(*)::int from public.stay_properties sp
-                    where sp.owner_user_id = pp.id and sp.is_active) as active_stays,
-                  (select round(avg(r.rating)::numeric, 2)::float
-                     from public.reviews r
-                     join public.stay_properties sp on sp.listing_id = r.listing_id
-                    where sp.owner_user_id = pp.id) as rating,
-                  (select count(*)::int
-                     from public.reviews r
-                     join public.stay_properties sp on sp.listing_id = r.listing_id
-                    where sp.owner_user_id = pp.id) as review_count
-             from public.public_provider_profile_projection pp
-            where pp.id = $1 and pp.verified is true
-            limit 1`,
-          [hostId],
-        );
-        if (!host.rows[0]) return { missing: true as const };
-        const listings = await client.query(
-          `select l.id as listing_id, sp.name, sp.property_type, sp.place_type, sp.city, sp.area,
-                  sp.base_price_paise, sp.guest_favourite,
-                  jsonb_set(
-                    coalesce(l.payload, '{}'::jsonb), '{images}',
-                    coalesce(media.images, coalesce(l.payload->'images', '[]'::jsonb)), true
-                  ) as payload
-             from public.stay_properties sp
-             join public.listings l on l.id = sp.listing_id
-             left join lateral (
-               select jsonb_agg(
-                        'storage://' || asset.bucket_id || '/' || asset.object_path
-                        order by asset.display_order, asset.created_at, asset.id
-                      ) as images
-                 from public.media_assets asset
-                where asset.owner_id = l.owner_id
-                  and asset.parent_type = 'provider_listing'
-                  and asset.parent_id = l.id
-                  and asset.bucket_id = 'bos-public-media'
-                  and asset.privacy = 'public'
-                  and asset.processing_status = 'ready'
-             ) media on true
-            where sp.owner_user_id = $1 and sp.is_active and l.status = 'active'
-              and l.is_verified is true and l.verified_by is not null
-              and l.payload->>'stayLifecycle' = 'approved'
-              and coalesce(l.payload->>'demo','false') <> 'true'
-              and exists (
-                select 1 from public.public_provider_profile_projection owner
-                 where owner.id = sp.owner_user_id and owner.verified is true
-              )
-            order by sp.guest_favourite desc, sp.created_at desc
-            limit 12`,
-          [hostId],
-        );
-        return { missing: false as const, host: host.rows[0], listings: listings.rows };
-      });
+      const payload = await withActor(
+        async (client) => {
+          const host = await client.query(
+            `select pp.id, pp.full_name, pp.avatar_url, pp.city, pp.verified,
+                    coalesce((
+                      select array_agg(distinct lang)
+                        from public.stay_properties sp, unnest(sp.host_languages) lang
+                       where sp.owner_user_id = pp.id and sp.is_active
+                    ), '{}'::text[]) as host_languages,
+                    (select count(*)::int from public.stay_properties sp
+                      where sp.owner_user_id = pp.id and sp.is_active) as active_stays,
+                    (select round(avg(r.rating)::numeric, 2)::float
+                       from public.reviews r
+                       join public.stay_properties sp on sp.listing_id = r.listing_id
+                      where sp.owner_user_id = pp.id) as rating,
+                    (select count(*)::int
+                       from public.reviews r
+                       join public.stay_properties sp on sp.listing_id = r.listing_id
+                      where sp.owner_user_id = pp.id) as review_count
+               from public.public_provider_profile_projection pp
+              where pp.id = $1 and pp.verified is true
+              limit 1`,
+            [hostId],
+          );
+          if (!host.rows[0]) return { missing: true as const };
+          const listings = await client.query(
+            `select l.id as listing_id, sp.name, sp.property_type, sp.place_type, sp.city, sp.area,
+                    sp.base_price_paise, sp.guest_favourite,
+                    coalesce(l.payload, '{}'::jsonb) as payload
+               from public.stay_properties sp
+               join public.listings l on l.id = sp.listing_id
+              where sp.owner_user_id = $1 and sp.is_active and l.status = 'active'
+                and l.is_verified is true and l.verified_by is not null
+                and l.payload->>'stayLifecycle' = 'approved'
+                and coalesce(l.payload->>'demo','false') <> 'true'
+                and exists (
+                  select 1 from public.public_provider_profile_projection owner
+                   where owner.id = sp.owner_user_id and owner.verified is true
+                )
+              order by sp.guest_favourite desc, sp.created_at desc
+              limit 12`,
+            [hostId],
+          );
+          return { missing: false as const, host: host.rows[0], listings: listings.rows };
+        },
+        async (client, out) => {
+          if (!out.missing) {
+            await attachApprovedStayMedia(client, out.listings);
+          }
+          return out;
+        },
+      );
       if (payload.missing) return bad(res, 404, 'HOST_NOT_FOUND', 'That host profile is not public.');
       const row: any = payload.host;
       res.setHeader('Cache-Control', 'public, max-age=60');
@@ -571,10 +591,7 @@ async function runSearch(
         public.stay_accessibility_keys(p.accessibility) as accessibility_keys,
         public.stay_language_keys(p.host_languages) as language_keys,
         l.title as listing_title, l.price as listing_price, l.price_unit,
-        jsonb_set(
-          coalesce(l.payload, '{}'::jsonb), '{images}',
-          coalesce(media.images, coalesce(l.payload->'images', '[]'::jsonb)), true
-        ) as payload,
+        coalesce(l.payload, '{}'::jsonb) as payload,
         host.full_name as host_name, host.avatar_url as host_avatar_url,
         stats.min_price_paise, stats.room_count, stats.room_types,
         stats.max_guests, stats.max_bedrooms, stats.max_beds, stats.max_bathrooms,
@@ -586,19 +603,6 @@ async function runSearch(
         and l.is_verified is true and l.verified_by is not null
         and l.payload->>'stayLifecycle' = 'approved'
       join public.public_provider_profile_projection host on host.id = p.owner_user_id and host.verified is true
-      left join lateral (
-        select jsonb_agg(
-                 'storage://' || asset.bucket_id || '/' || asset.object_path
-                 order by asset.display_order, asset.created_at, asset.id
-               ) as images
-          from public.media_assets asset
-         where asset.owner_id = l.owner_id
-           and asset.parent_type = 'provider_listing'
-           and asset.parent_id = l.id
-           and asset.bucket_id = 'bos-public-media'
-           and asset.privacy = 'public'
-           and asset.processing_status = 'ready'
-      ) media on true
       left join lateral (
         select
           min(rt.base_price_paise) as min_price_paise,

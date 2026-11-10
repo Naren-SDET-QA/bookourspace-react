@@ -41,7 +41,10 @@ ID, service name, a custom domain, or a previous environment.
 3. **Supabase Auth URL configuration**
    - Add `${API_URL}/auth/callback` to the allowed redirect URLs.
    - Confirm the Google OAuth authorized redirect URI remains
-     `https://obkfgxjzlscungkhbyvq.supabase.co/auth/v1/callback`.
+     `https://<production-project-ref>.supabase.co/auth/v1/callback`.
+   - Confirm `BOS_PRODUCTION_SUPABASE_PROJECT_ID` names that same production
+     project; production refuses to start when it is unset, disagrees with the
+     Supabase URL, or names the development project.
 4. **Web build** — the web app uses relative `/api` paths; no API host is
    embedded. If a separate web origin is used, rebuild/redeploy it so its
    `/api` reverse proxy targets `$API_URL`.
