@@ -33,6 +33,7 @@ import { venue12Categories } from '../data/venueData';
 import { AppLanguage, allIndianLanguages } from '../utils/translations';
 import { getUILabels } from '../utils/i18nEngine';
 import { HomeScreenLayoutStyle } from './ModularSystemEngine';
+import { MarketplaceHero } from './MarketplaceHero';
 
 interface SuperAppBentoHomeHubProps {
   sharedHeader?: React.ReactNode;
@@ -61,6 +62,9 @@ interface SuperAppBentoHomeHubProps {
   userInitials?: string;
   homeScreenStyle: HomeScreenLayoutStyle;
   onChangeHomeScreenStyle: (style: HomeScreenLayoutStyle) => void;
+  listingCount: number;
+  verifiedListingCount: number;
+  heroImage?: string;
   externalSearchOpen?: boolean;
   onCloseExternalSearch?: () => void;
 }
@@ -87,6 +91,9 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
   userInitials = 'BS',
   homeScreenStyle,
   onChangeHomeScreenStyle,
+  listingCount,
+  verifiedListingCount,
+  heroImage,
   externalSearchOpen = false,
   onCloseExternalSearch,
 }) => {
@@ -578,7 +585,18 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
 
       {/* MAIN MOBILE-LOCKED SUPER-APP BODY (FITS 100% WITHIN VIEWPORT WITH ZERO VERTICAL OR HORIZONTAL SCROLL) */}
       <div className="max-w-md sm:max-w-3xl mx-auto w-full flex-1 min-h-0 px-3 sm:px-5 py-1.5 sm:py-2.5 flex flex-col justify-between gap-1.5 sm:gap-2.5 overflow-visible box-border">
-        {/* 2. TOP SPOTLIGHT HERO CARD — REMOVED (banner animation disabled per product request) */}
+        <MarketplaceHero
+          currentLang={currentLang}
+          selectedLocationLabel={selectedLocationLabel}
+          listingCount={listingCount}
+          verifiedListingCount={verifiedListingCount}
+          heroImage={heroImage}
+          onOpenLocationSelector={onOpenLocationSelector}
+          onExplore={() => onSelectCategoryAndAdvance('pg_hostels', 'all')}
+        />
+
+        {/* 2. Legacy animated spotlight remains disabled; the live-data hero above
+            replaces its fabricated price and promotional copy safely. */}
         {false && (
         <div
           onMouseEnter={() => setIsHeroPaused(true)}

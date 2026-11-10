@@ -246,6 +246,8 @@ const UniversalObjectEditorModal = lazy(() => import('./components/UniversalObje
 const LiveAdminPageEditor = lazy(() => import('./components/LiveAdminPageEditor').then((module) => ({ default: module.LiveAdminPageEditor })));
 const UniversalLiveBuilder = lazy(() => import('./components/UniversalLiveBuilder').then((module) => ({ default: module.UniversalLiveBuilder })));
 const QuickBookChatAssistant = lazy(() => import('./components/QuickBookChatAssistant').then((module) => ({ default: module.QuickBookChatAssistant })));
+import { SpotlightModuleTabs } from './components/SpotlightModuleTabs';
+import { MarketplaceHero } from './components/MarketplaceHero';
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
@@ -319,6 +321,15 @@ function MarketplaceAppContent() {
   const [isPGSectionOpen, setIsPGSectionOpen] = useState(false);
   const [isHomeServicesOpen, setIsHomeServicesOpen] = useState(false);
   const [isClassesTimingsOpen, setIsClassesTimingsOpen] = useState(false);
+  // These screens are mutually exclusive. Keeping the four legacy booleans
+  // in sync through one setter prevents a stale section from winning the
+  // render precedence after a hash navigation or a page reload.
+  const setOpenSection = (section: MarketSectionType | null) => {
+    setIsPGSectionOpen(section === 'pg_hostels');
+    setIsClassesTimingsOpen(section === 'classes');
+    setIsHomeServicesOpen(section === 'services');
+    setIsHotelsStayExperienceOpen(section === 'hotel_stay');
+  };
   // Published admin presentation (labels/headlines) applied to the section screens.
   const [modulePresentation, setModulePresentation] = useState<Record<string, ModuleConfigResolution>>({});
   const returnSectionAfterStayRef = useRef<MarketSectionType>('pg_hostels');
@@ -452,7 +463,7 @@ function MarketplaceAppContent() {
       returnSectionAfterStayRef.current = previousMarketSectionRef.current === 'hotel_stay'
         ? 'pg_hostels'
         : previousMarketSectionRef.current;
-      setIsHotelsStayExperienceOpen(true);
+      setOpenSection('hotel_stay');
     }
     previousMarketSectionRef.current = activeMarketSection;
   }, [activeMarketSection, isHotelsStayExperienceOpen]);
@@ -472,46 +483,31 @@ function MarketplaceAppContent() {
             : 0;
       if (hash === 'pg' || hash.startsWith('pg/')) {
         setActiveMarketSection('pg_hostels');
-        setIsPGSectionOpen(true);
-        setIsHomeServicesOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection('pg_hostels');
       } else if (hash === 'services' || hash.startsWith('services/')) {
         setActiveMarketSection('services');
-        setIsHomeServicesOpen(true);
-        setIsPGSectionOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection('services');
       } else if (hash === 'stays' || hash === 'hotels' || hash.startsWith('stays/') || hash.startsWith('hotels/')) {
         setActiveMarketSection('hotel_stay');
-        setIsHotelsStayExperienceOpen(true);
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
+        setOpenSection('hotel_stay');
       } else if (hash === 'classes' || hash.startsWith('classes/')) {
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, classes: routeStyleNumber === 1 ? 'cards' : routeStyleNumber === 2 ? 'timetable' : 'style3' }));
         }
         setActiveMarketSection('classes');
-        setIsClassesTimingsOpen(true);
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection('classes');
       } else if (hash === 'venues' || hash === 'halls' || hash.startsWith('venues/') || hash.startsWith('halls/')) {
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, venues: routeStyleNumber === 1 ? 'showcase' : routeStyleNumber === 2 ? 'agenda' : 'style3' }));
         }
         setActiveMarketSection('venues');
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
-        setIsClassesTimingsOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection(null);
       } else if (hash === 'movies' || hash === 'cinema' || hash.startsWith('movies/') || hash.startsWith('cinema/')) {
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, movies: routeStyleNumber === 1 ? 'experience' : routeStyleNumber === 2 ? 'classic' : 'style3' }));
         }
         setActiveMarketSection('movies');
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
-        setIsClassesTimingsOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection(null);
       } else if (hash === 'provider' || hash.startsWith('provider/')) {
         // A URL hash is unauthenticated input and must never grant a role.
         // Signed-out visitors keep the hash so it applies once the session
@@ -524,10 +520,7 @@ function MarketplaceAppContent() {
         }
         setUserRole('provider');
         setActiveView('provider_portal');
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
-        setIsClassesTimingsOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection(null);
       } else if (hash === 'admin' || hash.startsWith('admin/')) {
         // A URL hash is unauthenticated input and must never grant a role.
         // Keep the hash while the persisted session is still hydrating or
@@ -542,15 +535,9 @@ function MarketplaceAppContent() {
         }
         setUserRole('admin');
         setActiveView('admin_console');
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
-        setIsClassesTimingsOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection(null);
       } else if (!hash.startsWith('venue-')) {
-        setIsPGSectionOpen(false);
-        setIsHomeServicesOpen(false);
-        setIsClassesTimingsOpen(false);
-        setIsHotelsStayExperienceOpen(false);
+        setOpenSection(null);
       }
     };
     applySectionHash();
@@ -1823,9 +1810,7 @@ function MarketplaceAppContent() {
         ? 'pg_hostels'
         : activeMarketSection;
       setActiveMarketSection('hotel_stay');
-      setIsPGSectionOpen(false);
-      setIsHomeServicesOpen(false);
-      setIsHotelsStayExperienceOpen(true);
+      setOpenSection('hotel_stay');
       return;
     }
     if (section === 'pg_hostels') {
@@ -1833,9 +1818,7 @@ function MarketplaceAppContent() {
         ? 'pg_hostels'
         : activeMarketSection;
       setActiveMarketSection('pg_hostels');
-      setIsHotelsStayExperienceOpen(false);
-      setIsHomeServicesOpen(false);
-      setIsPGSectionOpen(true);
+      setOpenSection('pg_hostels');
       return;
     }
     if (section === 'services') {
@@ -1843,14 +1826,10 @@ function MarketplaceAppContent() {
         ? 'pg_hostels'
         : activeMarketSection;
       setActiveMarketSection('services');
-      setIsHotelsStayExperienceOpen(false);
-      setIsPGSectionOpen(false);
-      setIsHomeServicesOpen(true);
+      setOpenSection('services');
       return;
     }
-    setIsHotelsStayExperienceOpen(false);
-    setIsPGSectionOpen(false);
-    setIsHomeServicesOpen(false);
+    setOpenSection(null);
     setActiveMarketSection(section);
   };
 
@@ -1931,12 +1910,10 @@ function MarketplaceAppContent() {
           </button>
           <input type="search" value={searchQuery} onFocus={() => setHomeSearchFocused(true)} onBlur={() => setHomeSearchFocused(false)} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search PGs, classes, halls, services, stay, movies..." aria-label="Search PGs, classes, halls, services, stay, movies..." className="min-h-10 min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-900 outline-hidden focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
         </div>
-        <nav aria-label="Marketplace modules" className="flex gap-1.5 overflow-x-auto no-scrollbar">
-          {([
-            ['pg_hostels', "PG's"], ['classes', 'Classes'], ['venues', 'Halls'],
-            ['services', 'Services'], ['hotel_stay', 'Stay'], ['movies', 'Movies'],
-          ] as const).map(([section, label]) => (
-            <button key={section} type="button" aria-current={activeMarketSection === section ? 'page' : undefined} onClick={() => {
+        <SpotlightModuleTabs
+          activeMarketSection={activeMarketSection}
+          compact
+          onSelectMarketSection={(section) => {
               moduleHeaderStateRef.current[activeMarketSection] = { category: selectedCategory, subcategory: selectedSubcategory, search: searchQuery };
               const saved = moduleHeaderStateRef.current[section];
               setSelectedCategory(saved?.category ?? 'all');
@@ -1952,11 +1929,8 @@ function MarketplaceAppContent() {
               if (section === 'hotel_stay') returnSectionAfterStayRef.current = activeMarketSection;
               if (section === 'services') returnSectionAfterServicesRef.current = activeMarketSection;
               setActiveMarketSection(section);
-            }} className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold ${activeMarketSection === section ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'}`}>
-              {label}
-            </button>
-          ))}
-        </nav>
+          }}
+        />
       </div>
     </header>
   );
@@ -2201,8 +2175,7 @@ function MarketplaceAppContent() {
               );
             }}
             onOpenServicesDiscovery={() => {
-              setIsHotelsStayExperienceOpen(false);
-              setIsHomeServicesOpen(true);
+              setOpenSection('services');
             }}
             hideCategoryRibbon={activeMarketSection === 'movies' || isHotelsStayExperienceOpen}
           />
@@ -2331,6 +2304,9 @@ function MarketplaceAppContent() {
         <SuperAppBentoHomeHub
           sharedHeader={sharedMarketplaceHeader}
           activeMarketSection={activeMarketSection}
+          listingCount={listings.filter((listing) => listing.status === 'active').length}
+          verifiedListingCount={listings.filter((listing) => listing.status === 'active' && listing.isVerified).length}
+          heroImage={listings.find((listing) => listing.status === 'active' && listing.images?.[0])?.images?.[0]}
           selectedLocationLabel={selectedLocationLabel}
           onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
           onSelectCategoryAndAdvance={(sec, catId = 'all', subcat = 'all') => {
@@ -2440,6 +2416,27 @@ function MarketplaceAppContent() {
         <>
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
           {sharedMarketplaceHeader}
+
+          {!activeSectionExperience && (
+            <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
+              <MarketplaceHero
+                currentLang={currentLang}
+                selectedLocationLabel={selectedLocationLabel}
+                listingCount={listings.filter((listing) => listing.status === 'active').length}
+                verifiedListingCount={listings.filter((listing) => listing.status === 'active' && listing.isVerified).length}
+                heroImage={listings.find((listing) => listing.status === 'active' && listing.images?.[0])?.images?.[0]}
+                onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
+                onExplore={() => {
+                  setActiveMarketSection('pg_hostels');
+                  setSelectedCategory('all');
+                  setSelectedSubcategory('all');
+                  setIsBentoLandingActive(false);
+                  setOpenSection('pg_hostels');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              />
+            </div>
+          )}
 
           {/* HOME-SCREEN CHROME (announcements, spotlight carousel) — hidden while a section screen is open */}
           {!activeSectionExperience && (

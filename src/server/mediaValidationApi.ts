@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import type { Pool } from 'pg';
 import { assertVariantVisualQuality, inspectServerImage } from './mediaImageInspection';
 import { verifySupabaseGoogleIdentity } from './supabaseGoogleIdentity';
 
@@ -25,6 +26,7 @@ interface MediaValidationConfig {
   projectUrl: string;
   publishableKey: string;
   serverSecretKey: string;
+  pool?: Pool | null;
   fetchImpl?: typeof fetch;
 }
 
@@ -54,13 +56,95 @@ function assertOwnedObjectPath(path: string, ownerId: string): void {
   }
 }
 
-async function fetchJson<T>(fetchImpl: typeof fetch, url: string, key: string, init?: RequestInit): Promise<T> {
-  const response = await fetchImpl(url, {
-    ...init,
-    headers: { ...serviceHeaders(key), ...(init?.headers || {}) },
-  });
-  if (!response.ok) throw new Error('MEDIA_BACKEND_REQUEST_FAILED');
-  return await response.json() as T;
+async function fetchJsonWithUserFallback<T>(
+  fetchImpl: typeof fetch,
+  url: string,
+  config: MediaValidationConfig,
+  userToken: string,
+): Promise<T> {
+  const serviceResponse = await fetchImpl(url, { headers: serviceHeaders(config.serverSecretKey) });
+  if (serviceResponse.ok) return await serviceResponse.json() as T;
+  if (serviceResponse.status === 403 && userToken && config.publishableKey) {
+    const userResponse = await fetchImpl(url, {
+      headers: {
+        apikey: config.publishableKey,
+        Authorization: `Bearer ${userToken}`,
+        Accept: 'application/json',
+      },
+    });
+    if (userResponse.ok) return await userResponse.json() as T;
+  }
+  throw new Error('MEDIA_BACKEND_REQUEST_FAILED');
+}
+
+async function loadAssetAndProfile(
+  config: MediaValidationConfig,
+  identityId: string,
+  userToken: string,
+  assetId: string,
+): Promise<{
+  asset: MediaAsset | undefined;
+  profile: { id: string; role: string; account_status: string } | undefined;
+}> {
+  if (config.pool) {
+    const client = await config.pool.connect();
+    try {
+      await client.query('BEGIN READ ONLY');
+      await client.query('SET LOCAL ROLE authenticated');
+      await client.query("select set_config('request.jwt.claim.sub', $1, true)", [identityId]);
+      await client.query("select set_config('request.jwt.claim.role', 'authenticated', true)");
+      await client.query(
+        "select set_config('request.jwt.claims', $1, true)",
+        [JSON.stringify({ sub: identityId, role: 'authenticated', aal: 'aal1' })],
+      );
+      const assetResult = await client.query(
+        `select id, owner_id, parent_type, parent_id, bucket_id, privacy, object_path,
+                media_kind, media_format, file_size_bytes, width, height, checksum_sha256,
+                variants, processing_status
+           from public.media_assets
+          where id = $1
+          limit 1`,
+        [assetId],
+      );
+      const profileResult = await client.query(
+        'select id, role, account_status from public.profiles where id = $1 limit 1',
+        [identityId],
+      );
+      await client.query('COMMIT');
+      return {
+        asset: assetResult.rows[0] as MediaAsset | undefined,
+        profile: profileResult.rows[0] as { id: string; role: string; account_status: string } | undefined,
+      };
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // preserve original failure
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const fetchImpl = config.fetchImpl || fetch;
+  const assetUrl = new URL(`${config.projectUrl}/rest/v1/media_assets`);
+  assetUrl.search = new URLSearchParams({
+    select: 'id,owner_id,parent_type,parent_id,bucket_id,privacy,object_path,media_kind,media_format,file_size_bytes,width,height,checksum_sha256,variants,processing_status',
+    id: `eq.${assetId}`,
+    limit: '1',
+  }).toString();
+  const assets = await fetchJsonWithUserFallback<MediaAsset[]>(fetchImpl, assetUrl.toString(), config, userToken);
+
+  const profileUrl = new URL(`${config.projectUrl}/rest/v1/profiles`);
+  profileUrl.search = new URLSearchParams({ select: 'id,role,account_status', id: `eq.${identityId}`, limit: '1' }).toString();
+  const profiles = await fetchJsonWithUserFallback<Array<{ id: string; role: string; account_status: string }>>(
+    fetchImpl,
+    profileUrl.toString(),
+    config,
+    userToken,
+  );
+  return { asset: assets[0], profile: profiles[0] };
 }
 
 async function inspectObject(config: MediaValidationConfig, bucket: string, path: string) {
@@ -74,24 +158,18 @@ async function inspectObject(config: MediaValidationConfig, bucket: string, path
 
 async function validateAndFinalize(config: MediaValidationConfig, request: Request): Promise<void> {
   const fetchImpl = config.fetchImpl || fetch;
+  const userToken = tokenFrom(request);
   const identity = await verifySupabaseGoogleIdentity({
     projectUrl: config.projectUrl,
     publishableKey: config.publishableKey,
-    accessToken: tokenFrom(request),
+    accessToken: userToken,
     fetchImpl,
   });
   if (!identity) throw Object.assign(new Error('VERIFIED_GOOGLE_SESSION_REQUIRED'), { statusCode: 401 });
 
   const id = String((request.body as any)?.id || '').trim();
   if (!UUID.test(id)) throw Object.assign(new Error('MEDIA_ASSET_ID_INVALID'), { statusCode: 400 });
-  const assetUrl = new URL(`${config.projectUrl}/rest/v1/media_assets`);
-  assetUrl.search = new URLSearchParams({
-    select: 'id,owner_id,parent_type,parent_id,bucket_id,privacy,object_path,media_kind,media_format,file_size_bytes,width,height,checksum_sha256,variants,processing_status',
-    id: `eq.${id}`,
-    limit: '1',
-  }).toString();
-  const assets = await fetchJson<MediaAsset[]>(fetchImpl, assetUrl.toString(), config.serverSecretKey);
-  const asset = assets[0];
+  const { asset, profile } = await loadAssetAndProfile(config, identity.id, userToken, id);
   if (!asset || asset.owner_id.toLowerCase() !== identity.id.toLowerCase()) {
     throw Object.assign(new Error('MEDIA_ASSET_NOT_FOUND'), { statusCode: 404 });
   }
@@ -108,10 +186,6 @@ async function validateAndFinalize(config: MediaValidationConfig, request: Reque
     throw Object.assign(new Error('MEDIA_ASSET_NOT_FINALIZABLE'), { statusCode: 409 });
   }
   assertOwnedObjectPath(asset.object_path, identity.id);
-  const profileUrl = new URL(`${config.projectUrl}/rest/v1/profiles`);
-  profileUrl.search = new URLSearchParams({ select: 'id,role,account_status', id: `eq.${identity.id}`, limit: '1' }).toString();
-  const profiles = await fetchJson<Array<{ id: string; role: string; account_status: string }>>(fetchImpl, profileUrl.toString(), config.serverSecretKey);
-  const profile = profiles[0];
   if (!profile || profile.account_status !== 'active' || (!profileMedia && !['provider', 'admin'].includes(profile.role))) {
     throw Object.assign(new Error('MEDIA_FINALIZATION_REQUIRES_ACTIVE_PROVIDER'), { statusCode: 403 });
   }

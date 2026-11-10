@@ -2,9 +2,9 @@
 
 **Status: PREPARED — do not execute without separate approval.**
 
-Region: `asia-south1`  
-Service: `bookourspace-api`  
-Supabase: `obkfgxjzlscungkhbyvq` (ap-south-1)  
+- Region: `asia-south1`
+- Service: `bookourspace-api`
+- Supabase: dedicated production project (explicit; never the development project)
 Canonical API URL: **PENDING** (`gcloud run services describe … status.url` after deploy)
 
 This checklist does not deploy, apply SQL, take payments, push git, or publish apps.
@@ -40,7 +40,7 @@ Create interactively (`read -r -s`); never commit.
 
 | Secret | Env var | Notes |
 |---|---|---|
-| `bos-listings-database-url` | `BOS_LISTINGS_DATABASE_URL` | Mumbai pooler, `sslmode=verify-full` (or `require`). User `postgres.obkfgxjzlscungkhbyvq` on port 5432 |
+| `bos-listings-database-url` | `BOS_LISTINGS_DATABASE_URL` | Production pooler, `sslmode=verify-full` (or `require`). User `postgres.<production-project-ref>` on port 5432 |
 | `bos-server-hmac-secret` | `BOS_SERVER_HMAC_SECRET` | ≥32 chars; 64+ recommended |
 | `supabase-secret-key` | `SUPABASE_SECRET_KEY` | Server-only. Never `VITE_` |
 
@@ -68,10 +68,11 @@ Confirm in `deploy/cloudrun/service.yaml` and the image build args:
 ## 4. Build image (no deploy)
 
 ```bash
+export SUPABASE_PROJECT_ID="<dedicated production project ref>"   # required; never the development project
 export SUPABASE_PUBLISHABLE_KEY="<public anon/publishable key>"
 gcloud builds submit --project "$PROJECT_ID" \
   --config deploy/cloudrun/cloudbuild.yaml \
-  --substitutions "_VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY}"
+  --substitutions "_VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY},_VITE_SUPABASE_PROJECT_ID=${SUPABASE_PROJECT_ID}"
 ```
 
 Build args are public Vite values only. Database password, HMAC, and service-role keys are not Docker build args.
@@ -80,6 +81,7 @@ Build args are public Vite values only. Database password, HMAC, and service-rol
 
 ```bash
 export REGION=asia-south1 SERVICE=bookourspace-api
+export SUPABASE_PROJECT_ID="<dedicated production project ref>"   # required by service.yaml
 export IMAGE="asia-south1-docker.pkg.dev/${PROJECT_ID}/bookourspace/api:<sha>"
 export SERVICE_ACCOUNT="bookourspace-api@${PROJECT_ID}.iam.gserviceaccount.com"
 export APP_URL="https://bootstrap.invalid"   # temporary; not canonical
@@ -133,14 +135,22 @@ curl -fsS "${API_URL}/api/health"     # 200 when PostgreSQL is ready
 - [ ] Same-origin web (this service serves `dist` + `/api`) does not need extra CORS
 - [ ] Probe paths `/health/live` and `/api/health` are unauthenticated by design
 
-## 8. Supabase `obkfgxjzlscungkhbyvq`
+## 8. Supabase production project (explicit, never the development project)
 
-- [ ] `VITE_SUPABASE_PROJECT_ID` / `VITE_SUPABASE_URL` match this ref (not `sfoizxarbljhldmkgsma` or `ezrxykyocgbolpaebnqx`)
-- [ ] Auth redirect: `https://obkfgxjzlscungkhbyvq.supabase.co/auth/v1/callback`
+The production project reference is an owner input and is not recorded in this
+repository. Production startup fails closed without an explicit
+`BOS_PRODUCTION_SUPABASE_PROJECT_ID`, and refuses the designated development
+project wherever it appears in the Supabase variables.
+
+- [ ] `SUPABASE_PROJECT_ID` exported for `envsubst` / the build substitution
+- [ ] `BOS_PRODUCTION_SUPABASE_PROJECT_ID` supplied to the service (not the development project)
+- [ ] `VITE_SUPABASE_PROJECT_ID` / `VITE_SUPABASE_URL` match the production ref (`https://<ref>.supabase.co`)
+- [ ] Auth redirect: `https://<production-ref>.supabase.co/auth/v1/callback`
 - [ ] After `API_URL` exists, add `${API_URL}/auth/callback` to Supabase Auth URL configuration
 - [ ] Hosted schema: local chain is 73 files; hosted ledger 53 through `20261105140000`. **21 pending. `--apply` is a separate approval. Do not skip backup.**
-- [ ] Pooler: `aws-0-ap-south-1.pooler.supabase.com:5432` user `postgres.obkfgxjzlscungkhbyvq`, `sslmode=verify-full`
+- [ ] Pooler for the production project: `aws-0-ap-south-1.pooler.supabase.com:5432` user `postgres.<production-ref>`, `sslmode=verify-full`
 - [ ] Never `supabase db push`
+- [ ] `python3 deploy/cloudrun/verify-deployment-config.py` reports PASS
 
 ## 9. Native bake (after `API_URL`)
 

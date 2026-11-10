@@ -323,6 +323,18 @@ test('postgres URL supplied as the key is refused', () => {
   assert.ok(hasError(result, 'SUPABASE_KEY_IS_DATABASE_URL'));
 });
 
+test('postgres URL in a secondary browser key is refused even when publishable key is present', () => {
+  const result = resolveFixture({
+    url: 'https://abcdefghijklmnopqrst.supabase.co',
+    projectId: 'abcdefghijklmnopqrst',
+    publishableKey,
+    anonKey: 'postgresql://user:pass@db.example.com:5432/postgres',
+  });
+  assert.equal(result.isConfigured, false);
+  assert.equal(result.publishableKey, '');
+  assert.ok(hasError(result, 'SUPABASE_KEY_IS_DATABASE_URL'));
+});
+
 test('missing key disables the client but keeps the explicit target', () => {
   const result = resolveFixture({
     url: 'https://abcdefghijklmnopqrst.supabase.co',

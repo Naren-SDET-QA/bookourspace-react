@@ -217,6 +217,38 @@ test('Movies route shows only real showtimes and no booking surfaces', async ({ 
 });
 
 test.describe('module deep links', () => {
+  test('repeated navigation and reloads keep lazy sections available', async ({ page }) => {
+    const failures: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error'
+        && /Outdated Optimize Dep|Failed to fetch dynamically imported module|SectionErrorBoundary|\[section\] failed to load/i.test(message.text())) {
+        failures.push(`console: ${message.text()}`);
+      }
+    });
+    page.on('response', (response) => {
+      if (response.status() >= 500 && /node_modules\/\.vite|src\/components|\/assets\//.test(response.url())) {
+        failures.push(`response ${response.status()}: ${response.url()}`);
+      }
+    });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await bootApp(page);
+    for (let round = 0; round < 3; round += 1) {
+      for (const route of ['#pg', '#classes', '#services', '#stays', '#movies']) {
+        await page.evaluate((hash) => { window.location.hash = hash; }, route);
+        await expect(page.getByRole('button', { name: 'Open All Sections & Quick Menu' })).toBeVisible();
+        await waitForLazyModule(page, route);
+        await expect(page.getByText('This section could not load')).toHaveCount(0);
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('button', { name: 'Open All Sections & Quick Menu' })).toBeVisible({ timeout: 30_000 });
+        await waitForLazyModule(page, route);
+        await expect(page.getByText('This section could not load')).toHaveCount(0);
+      }
+    }
+    expect(failures, failures.join(' | ')).toHaveLength(0);
+  });
+
   test('every registry route renders content and survives history navigation', async ({ page }) => {
     const errors = collectErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });

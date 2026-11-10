@@ -5,8 +5,8 @@ test('Classes image layout renders at the target responsive widths', async ({ pa
   // deterministic fixture cards, so use it to cover the SafeImage surfaces.
   await page.route('https://images.unsplash.com/**', (route) => route.fulfill({
     status: 200,
-    contentType: 'image/gif',
-    body: Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64'),
+    contentType: 'image/svg+xml',
+    body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#64748b"/></svg>'),
   }));
   for (const width of [320, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -41,4 +41,37 @@ test('a failed remote photo renders its local module fallback without retrying t
   await expect(proof).toHaveAttribute('data-image-state', 'loaded');
   expect(await proof.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
   expect(failedSourceRequests).toBe(1);
+});
+
+test('visible module imagery is loaded on phone and desktop without demo-host requests', async ({ page }) => {
+  await page.route('https://images.unsplash.com/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#64748b"/></svg>'),
+  }));
+  const imageRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'image') imageRequests.push(request.url());
+  });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const route of ['#pg', '#classes', '#venues', '#services', '#stays', '#movies']) {
+      await page.goto(`/${route}`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'Open All Sections & Quick Menu' }).waitFor({ timeout: 30_000 });
+      const visibleImageState = () => page.locator('img[data-safe-image]').evaluateAll((images) => (images as HTMLImageElement[])
+        .filter((image) => {
+          const bounds = image.getBoundingClientRect();
+          return bounds.bottom > 0 && bounds.top < window.innerHeight;
+        })
+        .map((image) => ({ loaded: image.complete && image.naturalWidth > 0, source: image.currentSrc || image.src })));
+      await expect.poll(async () => {
+        const images = await visibleImageState();
+        return images.length > 0 && images.every((image) => image.loaded);
+      }, { message: `${route} at ${width}px has a visible image that did not load`, timeout: 10_000 }).toBe(true);
+      const visibleImages = await visibleImageState();
+      expect(visibleImages.length, `${route} rendered no visible image at ${width}px`).toBeGreaterThan(0);
+      expect(visibleImages.every((image) => image.loaded), `${route} has a broken visible image at ${width}px`).toBe(true);
+    }
+  }
+  expect(imageRequests.filter((url) => /images\.example\.com|cdn\.example\.test|media\.example\.test/i.test(url))).toHaveLength(0);
 });
