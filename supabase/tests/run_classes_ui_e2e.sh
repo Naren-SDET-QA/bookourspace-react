@@ -275,6 +275,26 @@ values ('venue-e2e-hall', '11111111-aaaa-4aaa-8aaa-000000000001', 'E2E Function 
   'venue-marriage', 'Function halls', 'venue', 5000, 'per event', 'active',
   '{"location":{"area":"Test District","city":"Hyderabad"},"images":[],"customFieldValues":{"capacity":300,"acType":"AC","parkingCapacity":"40 cars","cateringPolicy":"Outside catering allowed"}}'::jsonb)
 on conflict (id) do update set status='active';
+delete from public.cinema_screens where id in ('scr-e2e-1', 'scr-e2e-hidden');
+insert into public.cinema_screens
+  (id, cinema_listing_id, cinema_title, area, screen_name, format, sound_system, total_seats,
+   tiers, seat_tiers, wheelchair_seats, showtimes, movie_title, show_date, city, pincode,
+   is_visible, cancellation_allowed, cancellation_cutoff_minutes, refund_percent,
+   convenience_fee_per_seat, gst_percent, fnb_delivery_enabled, row_version, updated_at)
+values
+  ('scr-e2e-1', 'movie-hyd-1', 'E2E Multiplex Gachibowli', 'Gachibowli', 'Screen 1 · E2E Laser',
+   '4K Laser', 'Dolby Atmos', 80,
+   '[{"name":"E2E Prime","rows":["A","B","C"],"price":250}]'::jsonb,
+   '[{"id":"prime","name":"E2E Prime","priceMultiplier":1.0,"rows":["A","B","C"],"seatsPerRow":8}]'::jsonb,
+   '["A1","A8"]'::jsonb, '["11:15 AM","03:30 PM"]'::jsonb, 'E2E Cinema Feature',
+   current_date + 2, 'Hyderabad', '500032', true, true, 120, 80, 28, 18, true, 1, now()),
+  ('scr-e2e-hidden', 'movie-hyd-1', 'E2E Multiplex Gachibowli', 'Gachibowli', 'Screen 2 · Hidden',
+   '4K Laser', 'Dolby Atmos', 80,
+   '[]'::jsonb, '[]'::jsonb, '["A1"]'::jsonb, '["09:00 PM"]'::jsonb, 'E2E Hidden Feature',
+   current_date + 2, 'Hyderabad', '500032', false, true, 120, 80, 28, 18, true, 1, now())
+on conflict (id) do update set show_date = excluded.show_date, movie_title = excluded.movie_title,
+  showtimes = excluded.showtimes, is_visible = excluded.is_visible, updated_at = now();
+
 insert into public.venue_booking_settings(listing_id,owner_user_id,time_zone,booking_enabled,requires_owner_approval,capacity,
   hourly_rate_paise,half_day_rate_paise,full_day_rate_paise,per_guest_rate_paise,included_guests,deposit_paise,tax_percent,
   setup_buffer_minutes,cleanup_buffer_minutes,advance_booking_days,minimum_advance_minutes,addon_rates,cancellation_policy)
@@ -500,6 +520,14 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" != "1" ]; then
     > "$OUT/playwright-chromium.log" 2>&1 \
     || { tail -60 "$SERVER_LOG" >&2; tail -80 "$OUT/playwright-chromium.log"; fail "Chromium Classes journey (see $OUT/playwright-chromium.log)"; }
   grep -E "✓|passed|failed" "$OUT/playwright-chromium.log" | tail -12 | sed 's/^/    /'
+  echo "=== 6a. Movies discovery, showtimes and seat availability ==="
+  E2E_BASE_URL="$SERVER_URL" \
+  E2E_MOVIES_SESSIONS="$SESSIONS" \
+  E2E_MOVIES_TITLE="E2E Cinema Feature" \
+  npx playwright test e2e/movies-showtimes.spec.ts --project=chromium --reporter=list \
+    > "$OUT/playwright-movies.log" 2>&1 \
+    || { tail -80 "$OUT/playwright-movies.log"; fail "Movies browser coverage (see $OUT/playwright-movies.log)"; }
+  grep -E "✓|passed|failed" "$OUT/playwright-movies.log" | tail -8 | sed 's/^/    /'
 else
   echo "    classes journey skipped by BOS_RUN_VENUE_ONLY=1"
 fi
