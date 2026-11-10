@@ -11,16 +11,26 @@ Import **Naren-SDET-QA/bookourspace-react → main** into a **new** AI Studio ap
 Add in **AI Studio → Settings → Secrets** when server-backed routes are needed:
 
 - `BOS_LISTINGS_DATABASE_URL` — Supabase Mumbai pooler URL with `sslmode=verify-full`
+- `BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE=1` — explicit opt-in for remote DEV DB
+- `BOS_DEVELOPMENT_DATABASE_PROJECT_ID=obkfgxjzlscungkhbyvq`
+- `BOS_DEVELOPMENT_DATABASE_HOST=aws-0-ap-south-1.pooler.supabase.com` — approved pooler host
 - `BOS_SERVER_HMAC_SECRET` — 64+ random characters
 - `SUPABASE_SECRET_KEY` — server-only
 - `VITE_SUPABASE_URL=https://obkfgxjzlscungkhbyvq.supabase.co`
 - `VITE_SUPABASE_PROJECT_ID=obkfgxjzlscungkhbyvq`
+- `VITE_SUPABASE_DEVELOPMENT_PROJECT_ID=obkfgxjzlscungkhbyvq`
 - `VITE_SUPABASE_PUBLISHABLE_KEY` — public publishable/anon key
 - `GEMINI_API_KEY` — usually injected by AI Studio
 
 Then `npm install` and `npm run dev`. The development frontend preview starts without
 PostgreSQL; readiness reports unavailable until a database is configured. Production
 still fails closed without PostgreSQL and the server HMAC secret.
+
+Demo fixtures are **off by default**, including in the AI Studio `/app/applet`
+preview, so that build shows real data from the configured database. To preview
+sample content deliberately, set `VITE_ENABLE_DEMO_DATA=true` together with
+`VITE_AI_STUDIO_DEMO=true` (or rely on local `DEV` mode); fixture cards are marked
+as samples and must never be treated as inventory.
 
 ## Full local development
 

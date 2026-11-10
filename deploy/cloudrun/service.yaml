@@ -60,14 +60,19 @@ spec:
             # first revision. Never hard-code a hostname here.
             - name: APP_URL
               value: "${APP_URL}"
+            # Dedicated production Supabase project, supplied at apply time via
+            # envsubst. Never the development project; production startup
+            # refuses a development or undeclared target.
+            - name: BOS_PRODUCTION_SUPABASE_PROJECT_ID
+              value: "${SUPABASE_PROJECT_ID}"
             - name: SUPABASE_URL
-              value: "https://obkfgxjzlscungkhbyvq.supabase.co"
+              value: "https://${SUPABASE_PROJECT_ID}.supabase.co"
             - name: SUPABASE_PROJECT_ID
-              value: "obkfgxjzlscungkhbyvq"
+              value: "${SUPABASE_PROJECT_ID}"
             - name: VITE_SUPABASE_PROJECT_ID
-              value: "obkfgxjzlscungkhbyvq"
+              value: "${SUPABASE_PROJECT_ID}"
             - name: VITE_SUPABASE_URL
-              value: "https://obkfgxjzlscungkhbyvq.supabase.co"
+              value: "https://${SUPABASE_PROJECT_ID}.supabase.co"
             - name: SUPABASE_PUBLISHABLE_KEY
               value: "${SUPABASE_PUBLISHABLE_KEY}"
             - name: VITE_SUPABASE_PUBLISHABLE_KEY
