@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { isDemoDataEnabled } from '../src/lib/demoDataPolicy.ts';
 
 const SERVER_SOURCE = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+const PLAYWRIGHT_SOURCE = readFileSync(new URL('../playwright.config.ts', import.meta.url), 'utf8');
 
 test('preview mode never clears or rewrites the configured database variables', () => {
   for (const variable of ['BOS_LISTINGS_DATABASE_URL', 'BOS_PG_URL']) {
@@ -98,4 +99,11 @@ test('the build never forces demo data on, so AI Studio serves real data by defa
   // An unconfigured preview build therefore renders real (possibly empty) data.
   assert.equal(isDemoDataEnabled({}), false);
   assert.equal(isDemoDataEnabled({ VITE_AI_STUDIO_DEMO: 'true' }), false);
+});
+
+test('the browser harness can exercise the AI Studio preview path without demo data', () => {
+  assert.match(PLAYWRIGHT_SOURCE, /BOS_E2E_AI_STUDIO === '1'/);
+  assert.match(PLAYWRIGHT_SOURCE, /VITE_ENABLE_DEMO_DATA: aiStudioPreview \? 'false' : 'true'/);
+  assert.match(PLAYWRIGHT_SOURCE, /AI_STUDIO: 'true'/);
+  assert.match(PLAYWRIGHT_SOURCE, /BOS_AI_STUDIO_PREVIEW: '1'/);
 });
