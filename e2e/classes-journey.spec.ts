@@ -72,6 +72,9 @@ function authUserFor(user: TestUser) {
   };
 }
 
+// Upper bound for one proxied API call; the real endpoints answer in milliseconds.
+const API_PROXY_TIMEOUT_MS = 30_000;
+
 function isBenignRouteError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /Route is already handled|Request context disposed|Target (page, context or browser has been )?closed|Test ended|Protocol error|Connection closed/i.test(message);
@@ -82,9 +85,20 @@ async function proxyHarnessRequest(route: Route): Promise<void> {
     const target = new URL(route.request().url());
     if (target.origin === harness.uiUrl) {
       if (target.pathname.startsWith('/api/')) {
-        const upstream = await route.fetch({
-          url: `${harness.apiUrl}${target.pathname}${target.search}`,
-        });
+        // An upstream that never answers used to hang this handler forever, and
+        // unrouteAll({ behavior: 'wait' }) in close() then waited on it until the
+        // whole test timed out with no failing step. Bound the wait so a stalled
+        // API surfaces as one failed request instead of a silent hang.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const upstream = await Promise.race([
+          route.fetch({ url: `${harness.apiUrl}${target.pathname}${target.search}` }),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(Object.assign(new Error('API_PROXY_TIMEOUT'), { code: 'API_PROXY_TIMEOUT' })),
+              API_PROXY_TIMEOUT_MS,
+            );
+          }),
+        ]).finally(() => { if (timer) clearTimeout(timer); });
         await route.fulfill({ response: upstream });
       } else {
         await route.continue();
@@ -93,6 +107,10 @@ async function proxyHarnessRequest(route: Route): Promise<void> {
     }
     await route.abort('blockedbyclient');
   } catch (error) {
+    if ((error as { code?: string })?.code === 'API_PROXY_TIMEOUT') {
+      await route.abort('timedout').catch(() => undefined);
+      return;
+    }
     // Vite, a late navigation, or Chromium settling a redirected request can
     // complete the route before fulfill/continue/abort. That race is not a
     // product failure; uncaught it flakes the Classes journey.
