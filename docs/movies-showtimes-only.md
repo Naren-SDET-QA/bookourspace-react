@@ -123,3 +123,20 @@ Still deliberately disabled: `POST /api/movies/showtimes/sync` returns **503 MOV
 - Authorized daily sync provider/token not configured (endpoint returns 503).
 - Android/iOS runtime tests remain BLOCKED (no emulator/simulator; platform files preserved, `cap sync` not run).
 - Legacy booking/seat/payment APIs remain in code but are unreachable from the Movies UI.
+
+## Orphaned API clients (audited 2026-11-10)
+
+`src/lib/supabaseClient.ts` still exports three clients whose endpoints are not
+part of Movies V1 and have no consumer in the app:
+
+| Client | Target | Status |
+|---|---|---|
+| `fetchMoviesRealityAudit()` | `GET /api/movies/reality-audit` | No route exists. |
+| `downloadBosMovieTicketPdf()` | `GET /api/movies/bookings/:id/ticket.pdf` | Blocked by the `MOVIES_V1_DISPLAY_ONLY` gate; no PDF renderer is configured server-side. |
+| ticket resend | `POST /api/movies/bookings/:id/resend` | Blocked by the same gate; no transactional email provider is configured. |
+
+No endpoint was implemented for these clients: V1 is display-only, no customer
+movie booking can be created (`POST /api/bookings/atomic` answers 410 for a
+cinema listing), and ticket delivery has no authorized backend data or provider.
+Removing the clients would be a code change, not a feature change, so they are
+left in place and remain unreachable.
