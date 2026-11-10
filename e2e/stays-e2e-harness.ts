@@ -219,8 +219,8 @@ export async function startStaysHarness(options: {
   const postgresLog = path.join(tempRoot, 'postgres.log');
   const storePath = path.join(tempRoot, 'authoritative-store.json');
   const pgPort = await freePort();
-  const apiPort = await freePort();
-  const apiUrl = `http://127.0.0.1:${apiPort}`;
+  let apiPort = await freePort();
+  let apiUrl = `http://127.0.0.1:${apiPort}`;
   const database = 'bos_stays_e2e';
   const connectionString = `postgres://postgres@127.0.0.1:${pgPort}/${database}?sslmode=disable`;
 
@@ -244,50 +244,59 @@ export async function startStaysHarness(options: {
   };
 
   const startApi = async () => {
-    apiOutput = '';
-    const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        NODE_ENV: 'test',
-        PORT: String(apiPort),
-        // Tests use the current source snapshot without Vite replacing modules
-        // mid-journey when another local task edits the worktree.
-        DISABLE_HMR: 'true',
-        BOS_SERVER_HMAC_SECRET: TEST_HMAC_SECRET,
-        BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,
-        BOS_LISTINGS_DATABASE_URL: connectionString,
-        // Tests must not inherit a developer's local preview opt-ins: demo rows
-        // stay hidden and unbookable by default, exactly as in production.
-        BOS_STAY_INCLUDE_DEMO: '0',
-        BOS_STAY_ALLOW_DEMO_BOOKING: '0',
-        // Payments stay disabled: only signed sandbox settlement can settle money.
-        BOS_PAYMENT_SANDBOX: options.paymentSandboxSecret ? '1' : '0',
-        BOS_PAYMENT_SANDBOX_SECRET: options.paymentSandboxSecret || '',
-        BOS_UPI_MERCHANT_VPA: options.merchantVpa || '',
-        BOS_UPI_MERCHANT_NAME: 'BookOurSpace',
-        RAZORPAY_KEY_ID: options.razorpayKeyId || '',
-        RAZORPAY_KEY_SECRET: options.razorpayKeySecret || '',
-        RAZORPAY_WEBHOOK_SECRET: options.razorpayWebhookSecret || '',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    apiChild = child;
-    child.stdout?.on('data', (chunk) => { apiOutput += String(chunk); });
-    child.stderr?.on('data', (chunk) => { apiOutput += String(chunk); });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      apiOutput = '';
+      const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          PORT: String(apiPort),
+          // Tests use the current source snapshot without Vite replacing modules
+          // mid-journey when another local task edits the worktree.
+          DISABLE_HMR: 'true',
+          BOS_SERVER_HMAC_SECRET: TEST_HMAC_SECRET,
+          BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,
+          BOS_LISTINGS_DATABASE_URL: connectionString,
+          // Tests must not inherit a developer's local preview opt-ins: demo rows
+          // stay hidden and unbookable by default, exactly as in production.
+          BOS_STAY_INCLUDE_DEMO: '0',
+          BOS_STAY_ALLOW_DEMO_BOOKING: '0',
+          // Payments stay disabled: only signed sandbox settlement can settle money.
+          BOS_PAYMENT_SANDBOX: options.paymentSandboxSecret ? '1' : '0',
+          BOS_PAYMENT_SANDBOX_SECRET: options.paymentSandboxSecret || '',
+          BOS_UPI_MERCHANT_VPA: options.merchantVpa || '',
+          BOS_UPI_MERCHANT_NAME: 'BookOurSpace',
+          RAZORPAY_KEY_ID: options.razorpayKeyId || '',
+          RAZORPAY_KEY_SECRET: options.razorpayKeySecret || '',
+          RAZORPAY_WEBHOOK_SECRET: options.razorpayWebhookSecret || '',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      apiChild = child;
+      child.stdout?.on('data', (chunk) => { apiOutput += String(chunk); });
+      child.stderr?.on('data', (chunk) => { apiOutput += String(chunk); });
 
-    const deadline = Date.now() + 45_000;
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null) {
-        throw new Error(`Stays E2E server exited before listening (${child.exitCode})\n${apiOutput.slice(-4000)}`);
+      const deadline = Date.now() + 45_000;
+      while (Date.now() < deadline) {
+        if (child.exitCode !== null) {
+          if (/EADDRINUSE/.test(apiOutput) && attempt < 3) {
+            apiPort = await freePort();
+            apiUrl = `http://127.0.0.1:${apiPort}`;
+            break;
+          }
+          throw new Error(`Stays E2E server exited before listening (${child.exitCode})\n${apiOutput.slice(-4000)}`);
+        }
+        try {
+          const response = await fetch(`${apiUrl}/api/auth/me`);
+          if (response.status === 401) return;
+        } catch { /* booting */ }
+        await sleep(100);
       }
-      try {
-        const response = await fetch(`${apiUrl}/api/auth/me`);
-        if (response.status === 401) return;
-      } catch { /* booting */ }
-      await sleep(100);
+      if (child.exitCode === null) {
+        throw new Error(`Stays E2E server did not become ready\n${apiOutput.slice(-4000)}`);
+      }
     }
-    throw new Error(`Stays E2E server did not become ready\n${apiOutput.slice(-4000)}`);
   };
 
   try {
