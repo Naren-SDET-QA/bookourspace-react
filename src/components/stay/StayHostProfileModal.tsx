@@ -40,7 +40,7 @@ export function StayHostProfileModal({ hostId, onClose }: { hostId: string; onCl
             <>
               <div className="flex items-center gap-4">
                 <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f7f7f7] text-xl font-bold text-[#717171] dark:bg-slate-800">
-                  {profile.host.avatarUrl ? <img src={profile.host.avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : profile.host.name.slice(0, 1).toUpperCase()}
+                  {profile.host.avatarUrl ? <SafeImage category="general" src={profile.host.avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : profile.host.name.slice(0, 1).toUpperCase()}
                 </div>
                 <div className="min-w-0">
                   <p className="text-xl font-semibold">{profile.host.name}</p>

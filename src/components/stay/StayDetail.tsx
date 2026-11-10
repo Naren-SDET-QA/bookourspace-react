@@ -389,7 +389,7 @@ export function StayDetail({
               </div>
               <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f7f7f7] text-lg font-bold text-[#717171] dark:bg-slate-800">
                 {item.hostAvatarUrl ? (
-                  <img src={item.hostAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                  <SafeImage category="general" src={item.hostAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
                   (item.hostName || 'B').trim().slice(0, 1).toUpperCase()
                 )}
