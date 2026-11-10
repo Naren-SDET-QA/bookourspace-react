@@ -67,6 +67,8 @@ test('storage references accept only approved buckets and safe canonical object 
     'storage://bos-public-media/../secret.png',
     'storage://bos-public-media/%2e%2e/secret.png',
     'storage://bos-public-media/user/%2fetc/passwd',
+    'storage://bos-public-media/user/photo%3Ftoken.jpg',
+    'storage://bos-public-media/user/photo%23hash.jpg',
     'storage://bos-public-media/user/file.png?token=unsafe',
     'storage://bos-public-media/user\\file.png',
   ]) assert.equal(parseStorageObjectReference(value), null, value);
@@ -89,6 +91,14 @@ test('Supabase object URLs normalize to canonical refs, including relative paths
   assert.equal(
     storageReferenceForSource('https://other.supabase.co/storage/v1/object/public/bos-public-media/owner/listing/original.jpg', projectUrl),
     null,
+  );
+  assert.equal(
+    storageReferenceForSource('/storage/v1/object/public/bos-public-media/owner/listing/photo%2Fvariant.jpg', projectUrl),
+    null,
+  );
+  assert.equal(
+    storageReferenceForSource('storage://BOS-PUBLIC-MEDIA/owner/listing/original.jpg'),
+    'storage://bos-public-media/owner/listing/original.jpg',
   );
 });
 

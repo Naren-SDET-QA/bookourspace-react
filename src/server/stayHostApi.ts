@@ -13,6 +13,7 @@ import {
   stayRazorpayReady,
 } from './stayRazorpay';
 import { stayLifecycleOf, stayPayload, staySubmitMissing } from '../lib/stayListingGate';
+import { isPersistableListingImageSource } from '../lib/media/signedStorageUrl';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,6 +27,14 @@ const int = (value: unknown, min: number, max: number) => {
   return parsed;
 };
 const bad = (res: express.Response, status: number, error: string, message?: string) => res.status(status).json({ ok: false, error, ...(message ? { message } : {}) });
+
+export function persistableStayImages(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .map((item: unknown) => text(item, 600))
+    .filter((item: string) => isPersistableListingImageSource(item))
+    .slice(0, 16);
+}
 
 export interface StayHostApiDeps {
   verifySession: (request: express.Request) => any | null;
@@ -275,9 +284,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
       reference: text(doc?.reference, 600),
       fileName: text(doc?.fileName, 160),
     })).filter((doc: { kind: string; reference: string }) => doc.kind && doc.reference) : [];
-    const images = Array.isArray(body.images)
-      ? body.images.map((item: unknown) => text(item, 600)).filter((item: string) => item.startsWith('https://') || item.startsWith('storage://bos-public-media/')).slice(0, 16)
-      : undefined;
+    const images = persistableStayImages(body.images);
     const gstin = text(body.gstin, 15);
     const legalName = text(body.legalName, 160);
     const policies = text(body.policies, 4000);
