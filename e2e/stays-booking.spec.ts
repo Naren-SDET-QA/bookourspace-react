@@ -118,7 +118,7 @@ test('Host API — provider manages owned stay details, rooms, units, blackout a
   });
   expect(unitSave.status).toBe(201);
   const blackoutRange = { startsOn: isoPlus(90), endsOn: isoPlus(92) };
-  const countBeforeBlock = await harness.query(
+  const countBeforeBlock = await harness.queryAsUser(USERS.provider.authId,
     `select count(*)::int as count from public.stay_availability($1::uuid,$2::date,$3::date)`,
     [roomSave.data.roomType.id, blackoutRange.startsOn, blackoutRange.endsOn],
   );
@@ -128,7 +128,7 @@ test('Host API — provider manages owned stay details, rooms, units, blackout a
   });
   expect(block.status).toBe(201);
   expect(block.data.block.is_active).toBe(true);
-  const countWhileBlocked = await harness.query(
+  const countWhileBlocked = await harness.queryAsUser(USERS.provider.authId,
     `select count(*)::int as count from public.stay_availability($1::uuid,$2::date,$3::date)`,
     [roomSave.data.roomType.id, blackoutRange.startsOn, blackoutRange.endsOn],
   );
@@ -139,7 +139,7 @@ test('Host API — provider manages owned stay details, rooms, units, blackout a
   });
   expect(restore.status).toBe(200);
   expect(restore.data.block.is_active).toBe(false);
-  const countAfterRestore = await harness.query(
+  const countAfterRestore = await harness.queryAsUser(USERS.provider.authId,
     `select count(*)::int as count from public.stay_availability($1::uuid,$2::date,$3::date)`,
     [roomSave.data.roomType.id, blackoutRange.startsOn, blackoutRange.endsOn],
   );
