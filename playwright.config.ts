@@ -52,7 +52,7 @@ export default defineConfig({
       }],
     },
     headless: true,
-    trace: 'off',
+    trace: 'retain-on-failure',
     screenshot: 'off',
     video: 'off',
   },
