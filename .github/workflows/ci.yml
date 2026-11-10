@@ -74,6 +74,12 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Build the frontend for the browser journey
+        run: npm run build
+
+      - name: Verify the browser build exists
+        run: test -f dist/index.html
+
       - name: Run isolated Chromium E2E suite
         env:
           BOS_PLAYWRIGHT_PORT: 4621

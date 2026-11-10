@@ -87,7 +87,7 @@ before(async () => {
   await fs.writeFile(storePath, JSON.stringify(seedStore), 'utf8');
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
-  server = spawn('npx', ['tsx', 'server.ts'], {
+  server = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
     cwd: projectRoot,
     env: {
       ...process.env,

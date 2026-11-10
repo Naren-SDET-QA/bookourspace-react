@@ -27,7 +27,9 @@ test('preview mode is explicitly fenced out of Cloud Run', () => {
 });
 
 test('Cloud Run cannot enter the preview/demo fallback even when preview flags are set', async () => {
-  const child = spawn('npx', ['tsx', 'server.ts'], {
+  // Run the local tsx CLI directly: `npx` resolves packages over the network on
+  // a cold runner and can block forever instead of starting the server.
+  const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
     cwd: new URL('..', import.meta.url),
     env: {
       PATH: process.env.PATH,
@@ -47,7 +49,18 @@ test('Cloud Run cannot enter the preview/demo fallback even when preview flags a
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });
-  const code = await new Promise((resolve) => child.on('exit', resolve));
+  const code = await new Promise((resolve, reject) => {
+    // Bound the wait so a server that never exits fails this test with its
+    // output instead of stalling the whole CI job until the job timeout.
+    const deadline = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`server did not exit within 60s: ${output.slice(-2000)}`));
+    }, 60_000);
+    child.once('exit', (exitCode) => {
+      clearTimeout(deadline);
+      resolve(exitCode);
+    });
+  });
 
   assert.notEqual(code, 0, 'production on Cloud Run must not listen');
   assert.match(
