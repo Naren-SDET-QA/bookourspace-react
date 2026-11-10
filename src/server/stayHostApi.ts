@@ -111,7 +111,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
   }
   const reportError = (res: express.Response, error: any) => {
     const status = Number(error?.statusCode);
-    if (status >= 400 && status < 500) { bad(res, status, String(error.message)); return; }
+    if (status >= 400 && status < 500) { bad(res, status, String(error.message), error?.detail ? String(error.detail) : undefined); return; }
     const message = String(error?.message || '');
     if (message.includes('STAY_PROFILE_INCOMPLETE') || message.includes('STAY_PHOTOS_REQUIRED') || message.includes('STAY_VERIFICATION_DOCS_REQUIRED') || message.includes('STAY_NOT_SUBMITTABLE')) {
       bad(res, 400, 'STAY_PROFILE_INCOMPLETE', 'Add hotel details, photos, rooms, units and verification documents before submitting.');
@@ -145,29 +145,33 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
       } catch (error: any) { reportError(res, error); }
     };
 
+  // Onboarding creates the draft the next screen reads, so the 201 is sent
+  // only after COMMIT. A customer may onboard, so requireHost is not applied.
   app.post('/api/stays/host/onboard', async (req, res) => {
     const actorId = actorOf(req, res); if (!actorId) return;
     try {
-      await withActor(actorId, async (client) => {
+      const created = await withActor(actorId, async (client) => {
         const profile = await client.query(
           `select role, account_status from public.profiles where id = $1 limit 1`, [actorId],
         );
         if (profile.rows[0]?.account_status !== 'active' || !['customer', 'provider', 'admin'].includes(String(profile.rows[0]?.role))) {
-          return bad(res, 403, 'ACTIVE_PROFILE_REQUIRED');
+          throw Object.assign(new Error('ACTIVE_PROFILE_REQUIRED'), { statusCode: 403 });
         }
         const body = req.body || {};
         const title = text(body.title || body.name, 160);
         const name = text(body.name || body.title, 160);
         const city = text(body.city, 120);
-        if (!title || !name || !city) return bad(res, 400, 'PROPERTY_NAME_AND_CITY_REQUIRED');
+        if (!title || !name || !city) throw Object.assign(new Error('PROPERTY_NAME_AND_CITY_REQUIRED'), { statusCode: 400 });
         const result = await client.query(
           `select public.create_stay_owner_draft($1,$2,$3,$4,$5,$6) as payload`,
           [title, name, city, text(body.propertyType, 40) || 'hotel', text(body.area, 120) || null, text(body.address, 400) || null],
         );
-        res.status(201).json({ ok: true, ...result.rows[0]?.payload });
+        return { status: 201, body: { ok: true, ...result.rows[0]?.payload } };
       });
+      res.status(created.status).json(created.body);
     } catch (error: any) {
       const message = String(error?.message || '');
+      if (error?.statusCode) return bad(res, Number(error.statusCode), message);
       if (message.includes('STAY_NAME_AND_CITY_REQUIRED') || message.includes('INVALID_PROPERTY_OPTIONS')) {
         return bad(res, 400, 'PROPERTY_NAME_AND_CITY_REQUIRED');
       }
@@ -233,7 +237,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     });
   }));
 
-  app.post('/api/stays/host/listings/:listingId/submit', handle(async (req, res, actorId, client) => {
+  app.post('/api/stays/host/listings/:listingId/submit', handleCommitted(async (req, actorId, client) => {
     const listingId = text(req.params.listingId, 128);
     const listing = await requireOwnedStayListing(client, actorId, listingId);
     const property = await client.query(
@@ -257,12 +261,12 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
       unitCount: Number(rooms.rows[0]?.units || 0),
       documents: payload.verificationDocuments,
     });
-    if (missing.length) return bad(res, 400, 'STAY_PROFILE_INCOMPLETE', `Missing: ${missing.join(', ')}`);
+    if (missing.length) throw Object.assign(new Error('STAY_PROFILE_INCOMPLETE'), { statusCode: 400, detail: `Missing: ${missing.join(', ')}` });
     const result = await client.query(`select public.submit_stay_listing_for_review($1) as payload`, [listingId]);
-    res.json({ ok: true, ...result.rows[0]?.payload });
+    return { body: { ok: true, ...result.rows[0]?.payload } };
   }));
 
-  app.put('/api/stays/host/listings/:listingId/documents', handle(async (req, res, actorId, client) => {
+  app.put('/api/stays/host/listings/:listingId/documents', handleCommitted(async (req, actorId, client) => {
     const listingId = text(req.params.listingId, 128);
     const listing = await requireOwnedStayListing(client, actorId, listingId);
     const body = req.body || {};
@@ -288,11 +292,11 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
         policies,
       })],
     );
-    if (!result.rows[0]?.payload) return bad(res, 404, 'OWNED_STAY_LISTING_REQUIRED');
-    res.json({ ok: true, listing: { id: listingId, payload: result.rows[0].payload } });
+    if (!result.rows[0]?.payload) throw Object.assign(new Error('OWNED_STAY_LISTING_REQUIRED'), { statusCode: 404 });
+    return { body: { ok: true, listing: { id: listingId, payload: result.rows[0].payload } } };
   }));
 
-  app.put('/api/stays/host/properties', handle(async (req, res, actorId, client) => {
+  app.put('/api/stays/host/properties', handleCommitted(async (req, actorId, client) => {
     const body = req.body || {};
     const listingId = text(body.listingId, 128);
     const listing = await requireOwnedStayListing(client, actorId, listingId);
@@ -300,11 +304,11 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     const isActive = approved && body.isActive !== false;
     const name = text(body.name, 160);
     const city = text(body.city, 120);
-    if (!name || !city) return bad(res, 400, 'PROPERTY_NAME_AND_CITY_REQUIRED');
+    if (!name || !city) throw Object.assign(new Error('PROPERTY_NAME_AND_CITY_REQUIRED'), { statusCode: 400 });
     const propertyType = String(body.propertyType || 'hotel');
     const placeType = String(body.placeType || 'entire_home');
     const policy = body.cancellationPolicy === undefined ? null : String(body.cancellationPolicy || 'moderate');
-    if (!PROPERTY_TYPES.has(propertyType) || !PLACE_TYPES.has(placeType) || (policy !== null && !CANCELLATION_POLICIES.has(policy))) return bad(res, 400, 'INVALID_PROPERTY_OPTIONS');
+    if (!PROPERTY_TYPES.has(propertyType) || !PLACE_TYPES.has(placeType) || (policy !== null && !CANCELLATION_POLICIES.has(policy))) throw Object.assign(new Error('INVALID_PROPERTY_OPTIONS'), { statusCode: 400 });
     const taxPercent = body.taxPercent === undefined || body.taxPercent === null || body.taxPercent === ''
       ? null
       : Math.min(100, Math.max(0, Number(body.taxPercent)));
@@ -316,7 +320,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     const beds = int(body.beds ?? 0, 0, 200);
     const maxGuests = int(body.maxGuests ?? 0, 0, 500);
     const bathrooms = Number(body.bathrooms ?? 0);
-    if (!Number.isFinite(bathrooms) || bathrooms < 0 || bathrooms > 100) return bad(res, 400, 'INVALID_BATHROOM_COUNT');
+    if (!Number.isFinite(bathrooms) || bathrooms < 0 || bathrooms > 100) throw Object.assign(new Error('INVALID_BATHROOM_COUNT'), { statusCode: 400 });
     const result = await client.query(
       `insert into public.stay_properties
          (listing_id, owner_user_id, name, property_type, place_type, city, area, address,
@@ -360,8 +364,8 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
         int(body.serviceFeeBps ?? 0, 0, 3000),
         isActive],
     );
-    if (!result.rows[0]) return bad(res, 403, 'PROPERTY_OWNERSHIP_REQUIRED');
-    res.json({ ok: true, property: result.rows[0] });
+    if (!result.rows[0]) throw Object.assign(new Error('PROPERTY_OWNERSHIP_REQUIRED'), { statusCode: 403 });
+    return { body: { ok: true, property: result.rows[0] } };
   }));
 
   // Room types and units are written by the same screen that then reads them
@@ -814,24 +818,24 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     res.json(outcome);
   }));
 
-  app.put('/api/stays/host/media-order', handle(async (req, res, actorId, client) => {
+  app.put('/api/stays/host/media-order', handleCommitted(async (req, actorId, client) => {
     const listingId = text(req.body?.listingId, 128);
     await requireOwnedStayListing(client, actorId, listingId);
     const ids = Array.isArray(req.body?.mediaIds) ? req.body.mediaIds.map((id: unknown) => String(id)) : [];
-    if (ids.length > 20 || ids.some((id: string) => !UUID.test(id)) || new Set(ids).size !== ids.length) return bad(res, 400, 'INVALID_MEDIA_ORDER');
+    if (ids.length > 20 || ids.some((id: string) => !UUID.test(id)) || new Set(ids).size !== ids.length) throw Object.assign(new Error('INVALID_MEDIA_ORDER'), { statusCode: 400 });
     const owned = await client.query(
       `select id, 'storage://' || bucket_id || '/' || object_path as reference from public.media_assets
         where id = any($1::uuid[]) and owner_id=$2 and module_key='stays' and parent_type='provider_listing'
           and parent_id=$3 and bucket_id='bos-public-media' and privacy='public' and processing_status='ready'`,
       [ids, actorId, listingId],
     );
-    if (owned.rowCount !== ids.length) return bad(res, 403, 'OWNED_READY_MEDIA_REQUIRED');
+    if (owned.rowCount !== ids.length) throw Object.assign(new Error('OWNED_READY_MEDIA_REQUIRED'), { statusCode: 403 });
     for (let index = 0; index < ids.length; index += 1) {
       const changed = await client.query(
         `update public.media_assets set display_order=$3 where id=$1 and owner_id=$2 and parent_id=$4 and processing_status='ready'`,
         [ids[index], actorId, index, listingId],
       );
-      if (changed.rowCount !== 1) return bad(res, 403, 'MEDIA_ORDER_UPDATE_FORBIDDEN');
+      if (changed.rowCount !== 1) throw Object.assign(new Error('MEDIA_ORDER_UPDATE_FORBIDDEN'), { statusCode: 403 });
     }
     const referenceById = new Map(owned.rows.map(row => [row.id, row.reference]));
     const images = ids.map((id: string) => referenceById.get(id));
@@ -839,7 +843,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
       `update public.listings set payload=jsonb_set(coalesce(payload,'{}'::jsonb),'{images}',$2::jsonb,true),updated_at=now()
         where id=$1 and owner_id=$3 returning id`, [listingId, JSON.stringify(images), actorId],
     );
-    if (!listing.rowCount) return bad(res, 403, 'LISTING_UPDATE_FORBIDDEN');
-    res.json({ ok: true, images });
+    if (!listing.rowCount) throw Object.assign(new Error('LISTING_UPDATE_FORBIDDEN'), { statusCode: 403 });
+    return { body: { ok: true, images } };
   }));
 }
