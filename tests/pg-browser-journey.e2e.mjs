@@ -114,7 +114,9 @@ try {
     await dismissPrivacyChoices(page);
 
     // -------------------------------------------------- signed-out discovery
-    const detailsButton = page.getByRole('button', { name: `View details for ${listingTitle}` });
+    const detailsButton = page
+      .getByRole('article', { name: `PG listing ${listingTitle}` })
+      .getByRole('button', { name: 'View & book' });
     const listed = await detailsButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the approved PG listing is rendered in the discovery feed`, listed);
     if (!listed) {
@@ -129,7 +131,7 @@ try {
     }
 
     await detailsButton.click();
-    await page.getByRole('heading', { name: listingTitle }).waitFor({ timeout: 15000 });
+    await page.locator('#pg-detail-title').waitFor({ timeout: 15000 });
     const availabilityRegion = page.getByRole('region', { name: 'PG availability and booking' });
     const hasAvailability = await availabilityRegion.waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the PG detail sheet exposes the live availability panel`, hasAvailability);
@@ -167,7 +169,9 @@ try {
     await page.goto(`${uiUrl}/#pg`, { waitUntil: 'domcontentloaded' });
     await dismissPrivacyChoices(page);
 
-    const signedInButton = page.getByRole('button', { name: `View details for ${listingTitle}` });
+    const signedInButton = page
+      .getByRole('article', { name: `PG listing ${listingTitle}` })
+      .getByRole('button', { name: 'View & book' });
     const signedInListed = await signedInButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the signed-in customer still sees the listing`, signedInListed);
     if (signedInListed) {
@@ -188,7 +192,23 @@ try {
       }
 
       if (canReserve) {
+        const bookingResponsePromise = page
+          .waitForResponse(
+            (response) => response.url().endsWith('/api/pg/bookings') && response.request().method() === 'POST',
+            { timeout: 15000 },
+          )
+          .catch(() => null);
         await reserve.click();
+        const bookingResponse = await bookingResponsePromise;
+        const bookingPayload = bookingResponse ? await bookingResponse.json().catch(() => ({})) : {};
+        const reservationBookingId = String(bookingPayload?.booking?.bookingId || '');
+        const reservationRequest = bookingResponse?.request()?.postDataJSON?.() || {};
+        assertCheck(`${viewport.name}: the reservation is persisted by the PostgreSQL API`, Boolean(reservationBookingId));
+        assertCheck(
+          `${viewport.name}: a fresh reservation starts unpaid`,
+          String(bookingPayload?.booking?.paymentStatus || '') === 'pay_later',
+          JSON.stringify(bookingPayload?.booking || {}).slice(0, 240),
+        );
         const paymentHeading = page.getByText(/Payment for reservation/i);
         const paymentShown = await paymentHeading.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
         assertCheck(`${viewport.name}: the payment step is shown after the reservation`, paymentShown);
@@ -204,6 +224,72 @@ try {
             assertCheck(`${viewport.name}: a UPI QR is rendered for the server-priced amount`, qrVisible);
             const pending = page.getByText(/Waiting for the payment provider/i).waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
             assertCheck(`${viewport.name}: the reservation is honestly shown as pending, not paid`, pending);
+
+            if (reservationBookingId) {
+              const token = await page.evaluate(() => localStorage.getItem('bos_session_token_v1') || '');
+              const auth = { Authorization: `Bearer ${token}` };
+              const paymentState = await page.request.get(
+                `${baseUrl}/api/pg/bookings/${encodeURIComponent(reservationBookingId)}/payment`,
+                { headers: auth },
+              );
+              const paymentBody = await paymentState.json().catch(() => ({}));
+              assertCheck(
+                `${viewport.name}: the server reports the payment as pending verification`,
+                paymentState.status() === 200 && paymentBody?.paymentStatus === 'pending_verification',
+                JSON.stringify(paymentBody).slice(0, 240),
+              );
+
+              // A pending payment must block a bare cancellation: the bed is only
+              // released once the money is reconciled.
+              const blockedCancel = await page.request.post(
+                `${baseUrl}/api/pg/bookings/${encodeURIComponent(reservationBookingId)}/cancel`,
+                { headers: auth },
+              );
+              assertCheck(
+                `${viewport.name}: a pending-payment reservation cannot be cancelled without a refund`,
+                !blockedCancel.ok(),
+                `${blockedCancel.status()} ${(await blockedCancel.text()).slice(0, 200)}`,
+              );
+
+              // A second, unpaid reservation is cancellable end to end.
+              const second = await page.request.post(`${baseUrl}/api/pg/bookings`, {
+                headers: auth,
+                data: {
+                  listingId: reservationRequest.listingId,
+                  roomTypeId: reservationRequest.roomTypeId,
+                  moveIn: reservationRequest.moveIn,
+                  months: 1,
+                  beds: 1,
+                  occupants: 1,
+                  idempotencyKey: `pg-cancel-${viewport.name}-${Date.now()}`,
+                },
+              });
+              const secondBody = await second.json().catch(() => ({}));
+              const secondId = String(secondBody?.booking?.bookingId || '');
+              assertCheck(`${viewport.name}: a second bed reservation is created for cancellation`, second.status() === 201 && Boolean(secondId), JSON.stringify(secondBody).slice(0, 240));
+
+              if (secondId) {
+                const cancelled = await page.request.post(
+                  `${baseUrl}/api/pg/bookings/${encodeURIComponent(secondId)}/cancel`,
+                  { headers: auth },
+                );
+                const cancelledBody = await cancelled.json().catch(() => ({}));
+                assertCheck(
+                  `${viewport.name}: an unpaid reservation cancels and releases its bed`,
+                  cancelled.ok() && String(cancelledBody?.booking?.status || cancelledBody?.status || '') === 'cancelled',
+                  `${cancelled.status()} ${JSON.stringify(cancelledBody).slice(0, 240)}`,
+                );
+
+                const mine = await page.request.get(`${baseUrl}/api/pg/bookings`, { headers: auth });
+                const mineBody = await mine.json().catch(() => ({}));
+                const persisted = (mineBody.bookings || []).find((booking) => booking.bookingId === secondId);
+                assertCheck(
+                  `${viewport.name}: the cancellation is persisted in My Bookings`,
+                  Boolean(persisted) && persisted.status === 'cancelled',
+                  JSON.stringify(persisted || {}).slice(0, 240),
+                );
+              }
+            }
           }
         }
       }
