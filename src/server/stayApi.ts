@@ -623,10 +623,11 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
       const result = await withActor(actor, async (client) => {
         const gate = await client.query(
           `select l.status, l.payload, p.is_active, l.is_verified, l.verified_by,
-                  (owner.role = 'provider' and owner.account_status = 'active' and owner.verified is true) as owner_verified
+                  coalesce(owner.verified, false) as owner_verified
              from public.listings l
              join public.stay_properties p on p.listing_id = l.id
-             join public.profiles owner on owner.id = p.owner_user_id and owner.id = l.owner_id
+             join public.public_provider_profile_projection owner
+               on owner.id = p.owner_user_id and owner.id = l.owner_id
             where l.id = $1 limit 1`,
           [listingId],
         );

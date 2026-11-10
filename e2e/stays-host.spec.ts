@@ -245,7 +245,7 @@ test('request-to-book holds inventory, host approves, guest self checks in and o
       guestName: 'Request Guest', guestPhone: '+919000000010',
     }),
   });
-  expect(request.status).toBe(201);
+  expect(request.status, JSON.stringify(request.body)).toBe(201);
   expect(request.body.status).toBe('pending_approval');
   expect(request.body.totalPaise).toBeGreaterThan(0);
   const bookingId = request.body.bookingId as string;
