@@ -6,10 +6,13 @@
 export interface DemoDataEnvironment {
   DEV?: boolean;
   VITE_ENABLE_DEMO_DATA?: string;
+  /** Explicit, operator-set opt-in for a hosted preview build. */
+  VITE_AI_STUDIO_DEMO?: string;
 }
 
 export function isDemoDataEnabled(environment: DemoDataEnvironment): boolean {
-  return environment.DEV === true && environment.VITE_ENABLE_DEMO_DATA === 'true';
+  return environment.VITE_ENABLE_DEMO_DATA === 'true'
+    && (environment.DEV === true || environment.VITE_AI_STUDIO_DEMO === 'true');
 }
 
 export const DEMO_DATA_ENABLED = isDemoDataEnabled(import.meta.env ?? {});

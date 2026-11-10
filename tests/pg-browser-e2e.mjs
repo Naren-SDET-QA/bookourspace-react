@@ -143,6 +143,17 @@ async function installLocalOnlyNetwork(page) {
   );
 }
 
+function pgCardAction(page, listingTitle) {
+  // The PG module renders PGSectionExperience cards ("View & book") in every
+  // style; the older PgDekhoExperience control ("View details for") is kept as
+  // a fallback so this harness follows whichever experience is mounted.
+  const modern = page
+    .getByRole('article', { name: `PG listing ${listingTitle}` })
+    .getByRole('button', { name: 'View & book' });
+  const legacy = page.getByRole('button', { name: `View details for ${listingTitle}` });
+  return modern.or(legacy).first();
+}
+
 async function openLiveListing(page, style) {
   const diagnostics = browserDiagnostics.get(page) || attachBrowserDiagnostics(page, 'unknown', style);
   const mark = (event) => diagnostics.timeline.push({ ms: Date.now() - diagnostics.startedAt, event });
@@ -163,7 +174,7 @@ async function openLiveListing(page, style) {
   }
   if (style === 'style1') {
     await page.locator('#pg-search').fill(listingTitle);
-    await page.getByRole('button', { name: `View details for ${listingTitle}` }).waitFor({ timeout: 10000 });
+    await pgCardAction(page, listingTitle).waitFor({ timeout: 10000 });
     await page.getByRole('button', { name: 'Filters' }).click();
     await page.getByRole('button', { name: 'Under ₹5,000' }).click();
     try {
@@ -184,11 +195,11 @@ async function openLiveListing(page, style) {
     // so the Style 2 fixture does not rely on fabricated location metadata.
     await page.getByPlaceholder('Search Location').fill(listingTitle);
     await page.getByRole('region', { name: 'pg_hostels section' }).getByRole('button', { name: 'Search', exact: true }).click();
-    await page.getByRole('button', { name: `View details for ${listingTitle}` }).waitFor({ timeout: 10000 });
+    await pgCardAction(page, listingTitle).waitFor({ timeout: 10000 });
     console.log('  INFO  style2 search passed');
     mark('style2 search complete');
   }
-  await page.getByRole('button', { name: `View details for ${listingTitle}` }).click();
+  await pgCardAction(page, listingTitle).click();
   mark('listing detail opened');
   await page.getByRole('heading', { name: listingTitle }).last().waitFor({ timeout: 10000 });
   await page.getByRole('region', { name: 'PG availability and booking' }).waitFor();
@@ -370,7 +381,7 @@ async function runCustomerBookingJourney(browser, style) {
   // its backdrop correctly blocks clicks on the page beneath it.
   await page.locator('div.fixed.inset-0.z-50').getByRole('button').first().click();
   await page.goto(`${uiUrl}/#pg/${style}`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: `View details for ${listingTitle}` }).click();
+  await pgCardAction(page, listingTitle).click();
   const availabilityPanel = page.getByRole('region', { name: 'PG availability and booking' });
   await availabilityPanel.waitFor();
   await page.getByLabel('Move-in date').fill(moveIn);

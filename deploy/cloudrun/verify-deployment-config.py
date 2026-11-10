@@ -77,6 +77,71 @@ check(not re.search(r"https://[a-z0-9.-]+\.run\.app", deploy_text), "no assumed 
 for required in ("deploy/POST_DEPLOY.md", "deploy/env.production.example", "deploy/native/build-production.sh"):
     check((ROOT / required).is_file(), f"{required} present")
 
+# ---------------------------------------------------------------------------
+# Development / production Supabase separation
+# ---------------------------------------------------------------------------
+GUARD = ROOT / "src/server/supabaseProductionGuard.ts"
+guard_text = GUARD.read_text()
+development_refs = set(re.findall(r"'([a-z0-9]{20})'", guard_text))
+check(len(development_refs) >= 3, "runtime guard declares the development Supabase references")
+
+offending = sorted(
+    str(p.relative_to(ROOT))
+    for p in (ROOT / "deploy").rglob("*")
+    if p.is_file()
+    and p.suffix in {".yaml", ".yml", ".example", ".md", ".sh", ".py", ".json"}
+    and any(ref in p.read_text(errors="ignore") for ref in development_refs)
+)
+check(not offending, "no deployment file names a development Supabase project")
+for name in offending:
+    print("      offending: " + name, file=sys.stderr)
+
+production_env = (ROOT / "deploy/env.production.example").read_text()
+check(
+    "BOS_PRODUCTION_SUPABASE_PROJECT_ID=__PRODUCTION_SUPABASE_PROJECT_REF__" in production_env,
+    "production env template requires an explicit production Supabase project",
+)
+check(
+    "VITE_SUPABASE_URL=https://__PRODUCTION_SUPABASE_PROJECT_REF__.supabase.co" in production_env,
+    "production env template derives the URL from the production project ref",
+)
+
+service_text = SERVICE.read_text()
+check('value: "${SUPABASE_PROJECT_ID}"' in service_text, "service.yaml takes the project ref from a substitution")
+check("BOS_PRODUCTION_SUPABASE_PROJECT_ID" in service_text, "service.yaml passes BOS_PRODUCTION_SUPABASE_PROJECT_ID")
+check(
+    not re.search(r"[a-z0-9]{20}\.supabase\.co", service_text),
+    "service.yaml hard-codes no Supabase project host",
+)
+
+build_text = BUILD.read_text()
+check(
+    '_VITE_SUPABASE_PROJECT_ID: "REPLACE_WITH_PRODUCTION_SUPABASE_PROJECT_REF"' in build_text,
+    "cloudbuild.yaml requires an explicit production project substitution",
+)
+check(
+    "Refusing to build production with a development Supabase project reference." in build_text,
+    "cloudbuild.yaml refuses a development project ref",
+)
+check(
+    not re.search(r"[a-z0-9]{20}\.supabase\.co", build_text),
+    "cloudbuild.yaml hard-codes no Supabase project host",
+)
+
+native_build = (ROOT / "deploy/native/build-production.sh").read_text()
+check(
+    "a release build must not target the development Supabase project" in native_build,
+    "native release build refuses a development project ref",
+)
+
+server_text = (ROOT / "server.ts").read_text()
+check(
+    "assertProductionSupabaseEnvironment();" in server_text
+    and "httpServer.listen(" in server_text
+    and server_text.index("assertProductionSupabaseEnvironment();") < server_text.index("httpServer.listen("),
+    "production startup validates Supabase separation before listening",
+)
+
 if failures:
     print(f"\nBLOCKED: {len(failures)} configuration check(s) failed", file=sys.stderr)
     sys.exit(1)

@@ -51,6 +51,20 @@ if [[ -z "${VITE_SUPABASE_URL:-}" || -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]];
   echo "BLOCKER: export the public VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY for the release build." >&2
   exit 2
 fi
+# A release bundle is built only against an explicit, dedicated production
+# project. The development project is refused, never silently inherited.
+if [[ -z "${VITE_SUPABASE_PROJECT_ID:-}" ]]; then
+  echo "BLOCKER: export VITE_SUPABASE_PROJECT_ID with the dedicated production project reference." >&2
+  exit 2
+fi
+if [[ "${VITE_SUPABASE_URL}" != "https://${VITE_SUPABASE_PROJECT_ID}.supabase.co" ]]; then
+  echo "BLOCKER: VITE_SUPABASE_URL must be https://<VITE_SUPABASE_PROJECT_ID>.supabase.co." >&2
+  exit 2
+fi
+if grep -Eq "['\"]${VITE_SUPABASE_PROJECT_ID}['\"]" src/server/supabaseProductionGuard.ts; then
+  echo "BLOCKER: a release build must not target the development Supabase project." >&2
+  exit 2
+fi
 
 # No live-reload server URL may be bundled into a release shell.
 if grep -RIn --include='capacitor.config.*' -E 'url:[[:space:]]*["'"'"']https?://' capacitor.config.ts android ios 2>/dev/null; then
@@ -73,7 +87,7 @@ VITE_NATIVE_API_ORIGIN="$ORIGIN" \
 VITE_ENABLE_DEMO_DATA=false \
 VITE_BOS_LOCAL_DEV_AUTH=0 \
 VITE_SUPABASE_URL="$VITE_SUPABASE_URL" \
-VITE_SUPABASE_PROJECT_ID="${VITE_SUPABASE_PROJECT_ID:-obkfgxjzlscungkhbyvq}" \
+VITE_SUPABASE_PROJECT_ID="$VITE_SUPABASE_PROJECT_ID" \
 VITE_SUPABASE_PUBLISHABLE_KEY="$VITE_SUPABASE_PUBLISHABLE_KEY" \
 VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-$VITE_SUPABASE_PUBLISHABLE_KEY}" \
 npm run build

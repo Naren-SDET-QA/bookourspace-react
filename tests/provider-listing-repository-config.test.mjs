@@ -6,7 +6,7 @@ test('listing repository stays unconfigured when no local database URL is suppli
   assert.equal(ProviderListingRepository.fromEnvironment({ NODE_ENV: 'test' }), null);
 });
 
-test('listing repository accepts only a loopback PostgreSQL target', async () => {
+test('listing repository accepts loopback or an explicit TLS Supabase development target', async () => {
   const repository = ProviderListingRepository.fromEnvironment({
     NODE_ENV: 'test',
     BOS_LISTINGS_DATABASE_URL: 'postgres://postgres@127.0.0.1:55432/bos_test',
@@ -19,8 +19,17 @@ test('listing repository accepts only a loopback PostgreSQL target', async () =>
       NODE_ENV: 'test',
       BOS_LISTINGS_DATABASE_URL: 'postgres://localhost.example.invalid/bos_test',
     }),
-    /BOS_LISTINGS_DATABASE_MUST_BE_LOOPBACK/,
+    /BOS_DEVELOPMENT_POSTGRES_TARGET_NOT_ALLOWLISTED/,
   );
+  const developmentRepository = ProviderListingRepository.fromEnvironment({
+    NODE_ENV: 'development',
+    BOS_LISTINGS_DATABASE_URL:
+      'postgresql://postgres:placeholder@db.obkfgxjzlscungkhbyvq.supabase.co:5432/postgres?sslmode=verify-full',
+    BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+    BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+  });
+  assert.ok(developmentRepository instanceof ProviderListingRepository);
+  await developmentRepository.close();
   assert.throws(
     () => ProviderListingRepository.fromEnvironment({
       NODE_ENV: 'development',

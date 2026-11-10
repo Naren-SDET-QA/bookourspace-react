@@ -41,7 +41,18 @@ async function openApp(browser: Browser, viewport?: { width: number; height: num
       const target = new URL(route.request().url());
       if (target.origin === harness.uiUrl) {
         if (target.pathname.startsWith('/api/')) {
-          const upstream = await route.fetch({ url: `${harness.apiUrl}${target.pathname}${target.search}` });
+          // Bound the proxy: an upstream that never answers would otherwise
+          // hang this handler, which close() waits on via unrouteAll.
+          let proxyTimer: ReturnType<typeof setTimeout> | undefined;
+          const upstream = await Promise.race([
+            route.fetch({ url: `${harness.apiUrl}${target.pathname}${target.search}` }),
+            new Promise<never>((_resolve, reject) => {
+              proxyTimer = setTimeout(
+                () => reject(Object.assign(new Error('API_PROXY_TIMEOUT'), { code: 'API_PROXY_TIMEOUT' })),
+                30_000,
+              );
+            }),
+          ]).finally(() => { if (proxyTimer) clearTimeout(proxyTimer); });
           await route.fulfill({ response: upstream });
         } else {
           await route.continue();
@@ -49,7 +60,11 @@ async function openApp(browser: Browser, viewport?: { width: number; height: num
         return;
       }
       await route.abort('blockedbyclient');
-    } catch {
+    } catch (error) {
+    if ((error as { code?: string })?.code === 'API_PROXY_TIMEOUT') {
+      await route.abort('timedout').catch(() => undefined);
+      return;
+    }
       // Navigation can close a context with a request in flight.
     }
   });

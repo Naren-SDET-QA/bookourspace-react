@@ -9,7 +9,8 @@ after deployment; never invent it.
 ```bash
 export VITE_NATIVE_API_ORIGIN="$(gcloud run services describe bookourspace-api \
   --region asia-south1 --format='value(status.url)')"
-export VITE_SUPABASE_URL="https://obkfgxjzlscungkhbyvq.supabase.co"
+export VITE_SUPABASE_PROJECT_ID="<dedicated production project ref>"
+export VITE_SUPABASE_URL="https://${VITE_SUPABASE_PROJECT_ID}.supabase.co"
 export VITE_SUPABASE_PUBLISHABLE_KEY="<public publishable/anon key>"
 export VITE_ENABLE_DEMO_DATA=false
 export VITE_BOS_LOCAL_DEV_AUTH=0
@@ -32,6 +33,7 @@ bash deploy/native/build-production.sh --verify
 This runs `npm ci`, the production web build and `npx cap sync`, and rejects:
 
 - missing/non-HTTPS API origin or the Supabase host
+- a missing, malformed or development Supabase project reference
 - `VITE_ENABLE_DEMO_DATA` not `false`
 - local demo auth / payment sandbox / demo stay flags
 - a live-reload `server.url`

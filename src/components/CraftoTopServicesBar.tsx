@@ -68,6 +68,7 @@ import {
 import { useMarketplace } from '../context/MarketplaceContext';
 import { UserWalletAndLedgerSection } from './UserWalletAndQuickModals';
 import { canAccessAdminConsole } from '../lib/accessControl';
+import { SpotlightModuleTabs } from './SpotlightModuleTabs';
 
 interface CraftoTopServicesBarProps {
   activeMarketSection: MarketSectionType;
@@ -1032,78 +1033,20 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
             </div>
           )}
 
-          {/* Row 4: 6 MARKET SECTION ICON CARDS (PG's • Classes • Halls • Services • Stay • Movies) matching Light & Dark screenshots */}
-          <div className="grid grid-cols-6 gap-1 sm:gap-2.5 pt-0.5 w-full">
-            {[
-              {
-                id: 'pg_hostels' as MarketSectionType,
-                emoji: '🏠',
-                label: currentLang === 'en' ? "PG's" : ui.secPGShort,
-                lightBg: 'bg-[#EEF2FF] border-[#C7D2FE]/80',
-              },
-              {
-                id: 'classes' as MarketSectionType,
-                emoji: '🎓',
-                label: currentLang === 'en' ? 'Classes' : ui.secClassesShort,
-                lightBg: 'bg-[#EFF6FF] border-[#BFDBFE]/80',
-              },
-              {
-                id: 'venues' as MarketSectionType,
-                emoji: '🏛️',
-                label: currentLang === 'en' ? 'Halls' : ui.secVenuesShort,
-                lightBg: 'bg-[#FFF7ED] border-[#FED7AA]/80',
-              },
-              {
-                id: 'services' as MarketSectionType,
-                emoji: '🛠️',
-                label: currentLang === 'en' ? 'Services' : ui.secServicesShort,
-                lightBg: 'bg-[#ECFDF5] border-[#A7F3D0]/80',
-              },
-              {
-                id: 'hotel_stay' as MarketSectionType,
-                emoji: '🏨',
-                label: currentLang === 'en' ? 'Stay' : ui.secStayShort,
-                lightBg: 'bg-[#FFF1F2] border-[#FECDD3]/80',
-              },
-              {
-                id: 'movies' as MarketSectionType,
-                emoji: '🎬',
-                label: currentLang === 'en' ? 'Movies' : ui.secMoviesShort,
-                lightBg: 'bg-[#F5F3FF] border-[#DDD6FE]/80',
-              },
-            ].map((tab) => {
-              const isActive = activeMarketSection === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  data-testid={`market-section-${tab.id}`}
-                  aria-pressed={isActive}
-                  onClick={() => {
-                    // Always (re)enter the section so its screen loads below the header,
-                    // even when this card is already the active section.
-                    onSelectMarketSection(tab.id);
-                  }}
-                  className={`group py-1.5 sm:py-2.5 px-0.5 sm:px-3 rounded-2xl transition-all duration-200 flex flex-col items-center justify-center gap-1 cursor-pointer border min-w-0 overflow-hidden ${
-                    isActive
-                      ? 'bg-gradient-to-b from-[#7C3AED] via-[#6D28D9] to-[#4338CA] text-white border-[#8B5CF6] shadow-[0_8px_20px_-4px_rgba(109,40,217,0.55)] ring-2 ring-purple-300/80 dark:ring-purple-500/70 scale-[1.01]'
-                      : `${tab.lightBg} dark:bg-[#161336]/90 dark:border-indigo-500/25 text-slate-900 dark:text-slate-100 hover:scale-[1.01] hover:border-[#6D28D9]/50 shadow-2xs`
-                  }`}
-                >
-                  <span className="text-lg sm:text-2xl leading-none drop-shadow-2xs transition-transform duration-200 group-hover:scale-110">
-                    {tab.emoji}
-                  </span>
-                  <span
-                    className={`text-[9px] sm:text-xs font-extrabold leading-tight tracking-tighter sm:tracking-tight whitespace-nowrap ${
-                      isActive ? 'text-white' : 'text-slate-800 dark:text-slate-200'
-                    }`}
-                  >
-                    {tab.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {/* Lightweight Spotlight-style module tabs preserve the existing
+              section navigation callback while improving hierarchy and keyboard access. */}
+          <SpotlightModuleTabs
+            activeMarketSection={activeMarketSection}
+            onSelectMarketSection={onSelectMarketSection}
+            labels={{
+              pg_hostels: currentLang === 'en' ? "PG's" : ui.secPGShort,
+              classes: currentLang === 'en' ? 'Classes' : ui.secClassesShort,
+              venues: currentLang === 'en' ? 'Halls' : ui.secVenuesShort,
+              services: currentLang === 'en' ? 'Services' : ui.secServicesShort,
+              hotel_stay: currentLang === 'en' ? 'Stay' : ui.secStayShort,
+              movies: currentLang === 'en' ? 'Movies' : ui.secMoviesShort,
+            }}
+          />
           {onOpenServicesDiscovery && (
             <div className="flex justify-end pt-2">
               <button

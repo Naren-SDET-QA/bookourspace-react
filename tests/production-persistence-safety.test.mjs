@@ -79,14 +79,85 @@ test('production accepts a verified TLS PostgreSQL target and a strong secret', 
   assert.equal(policy.postgres, true);
 });
 
-test('development and test never reach a remote database', () => {
+test('development and test reject remote databases without an explicit project allowlist', () => {
   assert.throws(
     () =>
       assertProductionPersistenceReady({
         NODE_ENV: 'test',
         BOS_LISTINGS_DATABASE_URL: PRODUCTION_TLS_URL,
       }),
-    /BOS_LISTINGS_DATABASE_MUST_BE_LOOPBACK/,
+    /BOS_DEVELOPMENT_POSTGRES_TARGET_NOT_ALLOWLISTED/,
+  );
+});
+
+test('development accepts only the allowlisted Supabase project over TLS', () => {
+  const developmentUrl =
+    'postgresql://postgres:placeholder@db.obkfgxjzlscungkhbyvq.supabase.co:5432/postgres?sslmode=verify-full';
+  const policy = assertProductionPersistenceReady({
+    NODE_ENV: 'development',
+    BOS_LISTINGS_DATABASE_URL: developmentUrl,
+    BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+    BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+  });
+  assert.equal(policy.mode, 'postgres');
+  assert.equal(policy.postgres, true);
+
+  const poolerUrl =
+    'postgresql://postgres.obkfgxjzlscungkhbyvq:placeholder@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+  const poolerPolicy = assertProductionPersistenceReady({
+    NODE_ENV: 'development',
+    BOS_LISTINGS_DATABASE_URL: poolerUrl,
+    BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+    BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+  });
+  assert.equal(poolerPolicy.mode, 'postgres');
+  assert.equal(poolerPolicy.postgres, true);
+
+  assert.throws(
+    () =>
+      assertProductionPersistenceReady({
+        NODE_ENV: 'development',
+        BOS_LISTINGS_DATABASE_URL: poolerUrl.replace('postgres.obkfgxjzlscungkhbyvq', 'postgres.otherproject'),
+        BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+        BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+      }),
+    /BOS_DEVELOPMENT_POSTGRES_TARGET_NOT_ALLOWLISTED/,
+  );
+
+  assert.throws(
+    () =>
+      assertProductionPersistenceReady({
+        NODE_ENV: 'development',
+        BOS_LISTINGS_DATABASE_URL: poolerUrl.replace('sslmode=verify-full', 'sslmode=disable'),
+        BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+        BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+      }),
+    /BOS_DEVELOPMENT_POSTGRES_TLS_REQUIRED/,
+  );
+
+  assert.throws(
+    () =>
+      assertProductionPersistenceReady({
+        NODE_ENV: 'development',
+        BOS_LISTINGS_DATABASE_URL: developmentUrl.replace('sslmode=verify-full', 'sslmode=disable'),
+        BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+        BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+      }),
+    /BOS_DEVELOPMENT_POSTGRES_TLS_REQUIRED/,
+  );
+
+  assert.throws(
+    () =>
+      assertProductionPersistenceReady({
+        NODE_ENV: 'development',
+        BOS_LISTINGS_DATABASE_URL: developmentUrl.replace(
+          'db.obkfgxjzlscungkhbyvq.supabase.co',
+          'db.other-project.supabase.co',
+        ),
+        BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+        BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+      }),
+    /BOS_DEVELOPMENT_POSTGRES_TARGET_NOT_ALLOWLISTED/,
   );
 });
 

@@ -62,7 +62,7 @@ case "$DATABASE_URL" in
   *prod*) echo "REFUSED: the connection string looks like a production target." >&2; exit 3 ;;
 esac
 
-READONLY_PSQL=(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -X -q)
+READONLY_PSQL=(env PGOPTIONS="-c default_transaction_read_only=on" psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -X -q)
 
 if [ "$MODE" = "check" ]; then
   echo "Read-only DEV schema check"

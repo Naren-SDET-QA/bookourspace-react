@@ -182,11 +182,17 @@ function validateKey(key: string, projectId: string, isLocal: boolean): string |
   return 'INVALID_SUPABASE_PUBLISHABLE_KEY: expected a Supabase publishable key or legacy anon JWT.';
 }
 
+function isPlaceholderKey(key: string): boolean {
+  return PLACEHOLDER_KEY_VALUES.has(key.toLowerCase());
+}
+
 export function resolveSupabaseConfig(input: SupabaseConfigInput = {}): ResolvedSupabaseConfig {
   const explicitUrl = clean(input.url);
   const explicitProjectId = clean(input.projectId);
   const developmentProjectId = clean(input.developmentProjectId);
-  const key = clean(input.publishableKey) || clean(input.anonKey);
+  const publishableKey = clean(input.publishableKey);
+  const anonKey = clean(input.anonKey);
+  const key = publishableKey || anonKey;
   const errors: string[] = [];
 
   let projectId = '';
@@ -252,8 +258,18 @@ export function resolveSupabaseConfig(input: SupabaseConfigInput = {}): Resolved
   }
 
   if (projectUrl || errors.length > 0) {
-    const keyError = validateKey(key, projectId, projectId === 'local');
-    if (keyError) {
+    // Vite exposes every VITE_* value to the browser, even when the client
+    // would otherwise prefer a different alias. Validate both aliases so a
+    // database URL, service key, or other private value cannot hide in the
+    // secondary variable while the public client appears configured.
+    const configuredKeys = [publishableKey, anonKey].filter(Boolean);
+    if (configuredKeys.length === 0) configuredKeys.push(key);
+    for (const candidate of configuredKeys) {
+      // The example placeholder is allowed as an unused fallback when the
+      // other alias is configured; the selected placeholder still fails below.
+      if (candidate !== key && isPlaceholderKey(candidate)) continue;
+      const keyError = validateKey(candidate, projectId, projectId === 'local');
+      if (!keyError) continue;
       errors.push(keyError);
       // A key that belongs to a different project makes the pairing itself
       // unusable, so the configured project is dropped rather than half-used.

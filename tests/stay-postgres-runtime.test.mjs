@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import express from 'express';
 import { test } from 'node:test';
-import { closeSharedPostgresPool, getSharedPostgresPool, initializePostgresRuntime } from '../src/server/postgresPool.ts';
+import {
+  closeSharedPostgresPool,
+  getSharedPostgresPool,
+  initializePostgresRuntime,
+  resolvePostgresTlsConnectionString,
+} from '../src/server/postgresPool.ts';
 import { registerStaySearchApi } from '../src/server/staySearchApi.ts';
 
 const LOOPBACK = {
@@ -44,6 +49,16 @@ test('one canonical database URL reuses one shared pool instead of duplicating i
   const second = getSharedPostgresPool(LOOPBACK.BOS_LISTINGS_DATABASE_URL, LOOPBACK);
   assert.equal(first, second);
   await closeSharedPostgresPool();
+});
+
+test('Supabase TLS pooler URLs resolve the bundled root CA without weakening verify-full', () => {
+  const resolved = resolvePostgresTlsConnectionString(
+    'postgresql://postgres.obkfgxjzlscungkhbyvq:secret@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+  );
+  const parsed = new URL(resolved);
+  assert.equal(parsed.searchParams.get('sslmode'), 'verify-full');
+  assert.match(parsed.searchParams.get('sslrootcert') || '', /supabase\/certs\/supabase-root-ca\.crt$/);
+  assert.equal(resolvePostgresTlsConnectionString(LOOPBACK.BOS_LISTINGS_DATABASE_URL), LOOPBACK.BOS_LISTINGS_DATABASE_URL);
 });
 
 test('PostgreSQL startup verifies connectivity and required stay schema before serving', async () => {
