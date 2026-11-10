@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowRight, MapPin, Star } from 'lucide-react';
 import type { MarketplaceListing } from '../types/marketplace';
+import SafeImage from './SafeImage';
 
 /**
  * Agenda-style Venues discovery. This is intentionally a different design from
@@ -39,7 +40,7 @@ export function VenueAgendaView({
               >
                 <span className="relative block h-20 w-20 overflow-hidden rounded-xl bg-slate-100 sm:h-24 sm:w-full dark:bg-slate-800">
                   {photo ? (
-                    <img src={String(photo)} alt={listing.title} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+                    <SafeImage category="venues" src={String(photo)} alt={listing.title} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center text-2xl" aria-hidden="true">🏛️</span>
                   )}

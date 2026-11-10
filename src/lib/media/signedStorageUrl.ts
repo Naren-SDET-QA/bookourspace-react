@@ -6,34 +6,56 @@ const MAX_CACHED_URLS = 300;
 const VARIANT_CACHE_MS = 5 * 60 * 1000;
 const MAX_RESPONSIVE_VARIANTS = 8;
 const ALLOWED_BUCKETS = new Set(['bos-public-media', 'bos-private-documents', 'bos-private-profile-media']);
+const INVALID_STORAGE_PATH_CHARACTER = /[?#\\/\u0000-\u001f\u007f]/;
 
 export interface StorageObjectReference {
   bucket: 'bos-public-media' | 'bos-private-documents' | 'bos-private-profile-media';
   path: string;
 }
 
-/** Canonical persisted form: storage://<approved-bucket>/<object-path>. */
-export function parseStorageObjectReference(value: string): StorageObjectReference | null {
-  const match = /^storage:\/\/([^/]+)\/(.+)$/.exec(value);
-  if (!match) return null;
+function decodeStoragePath(rawPath: string): string | null {
+  const rawSegments = rawPath.split('/');
+  if (!rawSegments.length || rawSegments.some((segment) => !segment)) return null;
   try {
-    const bucket = match[1].toLowerCase();
-    if (!ALLOWED_BUCKETS.has(bucket) || /[?#\\\u0000-\u001f\u007f]/.test(match[2])) return null;
-    const rawSegments = match[2].split('/');
-    if (!rawSegments.length || rawSegments.some((segment) => !segment)) return null;
     const segments = rawSegments.map((segment) => decodeURIComponent(segment));
-    if (segments.some((segment) => segment === '.' || segment === '..' || /[\\/\u0000-\u001f\u007f]/.test(segment))) return null;
+    if (segments.some((segment) => segment === '.' || segment === '..' || INVALID_STORAGE_PATH_CHARACTER.test(segment))) return null;
     const path = segments.join('/');
-    if (path.length > 512) return null;
-    return { bucket: bucket as StorageObjectReference['bucket'], path };
+    return path.length > 512 ? null : path;
   } catch {
     return null;
   }
 }
 
+function canonicalStorageReference(bucketValue: string, rawPath: string): string | null {
+  let bucket: string;
+  try {
+    bucket = decodeURIComponent(bucketValue).toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!ALLOWED_BUCKETS.has(bucket)) return null;
+  const path = decodeStoragePath(rawPath);
+  if (!path) return null;
+  return `storage://${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+/** Canonical persisted form: storage://<approved-bucket>/<object-path>. */
+export function parseStorageObjectReference(value: string): StorageObjectReference | null {
+  const match = /^storage:\/\/([^/]+)\/(.+)$/.exec(value);
+  if (!match) return null;
+  const canonical = canonicalStorageReference(match[1], match[2]);
+  if (!canonical) return null;
+  const canonicalMatch = /^storage:\/\/([^/]+)\/(.+)$/.exec(canonical);
+  if (!canonicalMatch) return null;
+  return {
+    bucket: canonicalMatch[1] as StorageObjectReference['bucket'],
+    path: canonicalMatch[2].split('/').map((segment) => decodeURIComponent(segment)).join('/'),
+  };
+}
+
 /** Identifies a Supabase Storage object URL without trusting its host. */
 export function isSupabaseStorageSource(value: string): boolean {
-  if (value.startsWith('storage://')) return true;
+  if (value.startsWith('storage://')) return parseStorageObjectReference(value) !== null;
   try {
     const url = value.startsWith('/')
       ? new URL(value, SUPABASE_PROJECT_URL)
@@ -45,7 +67,10 @@ export function isSupabaseStorageSource(value: string): boolean {
 }
 
 export function storageReferenceForSource(value: string, projectUrl = SUPABASE_PROJECT_URL): string | null {
-  if (value.startsWith('storage://')) return parseStorageObjectReference(value) ? value : null;
+  if (value.startsWith('storage://')) {
+    const match = /^storage:\/\/([^/]+)\/(.+)$/.exec(value);
+    return match ? canonicalStorageReference(match[1], match[2]) : null;
+  }
   let url: URL;
   let configuredOrigin: string;
   try {
@@ -58,14 +83,7 @@ export function storageReferenceForSource(value: string, projectUrl = SUPABASE_P
   const match = url.pathname.match(/^\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/)
     || url.pathname.match(/^\/storage\/v1\/object\/([^/]+)\/(.+)$/);
   if (!match) return null;
-  try {
-    const bucket = decodeURIComponent(match[1]);
-    const path = match[2].split('/').map((segment) => decodeURIComponent(segment)).join('/');
-    const reference = `storage://${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
-    return parseStorageObjectReference(reference) ? reference : null;
-  } catch {
-    return null;
-  }
+  return canonicalStorageReference(match[1], match[2]);
 }
 
 /** Only the listing-media bucket is valid in an image element. */

@@ -32,6 +32,7 @@ const localDbPort = process.env.BOS_PLAYWRIGHT_DB_PORT || String(Number(localWeb
 const localDbDataDir = process.env.BOS_PLAYWRIGHT_DB_DATA_DIR || `/tmp/bookourspace-playwright-db-${localWebPort}`;
 const defaultBaseURL = `http://127.0.0.1:${localWebPort}`;
 const externalBaseURL = process.env.E2E_BASE_URL;
+const aiStudioPreview = process.env.BOS_E2E_AI_STUDIO === '1';
 
 export default defineConfig({
   testDir: './e2e',
@@ -79,7 +80,8 @@ export default defineConfig({
       // SafeImage and module smoke tests use clearly labelled local fixtures.
       // This flag is injected only into the isolated Playwright server and is
       // never part of the production build configuration.
-      VITE_ENABLE_DEMO_DATA: 'true',
+      VITE_ENABLE_DEMO_DATA: aiStudioPreview ? 'false' : 'true',
+      ...(aiStudioPreview ? { AI_STUDIO: 'true', BOS_AI_STUDIO_PREVIEW: '1' } : {}),
       // Keep browser tests stable when another local task is editing source:
       // HMR can replace a lazy module during a journey and reset React state.
       // Vite still serves the current modules; only its websocket reload path
