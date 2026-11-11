@@ -691,7 +691,7 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
       );
       return query.rows[0]?.payload;
     });
-    if (input.eventType === 'payment.captured' && result?.status === 'verified') {
+    if (input.eventType === 'payment.captured' && result?.status === 'verified' && result?.replayed !== true) {
       try {
         const booking = await withProviderTransaction(async (client) => {
           const query = await client.query(

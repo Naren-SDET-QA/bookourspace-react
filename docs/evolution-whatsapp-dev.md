@@ -8,10 +8,13 @@ notifications.
 
 ## Start the local service
 
-The local secret file is ignored by git. If it does not exist, create it from
-.env.evolution.example and set both values to long random strings.
+The local secret file is ignored by git. If it does not exist, create
+`.env.evolution.local` with these two values and set both to long random
+strings. The file is intentionally not committed:
 
-    cp .env.evolution.example .env.evolution.local
+    EVOLUTION_API_KEY=<long-random-local-key>
+    EVOLUTION_DB_PASSWORD=<long-random-local-password>
+
     docker compose --env-file .env.evolution.local -f docker-compose.evolution.yml up -d
 
 The app-side values belong in .env.local:
