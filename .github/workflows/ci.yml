@@ -81,7 +81,7 @@ jobs:
         run: npm ci
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Build the frontend for the browser journey
         run: npm run build
