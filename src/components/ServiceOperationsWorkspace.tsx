@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   ClipboardList,
   Loader2,
+  Navigation,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -25,6 +26,7 @@ import {
   type ServiceEarnings,
   type ServicePaymentClaim,
 } from '../lib/servicesBookingClient';
+import { HelperTrackingPublisher } from './tracking/HelperTrackingPublisher';
 
 interface ServiceOperationsWorkspaceProps {
   role: 'provider' | 'admin';
@@ -56,6 +58,7 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
   const [paymentDraft, setPaymentDraft] = useState<Record<string, { method: 'cash' | 'upi'; reference: string; evidenceNote: string }>>({});
   const [claimNote, setClaimNote] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState<Record<string, string>>({});
+  const [trackingBookingId, setTrackingBookingId] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -262,12 +265,16 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
                       )}
                       {role !== 'admin' && booking.status === 'accepted' && (
                         <>
+                          <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
                           <button type="button" disabled={busy} onClick={() => void act(booking, 'start')} className="min-h-10 rounded-xl bg-violet-700 px-4 text-xs font-bold text-white hover:bg-violet-800 disabled:opacity-60">Start service</button>
                           <button type="button" disabled={busy} onClick={() => void act(booking, 'cancel')} className="min-h-10 rounded-xl border border-slate-300 px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>
                         </>
                       )}
                       {role !== 'admin' && booking.status === 'in_progress' && (
-                        <button type="button" disabled={busy} onClick={() => void act(booking, 'complete')} className="min-h-10 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-60">Mark completed</button>
+                        <>
+                          <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
+                          <button type="button" disabled={busy} onClick={() => void act(booking, 'complete')} className="min-h-10 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-60">Mark completed</button>
+                        </>
                       )}
                       {role !== 'admin' && ['requested', 'accepted'].includes(booking.status) && (
                         <div className="flex w-full flex-wrap items-end gap-2 rounded-xl border border-slate-200 p-2 dark:border-slate-700">
@@ -315,6 +322,7 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
           )}
         </section>
       </main>
+      {trackingBookingId && <HelperTrackingPublisher bookingId={trackingBookingId} onClose={() => setTrackingBookingId('')} />}
     </div>
   );
 }

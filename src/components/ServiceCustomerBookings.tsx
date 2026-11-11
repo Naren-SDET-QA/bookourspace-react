@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, CheckCircle2, Loader2, RefreshCw, Star, X, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Loader2, Navigation, RefreshCw, Star, X, XCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   fetchServiceBookings,
@@ -8,6 +8,7 @@ import {
   transitionServiceBooking,
   type ServiceBooking,
 } from '../lib/servicesBookingClient';
+import { DeliveryTrackingPanel } from './tracking/DeliveryTrackingPanel';
 import {
   createServicePaymentIntent,
   fetchServicePaymentStatus,
@@ -29,6 +30,7 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
   const [intent, setIntent] = useState<ServicePaymentIntent | null>(null);
   const [intentStatus, setIntentStatus] = useState('');
   const [reviewDraft, setReviewDraft] = useState<Record<string, { rating: number; comment: string }>>({});
+  const [trackingBookingId, setTrackingBookingId] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -163,6 +165,11 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
               <p className="mt-1 text-xs font-semibold">₹{booking.amount.toLocaleString('en-IN')} · {booking.amountBasis}</p>
 
               <div className="mt-3 flex flex-wrap gap-2">
+                {['accepted', 'in_progress'].includes(booking.status) && (
+                  <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-700 px-4 text-xs font-bold text-white">
+                    <Navigation className="h-3.5 w-3.5" aria-hidden="true" /> Track live
+                  </button>
+                )}
                 {['requested', 'accepted'].includes(booking.status) && (
                   <button type="button" disabled={busyId === booking.id} onClick={() => void cancel(booking)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-rose-300 px-4 text-xs font-bold text-rose-700 disabled:opacity-60 dark:border-rose-900 dark:text-rose-300">
                     <XCircle className="h-3.5 w-3.5" aria-hidden="true" /> Cancel booking
@@ -204,6 +211,7 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
           ))
         )}
       </main>
+      {trackingBookingId && <DeliveryTrackingPanel bookingId={trackingBookingId} onClose={() => setTrackingBookingId('')} />}
     </div>
   );
 }
