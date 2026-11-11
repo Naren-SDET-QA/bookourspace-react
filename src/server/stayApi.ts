@@ -666,10 +666,10 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
           const owner = await withServer(async (client) => {
             const query = await client.query(
               `select b.id as booking_id, b.listing_title, b.status, b.scheduled_date,
-                      b.scheduled_time, owner.email as owner_email, owner.full_name as owner_name
+                      b.scheduled_time, null::text as owner_email, owner.full_name as owner_name
                  from public.bookings b
                  join public.stay_properties p on p.listing_id = b.listing_id
-                 left join public.profiles owner on owner.id = p.owner_user_id
+                 left join public.public_provider_profile_projection owner on owner.id = p.owner_user_id
                 where b.id = $1 limit 1`,
               [String(result.bookingId)],
             );
