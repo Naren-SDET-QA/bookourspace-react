@@ -1216,6 +1216,35 @@ $$;
 revoke all on function public.confirm_service_delivery(uuid) from public, anon;
 grant execute on function public.confirm_service_delivery(uuid) to authenticated;
 
+-- GPS points are accepted from a real device, but a booking cannot flood the
+-- table or the Realtime stream. One accepted point per five seconds is enough
+-- for the 10-second publisher and keeps Pro message/storage usage bounded.
+create or replace function public.service_tracking_rate_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_last timestamptz;
+begin
+  select max(captured_at) into v_last
+    from public.service_tracking_locations
+   where booking_id = new.booking_id;
+  if v_last is not null and new.captured_at < v_last + interval '5 seconds' then
+    raise exception 'TRACKING_UPDATE_TOO_FREQUENT' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_service_tracking_rate_guard on public.service_tracking_locations;
+create trigger trg_service_tracking_rate_guard
+  before insert on public.service_tracking_locations
+  for each row execute function public.service_tracking_rate_guard();
+
+revoke all on function public.service_tracking_rate_guard() from public, anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 9. Super Admin catalog RPCs. Only the application server connection may
 --    execute them; the actor is re-derived from profiles inside each function.
@@ -1630,7 +1659,8 @@ insert into public.service_category_configs (id, tenant_id, enabled)
 values
   ('human_help', 'default', true),
   ('medicine_delivery', 'default', true),
-  ('water_delivery', 'default', true)
+  ('water_delivery', 'default', true),
+  ('groceries_delivery', 'default', true)
 on conflict (id) do nothing;
 
 do $$
@@ -1666,6 +1696,40 @@ begin
       "legacyCategoryIds": []
     }$config$::jsonb;
     v_summary := 'Baseline Human Help configuration';
+    insert into public.service_category_config_versions
+      (category_id, tenant_id, version_number, status, config, summary, published_at)
+    values (v_id, 'default', 1, 'published', public.service_catalog_apply_hard_rules(v_id, v_config), v_summary, now())
+    returning id into v_version;
+    update public.service_category_configs set current_version_id = v_version where id = v_id;
+  end if;
+
+  v_id := 'groceries_delivery';
+  if not exists (select 1 from public.service_category_config_versions where category_id = v_id) then
+    v_config := $config${
+      "schemaVersion": 1,
+      "name": "Groceries Delivery",
+      "description": "Everyday groceries and household essentials delivered from a verified local store, with optional recurring baskets.",
+      "icon": "package",
+      "imageUrl": "",
+      "accentColor": "#15803d",
+      "deliveryKind": "human_help",
+      "bookingType": "scheduled",
+      "providerAssignment": "customer_selects",
+      "deliveryModes": ["home_delivery", "pickup"],
+      "pricing": {"mode": "quote", "amount": 0, "currency": "INR", "unit": "per basket", "quantityEnabled": true, "minQuantity": 1, "maxQuantity": 50},
+      "recurring": {"enabled": true, "frequencies": ["daily", "weekly"], "defaultFrequency": "weekly", "maxOccurrences": 26},
+      "toggles": {"gpsTracking": true, "liveMap": true, "customerOtp": true, "prescriptionVerification": false, "documentVerification": false, "payment": true, "deliveryConfirmation": true},
+      "fields": [
+        {"key": "basketSize", "label": "Basket size", "type": "select", "required": true, "options": ["Small (up to 10 items)", "Medium (11-25 items)", "Large (26+ items)"]},
+        {"key": "substitutions", "label": "If an item is unavailable", "type": "select", "required": true, "options": ["Allow similar substitutions", "Call me before substituting", "No substitutions"]},
+        {"key": "deliveryInstructions", "label": "Delivery instructions", "type": "textarea", "required": false, "maxLength": 300}
+      ],
+      "documents": [],
+      "approvalWorkflow": {"requiresProviderAcceptance": true, "requiresDocumentVerification": false, "requiresAdminApproval": false},
+      "validation": {"minLeadTimeMinutes": 60, "maxAdvanceDays": 14, "requiresServiceAddress": true, "requiresPhone": true, "notesRequired": false},
+      "legacyCategoryIds": []
+    }$config$::jsonb;
+    v_summary := 'Baseline Groceries Delivery configuration';
     insert into public.service_category_config_versions
       (category_id, tenant_id, version_number, status, config, summary, published_at)
     values (v_id, 'default', 1, 'published', public.service_catalog_apply_hard_rules(v_id, v_config), v_summary, now())
@@ -1747,7 +1811,7 @@ begin
   select 'default', config.id, 'system', 'category_published',
          'Baseline category published', jsonb_build_object('seed', true)
     from public.service_category_configs config
-   where config.id in ('human_help', 'medicine_delivery', 'water_delivery')
+   where config.id in ('human_help', 'medicine_delivery', 'water_delivery', 'groceries_delivery')
      and not exists (
        select 1 from public.service_category_config_audit audit
         where audit.category_id = config.id and audit.tenant_id = 'default'

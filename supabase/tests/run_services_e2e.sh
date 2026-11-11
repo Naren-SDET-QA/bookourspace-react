@@ -219,18 +219,22 @@ INTENTS=$(pq -d "$DB" -tAc "select count(*) from public.service_payment_intents"
 REFUNDED=$(pq -d "$DB" -tAc "select count(*) from public.service_payment_intents where status = 'refunded'")
 RLS=$(pq -d "$DB" -tAc "select relrowsecurity from pg_class where oid='public.service_payment_intents'::regclass")
 LEAK=$(pq -q -d "$DB" -tAc "begin; set local test.uid='b1c2d3e4-3333-4444-8555-666677778888'; set local role authenticated; select count(*) from public.service_payment_intents; commit;" 2>/dev/null | tr -d ' ')
-CONFIGS=$(pq -d "$DB" -tAc "select count(*) from public.service_category_configs where tenant_id='default' and id in ('human_help','medicine_delivery','water_delivery');")
+CONFIGS=$(pq -d "$DB" -tAc "select count(*) from public.service_category_configs where tenant_id='default' and id in ('human_help','medicine_delivery','water_delivery','groceries_delivery');")
+REALTIME_TABLES=$(pq -d "$DB" -tAc "select count(*) from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename in ('service_tracking_locations','service_tracking_events','service_delivery_profiles','service_category_configs','service_category_config_versions');")
+NEW_RLS=$(pq -d "$DB" -tAc "select count(*) from pg_class where relname in ('service_tracking_locations','service_tracking_events','service_delivery_profiles','service_delivery_otps','service_category_configs','service_category_config_versions','service_category_config_audit','service_booking_documents','service_booking_field_values','service_provider_credentials') and relrowsecurity;")
 MEDICINE_HARD=$(pq -d "$DB" -tAc "select count(*) from public.service_category_configs c join public.service_category_config_versions v on v.id=c.current_version_id where c.id='medicine_delivery' and v.config->'toggles'->>'prescriptionVerification'='true' and v.config->'documents' @> '[{\"key\":\"prescription\",\"required\":true}]'::jsonb;")
 echo "    duplicate live slots=$DUP (must be 0) null_slot_keys=$NULL_KEYS intents=$INTENTS events=$EVENTS refunded=$REFUNDED rls=$RLS cross_customer_rows=$LEAK (must be 0)"
-echo "    baseline service categories=$CONFIGS (must be 3) medicine_hard_rules=$MEDICINE_HARD (must be 1)"
+echo "    baseline service categories=$CONFIGS (must be 4) medicine_hard_rules=$MEDICINE_HARD (must be 1) realtime_tables=$REALTIME_TABLES (must be 5) new_rls=$NEW_RLS (must be 10)"
 [ "$DUP" = "0" ] || fail "two live bookings share a canonical slot"
 [ "$INTENTS" -ge 3 ] || fail "expected at least 4 payment intents, found $INTENTS"
 [ "$EVENTS" -ge 4 ] || fail "expected signed provider events, found $EVENTS"
 [ "$REFUNDED" -ge 1 ] || fail "no refunded service payment recorded"
 [ "$RLS" = "t" ] || fail "service_payment_intents RLS is disabled"
 [ "$LEAK" != "0" ] && [ "$LEAK" != "" ] && fail "RLS exposed another customer's payment intents"
-[ "$CONFIGS" = "3" ] || fail "baseline service categories missing"
+[ "$CONFIGS" = "4" ] || fail "baseline service categories missing"
 [ "$MEDICINE_HARD" = "1" ] || fail "medicine hard rules are not published"
+[ "$REALTIME_TABLES" = "5" ] || fail "tracking/category tables are missing from the Realtime publication"
+[ "$NEW_RLS" = "10" ] || fail "a new service table has RLS disabled"
 
 echo "=== 6. verdict ==="
 echo "    PASS schedule=posted availability=real slots=canonical settlement=signed_provider_event"

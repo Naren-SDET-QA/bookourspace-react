@@ -28,6 +28,8 @@ const medicineProvider = '5e000000-0000-4000-8000-000000000005';
 const unlicensedProvider = '5e000000-0000-4000-8000-000000000006';
 const waterProvider = '5e000000-0000-4000-8000-000000000007';
 const customProvider = '5e000000-0000-4000-8000-000000000008';
+const groceriesProvider = '5e000000-0000-4000-8000-000000000009';
+const otherCustomer = '5e000000-0000-4000-8000-000000000010';
 
 const listings = {
   human: 'sb-e2e-human-help',
@@ -37,6 +39,7 @@ const listings = {
   custom: 'sb-e2e-pet-grooming',
   noPayment: 'sb-e2e-no-payment',
   approval: 'sb-e2e-admin-approval',
+  groceries: 'sb-e2e-groceries',
 };
 
 let pool;
@@ -78,6 +81,8 @@ const humanToken = token(humanProvider, 'provider', 'human-provider@example.test
 const medicineToken = token(medicineProvider, 'provider', 'medicine-provider@example.test');
 const unlicensedToken = token(unlicensedProvider, 'provider', 'unlicensed-provider@example.test');
 const waterToken = token(waterProvider, 'provider', 'water-provider@example.test');
+const groceriesToken = token(groceriesProvider, 'provider', 'groceries-provider@example.test');
+const otherCustomerToken = token(otherCustomer, 'customer', 'other-builder-customer@example.test');
 const customToken = token(customProvider, 'provider', 'custom-provider@example.test');
 
 async function request(method, path, authToken, body) {
@@ -180,6 +185,8 @@ async function seedUsers() {
     [unlicensedProvider, 'unlicensed-provider@example.test', 'Unlicensed Provider', 'provider', false],
     [waterProvider, 'water-provider@example.test', 'Water Provider', 'provider', false],
     [customProvider, 'custom-provider@example.test', 'Pet Groomer', 'provider', false],
+    [groceriesProvider, 'groceries-provider@example.test', 'Groceries Store', 'provider', false],
+    [otherCustomer, 'other-builder-customer@example.test', 'Other Builder Customer', 'customer', false],
   ]) {
     await pool.query(
       `insert into auth.users (id, email, raw_user_meta_data)
@@ -208,7 +215,7 @@ async function seedListingsAndCredentials() {
   );
   await pool.query('delete from public.listings where id = any($1::text[])', [Object.values(listings)]);
   await pool.query('delete from public.service_provider_credentials where provider_id = any($1::uuid[])', [
-    [medicineProvider, unlicensedProvider, customProvider, humanProvider],
+    [medicineProvider, unlicensedProvider, customProvider, humanProvider, groceriesProvider],
   ]);
   await pool.query('delete from public.service_category_configs where id = any($1::text[])', [['pet_grooming', 'no_payment_service', 'approval_service', 'tenant_b_service']]);
 
@@ -220,6 +227,7 @@ async function seedListingsAndCredentials() {
     [listings.custom, customProvider, 'Pet Grooming E2E', 'pet_grooming', 499, 'per pet'],
     [listings.noPayment, customProvider, 'Community Cleanup E2E', 'no_payment_service', 0, 'per task'],
     [listings.approval, humanProvider, 'Admin Approval Errand E2E', 'approval_service', 120, 'per task'],
+    [listings.groceries, groceriesProvider, 'Groceries Delivery E2E', 'groceries_delivery', 0, 'per basket'],
   ]) {
     await pool.query(
       `insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
@@ -266,7 +274,11 @@ dbTest('baseline categories are public and medicine is forced into the regulated
   const response = await request('GET', '/api/service-catalog');
   assert.equal(response.status, 200);
   const ids = response.data.categories.map((category) => category.id);
-  assert.deepEqual(ids.sort(), ['human_help', 'medicine_delivery', 'water_delivery']);
+  assert.deepEqual(ids.sort(), ['groceries_delivery', 'human_help', 'medicine_delivery', 'water_delivery']);
+  const groceries = response.data.categories.find((category) => category.id === 'groceries_delivery');
+  assert.equal(groceries.config.bookingType, 'scheduled');
+  assert.equal(groceries.config.recurring.enabled, true);
+  assert.equal(groceries.config.toggles.customerOtp, true);
   const medicine = response.data.categories.find((category) => category.id === 'medicine_delivery');
   assert.equal(medicine.config.toggles.prescriptionVerification, true);
   assert.equal(medicine.config.toggles.documentVerification, true);
@@ -520,6 +532,59 @@ dbTest('Human Help uses saved fields and completes with a real OTP handover', as
   assert.ok(complete.data.booking.deliveryConfirmedAt);
 });
 
+dbTest('Groceries Delivery uses its saved basket fields, quantity and recurring schedule', async () => {
+  const booking = await request('POST', '/api/services/bookings', customerToken, {
+    idempotencyKey: randomUUID(),
+    listingId: listings.groceries,
+    categoryConfigId: 'groceries_delivery',
+    scheduledDate: targetDate(3),
+    timeSlot: '12:00',
+    serviceAddress: 'Flat 601, Madhapur, Hyderabad',
+    customerPhone: '+91 90000 00008',
+    paymentMode: 'pay_after_service',
+    deliveryMode: 'home_delivery',
+    quantity: 2,
+    recurrence: { frequency: 'weekly', occurrences: 6 },
+    fieldValues: {
+      basketSize: 'Medium (11-25 items)',
+      substitutions: 'Call me before substituting',
+      deliveryInstructions: 'Ring the bell twice',
+    },
+  });
+  assert.equal(booking.status, 201, JSON.stringify(booking.data));
+  assert.equal(booking.data.booking.categoryConfigId, 'groceries_delivery');
+  assert.equal(booking.data.booking.quantity, 2);
+  assert.equal(booking.data.booking.recurrenceFrequency, 'weekly');
+  assert.equal(booking.data.booking.recurrenceOccurrences, 6);
+  assert.equal(booking.data.booking.deliveryMode, 'home_delivery');
+  assert.equal(booking.data.booking.fieldValues.basketSize, 'Medium (11-25 items)');
+
+  const missingRequired = await request('POST', '/api/services/bookings', customerToken, {
+    idempotencyKey: randomUUID(),
+    listingId: listings.groceries,
+    categoryConfigId: 'groceries_delivery',
+    scheduledDate: targetDate(4),
+    timeSlot: '12:00',
+    serviceAddress: 'Flat 601, Madhapur, Hyderabad',
+    customerPhone: '+91 90000 00008',
+    paymentMode: 'pay_after_service',
+    quantity: 1,
+    fieldValues: { basketSize: 'Small (up to 10 items)' },
+  });
+  assert.equal(missingRequired.status, 400);
+  assert.equal(missingRequired.data.error, 'SERVICE_REQUIRED_FIELDS_MISSING');
+
+  const bookingId = booking.data.booking.id;
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'accept' })).status, 200);
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'start' })).status, 200);
+  const otp = await request('POST', `/api/services/bookings/${bookingId}/otp`, customerToken, {});
+  assert.equal(otp.status, 201);
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/verify-otp`, groceriesToken, { code: otp.data.code })).data.verified, true);
+  const complete = await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'complete' });
+  assert.equal(complete.status, 200, JSON.stringify(complete.data));
+  assert.equal(complete.data.booking.status, 'completed');
+});
+
 dbTest('Water uses quantity and a recurring schedule through the same booking engine', async () => {
   const booking = await request('POST', '/api/services/bookings', customerToken, {
     idempotencyKey: randomUUID(),
@@ -717,6 +782,17 @@ dbTest('medicine requires a verified pharmacy and a prescription, then blocks an
   assert.equal(complete.data.booking.prescriptionStatus, 'verified');
 });
 
+dbTest('another customer cannot read a booking or its tracking snapshot', async () => {
+  const bookings = await request('GET', '/api/services/bookings', customerToken);
+  const medicineBooking = bookings.data.bookings.find((booking) => booking.categoryConfigId === 'medicine_delivery');
+  assert.ok(medicineBooking);
+  const otherList = await request('GET', '/api/services/bookings', otherCustomerToken);
+  assert.equal(otherList.status, 200);
+  assert.equal(otherList.data.bookings.some((booking) => booking.id === medicineBooking.id), false);
+  const foreignTracking = await request('GET', `/api/services/bookings/${medicineBooking.id}/tracking`, otherCustomerToken);
+  assert.equal(foreignTracking.status, 404);
+});
+
 dbTest('a provider can submit a licence through the server and see its review status', async () => {
   const submitted = await request('POST', '/api/services/provider/credentials', unlicensedToken, {
     credentialType: 'pharmacy_license',
@@ -822,6 +898,7 @@ dbTest('configuration and bookings persist across a server restart', async () =>
   const bookings = await request('GET', '/api/services/bookings', customerToken);
   assert.ok(bookings.data.bookings.some((booking) => booking.categoryConfigId === 'medicine_delivery'));
   assert.ok(bookings.data.bookings.some((booking) => booking.categoryConfigId === 'pet_grooming'));
+  assert.ok(bookings.data.bookings.some((booking) => booking.categoryConfigId === 'groceries_delivery'));
 });
 
 
@@ -911,6 +988,9 @@ dbTest('browser: Super Admin builder, dynamic customer form and provider dashboa
     await expect(builderPanel.getByRole('heading', { name: 'Customer booking fields' })).toBeVisible();
     await expect(builderPanel.getByRole('heading', { name: 'Required documents' })).toBeVisible();
     await expect(builderPanel.getByRole('heading', { name: 'Feature toggles' })).toBeVisible();
+    await adminPage.setViewportSize({ width: 390, height: 844 });
+    await expect(builderPanel.getByText('Service categories & booking forms')).toBeVisible();
+    await expect(builderPanel.getByRole('heading', { name: 'Feature toggles' })).toBeVisible();
 
     const persisted = await pool.query(
       `select status, category_config_id, amount from public.service_bookings
@@ -921,6 +1001,158 @@ dbTest('browser: Super Admin builder, dynamic customer form and provider dashboa
     assert.equal(persisted.rows[0].category_config_id, 'pet_grooming');
     assert.equal(Number(persisted.rows[0].amount), 998);
     assert.deepEqual(browserErrors, [], 'browser journey should not raise uncaught page errors');
+  } finally {
+    for (const context of contexts) await context.close();
+    await browser.close();
+  }
+});
+
+dbTest('browser: real device GPS, server OTP, polling fallback and delivery confirmation', async () => {
+  const booking = await request('POST', '/api/services/bookings', customerToken, {
+    idempotencyKey: randomUUID(),
+    listingId: listings.groceries,
+    categoryConfigId: 'groceries_delivery',
+    scheduledDate: targetDate(5),
+    timeSlot: '13:00',
+    serviceAddress: 'Flat 701, Gachibowli, Hyderabad',
+    customerPhone: '+91 90000 00009',
+    paymentMode: 'pay_after_service',
+    deliveryMode: 'home_delivery',
+    quantity: 1,
+    fieldValues: {
+      basketSize: 'Small (up to 10 items)',
+      substitutions: 'Allow similar substitutions',
+    },
+  });
+  assert.equal(booking.status, 201, JSON.stringify(booking.data));
+  const bookingRef = booking.data.booking.bookingRef;
+  const bookingId = booking.data.booking.id;
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'accept' })).status, 200);
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'start' })).status, 200);
+
+  const browser = await chromium.launch();
+  const browserErrors = [];
+  const openAs = async (authToken, geolocation) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      serviceWorkers: 'block',
+      ...(geolocation ? { permissions: ['geolocation'], geolocation } : {}),
+    });
+    await context.addInitScript((value) => {
+      try {
+        localStorage.setItem('bos_session_token_v1', value);
+        localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
+        localStorage.setItem('bos_section_styles_v2', JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'old' }));
+      } catch { /* storage unavailable */ }
+    }, authToken);
+    await context.route('**/*', async (route) => {
+      try {
+        if (new URL(route.request().url()).origin === serverUrl) await route.continue();
+        else await route.abort('blockedbyclient');
+      } catch { /* page closed */ }
+    });
+    const page = await context.newPage();
+    page.on('pageerror', (error) => {
+      if (error.message !== 'WebSocket closed without opened.') browserErrors.push(error.message);
+    });
+    await page.goto(`${serverUrl}/#services/old`, { waitUntil: 'domcontentloaded' });
+    return { context, page };
+  };
+
+  const contexts = [];
+  try {
+    // Mobile customer view: the generated Groceries form must remain usable at
+    // a 390 px phone viewport, including fields, delivery option and recurrence.
+    const customerBrowser = await openAs(customerToken);
+    contexts.push(customerBrowser.context);
+    const customerPage = customerBrowser.page;
+    await expect(customerPage.getByRole('heading', { name: /Hire a professional for the job at hand/i })).toBeVisible({ timeout: 30_000 });
+    await customerPage.evaluate(() => window.dispatchEvent(new Event('bos-marketplace-listings-updated')));
+    await expect(customerPage.getByRole('button', { name: 'View details for Groceries Delivery E2E' })).toBeVisible({ timeout: 30_000 });
+    await customerPage.getByRole('button', { name: 'View details for Groceries Delivery E2E' }).click();
+    const groceriesDetail = customerPage.getByRole('dialog').filter({ has: customerPage.getByRole('heading', { name: 'Groceries Delivery E2E' }) });
+    await groceriesDetail.getByRole('button', { name: 'Book this service' }).click();
+    const mobileForm = customerPage.locator('[aria-labelledby="service-booking-title"]');
+    await expect(mobileForm.getByLabel('Basket size')).toBeVisible();
+    await expect(mobileForm.getByLabel('Delivery option')).toBeVisible();
+    await expect(mobileForm.getByText('Recurring schedule')).toBeVisible();
+    await mobileForm.getByRole('button', { name: 'Close booking' }).click();
+    const allServices = groceriesDetail.getByRole('button', { name: /^All services$/i });
+    if (await allServices.isVisible().catch(() => false)) await allServices.click();
+    await expect(groceriesDetail).toBeHidden({ timeout: 15_000 });
+
+    // Mobile provider view: grant real browser geolocation and publish from the
+    // device. The browser sends its actual watchPosition coordinates to the
+    // server; no coordinate is synthesised by the app.
+    const providerBrowser = await openAs(groceriesToken, { latitude: 17.4485, longitude: 78.3748 });
+    contexts.push(providerBrowser.context);
+    const providerPage = providerBrowser.page;
+    await expect(providerPage.getByRole('button', { name: 'My service jobs' })).toBeVisible({ timeout: 30_000 });
+    await providerPage.getByRole('button', { name: 'My service jobs' }).click();
+    const job = providerPage.locator('article').filter({ hasText: bookingRef });
+    await expect(job.getByRole('button', { name: 'Share live GPS' })).toBeVisible();
+    await job.getByRole('button', { name: 'Share live GPS' }).click();
+    const publisher = providerPage.getByRole('dialog', { name: 'Helper live location sharing' });
+    await expect(publisher.getByRole('button', { name: 'Share live location' })).toBeVisible({ timeout: 15_000 });
+    await publisher.getByRole('button', { name: 'Share live location' }).click();
+    await expect.poll(async () => {
+      const result = await pool.query(
+        'select count(*)::int as count from public.service_tracking_locations where booking_id = $1',
+        [bookingId],
+      );
+      return result.rows[0].count;
+    }, { timeout: 25_000 }).toBeGreaterThan(0);
+    const devicePoint = await pool.query(
+      'select latitude, longitude, source from public.service_tracking_locations where booking_id = $1 order by captured_at desc limit 1',
+      [bookingId],
+    );
+    assert.ok(Math.abs(Number(devicePoint.rows[0].latitude) - 17.4485) < 0.01);
+    assert.ok(Math.abs(Number(devicePoint.rows[0].longitude) - 78.3748) < 0.01);
+    assert.equal(devicePoint.rows[0].source, 'device_gps');
+
+    // The polling fallback reads the same server snapshot, generates the
+    // single-use OTP and receives the GPS point without Supabase local services.
+    await expect(customerPage.getByRole('button', { name: 'My service bookings' })).toBeVisible({ timeout: 30_000 });
+    await customerPage.getByRole('button', { name: 'My service bookings' }).click();
+    const customerJob = customerPage.locator('article').filter({ hasText: bookingRef });
+    await expect(customerJob.getByRole('button', { name: 'Track live' })).toBeVisible();
+    await customerJob.getByRole('button', { name: 'Track live' }).click();
+    const trackingPanel = customerPage.getByRole('dialog', { name: 'Live delivery tracking' });
+    await expect(trackingPanel.getByRole('button', { name: 'Generate single-use OTP' })).toBeVisible({ timeout: 15_000 });
+    await expect(trackingPanel).not.toContainText('Last GPS waiting', { timeout: 15_000 });
+    await trackingPanel.getByRole('button', { name: 'Generate single-use OTP' }).click();
+    const otpLocator = trackingPanel.getByText(/^\d{6}$/);
+    await expect(otpLocator).toBeVisible({ timeout: 10_000 });
+    const otp = await otpLocator.innerText();
+
+    await publisher.getByLabel('Customer delivery OTP').fill(otp);
+    await publisher.getByRole('button', { name: 'Verify', exact: true }).click();
+    await expect(publisher).toContainText('OTP verified once', { timeout: 10_000 });
+    await publisher.getByRole('button', { name: 'Close helper tracking' }).click();
+
+    await expect(job).toContainText('Handover: confirmed', { timeout: 15_000 });
+    const completeResponsePromise = providerPage.waitForResponse(
+      (response) => response.url().includes(`/api/services/bookings/${bookingId}/actions`)
+        && response.request().method() === 'POST',
+      { timeout: 15_000 },
+    );
+    await job.getByRole('button', { name: 'Mark completed' }).click();
+    const completeResponse = await completeResponsePromise;
+    assert.equal(completeResponse.status(), 200, await completeResponse.text());
+    await expect(job).toContainText('completed', { timeout: 15_000 });
+
+    const persisted = await pool.query(
+      `select b.status, p.delivery_confirmed_at, p.prescription_status
+         from public.service_bookings b
+         join public.service_delivery_profiles p on p.booking_id = b.id
+        where b.id = $1`,
+      [bookingId],
+    );
+    assert.equal(persisted.rows[0].status, 'completed');
+    assert.ok(persisted.rows[0].delivery_confirmed_at);
+    assert.equal(persisted.rows[0].prescription_status, 'not_required');
+    assert.deepEqual(browserErrors, [], 'mobile GPS/OTP journey should not raise uncaught page errors');
   } finally {
     for (const context of contexts) await context.close();
     await browser.close();

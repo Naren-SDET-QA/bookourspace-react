@@ -54,7 +54,7 @@ export function DeliveryTrackingPanel({ bookingId, onClose }: { bookingId: strin
             <Navigation className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-black text-[#1f1650] dark:text-white">{config?.label || 'Live tracking'}</h2>
+            <h2 className="truncate text-sm font-black text-[#1f1650] dark:text-white">{snapshot?.categoryName || config?.label || 'Live tracking'}</h2>
             <p className="truncate text-[10px] font-semibold text-slate-500">{snapshot?.bookingRef || bookingId}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close live tracking" className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="h-5 w-5" /></button>
@@ -126,7 +126,7 @@ export function DeliveryTrackingPanel({ bookingId, onClose }: { bookingId: strin
 
               {live && !isTerminalDeliveryStatus(snapshot.status) && snapshot.otpEnabled && (
                 <section className="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
-                  <h3 className="flex items-center gap-1.5 text-[12px] font-black text-[#1f1650] dark:text-white"><ShieldCheck className="h-4 w-4 text-emerald-600" /> {config?.otpLabel || 'Delivery OTP'}</h3>
+                  <h3 className="flex items-center gap-1.5 text-[12px] font-black text-[#1f1650] dark:text-white"><ShieldCheck className="h-4 w-4 text-emerald-600" /> {snapshot.categoryName ? 'Handover OTP' : config?.otpLabel || 'Delivery OTP'}</h3>
                   <p className="mt-1 text-[10px] font-semibold leading-4 text-slate-500">Generate a single-use in-app OTP. Show it to the assigned helper only at handover. It expires in 10 minutes and can be used once.</p>
                   {otp ? (
                     <div className="mt-2 flex items-center gap-2">

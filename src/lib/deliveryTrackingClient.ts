@@ -27,6 +27,7 @@ export interface DeliveryTrackingSnapshot {
   trackingStoppedAt: string | null;
   serviceKind: DeliveryKind;
   categoryId: string | null;
+  categoryName: string | null;
   trackingEnabled: boolean;
   liveMapEnabled: boolean;
   otpEnabled: boolean;
@@ -42,6 +43,30 @@ const configured = () => {
   if (!supabase) throw new Error('SUPABASE_UNAVAILABLE');
   return supabase;
 };
+
+function sessionToken(): string | null {
+  try {
+    return (
+      window.localStorage.getItem('bos_session_token_v1')
+      || window.localStorage.getItem('bos_authoritative_session_token')
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function serviceRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = sessionToken();
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(path, { ...init, headers, credentials: 'include', cache: 'no-store' });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(String(payload?.error || 'TRACKING_SERVICE_UNAVAILABLE'));
+  }
+  return payload as T;
+}
 
 function mapStatus(value: unknown): DeliveryStatus {
   const allowed: DeliveryStatus[] = ['requested', 'accepted', 'in_progress', 'completed', 'cancelled', 'rejected'];
@@ -65,7 +90,7 @@ function mapPoint(row: any): TrackingPoint | null {
   };
 }
 
-export async function fetchDeliveryTracking(bookingId: string): Promise<DeliveryTrackingSnapshot> {
+async function fetchDeliveryTrackingFromSupabase(bookingId: string): Promise<DeliveryTrackingSnapshot> {
   const client = configured();
   const { data: booking, error: bookingError } = await client
     .from('service_bookings')
@@ -94,6 +119,7 @@ export async function fetchDeliveryTracking(bookingId: string): Promise<Delivery
     trackingStoppedAt: booking.tracking_stopped_at || null,
     serviceKind: mapKind(profile?.service_kind),
     categoryId: profile?.category_id ? String(profile.category_id) : null,
+    categoryName: null,
     trackingEnabled: profile?.tracking_enabled !== false,
     liveMapEnabled: profile?.live_map_enabled !== false,
     otpEnabled: profile?.otp_enabled !== false,
@@ -111,22 +137,114 @@ export async function fetchDeliveryTracking(bookingId: string): Promise<Delivery
   };
 }
 
+function normalizeServerSnapshot(payload: any): DeliveryTrackingSnapshot {
+  const location = payload?.latestLocation;
+  return {
+    bookingId: String(payload?.bookingId || ''),
+    bookingRef: String(payload?.bookingRef || ''),
+    title: String(payload?.title || 'Delivery booking'),
+    status: mapStatus(payload?.status),
+    customerId: String(payload?.customerId || ''),
+    providerId: String(payload?.providerId || ''),
+    helperAssignedAt: payload?.helperAssignedAt || null,
+    trackingStartedAt: payload?.trackingStartedAt || null,
+    trackingStoppedAt: payload?.trackingStoppedAt || null,
+    serviceKind: mapKind(payload?.serviceKind),
+    categoryId: payload?.categoryId ? String(payload.categoryId) : null,
+    categoryName: payload?.categoryName ? String(payload.categoryName) : null,
+    trackingEnabled: payload?.trackingEnabled !== false,
+    liveMapEnabled: payload?.liveMapEnabled !== false,
+    otpEnabled: payload?.otpEnabled !== false,
+    deliveryConfirmationEnabled: payload?.deliveryConfirmationEnabled === true,
+    deliveryConfirmedAt: payload?.deliveryConfirmedAt || null,
+    prescriptionStatus: (payload?.prescriptionStatus || 'not_required') as DeliveryTrackingSnapshot['prescriptionStatus'],
+    recurrenceRule: (payload?.recurrenceRule || 'none') as DeliveryTrackingSnapshot['recurrenceRule'],
+    latestLocation: location && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude))
+      ? {
+          latitude: Number(location.latitude),
+          longitude: Number(location.longitude),
+          accuracyMeters: location.accuracyMeters === null || location.accuracyMeters === undefined ? null : Number(location.accuracyMeters),
+          capturedAt: String(location.capturedAt || ''),
+        }
+      : null,
+    events: Array.isArray(payload?.events)
+      ? payload.events.map((event: any) => ({
+          id: Number(event.id),
+          eventType: String(event.eventType || ''),
+          note: event.note ?? null,
+          createdAt: String(event.createdAt || ''),
+        }))
+      : [],
+  };
+}
+
+/**
+ * Server-authoritative snapshot. Supabase Realtime remains the live update
+ * transport when configured; this read path is what the polling fallback and
+ * the local/offline-safe browser use.
+ */
+export async function fetchDeliveryTracking(bookingId: string): Promise<DeliveryTrackingSnapshot> {
+  try {
+    const response = await serviceRequest<{ ok: true; snapshot: any }>(
+      `/api/services/bookings/${encodeURIComponent(bookingId)}/tracking`,
+    );
+    return normalizeServerSnapshot(response.snapshot);
+  } catch (error) {
+    if (!supabase) throw error;
+    return fetchDeliveryTrackingFromSupabase(bookingId);
+  }
+}
+
 export async function createDeliveryOtp(bookingId: string): Promise<string> {
-  const client = configured();
-  const { data, error } = await client.rpc('create_delivery_otp', { p_booking_id: bookingId });
-  if (error) throw new Error(error.message);
-  if (typeof data !== 'string' || !/^\d{6}$/.test(data)) throw new Error('OTP_NOT_RETURNED');
-  return data;
+  try {
+    const response = await serviceRequest<{ ok: true; code: string }>(
+      `/api/services/bookings/${encodeURIComponent(bookingId)}/otp`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    if (!/^\d{6}$/.test(response.code)) throw new Error('OTP_NOT_RETURNED');
+    return response.code;
+  } catch (error) {
+    if (!supabase) throw error;
+    const client = configured();
+    const { data, error: rpcError } = await client.rpc('create_delivery_otp', { p_booking_id: bookingId });
+    if (rpcError) throw new Error(rpcError.message);
+    if (typeof data !== 'string' || !/^\d{6}$/.test(data)) throw new Error('OTP_NOT_RETURNED');
+    return data;
+  }
 }
 
 export async function verifyDeliveryOtp(bookingId: string, code: string): Promise<boolean> {
-  const client = configured();
-  const { data, error } = await client.rpc('verify_delivery_otp', { p_booking_id: bookingId, p_code: code });
-  if (error) throw new Error(error.message);
-  return data === true;
+  try {
+    const response = await serviceRequest<{ ok: true; verified: boolean }>(
+      `/api/services/bookings/${encodeURIComponent(bookingId)}/verify-otp`,
+      { method: 'POST', body: JSON.stringify({ code }) },
+    );
+    return response.verified === true;
+  } catch (error) {
+    if (!supabase) throw error;
+    const client = configured();
+    const { data, error: rpcError } = await client.rpc('verify_delivery_otp', { p_booking_id: bookingId, p_code: code });
+    if (rpcError) throw new Error(rpcError.message);
+    return data === true;
+  }
 }
 
 export async function publishTrackingLocation(bookingId: string, point: TrackingPoint): Promise<void> {
+  try {
+    await serviceRequest(`/api/services/bookings/${encodeURIComponent(bookingId)}/tracking/location`, {
+      method: 'POST',
+      body: JSON.stringify({
+        latitude: point.latitude,
+        longitude: point.longitude,
+        accuracyMeters: point.accuracyMeters,
+        capturedAt: point.capturedAt,
+      }),
+    });
+    return;
+  } catch (error) {
+    if (!supabase) throw error;
+  }
+  // Hosted Supabase fallback keeps the original RLS-enforced insert path.
   const client = configured();
   const { data: userData, error: userError } = await client.auth.getUser();
   if (userError || !userData.user) throw new Error('UNAUTHORIZED');
@@ -148,6 +266,13 @@ export function subscribeToDeliveryTracking(
   onChange: () => void,
   onStatus?: (status: string) => void,
 ): () => void {
+  if (!supabase) {
+    // Local/self-hosted browsers without the Supabase Realtime client still get
+    // live status and GPS through a short server poll. Hosted deployments keep
+    // the Realtime channel below.
+    const timer = window.setInterval(onChange, 5_000);
+    return () => window.clearInterval(timer);
+  }
   const client = configured();
   const channel = client
     .channel(`delivery-tracking-${bookingId}`)

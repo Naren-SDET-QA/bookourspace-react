@@ -896,6 +896,139 @@ export class ServiceBookingRepository {
     });
   }
 
+  async deliveryTrackingSnapshot(actor: ProviderListingActor, bookingId: string): Promise<Record<string, unknown>> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      const bookingResult = await client.query(
+        `select b.id, b.booking_ref, b.status, b.customer_id, b.provider_id,
+                b.helper_assigned_at, b.tracking_started_at, b.tracking_stopped_at,
+                l.title as listing_title, category_version.config->>'name' as category_name
+           from public.service_bookings b
+           join public.listings l on l.id = b.listing_id
+           left join public.service_category_configs category on category.id = b.category_config_id
+           left join public.service_category_config_versions category_version on category_version.id = category.current_version_id
+          where b.id = $1
+          limit 1`,
+        [bookingId],
+      );
+      const booking = bookingResult.rows[0];
+      if (!booking) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+      const [profileResult, locationResult, eventResult] = await Promise.all([
+        client.query(
+          `select service_kind, category_id, tracking_enabled, live_map_enabled, otp_enabled,
+                  delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule
+             from public.service_delivery_profiles where booking_id = $1 limit 1`,
+          [bookingId],
+        ),
+        client.query(
+          `select latitude, longitude, accuracy_meters, captured_at
+             from public.service_tracking_locations
+            where booking_id = $1
+            order by captured_at desc
+            limit 1`,
+          [bookingId],
+        ),
+        client.query(
+          `select id, event_type, note, created_at
+             from public.service_tracking_events
+            where booking_id = $1
+            order by created_at desc
+            limit 20`,
+          [bookingId],
+        ),
+      ]);
+      const profile = profileResult.rows[0] || {};
+      const location = locationResult.rows[0] || null;
+      return {
+        bookingId: String(booking.id),
+        bookingRef: String(booking.booking_ref || ''),
+        title: String(booking.listing_title || 'Delivery booking'),
+        status: String(booking.status),
+        customerId: String(booking.customer_id),
+        providerId: String(booking.provider_id),
+        helperAssignedAt: iso(booking.helper_assigned_at),
+        trackingStartedAt: iso(booking.tracking_started_at),
+        trackingStoppedAt: iso(booking.tracking_stopped_at),
+        serviceKind: String(profile.service_kind || 'human_help'),
+        categoryId: profile.category_id ? String(profile.category_id) : null,
+        categoryName: booking.category_name ? String(booking.category_name) : null,
+        trackingEnabled: profile.tracking_enabled !== false,
+        liveMapEnabled: profile.live_map_enabled !== false,
+        otpEnabled: profile.otp_enabled !== false,
+        deliveryConfirmationEnabled: profile.delivery_confirmation_enabled === true,
+        deliveryConfirmedAt: iso(profile.delivery_confirmed_at),
+        prescriptionStatus: String(profile.prescription_status || 'not_required'),
+        recurrenceRule: String(profile.recurrence_rule || 'none'),
+        latestLocation: location ? {
+          latitude: Number(location.latitude),
+          longitude: Number(location.longitude),
+          accuracyMeters: location.accuracy_meters === null ? null : Number(location.accuracy_meters),
+          capturedAt: iso(location.captured_at),
+        } : null,
+        events: eventResult.rows.map((row) => ({
+          id: Number(row.id),
+          eventType: String(row.event_type || ''),
+          note: row.note ?? null,
+          createdAt: iso(row.created_at),
+        })),
+      };
+    });
+  }
+
+  async publishTrackingLocation(
+    actor: ProviderListingActor,
+    bookingId: string,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'provider') throw new ServiceBookingRepositoryError('PROVIDER_ACTION_REQUIRED', 403);
+    const latitude = Number(input.latitude);
+    const longitude = Number(input.longitude);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
+        || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      throw new ServiceBookingRepositoryError('INVALID_LOCATION_COORDINATES', 400);
+    }
+    const accuracy = input.accuracyMeters === null || input.accuracyMeters === undefined
+      ? null
+      : Number(input.accuracyMeters);
+    if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 5000)) {
+      throw new ServiceBookingRepositoryError('INVALID_LOCATION_ACCURACY', 400);
+    }
+    const capturedAt = new Date(String(input.capturedAt || ''));
+    if (Number.isNaN(capturedAt.getTime())) {
+      throw new ServiceBookingRepositoryError('INVALID_LOCATION_TIME', 400);
+    }
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      try {
+        const result = await client.query(
+          `insert into public.service_tracking_locations
+            (booking_id, actor_id, actor_role, latitude, longitude, accuracy_meters, captured_at, source)
+           values ($1, auth.uid(), 'helper', $2, $3, $4, $5, 'device_gps')
+           returning id, latitude, longitude, accuracy_meters, captured_at`,
+          [bookingId, latitude, longitude, accuracy, capturedAt.toISOString()],
+        );
+        return {
+          id: Number(result.rows[0].id),
+          latitude: Number(result.rows[0].latitude),
+          longitude: Number(result.rows[0].longitude),
+          accuracyMeters: result.rows[0].accuracy_meters === null ? null : Number(result.rows[0].accuracy_meters),
+          capturedAt: iso(result.rows[0].captured_at),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('TRACKING_UPDATE_TOO_FREQUENT')) {
+          throw new ServiceBookingRepositoryError('TRACKING_UPDATE_TOO_FREQUENT', 429);
+        }
+        if (message.includes('row-level security') || message.includes('42501')) {
+          throw new ServiceBookingRepositoryError('TRACKING_NOT_ACTIVE', 409);
+        }
+        throw error;
+      }
+    });
+  }
+
   async createDeliveryOtp(actor: ProviderListingActor, bookingId: string): Promise<string> {
     if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
     if (actor.role !== 'customer') throw new ServiceBookingRepositoryError('CUSTOMER_SESSION_REQUIRED', 403);

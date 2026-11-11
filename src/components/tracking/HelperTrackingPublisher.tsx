@@ -45,7 +45,7 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
         <header className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"><Navigation className="h-4 w-4" /></span>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-black text-[#1f1650] dark:text-white">{config?.label || 'Delivery'} tracking</h2>
+            <h2 className="truncate text-sm font-black text-[#1f1650] dark:text-white">{snapshot?.categoryName || config?.label || 'Delivery'} tracking</h2>
             <p className="truncate text-[10px] font-semibold text-slate-500">{snapshot?.bookingRef || bookingId}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close helper tracking" className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="h-5 w-5" /></button>
@@ -121,7 +121,7 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
               {snapshot.otpEnabled ? (
               <section className="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
                 <h3 className="flex items-center gap-1.5 text-[12px] font-black text-[#1f1650] dark:text-white"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Verify customer OTP</h3>
-                <p className="mt-1 text-[10px] font-semibold text-slate-500">Ask the customer for the 6-digit in-app {config?.otpLabel || 'delivery OTP'} at handover. It is single-use and expires in 10 minutes.</p>
+                <p className="mt-1 text-[10px] font-semibold text-slate-500">Ask the customer for the 6-digit in-app {snapshot.categoryName ? 'handover OTP' : config?.otpLabel || 'delivery OTP'} at handover. It is single-use and expires in 10 minutes.</p>
                 <div className="mt-2 flex gap-2">
                   <input value={otp} onChange={(event) => setOtp(event.target.value)} inputMode="numeric" maxLength={6} placeholder="000000" aria-label="Customer delivery OTP" className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-center text-lg font-black tracking-[0.2em] outline-none focus:border-violet-500 dark:border-slate-700 dark:bg-slate-900" />
                   <button type="button" onClick={() => void verify()} disabled={otpBusy} className="rounded-xl bg-[#5b21b6] px-4 text-[11px] font-black text-white disabled:opacity-50">{otpBusy ? 'Checking…' : 'Verify'}</button>

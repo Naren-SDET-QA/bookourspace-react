@@ -115,6 +115,30 @@ export function registerServiceBookingApi(
     }
   });
 
+  app.get('/api/services/bookings/:id/tracking', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['customer', 'provider', 'admin']);
+    if (!actor) return;
+    try {
+      const snapshot = await repository.deliveryTrackingSnapshot(actor, String(request.params.id || ''));
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, snapshot, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/tracking/location', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider']);
+    if (!actor) return;
+    try {
+      const point = await repository.publishTrackingLocation(actor, String(request.params.id || ''), request.body || {});
+      response.setHeader('cache-control', 'no-store');
+      response.status(201).json({ ok: true, point, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
   app.post('/api/services/bookings/:id/confirm-delivery', async (request, response) => {
     const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
     if (!actor) return;

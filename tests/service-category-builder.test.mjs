@@ -237,6 +237,7 @@ test('migration adds versioned categories, RLS, audit, tenant scoping and medici
   assert.match(migration, /DELIVERY_CONFIRMATION_REQUIRED/);
   assert.match(migration, /PAYMENT_DISABLED_FOR_SERVICE/);
   assert.match(migration, /delivery_mode/);
+  assert.match(migration, /groceries_delivery/);
   assert.match(migration, /revoke all on function public\.service_catalog_save_draft/);
   assert.match(migration, /grant execute on function public\.service_catalog_save_draft\(uuid, text, text, jsonb, text, bigint\) to service_role/);
   assert.match(migration, /alter publication supabase_realtime add table public\.service_category_configs/);

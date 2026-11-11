@@ -612,8 +612,8 @@
       "version": "20261111200000",
       "name": "dynamic_service_category_builder",
       "file": "supabase/migrations/20261111200000_dynamic_service_category_builder.sql",
-      "bytes": 81726,
-      "sha256": "199cbf5ec47803d3d4af4e47e53f155b58d2ee1454278e16629395efa6117ae9"
+      "bytes": 85321,
+      "sha256": "e9dd007b7207194f275915dba5a3a8f6859c4c38b80e13886fea21a7e1620ec4"
     }
   ],
   "review": {

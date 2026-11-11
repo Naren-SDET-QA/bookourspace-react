@@ -4,7 +4,7 @@
 **Branch:** `feat/universal-gps-tracking`
 **Scope:** Extend the Universal GPS Tracking work with a dynamic, configuration-driven service catalog. No hosted database, push or deployment was performed.
 
-**Final status: PASS (local E2E, unit suite and production build).**
+**Final status: PASS (local E2E, unit suite and production build). A follow-up audit of this commit is recorded in [AUDIT_63DA6F6_REPORT.md](AUDIT_63DA6F6_REPORT.md).**
 
 ---
 
@@ -93,8 +93,8 @@
 `bash supabase/tests/run_services_e2e.sh` applies the baseline and all 75 migrations, then ran:
 
 - existing services lifecycle: **12/12 PASS** (schedule, availability, canonical slots, signed UPI settlement, refunds, restart persistence, browser journey)
-- dynamic service builder: **17/17 PASS**
-  - baseline Human Help, Medicine Delivery and Water Bottle Delivery configs are public
+- dynamic service builder: **20/20 PASS** (including Groceries Delivery and mobile GPS/OTP)
+  - baseline Human Help, Medicine Delivery, Water Bottle Delivery and Groceries Delivery configs are public
   - anonymous/customer/non-super-admin writes are rejected
   - custom category draft is invisible until publish, then visible
   - optimistic version conflict returns `409 SERVICE_CATALOG_VERSION_CONFLICT`
@@ -118,7 +118,7 @@ Direct SQL invariants from the same run:
 ```text
 duplicate live slots=0  null_slot_keys=0  intents=3  events=4  refunded=1
 rls=t  cross_customer_rows=0
-baseline service categories=3  medicine_hard_rules=1
+baseline service categories=4  medicine_hard_rules=1  realtime_tables=5  new_rls=10
 ```
 
 ---

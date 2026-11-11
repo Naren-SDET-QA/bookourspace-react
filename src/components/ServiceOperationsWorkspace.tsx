@@ -516,7 +516,7 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
           )}
         </section>
       </main>
-      {trackingBookingId && <HelperTrackingPublisher bookingId={trackingBookingId} onClose={() => setTrackingBookingId('')} />}
+      {trackingBookingId && <HelperTrackingPublisher bookingId={trackingBookingId} onClose={() => { setTrackingBookingId(''); void load(); }} />}
     </div>
   );
 }
