@@ -1,0 +1,30 @@
+feature,area,priority,original,clone,notes
+Owner login opens owner dashboard,onboarding,must,yes,yes,provider_portal hash is recognized and routes directly to the owner shell
+Responsive owner drawer,navigation,must,yes,yes,desktop sidebar plus mobile expand/close overlay
+PG Owner / Marketplace switcher,navigation,must,yes,yes,clears provider hash when returning to marketplace
+Dashboard overview,dashboard,must,yes,yes,live properties inventory bookings and occupancy
+Dues,money,must,yes,yes,derived only from live booking payment statuses until tenant ledger exists
+Collections,money,must,yes,yes,derived only from verified/paid/collected bookings
+Expenses,money,must,yes,partial,owner surface exists; persistent expense API is not in the repository
+Disputes,money,must,yes,partial,owner surface exists; dispute persistence is not in the repository
+Leads,people,must,yes,partial,owner surface exists; lead source is not connected
+Bookings,people,must,yes,yes,existing PG booking and payment workflow
+Tenants,people,must,yes,partial,empty/setup state until tenant record API is connected
+Staff,people,must,yes,partial,empty/setup state until staff and permissions API is connected
+Rooms and beds,property,must,yes,yes,live PostgreSQL inventory and bed labels
+Properties,property,must,yes,yes,live provider PG listing records
+Listings,property,must,yes,yes,live provider listing visibility surface
+Complaints,operations,must,yes,partial,empty/setup state until support records API is connected
+Requests,operations,must,yes,partial,empty/setup state until request approval API is connected
+Food menu,operations,must,yes,partial,empty/setup state until menu persistence is connected
+Notices,operations,must,partial,partial,owner surface exists; notification broadcast API is not connected
+Reviews,operations,must,yes,partial,empty/setup state until verified stay review feed is connected
+Community,operations,should,yes,partial,empty/setup state until community feed is connected
+Reports,reports,must,yes,yes,live occupancy/rent/booking summary with export affordances
+Plan and billing,billing,must,yes,partial,owner surface exists; production subscription billing is not connected
+Settings,settings,must,yes,partial,profile and workspace controls exist; persistence depends on backend contract
+Tenant invoices and receipts,money,should,yes,no,requires tenant ledger and invoice APIs
+Automated rent reminders,money,should,yes,no,requires reminder provider and delivery logs
+Move-out settlement,operations,should,yes,no,requires tenant lifecycle and deposit ledger
+Food billing,operations,could,yes,no,requires menu/meal plan and charge APIs
+WhatsApp communication,operations,could,yes,no,requires provider integration and consent workflow

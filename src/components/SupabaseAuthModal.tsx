@@ -65,7 +65,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const [emailOtpCode, setEmailOtpCode] = useState('');
   const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [localDevLoading, setLocalDevLoading] = useState<'admin' | 'customer' | null>(null);
+  const [localDevLoading, setLocalDevLoading] = useState<'admin' | 'customer' | 'provider' | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
@@ -222,7 +222,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
 
   const showLocalDevSignIn = Boolean(import.meta.env.DEV) || import.meta.env.VITE_BOS_LOCAL_DEV_AUTH === '1';
 
-  const handleLocalDevSignIn = async (role: 'admin' | 'customer') => {
+  const handleLocalDevSignIn = async (role: 'admin' | 'customer' | 'provider') => {
     setLocalDevLoading(role);
     setErrorMsg(null);
     try {
@@ -237,6 +237,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         return;
       }
       window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      window.location.hash = role === 'provider' ? '#provider_portal' : role === 'admin' ? '#admin' : '#stays';
       window.location.reload();
     } catch {
       setErrorMsg('Local demo sign-in failed. Check that the API server is running.');
@@ -575,7 +576,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 <p className="mt-1 text-[11px] leading-4 text-amber-900/80 dark:text-amber-100/80">
                   Supabase Google is not configured on this machine. Choose a seeded local profile to test the app and the admin console.
                 </p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <button
                     type="button"
                     disabled={localDevLoading !== null}
@@ -591,6 +592,14 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                     className="min-h-[38px] rounded-xl bg-amber-500 px-2 text-[11px] font-bold text-white disabled:opacity-50"
                   >
                     {localDevLoading === 'admin' ? 'Signing in…' : 'Continue as Admin'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={localDevLoading !== null}
+                    onClick={() => void handleLocalDevSignIn('provider')}
+                    className="min-h-[38px] rounded-xl bg-[#2554db] px-2 text-[11px] font-bold text-white disabled:opacity-50"
+                  >
+                    {localDevLoading === 'provider' ? 'Signing in…' : 'Continue as PG Owner'}
                   </button>
                 </div>
               </div>
