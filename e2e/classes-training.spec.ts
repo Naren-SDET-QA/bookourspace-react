@@ -130,9 +130,17 @@ async function openClasses(page: Page) {
 }
 
 async function openCourseEnrollment(page: Page, title = COURSE_TITLE) {
-  await page.getByRole('button', { name: `View ${title}` }).first().click();
+  // Classes is locked to the Style 3 surface. Its card is an article with a
+  // "View Details" action; the legacy "View <title>" button is kept as a
+  // fallback so the helper still follows a mounted legacy surface.
+  const style3Card = page.getByRole('article', { name: `Course listing ${title}` });
+  const style3View = style3Card.getByRole('button', { name: /View Details/i });
+  const legacyView = page.getByRole('button', { name: `View ${title}` });
+  await style3View.or(legacyView).first().click();
   await expect(page.getByRole('heading', { name: title }).last()).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'Select batch & enroll' }).click();
+  const style3Enroll = page.getByRole('button', { name: 'Enroll Now', exact: true });
+  const legacyEnroll = page.getByRole('button', { name: 'Select batch & enroll' });
+  await style3Enroll.or(legacyEnroll).last().click();
   // The enrollment dialog is labelled by the course title, like the detail sheet.
   await expect(page.getByRole('dialog', { name: title }).last()).toBeVisible({ timeout: 15_000 });
 }
@@ -142,6 +150,13 @@ async function closeCourseDetail(page: Page) {
   // The course detail remains mounted below its enrollment dialog. Wait for
   // the modal to leave the hit-testing layer before clicking the detail close.
   await expect(page.getByTestId('class-enrollment-modal')).toBeHidden({ timeout: 15_000 });
+  // Style 3 names its detail close control explicitly; older surfaces used a
+  // generic "Close". Support both without leaving the dialog over the page.
+  const style3Close = page.getByRole('button', { name: 'Back to all classes' });
+  if ((await style3Close.count()) > 0) {
+    await style3Close.last().click();
+    return;
+  }
   const close = page.getByRole('button', { name: 'Close', exact: true });
   if ((await close.count()) > 0) await close.last().click();
 }
@@ -177,7 +192,12 @@ test.describe.serial('Classes & Training journey', () => {
     await page.getByRole('button', { name: /Submit batch for admin approval/i }).click();
     await expect(page.getByTestId('batch-notice')).toContainText('Admin approval', { timeout: 15_000 });
 
-    const row = page.getByTestId('batch-row').filter({ hasText: BATCH_TITLE });
+    // A retried serial test can leave an already-approved copy with the same
+    // title. Assert the newly submitted pending row specifically.
+    const row = manager.getByTestId('batch-row')
+      .filter({ hasText: BATCH_TITLE })
+      .filter({ hasText: 'pending_approval' })
+      .first();
     await expect(row).toBeVisible();
     await expect(row.getByTestId('batch-status')).toHaveText('pending_approval');
   });
@@ -203,7 +223,10 @@ test.describe.serial('Classes & Training journey', () => {
     const review = page.getByTestId('admin-class-batch-review');
     await expect(review).toBeVisible({ timeout: 30_000 });
 
-    const row = review.getByTestId('admin-batch-row').filter({ hasText: BATCH_TITLE });
+    const row = review.getByTestId('admin-batch-row')
+      .filter({ hasText: BATCH_TITLE })
+      .filter({ hasText: 'pending_approval' })
+      .first();
     await expect(row).toBeVisible({ timeout: 15_000 });
     await review.getByLabel('Audit reason', { exact: true }).fill('E2E calendar and faculty verified');
     await row.getByRole('button', { name: /Approve & publish/i }).click();
@@ -294,8 +317,10 @@ test.describe.serial('Classes & Training journey', () => {
       await page.goto('/#classes', { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: 'Classes & Training' })).toBeVisible({ timeout: 30_000 });
       const raceTitle = process.env.E2E_RACE_COURSE_TITLE || 'E2E Race Course';
-      await page.getByRole('button', { name: `View ${raceTitle}` }).first().click();
-      await page.getByRole('button', { name: 'Select batch & enroll' }).click();
+      const raceCard = page.getByRole('article', { name: `Course listing ${raceTitle}` });
+      await raceCard.getByRole('button', { name: /View Details/i }).click();
+      await expect(page.getByRole('heading', { name: raceTitle }).last()).toBeVisible({ timeout: 15_000 });
+      await page.getByRole('button', { name: 'Enroll Now', exact: true }).click();
       await expect(page.getByRole('dialog', { name: raceTitle }).last()).toBeVisible({ timeout: 15_000 });
       await page.getByRole('radio').first().click();
       return { context, page };

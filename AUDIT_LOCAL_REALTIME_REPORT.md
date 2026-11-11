@@ -4,7 +4,7 @@
 
 **No hosted database change, push, deployment or paid service was used.**
 
-**Overall result: PASS locally for the Realtime/GPS/OTP/document/adaptive-polling scope, with one BLOCKED item: parts of the legacy six-module browser harness still use stale selectors. Those are test-harness failures, not backend or Realtime failures; the Chromium PG suite passed after selector repair.**
+**Overall result: PASS locally across the Realtime/GPS/OTP/document/adaptive-polling scope and the complete six-module browser regression.**
 
 ---
 
@@ -88,7 +88,8 @@ A new forward-only migration adds private-document upload for active booking par
 | Command | Result |
 |---|---|
 | `npm test` with DB gates enabled (fresh DB, baseline + 76 migrations) | **481 tests, 480 pass, 0 fail, 1 static skip** |
-| `bash supabase/tests/run_services_e2e.sh` | existing services **12/12 PASS**; builder/GPS/offline/permission **21/21 PASS** |
+| `bash supabase/tests/run_services_e2e.sh` | existing services **12/12 PASS**; builder/GPS/offline/permission/mobile-all-services **22/22 PASS** |
+| `bash supabase/tests/run_all_booking_suites.sh` | **ALL BOOKING SUITES PASSED** — all nine suites exit 0 |
 | `npm run test:realtime` (reproducible isolated stack) | **7/7 PASS** |
 | `npx tsc --noEmit` | **PASS** |
 | `npm run build` | **PASS** |
@@ -105,12 +106,18 @@ The six-module booking runner was executed:
 | services_api | **PASS** |
 | services_browser | **PASS** |
 | stays | **PASS** |
-| pg_integration (Chromium only, after selector repair) | **PASS** — phase1 37/37, phase2 6/6 |
-| pg_payments | Backend **PASS** (phase1 59/59, phase2 5/5); browser detail assertion still targets the removed `#pg-detail-title` selector — **BLOCKED (stale test harness)** |
-| classes | **BLOCKED** — legacy browser selectors/retry state fixtures (duplicate batch rows) |
-| venues | **BLOCKED** — legacy browser selector for the removed listing card surface |
+| pg_integration (all engines) | **PASS** — phase1 37/37, phase2 6/6, admin-console journey |
+| pg_payments (all engines) | **PASS** — phase1 59/59, phase2 5/5 |
+| classes | **PASS** — 7/7 journey, movies 2/2, cross-browser and restart persistence |
+| venues | **PASS** — 9/9 Chromium journey, Chromium/Firefox/WebKit mobile/tablet/desktop, restart persistence |
 
-The PG browser harness was repaired for the supported Style 3 card (`article` + `View`) and bottom navigation; the Chromium journey then passed. Firefox/WebKit PG responsive checks remain blocked by stale detail selectors. No product backend or six-module API test failed.
+The browser harnesses were repaired to the current UI rather than weakening assertions:
+
+- PG: Style 3 card `article` + `View`; Style 3 detail `#pg-style3-detail-title`; bottom-nav My Bookings.
+- Classes: Style 3 `Course listing` article + `View Details` + `Enroll Now`; `Back to all classes` close; pending-row scoping; stateful serial retries disabled so retries cannot create duplicate pending/active batches.
+- Venues: `View and book`, `Book Hall`, and the current pending/approved labels; cross-browser spec updated identically.
+
+No product backend or six-module API test failed.
 
 ## 7. Security and cost
 
@@ -136,8 +143,6 @@ The local stack is free/local; no hosted quota was consumed. The cost analysis r
 
 ## Final result
 
-**PASS locally** for real Supabase Auth/Realtime WebSockets, reconnects, booking authorization, GPS updates across all five categories, adaptive polling, GPS permission/offline handling, OTP security, recurrence, private documents, full unit/DB regression and build.
+**PASS locally** for real Supabase Auth/Realtime WebSockets, reconnects, booking authorization, GPS updates across all five categories, adaptive polling, GPS permission/offline handling, OTP security, recurrence, private documents, full unit/DB regression, the complete six-module browser regression, mobile customer/provider/Super Admin dynamic-service views and the production build.
 
-**BLOCKED:** the legacy six-module browser harness still contains stale selectors in `pg_payments` (removed `#pg-detail-title`), `classes` and `venues`. These do not affect the application APIs, database, RLS, Realtime or the audited service features. After repairing the supported PG Style 3 selectors, the Chromium PG suite passed 37/37 + 6/6.
-
-Hosted apply/deploy and paid usage remain owner-gated and unused.
+**BLOCKED:** none in the local scope. Hosted migration apply, push, merge and deployment remain owner-gated and were not performed; no paid service was used.

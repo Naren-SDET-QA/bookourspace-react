@@ -1225,3 +1225,72 @@ dbTest('browser: denied GPS permission is reported and never invents a location'
     await browser.close();
   }
 });
+
+dbTest('browser: all dynamic services are present in mobile customer, provider and Super Admin views', async () => {
+  const browser = await chromium.launch();
+  const contexts = [];
+  const errors = [];
+  const openAs = async (authToken) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+    contexts.push(context);
+    await context.addInitScript((value) => {
+      try {
+        localStorage.setItem('bos_session_token_v1', value);
+        localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
+        localStorage.setItem('bos_section_styles_v2', JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'old' }));
+      } catch { /* storage unavailable */ }
+    }, authToken);
+    await context.route('**/*', async (route) => {
+      try {
+        if (new URL(route.request().url()).origin === serverUrl) await route.continue();
+        else await route.abort('blockedbyclient');
+      } catch { /* page closed */ }
+    });
+    const page = await context.newPage();
+    page.on('pageerror', (error) => {
+      if (error.message !== 'WebSocket closed without opened.') errors.push(error.message);
+    });
+    await page.goto(`${serverUrl}/#services/old`, { waitUntil: 'domcontentloaded' });
+    return page;
+  };
+  const categoryNames = ['Human Help', 'Medicine Delivery', 'Water Bottle Delivery', 'Groceries Delivery', 'Pet Grooming'];
+
+  try {
+    const customerPage = await openAs(customerToken);
+    await expect(customerPage.getByRole('heading', { name: /Hire a professional for the job at hand/i })).toBeVisible({ timeout: 30_000 });
+    await customerPage.evaluate(() => window.dispatchEvent(new Event('bos-marketplace-listings-updated')));
+    for (const name of categoryNames) {
+      await expect(customerPage.getByRole('button', { name: new RegExp(name) }).first()).toBeVisible({ timeout: 20_000 });
+    }
+
+    const providers = [
+      [humanToken, 'Human Help'],
+      [medicineToken, 'Medicine Delivery'],
+      [waterToken, 'Water Bottle Delivery'],
+      [groceriesToken, 'Groceries Delivery'],
+      [customToken, 'Pet Grooming'],
+    ];
+    for (const [token, name] of providers) {
+      const page = await openAs(token);
+      await expect(page.getByRole('button', { name: 'My service jobs' })).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'My service jobs' }).click();
+      await expect(page.locator('article').filter({ hasText: name }).first()).toBeVisible({ timeout: 20_000 });
+    }
+
+    const adminPage = await openAs(superToken);
+    await expect(adminPage.getByRole('button', { name: 'Build', exact: true })).toBeVisible({ timeout: 30_000 });
+    await adminPage.getByRole('button', { name: 'Build', exact: true }).click();
+    const builderHeader = adminPage.locator('header').filter({ hasText: 'Universal Live Builder' });
+    await builderHeader.getByRole('button', { name: 'Services', exact: true }).click();
+    const builderPanel = adminPage.locator('[class*="z-[9990]"]');
+    await expect(builderPanel.getByText('Service categories & booking forms')).toBeVisible({ timeout: 15_000 });
+    for (const name of categoryNames) {
+      await expect(builderPanel.getByRole('button', { name: new RegExp(name) }).first()).toBeVisible({ timeout: 15_000 });
+    }
+    assert.deepEqual(errors, [], 'mobile dynamic service views should not raise uncaught page errors');
+  } finally {
+    for (const context of contexts) await context.close();
+    await browser.close();
+  }
+});

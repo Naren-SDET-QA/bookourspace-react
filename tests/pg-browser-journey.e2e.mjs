@@ -131,7 +131,7 @@ try {
     }
 
     await detailsButton.click();
-    await page.locator('#pg-detail-title').waitFor({ timeout: 15000 });
+    await page.locator('#pg-detail-title, #pg-style3-detail-title').waitFor({ timeout: 15000 });
     const availabilityRegion = page.getByRole('region', { name: 'PG availability and booking' });
     const hasAvailability = await availabilityRegion.waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the PG detail sheet exposes the live availability panel`, hasAvailability);
