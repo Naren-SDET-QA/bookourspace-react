@@ -424,7 +424,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             </div>
             <div>
               <h3 id="bos-auth-title" className="text-base font-black">
-                {activeAccount ? 'Your Account' : 'Sign In'}
+                {activeAccount ? 'Your Account' : 'Sign In with Google'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {activeAccount ? 'Signed in and verified.' : 'Continue with Google or email OTP to book and save.'}
