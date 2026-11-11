@@ -65,7 +65,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
-  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory' | 'pg_owner'>('listings');
+  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory' | 'pg_owner'>('pg_owner');
 
   // D3 Chart Computations for Analytics & Performance Tab
   const d3Analytics = useMemo(() => {

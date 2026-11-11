@@ -8,6 +8,7 @@ test('PG owner dashboard is a BookOurSpace-branded, grouped workspace', () => {
   const dashboard = source('src/components/pg/PgOwnerDashboard.tsx');
   const provider = source('src/components/ProviderDashboard.tsx');
   assert.match(provider, /pg_owner/);
+  assert.match(provider, /useState<[^>]+>\('pg_owner'\)/);
   assert.match(provider, /<PgOwnerDashboard/);
   for (const label of ['Dashboard', 'Dues', 'Collections', 'Expenses', 'Disputes', 'Leads', 'Bookings', 'Tenants', 'Staff', 'Rooms & Beds', 'Properties', 'Listings', 'Complaints', 'Requests', 'Food menu', 'Notices', 'Reviews', 'Community', 'Reports', 'Plan & billing', 'Settings']) {
     assert.match(dashboard, new RegExp(label.replace(/[&]/g, '\\&')), label);
