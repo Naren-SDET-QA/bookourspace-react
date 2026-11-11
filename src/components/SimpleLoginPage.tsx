@@ -14,11 +14,11 @@ export function SimpleLoginPage({
   onGoogle: () => void;
 }) {
   const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState<'email' | 'customer' | 'admin' | null>(null);
+  const [busy, setBusy] = useState<'email' | 'customer' | 'admin' | 'provider' | null>(null);
   const [error, setError] = useState('');
 
-  const signIn = async (payload: { email?: string; role?: 'customer' | 'admin' }) => {
-    setBusy(payload.role === 'admin' ? 'admin' : payload.email ? 'email' : 'customer');
+  const signIn = async (payload: { email?: string; role?: 'customer' | 'admin' | 'provider' }) => {
+    setBusy(payload.role === 'admin' ? 'admin' : payload.role === 'provider' ? 'provider' : payload.email ? 'email' : 'customer');
     setError('');
     try {
       const response = await fetch('/api/auth/local-dev/session', {
@@ -32,7 +32,7 @@ export function SimpleLoginPage({
         return;
       }
       window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
-      window.location.hash = '#stays';
+      window.location.hash = payload.role === 'provider' ? '#provider_portal' : payload.role === 'admin' ? '#admin' : '#stays';
       window.location.reload();
     } catch {
       setError('Sign-in failed. Check that the API server is running.');
@@ -124,12 +124,15 @@ export function SimpleLoginPage({
 
           {error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-2 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
 
-          <div className="mt-5 grid grid-cols-2 gap-2 border-t border-[#ebebeb] pt-4 dark:border-slate-800">
+          <div className="mt-5 grid grid-cols-1 gap-2 border-t border-[#ebebeb] pt-4 sm:grid-cols-3 dark:border-slate-800">
             <button type="button" disabled={busy !== null} onClick={() => void signIn({ role: 'customer' })} className="min-h-[40px] rounded-lg border border-[#dddddd] text-[11px] font-bold dark:border-slate-700">
               {busy === 'customer' ? 'Signing in…' : 'Local Customer'}
             </button>
             <button type="button" disabled={busy !== null} onClick={() => void signIn({ role: 'admin' })} className="min-h-[40px] rounded-lg bg-slate-950 text-[11px] font-bold text-white dark:bg-white dark:text-slate-900">
               {busy === 'admin' ? 'Signing in…' : 'Local Admin'}
+            </button>
+            <button type="button" disabled={busy !== null} onClick={() => void signIn({ role: 'provider' })} className="min-h-[40px] rounded-lg bg-[#2554db] text-[11px] font-bold text-white">
+              {busy === 'provider' ? 'Signing in…' : 'Local PG Owner'}
             </button>
           </div>
           <p className="mt-3 text-[10px] leading-4 text-[#888888] dark:text-slate-500">

@@ -11,13 +11,11 @@ import {
   Layers,
   Mic,
   ShieldCheck,
-  Briefcase,
   SlidersHorizontal,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
   Search,
-  PlusCircle,
   Check,
   Filter,
   RotateCcw,
@@ -156,7 +154,6 @@ const SectionSpotlightShowcase = lazy(() => import('./components/SectionSpotligh
 const HallsMandapExperience = lazy(() => import('./components/HallsMandapExperience').then((module) => ({ default: module.HallsMandapExperience })));
 const VenueDetailModal = lazy(() => import('./components/VenueDetailModal').then((module) => ({ default: module.VenueDetailModal })));
 const VenueBookingModal = lazy(() => import('./components/VenueBookingModal').then((module) => ({ default: module.VenueBookingModal })));
-const VenueOwnerWorkspace = lazy(() => import('./components/VenueOwnerWorkspace').then((module) => ({ default: module.VenueOwnerWorkspace })));
 const VenueAdminWorkspace = lazy(() => import('./components/VenueAdminWorkspace').then((module) => ({ default: module.VenueAdminWorkspace })));
 const MoviesShowtimes = lazy(() => import('./components/MoviesShowtimes').then((module) => ({ default: module.MoviesShowtimes })));
 const ServicesDiscoverySection = lazy(() => import('./components/ServicesDiscoverySection').then((module) => ({ default: module.ServicesDiscoverySection })));
@@ -178,7 +175,6 @@ const ClassCompareModal = lazy(() => import('./components/ClassCompareModal').th
 const CompareFloatingBar = lazy(() => import('./components/CompareFloatingBar').then((module) => ({ default: module.CompareFloatingBar })));
 const BookingEnquiryModal = lazy(() => import('./components/BookingEnquiryModal').then((module) => ({ default: module.BookingEnquiryModal })));
 const ChatModal = lazy(() => import('./components/ChatModal').then((module) => ({ default: module.ChatModal })));
-const ClassBatchManager = lazy(() => import('./components/ClassBatchManager').then((module) => ({ default: module.ClassBatchManager })));
 const AdminClassBatchReview = lazy(() => import('./components/AdminClassBatchReview').then((module) => ({ default: module.AdminClassBatchReview })));
 const PostListingWizard = lazy(() => import('./components/PostListingWizard').then((module) => ({ default: module.PostListingWizard })));
 const ProviderDashboard = lazy(() => import('./components/ProviderDashboard').then((module) => ({ default: module.ProviderDashboard })));
@@ -251,7 +247,6 @@ const LiveAdminPageEditor = lazy(() => import('./components/LiveAdminPageEditor'
 const UniversalLiveBuilder = lazy(() => import('./components/UniversalLiveBuilder').then((module) => ({ default: module.UniversalLiveBuilder })));
 const QuickBookChatAssistant = lazy(() => import('./components/QuickBookChatAssistant').then((module) => ({ default: module.QuickBookChatAssistant })));
 import { SpotlightModuleTabs } from './components/SpotlightModuleTabs';
-import { MarketplaceHero } from './components/MarketplaceHero';
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
@@ -573,7 +568,7 @@ function MarketplaceAppContent() {
         }
         setActiveMarketSection('movies');
         setOpenSection(null);
-      } else if (hash === 'provider' || hash.startsWith('provider/')) {
+      } else if (hash === 'provider' || hash === 'provider_portal' || hash.startsWith('provider/')) {
         // A URL hash is unauthenticated input and must never grant a role.
         // Signed-out visitors keep the hash so it applies once the session
         // hydrates; a signed-in non-provider is redirected to the marketplace.
@@ -2482,27 +2477,6 @@ function MarketplaceAppContent() {
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
           {sharedMarketplaceHeader}
 
-          {!activeSectionExperience && activeMarketSection === 'pg_hostels' && (
-            <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
-              <MarketplaceHero
-                currentLang={currentLang}
-                selectedLocationLabel={selectedLocationLabel}
-                listingCount={listings.filter((listing) => listing.status === 'active').length}
-                verifiedListingCount={listings.filter((listing) => listing.status === 'active' && listing.isVerified).length}
-                heroImage={listings.find((listing) => listing.status === 'active' && listing.images?.[0])?.images?.[0]}
-                onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
-                onExplore={() => {
-                  setActiveMarketSection('pg_hostels');
-                  setSelectedCategory('all');
-                  setSelectedSubcategory('all');
-                  setIsBentoLandingActive(false);
-                  setOpenSection('pg_hostels');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-              />
-            </div>
-          )}
-
           {/* HOME-SCREEN CHROME (announcements, spotlight carousel) — hidden while a section screen is open */}
           {!activeSectionExperience && (
             <>
@@ -3039,42 +3013,16 @@ function MarketplaceAppContent() {
         {/* VIEW 1: PROVIDER PORTAL */}
         {activeView === 'provider_portal' && (
           <div className="space-y-4 animate-in fade-in duration-200">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-              <div>
-                <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Briefcase className="w-5 h-5 text-emerald-600" />
-                  <span>
-                    BookOurSpace{' '}
-                    {currentLang === 'te'
-                      ? 'ప్రొవైడర్ హబ్ & బిజినెస్ మేనేజర్'
-                      : currentLang === 'hi'
-                      ? 'प्रोवाइडर हब और बिजनेस मैनेजर'
-                      : ui.providerHub}
-                  </span>
-                </h1>
-                <p className="text-xs text-slate-500">
-                  {currentLang === 'te'
-                    ? 'మీ లిస్టింగ్‌లను నిర్వహించండి, కస్టమర్ ఎంక్వైరీలకు సమాధానం ఇవ్వండి మరియు బుకింగ్‌లను ట్రాక్ చేయండి.'
-                    : currentLang === 'hi'
-                    ? 'अपनी लिस्टिंग प्रबंधित करें, ग्राहक पूछताछ का जवाब दें और बुकिंग ट्रैक करें।'
-                    : 'Manage your listings, respond to customer enquiries, track direct bookings, and upgrade posting plans.'}
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveView('marketplace')}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 transition cursor-pointer"
-              >
-                {currentLang === 'te'
-                  ? 'మార్కెట్‌ప్లేస్‌కు తిరిగి వెళ్ళండి'
-                  : currentLang === 'hi'
-                  ? 'मार्केटप्लेस पर वापस जाएं'
-                  : 'Back to Marketplace'}
-              </button>
-            </div>
-
             <SelfHealingBoundary moduleId="provider_portal_module" moduleName="Provider Portal & Hub Module">
               <ProviderDashboard
                 currentLang={currentLang}
+                onSwitchToMarketplace={() => {
+                  setActiveView('marketplace');
+                  setActiveBottomTab('home');
+                  if (window.location.hash.toLowerCase() === '#provider_portal') {
+                    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+                  }
+                }}
                 onOpenPostWizard={() => setIsPostWizardOpen(true)}
                 onOpenPaymentModal={(planName, amount) => {
                   setPaymentModalState({
@@ -3096,8 +3044,6 @@ function MarketplaceAppContent() {
                     : undefined
                 }
               />
-              {userRole === 'provider' && <ClassBatchManager />}
-              {userRole === 'provider' && <VenueOwnerWorkspace />}
             </SelfHealingBoundary>
           </div>
         )}
