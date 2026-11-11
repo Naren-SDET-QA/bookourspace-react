@@ -14,6 +14,7 @@ const variantSeeds = [
   { area: 'Banjara Hills', title: 'Demo PG — Banjara Hills Premium Co-Living', price: 12500, sharing: '1 sharing', category: 'pg-coliving' },
   { area: 'Secunderabad', title: 'Demo PG — Secunderabad Women Safe Stay', price: 8000, sharing: '3 sharing', category: 'pg-women-safe' },
   { area: 'Miyapur', title: 'Demo PG — Miyapur Budget Comfort Stay', price: 5500, sharing: '3 sharing', category: 'pg-budget' },
+  { area: 'Madhapur / Hitech City', title: 'Demo PG — Hitech City Service Apartments', price: 18000, sharing: '1 sharing', category: 'pg-service-apartments' },
 ] as const;
 
 const variants: MarketplaceListing[] = variantSeeds.map((seed, index) => {

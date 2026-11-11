@@ -240,6 +240,9 @@ export interface AdminContentSettings {
     category: string;
     uploadedAt: string;
   }[];
+  /** Category pill strip: shown on every section, one scrollable line or wrapping. */
+  categoryBarVisible: boolean;
+  categoryBarLayout: 'single' | 'multi';
   publishState: PublishState;
 }
 
@@ -681,6 +684,8 @@ export const DEFAULT_CONTENT_SETTINGS: AdminContentSettings = {
     accentColor: '#7C3AED',
     compactDensity: false,
   },
+  categoryBarVisible: true,
+  categoryBarLayout: 'single',
   mediaLibrary: [
     {
       id: 'MED-1',
@@ -982,8 +987,15 @@ export const recordAdClick = (adId: string) => {
 
 export const loadAdminContentSettings = () =>
   loadFromStorage<AdminContentSettings>(KEYS.CONTENT, DEFAULT_CONTENT_SETTINGS);
-export const saveAdminContentSettings = (content: AdminContentSettings) =>
-  saveToStorage(KEYS.CONTENT, content);
+export const saveAdminContentSettings = (content: AdminContentSettings) => {
+  const saved = saveToStorage(KEYS.CONTENT, content);
+  try {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('bos-admin-content-settings-changed'));
+  } catch {
+    /* event dispatch is best-effort */
+  }
+  return saved;
+};
 
 export const loadAdminDisputes = () => loadFromStorage<AdminBookingDispute[]>(KEYS.DISPUTES, DEFAULT_DISPUTES);
 export const saveAdminDisputes = (disputes: AdminBookingDispute[]) => saveToStorage(KEYS.DISPUTES, disputes);

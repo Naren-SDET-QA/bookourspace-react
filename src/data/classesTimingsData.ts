@@ -64,6 +64,14 @@ export interface Faculty {
   name: string;
   experience: string;
   photo: string;
+  title?: string;
+  qualification?: string;
+  studentsTaught?: number;
+  rating?: number;
+  bio?: string;
+  philosophy?: string;
+  certifications?: string[];
+  achievements?: string[];
 }
 
 export interface CourseListing {
@@ -104,6 +112,23 @@ export interface CourseListing {
   rating?: number;
   reviews?: number;
   feePlans: FeePlan[];
+  /** Optional detail fields used by the Style 3 course page. */
+  language?: string;
+  level?: string;
+  syllabus?: string[];
+  earlyBird?: string;
+  photos?: string[];
+  featuredReview?: { name: string; rating: number; date: string; comment: string };
+  lat?: number;
+  lng?: number;
+  /** Optional spotlight-card facts shown only when the owner/admin supplies them. */
+  courseCode?: string;
+  highEnrollment?: boolean;
+  originalFee?: number;
+  placedPercent?: number;
+  feedbackRating?: number;
+  certifiedCount?: number;
+  statsLink?: string;
 }
 
 const img = (id: string, w = 900): string =>
@@ -117,40 +142,94 @@ export const DEMO_PROVIDER_ID = 'demo-provider';
 export const classListings: CourseListing[] = [
   {
     id: 'c-fullstack',
-    title: 'Full-Stack Web Development',
-    category: 'Professional & IT',
-    description: 'Build production-ready web apps with React, Node.js, databases and deployment. Live mentor-led sessions with weekly projects and interview prep.',
+    title: 'Full Stack Web Development',
+    category: 'IT & Software',
+    description: 'A comprehensive Full Stack Web Development course covering frontend, backend and deployment with real-world projects.',
     provider: 'CodeCraft Academy',
     providerId: DEMO_PROVIDER_ID,
     area: 'Madhapur',
     city: 'Hyderabad',
     distanceKm: 3.2,
-    mode: 'Online',
-    modeOptions: ['Online', 'Recorded'],
-    fee: 8999,
+    mode: 'Hybrid',
+    modeOptions: ['Online', 'Offline'],
+    fee: 29999,
     feeUnit: 'course',
     free: false,
-    faculty: { name: 'Rahul Verma', experience: '9 yrs · ex-Amazon', photo: facultyPhoto('photo-1500648767791-00dcc994a43e') },
+    faculty: {
+      name: 'Mr. Rakesh Kumar',
+      title: 'Software Engineer & Trainer',
+      experience: '8+ Years Experience',
+      photo: facultyPhoto('photo-1500648767791-00dcc994a43e'),
+      qualification: 'B.Tech (Computer Science), JNTU Hyderabad',
+      studentsTaught: 1250,
+      rating: 4.8,
+      bio: 'Mr. Rakesh Kumar is a software engineer and trainer with 8+ years of experience building production web platforms. He has mentored over 1,200 learners into full-stack roles and designed a project-first curriculum covering React, Node.js, databases and cloud deployment.',
+      philosophy: 'Build real projects, review code together, and ship with confidence.',
+      certifications: [
+        'Full Stack Web Development — Certified Trainer',
+        'React & Node.js Professional Certification',
+        'Cloud Deployment & DevOps Practitioner',
+        'Advanced JavaScript & TypeScript Specialist',
+      ],
+      achievements: [
+        'Mentored 1,200+ learners into full-stack roles',
+        'Built production apps for fintech and SaaS teams',
+        'Designed the academy’s project-first curriculum',
+      ],
+    },
     batches: [
-      { slot: 'Evening', days: 'Mon – Fri', start: '18:00', end: '20:00', label: '6:00 PM – 8:00 PM' },
+      { slot: 'Evening', days: 'Mon – Fri', start: '19:00', end: '21:00', label: '7:00 PM – 9:00 PM' },
       { slot: 'Weekend', days: 'Sat – Sun', start: '10:00', end: '13:00', label: '10:00 AM – 1:00 PM' },
     ],
-    startDate: 'Every Monday',
-    duration: '12 weeks',
+    startDate: '25 Nov 2026',
+    duration: '6 Months',
+    lat: 17.4485,
+    lng: 78.3748,
     seats: 18,
     eligibility: 'Any graduate / final-year student',
     certification: 'BookOurSpace Verified Certificate',
     ageGroup: '18+',
+    level: 'Intermediate Level',
+    language: 'English',
+    syllabus: [
+      'Module 1: Web Fundamentals (HTML, CSS, JS)',
+      'Module 2: Frontend Development (React)',
+      'Module 3: Backend Development (Node.js, Express)',
+      'Module 4: Database (MongoDB, SQL)',
+      'Module 5: Deployment & Projects',
+    ],
+    earlyBird: '10% Early Bird Discount (Valid till 15 Nov)',
+    featuredReview: {
+      name: 'Srinivas K.',
+      rating: 5,
+      date: '2 weeks ago',
+      comment: 'Excellent training and practical projects. Faculty is very supportive.',
+    },
     verified: true,
     demo: true,
     status: 'approved',
     image: img('photo-1517180102446-f3ece451e9d8'),
+    photos: [
+      img('photo-1517180102446-f3ece451e9d8'),
+      img('photo-1524178232363-1fb2b075b655'),
+      img('photo-1522202176988-66273c2fd55f'),
+      img('photo-1509062522246-3755977927d7'),
+      img('photo-1511379938547-c1f69419868d'),
+      img('photo-1531482615713-2afd69097998'),
+      img('photo-1522071820081-009f0129c71c'),
+      img('photo-1517694712202-14dd9538aa97'),
+    ],
     rating: 4.8,
     reviews: 320,
     feePlans: [
-      { label: 'Online live', amount: 8999, unit: 'course', mode: 'Online' },
-      { label: 'Recorded only', amount: 4999, unit: 'course', mode: 'Recorded' },
+      { label: 'Course Fee', amount: 29999, unit: 'course', mode: 'Hybrid' },
     ],
+    courseCode: 'FULL STACK WEB DEVELOPMENT',
+    highEnrollment: true,
+    originalFee: 37499,
+    placedPercent: 94,
+    feedbackRating: 4.8,
+    certifiedCount: 1420,
   },
   {
     id: 'c-python',
@@ -167,7 +246,28 @@ export const classListings: CourseListing[] = [
     fee: 6499,
     feeUnit: 'course',
     free: false,
-    faculty: { name: 'Priya Nair', experience: '7 yrs · Data Scientist', photo: facultyPhoto('photo-1494790108377-be9c29b29330') },
+    faculty: {
+      name: 'Priya Nair',
+      title: 'Senior Data Scientist & Trainer',
+      experience: '7+ Years Experience',
+      photo: facultyPhoto('photo-1494790108377-be9c29b29330'),
+      qualification: 'M.Sc (Data Science), University of Hyderabad',
+      studentsTaught: 980,
+      rating: 4.9,
+      bio: 'Priya Nair is a senior data scientist and trainer with 7+ years of experience across analytics, machine learning and production data pipelines. She teaches Python, pandas, NumPy and visualisation with real datasets and a capstone project.',
+      philosophy: 'Learn by working with real datasets, not toy examples.',
+      certifications: [
+        'Python for Data Science — Certified Instructor',
+        'Machine Learning Practitioner',
+        'SQL & Analytics Professional',
+        'Data Visualisation Specialist',
+      ],
+      achievements: [
+        'Trained 900+ learners in Python and analytics',
+        'Built ML pipelines for retail and fintech teams',
+        'Mentored capstone projects selected by hiring partners',
+      ],
+    },
     batches: [
       { slot: 'Morning', days: 'Mon – Sat', start: '07:00', end: '09:00', label: '7:00 AM – 9:00 AM' },
       { slot: 'Evening', days: 'Tue / Thu', start: '19:00', end: '21:00', label: '7:00 PM – 9:00 PM' },
@@ -188,6 +288,12 @@ export const classListings: CourseListing[] = [
       { label: 'Hybrid', amount: 6499, unit: 'course', mode: 'Hybrid' },
       { label: 'Online only', amount: 5499, unit: 'course', mode: 'Online' },
     ],
+    courseCode: 'PYTHON FOR DATA SCIENCE',
+    highEnrollment: true,
+    originalFee: 8124,
+    placedPercent: 92,
+    feedbackRating: 4.7,
+    certifiedCount: 980,
   },
   {
     id: 'c-maths',
@@ -392,6 +498,76 @@ export const classListings: CourseListing[] = [
       { label: 'Offline full', amount: 12000, unit: 'course', mode: 'Offline' },
       { label: 'Online full', amount: 8500, unit: 'course', mode: 'Online' },
     ],
+  },
+  {
+    id: 'c-swimming',
+    title: 'Swimming for Beginners',
+    category: 'Sports & Fitness',
+    description: 'Learn water safety, floating, breathing and freestyle with certified coaches in a heated pool. Small batches and personal attention.',
+    provider: 'AquaFit Academy',
+    providerId: DEMO_PROVIDER_ID,
+    area: 'Gachibowli',
+    city: 'Hyderabad',
+    distanceKm: 4.2,
+    mode: 'Offline',
+    modeOptions: ['Offline'],
+    fee: 2500,
+    feeUnit: 'month',
+    free: false,
+    faculty: {
+      name: 'Coach Arjun',
+      title: 'Certified Swim Coach',
+      experience: '10+ Years Experience',
+      photo: facultyPhoto('photo-1500648767791-00dcc994a43e'),
+      qualification: 'B.P.Ed (Physical Education), Osmania University',
+      studentsTaught: 640,
+      rating: 4.7,
+      bio: 'Coach Arjun is a certified swim coach with 10+ years of experience teaching beginners, competitive swimmers and fitness learners. His sessions focus on water safety, breathing, technique and confidence in small batches.',
+      philosophy: 'Safety first, then technique — confidence follows repetition.',
+      certifications: [
+        'Certified Swim Coach (Level 3)',
+        'Water Safety & Rescue Certification',
+        'First-Aid & CPR Certified',
+        'Sports Injury Prevention Specialist',
+      ],
+      achievements: [
+        'Coached 60+ state-level junior swimmers',
+        'Built a beginner-friendly water-safety programme',
+        'Maintained a 100% pool-safety record',
+      ],
+    },
+    batches: [
+      { slot: 'Morning', days: 'Mon – Fri', start: '06:00', end: '07:00', label: '6:00 AM – 7:00 AM' },
+      { slot: 'Evening', days: 'Mon – Fri', start: '18:00', end: '19:00', label: '6:00 PM – 7:00 PM' },
+    ],
+    startDate: '1 Dec 2026',
+    duration: '8 weeks',
+    seats: 12,
+    eligibility: 'Open to all',
+    certification: 'Level 1 swimming certificate',
+    ageGroup: '8+',
+    level: 'Beginner Level',
+    language: 'English',
+    syllabus: [
+      'Module 1: Water safety & pool rules',
+      'Module 2: Floating & breathing',
+      'Module 3: Freestyle technique',
+      'Module 4: Endurance & confidence',
+    ],
+    earlyBird: '10% Early Bird Discount (Valid till 20 Nov)',
+    verified: true,
+    demo: true,
+    status: 'approved',
+    image: img('photo-1530549387789-4c1017266635'),
+    photos: [
+      img('photo-1530549387789-4c1017266635'),
+      img('photo-1573843981267-be1999ff37cd'),
+      img('photo-1507525428034-b723cf961d3e'),
+      img('photo-1546519638-68e109498ffc'),
+    ],
+    rating: 4.7,
+    reviews: 88,
+    feePlans: [{ label: 'Monthly', amount: 2500, unit: 'month', mode: 'Offline' }],
   },
   {
     id: 'c-yoga',

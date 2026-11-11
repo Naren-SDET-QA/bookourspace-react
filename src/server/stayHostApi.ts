@@ -28,6 +28,13 @@ const int = (value: unknown, min: number, max: number) => {
 };
 const bad = (res: express.Response, status: number, error: string, message?: string) => res.status(status).json({ ok: false, error, ...(message ? { message } : {}) });
 
+/**
+ * Persist only durable image references. A signed Storage URL carries a token
+ * that is regenerated per viewer and per session; storing it would leave the
+ * listing with an expired photo after the token's short TTL and would also
+ * leak a signed grant into the database. Original HTTPS photos and canonical
+ * public Storage references are re-signed safely at render time.
+ */
 export function persistableStayImages(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value

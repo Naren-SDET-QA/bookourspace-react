@@ -98,7 +98,7 @@ test('startup retries transient database failures a bounded number of times', as
   assert.equal(pool.calls.health, 3);
 });
 
-function makeSearchPool({ rows = [], transientSearchErrors = [], exhausted = 0, moduleEnabled = true } = {}) {
+function makeSearchPool({ rows = [], transientSearchErrors = [], exhausted = 0, moduleEnabled = true, permissionDenied = false } = {}) {
   const state = { connected: 0, released: 0, discarded: 0, active: 0, maxActive: 0, roles: 0, demoGuc: 0, sql: '' };
   const waiters = [];
   return {
@@ -119,6 +119,9 @@ function makeSearchPool({ rows = [], transientSearchErrors = [], exhausted = 0, 
           if (sql.includes('platform_module_flags')) return { rows: [{ is_enabled: moduleEnabled }] };
           if (sql.includes('with base as')) {
             state.sql = sql;
+            if (permissionDenied) {
+              throw Object.assign(new Error('permission denied for table media_assets'), { code: '42501' });
+            }
             if (transientSearchErrors.length) {
               const error = transientSearchErrors.shift();
               throw error;
@@ -203,6 +206,8 @@ test('stay search returns only active, verified, approved, eligible listings as 
     assert.match(pool.state.sql, /stay_room_types rt_inv/);
     assert.match(pool.state.sql, /stay_units u_inv/);
     assert.match(pool.state.sql, /availability,status/);
+    assert.match(pool.state.sql, /coalesce\(l\.payload, '\{\}'::jsonb\) as payload/);
+    assert.doesNotMatch(pool.state.sql, /from public\.media_assets/);
   } finally { await server.close(); }
 });
 
@@ -269,6 +274,27 @@ test('transient disconnect and pool exhaustion recover once without leaking clie
     assert.equal(pool.state.released, 2);
     assert.equal(pool.state.discarded, 1);
     assert.equal(pool.state.active, 0);
+  } finally { await server.close(); }
+});
+
+test('permission-denied stay search fails closed and backs off repeated requests', async () => {
+  const pool = makeSearchPool({ permissionDenied: true });
+  const server = await withSearchServer(pool);
+  try {
+    const first = await server.search();
+    assert.equal(first.status, 503);
+    assert.equal((await first.json()).error, 'STAY_SEARCH_UNAVAILABLE');
+    assert.equal(pool.state.connected, 1);
+    assert.equal(pool.state.released, 1);
+
+    // A permanent ACL/RLS error must not create a request storm while the
+    // operator repairs the database grants. The circuit returns the same
+    // unavailable state without opening another PostgreSQL transaction.
+    const second = await server.search();
+    assert.equal(second.status, 503);
+    assert.equal((await second.json()).error, 'STAY_SEARCH_UNAVAILABLE');
+    assert.equal(pool.state.connected, 1);
+    assert.equal(pool.state.released, 1);
   } finally { await server.close(); }
 });
 

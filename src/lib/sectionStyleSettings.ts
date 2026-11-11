@@ -27,6 +27,17 @@ const KEY = 'bos_section_styles_v2';
 const PREFS_KEY = 'bos_section_style_prefs_v1';
 export const SECTION_STYLES_EVENT = 'bos-section-styles-changed';
 
+/** Product decision: PG and Classes ship only the Style 3 experience. */
+export const STYLE3_LOCKED_SECTIONS = ['pg', 'classes'] as const;
+export function isStyle3Locked(section: keyof SectionStyles): boolean {
+  return section === 'pg' || section === 'classes';
+}
+
+function applyStyleLocks(value: SectionStyles): SectionStyles {
+  // Halls ships only the Style 2 (agenda) experience.
+  return { ...value, pg: 'style3', classes: 'style3', venues: 'agenda' };
+}
+
 const VALID_VALUES: Record<keyof SectionStyles, readonly string[]> = {
   pg: ['style1', 'style2', 'style3'],
   stay: ['old', 'airbnb', 'style3'],
@@ -52,7 +63,12 @@ function validStyles(input: unknown): Partial<SectionStyles> {
 export function loadStylePreferences(): Partial<SectionStyles> {
   try {
     if (typeof localStorage === 'undefined') return {};
-    return validStyles(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'));
+    const parsed = validStyles(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'));
+    // A stored Style 1/2 choice is stale for the locked sections.
+    if (parsed.pg) parsed.pg = 'style3';
+    if (parsed.classes) parsed.classes = 'style3';
+    if (parsed.venues) parsed.venues = 'agenda';
+    return parsed;
   } catch {
     return {};
   }
@@ -62,7 +78,7 @@ export function loadStylePreferences(): Partial<SectionStyles> {
 export function saveStylePreference<K extends keyof SectionStyles>(section: K, value: SectionStyles[K]): void {
   try {
     if (typeof localStorage === 'undefined') return;
-    const next = { ...loadStylePreferences(), [section]: value };
+    const next = { ...loadStylePreferences(), [section]: section === 'venues' ? 'agenda' : isStyle3Locked(section) ? 'style3' : value };
     localStorage.setItem(PREFS_KEY, JSON.stringify(next));
     if (typeof window !== 'undefined') window.dispatchEvent(new Event(SECTION_STYLES_EVENT));
   } catch {
@@ -81,13 +97,13 @@ function saveLocalCache(next: SectionStyles) {
 }
 
 const DEFAULTS: SectionStyles = {
-  // Style 1 is the classic, data-rich layout for every section and is the
-  // first view a fresh visitor sees.
-  pg: 'style1',
+  // PG and Classes are locked to Style 3; the other sections keep Style 1 as
+  // their first view for a fresh visitor.
+  pg: 'style3',
   stay: 'old',
   services: 'old',
-  classes: 'cards',
-  venues: 'showcase',
+  classes: 'style3',
+  venues: 'agenda',
   movies: 'experience',
 };
 
@@ -95,12 +111,12 @@ export function loadSectionStyles(): SectionStyles {
   const preferences = loadStylePreferences();
   // A browser-local preference may help development, but must never replace a
   // centrally published production design on a device that has stale storage.
-  if (!localPreferencesEnabled()) return { ...DEFAULTS, ...preferences };
+  if (!localPreferencesEnabled()) return applyStyleLocks({ ...DEFAULTS, ...preferences });
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULTS, ...preferences };
+    if (!raw) return applyStyleLocks({ ...DEFAULTS, ...preferences });
     const parsed = JSON.parse(raw) as Partial<SectionStyles>;
-    return {
+    return applyStyleLocks({
       pg: parsed.pg === 'style1' || parsed.pg === 'style2' || parsed.pg === 'style3' ? parsed.pg : DEFAULTS.pg,
       stay: parsed.stay === 'old' || parsed.stay === 'airbnb' || parsed.stay === 'style3' ? parsed.stay : DEFAULTS.stay,
       services:
@@ -111,9 +127,9 @@ export function loadSectionStyles(): SectionStyles {
       venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : DEFAULTS.venues,
       movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : DEFAULTS.movies,
       ...preferences,
-    };
+    });
   } catch {
-    return { ...DEFAULTS, ...preferences };
+    return applyStyleLocks({ ...DEFAULTS, ...preferences });
   }
 }
 
@@ -121,9 +137,8 @@ export function applyRemoteSectionStyles(value: unknown, sectionStylesVersion?: 
   if (!value || typeof value !== 'object') return null;
   const parsed = value as Partial<SectionStyles> & { sectionStylesVersion?: number };
   // Configs published before the unified Style 1/2/3 switch carried the old
-  // defaults (PG Style 2 / Stay Style 2). Treat those as Style 1 once, so every
-  // existing install opens with the classic layouts. A config republished by
-  // the new Admin carries sectionStylesVersion: 2 and is respected verbatim.
+  // defaults (PG Style 2 / Stay Style 2). Stay keeps the one-time legacy
+  // mapping; PG/Classes are always forced to Style 3 by applyStyleLocks.
   const legacyDefaults = (sectionStylesVersion ?? parsed.sectionStylesVersion) !== 2;
   const next = {
     ...loadSectionStyles(),
@@ -138,13 +153,17 @@ export function applyRemoteSectionStyles(value: unknown, sectionStylesVersion?: 
     venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : 'showcase',
     movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : 'experience',
   } as SectionStyles;
-  saveLocalCache(next);
+  const locked = applyStyleLocks(next);
+  saveLocalCache(locked);
   // An explicit visitor choice survives navigation, refresh and later config
   // refreshes; the published style remains the default for everyone else.
-  return { ...next, ...loadStylePreferences() };
+  return applyStyleLocks({ ...locked, ...loadStylePreferences() });
 }
 
 export async function saveSectionStyles(next: SectionStyles): Promise<SectionStyleSaveResult> {
+  // PG and Classes are locked to Style 3. Force the lock before the request so
+  // a stale admin form can never publish Style 1/2 for them.
+  const locked = applyStyleLocks(next);
   // The API re-verifies the signed session and the database role. Never treat
   // a browser cache write as a published setting.
   try {
@@ -154,12 +173,12 @@ export async function saveSectionStyles(next: SectionStyles): Promise<SectionSty
         const response = await fetch('/api/live-page-config/section-styles', {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-bos-session-token': token },
-          body: JSON.stringify({ styles: next }),
+          body: JSON.stringify({ styles: locked }),
           cache: 'no-store',
         });
         const result = await response.json().catch(() => null);
         if (response.ok && result?.ok === true && result?.okStyles === true) {
-          saveLocalCache(next);
+          saveLocalCache(locked);
           return 'published';
         }
         // An explicit authorization or validation failure must never turn into
@@ -172,14 +191,14 @@ export async function saveSectionStyles(next: SectionStyles): Promise<SectionSty
     // configured. This result is distinct from a published server setting.
   }
   if (localPreferencesEnabled()) {
-    saveLocalCache(next);
+    saveLocalCache(locked);
     return 'local-only';
   }
   return 'failed';
 }
 
 export function getPgStyle(): PgStyle {
-  return loadSectionStyles().pg;
+  return 'style3';
 }
 
 export function getStayStyle(): StayStyle {
@@ -191,11 +210,11 @@ export function getServicesStyle(): ServicesStyle {
 }
 
 export function getClassesStyle(): ClassesStyle {
-  return loadSectionStyles().classes;
+  return 'style3';
 }
 
 export function getVenuesStyle(): VenuesStyle {
-  return loadSectionStyles().venues;
+  return 'agenda';
 }
 
 export function getMoviesStyle(): MoviesStyle {

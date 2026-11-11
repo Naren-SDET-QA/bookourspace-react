@@ -3,8 +3,10 @@ import { test } from 'node:test';
 import {
   createResponsiveMediaResolver,
   createSignedStorageUrlResolver,
+  firstUsableListingImage,
   isPersistableListingImageSource,
   isRenderableListingImageSource,
+  isUsableListingImageSource,
   listingImageSources,
   MEDIA_URL_TTL_SECONDS,
   parseStorageObjectReference,
@@ -92,6 +94,9 @@ test('Supabase object URLs normalize to canonical refs, including relative paths
     storageReferenceForSource('https://other.supabase.co/storage/v1/object/public/bos-public-media/owner/listing/original.jpg', projectUrl),
     null,
   );
+  // An encoded slash is a path separator, not part of a single object name.
+  // Decoding it would let a caller turn a signed one-segment object into a
+  // different nested path, so the canonical form must reject it.
   assert.equal(
     storageReferenceForSource('/storage/v1/object/public/bos-public-media/owner/listing/photo%2Fvariant.jpg', projectUrl),
     null,
@@ -192,4 +197,34 @@ test('responsive resolver signs only stored variants and caches the derived srcs
   now += 5 * 60 * 1000;
   await resolve(reference);
   assert.equal(lookups, 3);
+});
+
+
+test('fixture-only media is excluded and a real photo is promoted', () => {
+  for (const value of [
+    'https://images.example.com/pg-a.jpg',
+    'https://cdn.example.test/room.jpg',
+    'storage://bos-public-media/mock/wrongtype/cover.png',
+    'storage://bos-public-media/mock/missing/cover.png',
+    'storage://bos-public-media/11111111-2222-4333-8444-555555555555/services/provider_listing/asset1/original-abc.jpg',
+    '/assets/fallbacks/pg.svg',
+    'data:image/png;base64,Zm9v',
+  ]) {
+    assert.equal(isUsableListingImageSource(value), false, value);
+  }
+  assert.equal(
+    isUsableListingImageSource('https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=480&q=80'),
+    true,
+  );
+  assert.equal(isUsableListingImageSource('storage://bos-public-media/owner/listing/photo.webp'), true);
+  assert.equal(
+    firstUsableListingImage([
+      'https://images.example.com/pg-a.jpg',
+      'storage://bos-public-media/mock/missing/cover.png',
+      'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=480&q=80',
+    ]),
+    'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=480&q=80',
+  );
+  assert.equal(firstUsableListingImage(['storage://bos-public-media/mock/missing/cover.png']), undefined);
+  assert.equal(firstUsableListingImage(null), undefined);
 });

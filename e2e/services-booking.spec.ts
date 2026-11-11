@@ -44,7 +44,7 @@ async function pageFor(browser: Browser, key: 'customer' | 'provider' | 'admin')
         // Select the classic services experience (the curated hub is display-only).
         window.localStorage.setItem(
           'bos_section_styles_v2',
-          JSON.stringify({ pg: 'style2', stay: 'airbnb', services: 'old' }),
+          JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'old' }),
         );
       } catch {
         /* storage unavailable */
