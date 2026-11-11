@@ -8,6 +8,31 @@ const MAX_RESPONSIVE_VARIANTS = 8;
 const ALLOWED_BUCKETS = new Set(['bos-public-media', 'bos-private-documents', 'bos-private-profile-media']);
 const INVALID_STORAGE_PATH_CHARACTER = /[?#\\/\u0000-\u001f\u007f]/;
 
+// These hosts are used only by disposable database/security fixtures. They
+// are intentionally non-routable and must never be requested by a browser.
+// Listing media continues through the normal HTTPS or signed Storage path
+// below; this is not a general URL allow/deny list.
+const UNAVAILABLE_DEMO_IMAGE_HOSTS = new Set([
+  'images.example.com',
+  'cdn.example.test',
+  'media.example.test',
+]);
+
+// Storage paths created only by the disposable E2E/security fixtures. A real
+// provider upload always starts with the owner's UUID, never these markers.
+const FIXTURE_STORAGE_PATH = /(^|\/)mock(\/|$)|^11111111-2222-4333-8444-555555555555\//i;
+
+export function isKnownUnavailableDemoImageSource(value: unknown): boolean {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    const base = typeof window === 'undefined' ? 'http://localhost/' : window.location.origin;
+    const url = new URL(value.trim(), base);
+    return url.protocol === 'https:' && UNAVAILABLE_DEMO_IMAGE_HOSTS.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export interface StorageObjectReference {
   bucket: 'bos-public-media' | 'bos-private-documents' | 'bos-private-profile-media';
   path: string;
@@ -24,6 +49,7 @@ function decodeStoragePath(rawPath: string): string | null {
   } catch {
     return null;
   }
+
 }
 
 function canonicalStorageReference(bucketValue: string, rawPath: string): string | null {
@@ -119,6 +145,29 @@ export function isRenderableListingImageSource(value: unknown): value is string 
   } catch {
     return false;
   }
+}
+
+/**
+ * True when a listing image is not one of the disposable fixture sources.
+ * The marketplace feed uses this to keep mock/example records out of the
+ * customer-visible cards instead of rendering a dummy fallback for them.
+ */
+export function isUsableListingImageSource(value: unknown): value is string {
+  if (!isRenderableListingImageSource(value)) return false;
+  if (isKnownUnavailableDemoImageSource(value)) return false;
+  if (value.startsWith('/assets/fallbacks/')) return false;
+  if (value.startsWith('storage://')) {
+    const reference = storageReferenceForSource(value);
+    const parsed = reference ? parseStorageObjectReference(reference) : null;
+    if (!parsed || FIXTURE_STORAGE_PATH.test(parsed.path)) return false;
+  }
+  return true;
+}
+
+/** The first image a card can actually request, or undefined when only fixture media exists. */
+export function firstUsableListingImage(images: unknown): string | undefined {
+  if (!Array.isArray(images)) return undefined;
+  return images.find((image) => isUsableListingImageSource(image));
 }
 
 /** Values that may be stored on a listing. Signed Storage URLs expire and are not persisted. */

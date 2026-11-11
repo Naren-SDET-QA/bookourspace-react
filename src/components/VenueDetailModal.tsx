@@ -5,7 +5,9 @@ import {
   Clock,
   Heart,
   MapPin,
+  MessageCircle,
   MessageSquare,
+  Phone,
   Share2,
   ShieldCheck,
   Snowflake,
@@ -16,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { MarketplaceListing } from '../types/marketplace';
 import SafeImage from './SafeImage';
+import { BOS_CALL_HREF, whatsappHref } from '../lib/contactNumbers';
 
 interface VenueDetailModalProps {
   listing: MarketplaceListing;
@@ -295,20 +298,34 @@ export function VenueDetailModal({ listing, onClose, onChat, onRequestAvailabili
 
       {/* Sticky actions */}
       <div className="fixed inset-x-0 bottom-0 z-[96] border-t border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-4xl gap-2 px-3 py-2.5">
+        <div className="mx-auto grid w-full max-w-4xl grid-cols-2 gap-2 px-3 py-2.5 sm:grid-cols-4">
+          <a
+            href={BOS_CALL_HREF}
+            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-emerald-600 text-[11.5px] font-bold text-emerald-700 transition hover:bg-emerald-50 dark:text-emerald-300"
+          >
+            <Phone className="h-4 w-4" /> Call Now
+          </a>
+          <a
+            href={whatsappHref(`Hi, I am interested in ${listing.title}. Please share availability and pricing.`)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-emerald-600 bg-emerald-50 text-[11.5px] font-bold text-emerald-700 transition hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300"
+          >
+            <MessageCircle className="h-4 w-4" /> WhatsApp
+          </a>
           <button
             type="button"
             onClick={onChat}
-            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[#7c3aed] text-[12.5px] font-bold text-[#6d28d9] transition hover:bg-[#f5f3ff]"
+            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-[#7c3aed] text-[11.5px] font-bold text-[#6d28d9] transition hover:bg-[#f5f3ff] dark:text-violet-300"
           >
             <MessageSquare className="h-4 w-4" /> Chat
           </button>
           <button
             type="button"
             onClick={onRequestAvailability}
-            className="inline-flex h-11 flex-[1.4] items-center justify-center gap-2 rounded-xl bg-[#7c3aed] text-[12.5px] font-bold text-white transition hover:bg-[#6d28d9]"
+            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-[#7c3aed] text-[11.5px] font-bold text-white transition hover:bg-[#6d28d9]"
           >
-            Request Availability
+            Book Hall
           </button>
         </div>
       </div>

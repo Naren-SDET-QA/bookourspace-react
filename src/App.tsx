@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import SafeImage from './components/SafeImage';
+import SafeImage, { imageCategoryFor } from './components/SafeImage';
 import SiteChrome from './components/SiteChrome';
 import {
   Sparkles,
@@ -85,8 +85,11 @@ function applyRouteStyleToSectionStyles(base: SectionStyles): SectionStyles {
   const [section, raw = ''] = window.location.hash.replace('#', '').toLowerCase().split('/');
   const style = raw === '1' || raw === 'style1' ? 1 : raw === '2' || raw === 'style2' ? 2 : raw === '3' || raw === 'style3' ? 3 : 0;
   if (!style) return base;
-  if (section === 'classes') return { ...base, classes: style === 1 ? 'cards' : style === 2 ? 'timetable' : 'style3' };
-  if (section === 'venues' || section === 'halls') return { ...base, venues: style === 1 ? 'showcase' : style === 2 ? 'agenda' : 'style3' };
+  // PG and Classes ship only Style 3; a stale #pg/style1 or #classes/style2
+  // deep link must not re-enable the retired layouts.
+  if (section === 'pg') return { ...base, pg: 'style3' };
+  if (section === 'classes') return { ...base, classes: 'style3' };
+  if (section === 'venues' || section === 'halls') return { ...base, venues: 'agenda' };
   if (section === 'movies' || section === 'cinema') return { ...base, movies: style === 1 ? 'experience' : style === 2 ? 'classic' : 'style3' };
   return base;
 }
@@ -145,6 +148,7 @@ import { LocationSelector, loadPersistedLocation, persistLocation, type Selected
 import { filterListingsByLocation, matchesSelectedLocation } from './lib/locationCityFilter';
 import { isPopularCategoriesVisible } from './lib/homeVisibilitySettings';
 import { applyRemoteMarketplaceVisibility } from './lib/marketplaceVisibility';
+import { firstUsableListingImage, isUsableListingImageSource } from './lib/media/signedStorageUrl';
 const FlipkartBannerSlider = lazy(() => import('./components/FlipkartBannerSlider').then((module) => ({ default: module.FlipkartBannerSlider })));
 const FlipkartFilterSidebar = lazy(() => import('./components/FlipkartFilterSidebar').then((module) => ({ default: module.FlipkartFilterSidebar })));
 const TrendingNearMeSection = lazy(() => import('./components/TrendingNearMeSection').then((module) => ({ default: module.TrendingNearMeSection })));
@@ -268,6 +272,67 @@ const popularCities = [
   'Pune',
   'Kolkata'
 ];
+
+/**
+ * Presentation-only media preparation. It NEVER removes a listing and never
+ * writes to the database. It only:
+ *   1. promotes the first real photo when a listing has a mix of real and
+ *      dead fixture references, and
+ *   2. substitutes an existing catalogue photo for a dead fixture reference
+ *      (for example `images.example.com` or a missing `mock/` Storage object).
+ *
+ * The stored listing stays exactly as the owner/admin left it.
+ */
+const EXISTING_CATEGORY_PHOTOS: Record<string, string[]> = {
+  pg: [
+    'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=480&q=80',
+  ],
+  classes: [
+    'https://images.unsplash.com/photo-1517180102446-f3ece451e9d8?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=480&q=80',
+  ],
+  venues: [
+    'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=480&q=80',
+  ],
+  services: [
+    'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&w=480&q=80',
+  ],
+  stays: [
+    'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=480&q=80',
+  ],
+  movies: [
+    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=480&q=80',
+    'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=480&q=80',
+  ],
+  general: [
+    'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=480&q=85',
+  ],
+};
+
+function prepareListingMedia(items: MarketplaceListing[]): MarketplaceListing[] {
+  return items.map((item) => {
+    const category = imageCategoryFor(`${item.categoryId} ${item.subcategory} ${item.title} ${item.entityType}`);
+    const photos = EXISTING_CATEGORY_PHOTOS[category] || EXISTING_CATEGORY_PHOTOS.general;
+    // Stable per-listing offset keeps substitute photos varied instead of
+    // showing the same catalogue image on every fixture card.
+    const photoOffset = Array.from(item.id).reduce((sum, character) => sum + character.charCodeAt(0), 0) % photos.length;
+    // A listing with no uploaded photo still gets a real, attractive category
+    // photo on every card. The stored listing is not changed.
+    if (!Array.isArray(item.images) || item.images.length === 0) {
+      return { ...item, images: [photos[photoOffset]] };
+    }
+    const images = item.images.map((image, index) => (
+      isUsableListingImageSource(image) ? image : photos[(photoOffset + index) % photos.length]
+    ));
+    const first = images.find((image) => isUsableListingImageSource(image)) || photos[0];
+    return { ...item, images: [first, ...images.filter((image) => image !== first)] };
+  });
+}
 
 function MarketplaceAppContent() {
   const {
@@ -492,13 +557,13 @@ function MarketplaceAppContent() {
         setOpenSection('hotel_stay');
       } else if (hash === 'classes' || hash.startsWith('classes/')) {
         if (routeStyleNumber) {
-          setSectionStylesState((previous) => ({ ...previous, classes: routeStyleNumber === 1 ? 'cards' : routeStyleNumber === 2 ? 'timetable' : 'style3' }));
+          setSectionStylesState((previous) => ({ ...previous, classes: 'style3' }));
         }
         setActiveMarketSection('classes');
         setOpenSection('classes');
       } else if (hash === 'venues' || hash === 'halls' || hash.startsWith('venues/') || hash.startsWith('halls/')) {
         if (routeStyleNumber) {
-          setSectionStylesState((previous) => ({ ...previous, venues: routeStyleNumber === 1 ? 'showcase' : routeStyleNumber === 2 ? 'agenda' : 'style3' }));
+          setSectionStylesState((previous) => ({ ...previous, venues: 'agenda' }));
         }
         setActiveMarketSection('venues');
         setOpenSection(null);
@@ -1219,7 +1284,7 @@ function MarketplaceAppContent() {
 
   // Filter listings: ONLY Admin-approved ('active') listings are displayed in the Marketplace application
   const filteredListings = useMemo(() => {
-    return listings.filter((item) => {
+    const approved = prepareListingMedia(listings).filter((item) => {
       // Strictly require Admin approval ('active') before displaying in the application
       if (item.status !== 'active') {
         return false;
@@ -1553,6 +1618,7 @@ function MarketplaceAppContent() {
       }
       return 0;
     });
+    return approved;
   }, [
     listings,
     categories,
@@ -1599,7 +1665,7 @@ function MarketplaceAppContent() {
   // Share the selected header city with experiences that maintain their own
   // category-level filtering and data loading.
   const locationFilteredListings = useMemo(
-    () => filterListingsByLocation(listings, { city: sharedSelectedCity, pincode: selectedPincode }),
+    () => filterListingsByLocation(prepareListingMedia(listings), { city: sharedSelectedCity, pincode: selectedPincode }),
     [listings, sharedSelectedCity, selectedPincode],
   );
 
@@ -2177,7 +2243,6 @@ function MarketplaceAppContent() {
             onOpenServicesDiscovery={() => {
               setOpenSection('services');
             }}
-            hideCategoryRibbon={activeMarketSection === 'movies' || isHotelsStayExperienceOpen}
           />
           </Suspense>
   ) : quickHomeHeader;
@@ -2417,7 +2482,7 @@ function MarketplaceAppContent() {
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
           {sharedMarketplaceHeader}
 
-          {!activeSectionExperience && (
+          {!activeSectionExperience && activeMarketSection === 'pg_hostels' && (
             <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
               <MarketplaceHero
                 currentLang={currentLang}
@@ -2870,7 +2935,7 @@ function MarketplaceAppContent() {
               className="w-full flex-1 animate-in fade-in duration-150"
               aria-label={`${activeSectionExperience} section`}
             >
-              {DEMO_DATA_ENABLED && demoCardSection && (
+              {DEMO_DATA_ENABLED && demoCardSection && selectedCategory === 'all' && (
                 <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
                   <DemoBookableCard section={demoCardSection} />
                 </div>
@@ -2886,6 +2951,8 @@ function MarketplaceAppContent() {
                     inline
                     style={sectionStyles.pg}
                     listings={locationFilteredListings}
+                    selectedCategory={selectedCategory}
+                    selectedSubcategory={selectedSubcategory}
                     selectedCity={sharedSelectedCity}
                     moduleLabel={modulePresentation.pg?.values.label}
                     moduleHeadline={modulePresentation.pg?.values.headline}
@@ -3276,7 +3343,7 @@ function MarketplaceAppContent() {
             )}
 
             {/* REDESIGNED 4-ITEM FILTER & VOICE BAR (VERIFIED ONLY | FILTERS | SORT | SEARCH BY VOICE) */}
-            <div className="bg-white dark:bg-[#0D1126] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-2 sm:p-2.5 shadow-[0_3px_14px_rgba(15,23,42,0.04)]">
+            <div className={`bg-white dark:bg-[#0D1126] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-2 sm:p-2.5 shadow-[0_3px_14px_rgba(15,23,42,0.04)] ${activeMarketSection === 'venues' ? 'hidden' : ''}`}>
               <div className="grid grid-cols-2 sm:grid-cols-4 items-center gap-2">
                 {/* 1. Verified Only Button */}
                 <button
@@ -3867,21 +3934,6 @@ function MarketplaceAppContent() {
                   ],
                 },
                 {
-                  section: 'movies',
-                  labelEn: 'Movies & Multiplexes',
-                  labelTe: 'మూవీస్ & మల్టీప్లెక్స్',
-                  chipLabel: '🎬 Movies',
-                  accentBadge: 'bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white',
-                  activeChipClass: 'bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white border-fuchsia-500 shadow-xs',
-                  containerTintClass: 'from-fuchsia-50/75 via-white to-purple-50/65 dark:from-fuchsia-950/35 dark:via-[#0D1126] dark:to-purple-950/30 border-fuchsia-200/80 dark:border-fuchsia-800/70',
-                  cardAccentBorder: 'hover:border-fuchsia-500 dark:hover:border-fuchsia-400',
-                  curatedImages: [
-                    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=700&q=85',
-                    'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=700&q=85',
-                    'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=700&q=85',
-                  ],
-                },
-                {
                   section: 'services',
                   labelEn: 'Home & Local Services',
                   labelTe: 'హోమ్ & లోకల్ సర్వీసులు',
@@ -3904,7 +3956,7 @@ function MarketplaceAppContent() {
                 ] || spotlightRotationSequence[0];
 
               const effectiveSpotlightSection: MarketSectionType =
-                spotlightShowcaseSyncMode === 'auto'
+                spotlightShowcaseSyncMode === 'auto' || spotlightShowcaseSyncMode === 'movies'
                   ? currentAutoSpotMeta.section
                   : spotlightShowcaseSyncMode;
 
@@ -4428,7 +4480,7 @@ function MarketplaceAppContent() {
               return (
                 <div className="space-y-4">
                   {/* 1. DYNAMIC ONE-BY-ONE SPOTLIGHT 3-CARD SHOWCASE WITH DISTINCT CATEGORY COLORS & CURATED IMAGERY */}
-                  {topFeaturedThree.length > 0 && (
+                  {false && topFeaturedThree.length > 0 && (
                     <div
                       onMouseEnter={() => setIsSpotlightPaused(true)}
                       onMouseLeave={() => setIsSpotlightPaused(false)}
@@ -4672,6 +4724,7 @@ function MarketplaceAppContent() {
                   )}
 
                   {/* 1.5 FESTIVE LIMITED PERIOD OFFER BANNER */}
+                  {false && (
                   <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#4C1D95] via-[#6D28D9] to-[#D97706] text-white p-4 sm:px-6 sm:py-4.5 shadow-md border border-purple-400/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="space-y-1 min-w-0 flex-1">
                       <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.15em] text-amber-200">
@@ -4701,8 +4754,10 @@ function MarketplaceAppContent() {
                       <span>→</span>
                     </button>
                   </div>
+                  )}
 
                   {/* 2. "FIND PG'S NEAR YOU — VIEW ON INTERACTIVE MAP" BANNER */}
+                  {false && (
                   <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#F0FDF4] via-white to-[#EEF2FF] dark:from-[#161233] dark:via-[#1C183E] dark:to-[#102338] border border-slate-200/90 dark:border-purple-500/30 p-3.5 sm:px-5 sm:py-4 shadow-xs">
                     {/* Stylized map roads grid background on right */}
                     <div
@@ -4815,6 +4870,7 @@ function MarketplaceAppContent() {
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* 3. "⭐ POPULAR CATEGORIES" DYNAMIC VISUAL STRIP WITH CUSTOM VECTOR ICONS & EMOJIS */}
                   {showPopularCategories && (
@@ -5622,18 +5678,7 @@ function MarketplaceAppContent() {
             {/* HALLS — MANDAP-STYLE VENUE TYPES, FILTERS & CARDS */}
             {activeMarketSection === 'venues' && (
               <div className="mb-3">
-                {DEMO_DATA_ENABLED && <DemoBookableCard section="venues" className="mb-3" />}
-                <SectionStyleTabs
-                  active={sectionStyles.venues === 'showcase' ? 1 : sectionStyles.venues === 'agenda' ? 2 : 3}
-                  onChange={(value) => {
-                    const next = value === 1 ? 'showcase' : value === 2 ? 'agenda' : 'style3';
-                    saveStylePreference('venues', next);
-                    setSectionStylesState((previous) => ({ ...previous, venues: next }));
-                    window.location.hash = `venues/style${value}`;
-                  }}
-                  label="Venues display style"
-                  className="border-b border-slate-200 bg-white"
-                />
+                {false && <DemoBookableCard section="venues" className="mb-3" />}
                 {sectionStyles.venues === 'style3' ? (
                   <div className="mx-auto max-w-5xl px-1 py-4">
                     <StyleThreeList
@@ -5660,15 +5705,8 @@ function MarketplaceAppContent() {
                       activeType={hallsVenueType}
                       onSelectType={setHallsVenueType}
                       onOpenListing={handleSelectListing}
+                      selectedCategory={selectedCategory}
                     />
-                    {sectionStyles.venues === 'agenda' && (
-                      <Suspense fallback={null}>
-                      <VenueAgendaView
-                        listings={locationFilteredListings.filter((l) => l.categoryId.startsWith('venue-'))}
-                        onOpen={handleSelectListing}
-                      />
-                      </Suspense>
-                    )}
                   </>
                 )}
               </div>

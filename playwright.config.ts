@@ -77,9 +77,9 @@ export default defineConfig({
       BOS_DEV_DB_PORT: localDbPort,
       BOS_DEV_DB_DATA_DIR: localDbDataDir,
       BOS_VITE_CACHE_DIR: localViteCacheDir,
-      // SafeImage and module smoke tests use clearly labelled local fixtures.
-      // This flag is injected only into the isolated Playwright server and is
-      // never part of the production build configuration.
+      // SafeImage and module smoke tests use clearly labelled local fixtures in
+      // the normal harness. The AI Studio preview path must run without demo
+      // inventory so it exercises real Storage signing instead.
       VITE_ENABLE_DEMO_DATA: aiStudioPreview ? 'false' : 'true',
       ...(aiStudioPreview ? { AI_STUDIO: 'true', BOS_AI_STUDIO_PREVIEW: '1' } : {}),
       // Keep browser tests stable when another local task is editing source:

@@ -43,7 +43,7 @@ const CATEGORY_TILES: CategoryTile[] = [
   { id: 'village', label: 'Village Services', emoji: '🌾' },
   { id: 'milk', label: 'Milk & Dairy', emoji: '🥛' },
   { id: 'more', label: 'More Categories', emoji: '⊞' },
-  { id: 'need-helper', label: 'Need Helper', emoji: '🧑‍🔧' },
+  { id: 'need-helper', label: 'Human Help', emoji: '🤝' },
 ];
 
 interface Banner {
@@ -844,7 +844,7 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
   };
 
   if (helperJourneyOpen) {
-    return <HelperJourney inline={inline} onClose={() => setHelperJourneyOpen(false)} />;
+    return <HelperJourney inline={false} onClose={() => setHelperJourneyOpen(false)} />;
   }
 
   return (

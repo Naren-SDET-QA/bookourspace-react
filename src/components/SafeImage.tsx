@@ -1,38 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { isProfileImageStorageSource, isPublicImageStorageSource, isSupabaseStorageSource, resolveResponsiveMediaSource } from '../lib/media/signedStorageUrl';
+import { isKnownUnavailableDemoImageSource, isProfileImageStorageSource, isPublicImageStorageSource, isSupabaseStorageSource, resolveResponsiveMediaSource } from '../lib/media/signedStorageUrl';
+
+// Re-exported for the focused source-policy test and for callers that need the
+// same fixture-host decision without importing the renderer itself.
+export { isKnownUnavailableDemoImageSource } from '../lib/media/signedStorageUrl';
 
 export type SafeImageCategory = 'pg' | 'classes' | 'venues' | 'services' | 'stays' | 'movies' | 'general';
 
 const fallbackFor: Record<SafeImageCategory, string> = {
-  pg: '/assets/fallbacks/pg.svg',
-  classes: '/assets/fallbacks/classes.svg',
-  venues: '/assets/fallbacks/venues.svg',
-  services: '/assets/fallbacks/services.svg',
-  stays: '/assets/fallbacks/stays.svg',
-  movies: '/assets/fallbacks/movies.svg',
-  general: '/assets/fallbacks/general.svg',
+  pg: '/assets/fallbacks/pg.webp',
+  classes: '/assets/fallbacks/classes.webp',
+  venues: '/assets/fallbacks/venues.webp',
+  services: '/assets/fallbacks/services.webp',
+  stays: '/assets/fallbacks/stays.webp',
+  movies: '/assets/fallbacks/movies.webp',
+  general: '/assets/fallbacks/general.webp',
 };
-
-// These hosts are used only by disposable database/security fixtures. They
-// are intentionally non-routable and must never be requested by a browser.
-// Real listing media continues through the normal HTTPS or signed Storage
-// path below; this is not a general URL allow/deny list.
-const UNAVAILABLE_DEMO_IMAGE_HOSTS = new Set([
-  'images.example.com',
-  'cdn.example.test',
-  'media.example.test',
-]);
-
-export function isKnownUnavailableDemoImageSource(value: unknown): boolean {
-  if (typeof value !== 'string' || !value.trim()) return false;
-  try {
-    const base = typeof window === 'undefined' ? 'http://localhost/' : window.location.origin;
-    const url = new URL(value.trim(), base);
-    return url.protocol === 'https:' && UNAVAILABLE_DEMO_IMAGE_HOSTS.has(url.hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
 
 const localResponsiveSets: Record<string, string> = {
   '/assets/optimized/profile-avatar-256.webp':

@@ -152,8 +152,8 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-3xl p-5 sm:p-7 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <SafeImage category="general"
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80"
-            alt="provider"
+            src={supabaseProfile?.avatar_url || '/assets/optimized/profile-avatar-256.webp'}
+            alt={supabaseProfile?.full_name ? `${supabaseProfile.full_name} profile photo` : 'Provider profile photo'}
             className="w-16 h-16 rounded-2xl object-cover ring-2 ring-emerald-400 bg-slate-800"
           />
           <div>
@@ -979,7 +979,8 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
             userPhone={supabaseProfile?.phone || myListings[0]?.providerPhone || '98480 12345'}
             userAvatar={
               myListings[0]?.providerAvatar ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80'
+              supabaseProfile?.avatar_url ||
+              '/assets/optimized/profile-avatar-256.webp'
             }
             onEditProfileClick={onOpenPostWizard}
           />

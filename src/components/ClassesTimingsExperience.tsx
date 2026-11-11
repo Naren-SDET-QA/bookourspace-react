@@ -39,9 +39,10 @@ import {
 import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 import { fetchClassBatches, type ClassBatch } from '../lib/classesApi';
 import { ClassEnrollmentModal, MyClassesPanel } from './ClassEnrollmentFlow';
-import { SectionStyleTabs, type SectionStyleNumber } from './sectionStyle/SectionStyleTabs';
-import { saveStylePreference } from '../lib/sectionStyleSettings';
-import { StyleThreeList } from './sectionStyle/StyleThreeList';
+import { ClassesStyleThreeCards } from './classes/ClassesStyleThreeCards';
+import { ClassesCategoryRail, type ClassesCategorySelection } from './classes/ClassesCategoryRail';
+import { ClassesSpotlightCards } from './classes/ClassesSpotlightCards';
+import { ClassesStyleThreeDetail } from './classes/ClassesStyleThreeDetail';
 import type { MarketplaceListing } from '../types/marketplace';
 import { canContactOwner } from '../lib/servicesStayRules';
 import { useOwnerContact } from '../lib/useOwnerContact';
@@ -741,8 +742,9 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
 }
 
 export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
-  const [activeStyle, setActiveStyle] = useState<'cards' | 'timetable' | 'style3'>(style);
-  useEffect(() => { setActiveStyle(style); }, [style]);
+  // Classes are locked to Style 3 by product decision.
+  const [activeStyle] = useState<'cards' | 'timetable' | 'style3'>('style3');
+  useEffect(() => { /* Style 1 and Style 2 are disabled for Classes. */ }, [style]);
   const [mode, setMode] = useState<'All' | CourseMode>('All');
   const [timing, setTiming] = useState<'All' | TimingSlot>('All');
   const [feeBand, setFeeBand] = useState<'All' | 'Free' | 'Under3k' | '3k8k' | '8kPlus'>('All');
@@ -837,6 +839,18 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
   }, [allCourses, query, category, mode, timing, feeBand, area, distance, duration, age, verifiedOnly]);
   const categoryOptions = useMemo(() => ['All', ...Array.from(new Set(allCourses.map((course) => course.category))).sort()], [allCourses]);
 
+  const selectCategoryCard = (selection: ClassesCategorySelection) => {
+    if (selection.category) {
+      setCategory(selection.category);
+      setQuery('');
+      return;
+    }
+    if (selection.query) {
+      setCategory('All');
+      setQuery(selection.query);
+    }
+  };
+
   return (
     <div
       className={
@@ -858,7 +872,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
             <h1 id="classes-title" className="truncate text-[15px] font-black text-[#1e1b4b] sm:text-[17px]">
               Classes & Training
             </h1>
-            <p className="truncate text-[10.5px] text-[#64748b]">India-wide · academic, IT, arts, sports, exams & more</p>
+            <p className="truncate text-[10.5px] text-[#64748b]">Courses · Institutes · Expert Faculty</p>
           </div>
           <button type="button" onClick={() => setShowMyClasses(true)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#ece8fb] px-3 text-[11.5px] font-bold text-[#4c1d95] transition hover:bg-[#f5f3ff]">
             <CalendarDays className="h-3.5 w-3.5" /> My classes
@@ -870,7 +884,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
 
         {/* Filters */}
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-1.5 px-3 pb-2.5 sm:px-5">
-          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search courses" placeholder="Search course or provider" className="h-8 min-w-40 rounded-full border border-[#ece8fb] bg-white px-3 text-[11px] outline-none" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search courses" placeholder="Search course, institute or faculty name" className="h-8 min-w-40 rounded-full border border-[#ece8fb] bg-white px-3 text-[11px] outline-none" />
           <FilterSelect label="Category" value={category} onChange={setCategory} options={categoryOptions} />
           <FilterSelect label="Mode" value={mode} onChange={(v) => setMode(v as any)} options={['All', ...COURSE_MODES]} />
           <FilterSelect label="Timing" value={timing} onChange={(v) => setTiming(v as any)} options={['All', ...TIMING_SLOTS]} />
@@ -893,21 +907,22 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
         </div>
       </header>
 
-      <SectionStyleTabs
-        active={activeStyle === 'timetable' ? 2 : activeStyle === 'style3' ? 3 : 1}
-        onChange={(value: SectionStyleNumber) => {
-          const next = value === 1 ? 'cards' : value === 2 ? 'timetable' : 'style3';
-          saveStylePreference('classes', next);
-          setActiveStyle(next);
-          window.location.hash = `classes/style${value}`;
-        }}
-        label="Classes display style"
-        className="border-b border-[#ece8fb] bg-white/90"
-      />
-
       {/* Results */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-3 py-3 sm:px-5">
+          {activeStyle === 'style3' && (
+            <>
+              <ClassesSpotlightCards
+                courses={allCourses}
+                onOpen={(course) => setSelected(course)}
+                onEnroll={(course) => {
+                  if (course.demo) setEnrolled(course.id);
+                  else setEnrollCourse(course);
+                }}
+              />
+              <ClassesCategoryRail activeCategory={category} activeQuery={query} onSelect={selectCategoryCard} />
+            </>
+          )}
           <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-[13px] font-extrabold text-[#1e1b4b]">{results.length} courses</h2>
             <span className="text-[10.5px] font-semibold text-[#94a3b8]">{providerCourses.length ? 'Admin-approved PostgreSQL listings' : DEMO_DATA_ENABLED ? 'Demo data' : 'Admin-approved listings only'}</span>
@@ -920,20 +935,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
               <p className="mt-0.5 text-[11px] text-[#64748b]">{DEMO_DATA_ENABLED ? 'Try clearing a filter or searching a different area.' : 'No admin-approved courses match these filters. Enrollment and payment are not available.'}</p>
             </div>
           ) : activeStyle === 'style3' ? (
-            <StyleThreeList
-              label="Classes style 3 list"
-              items={results.map((course) => ({
-                id: course.id,
-                title: course.title,
-                subtitle: [course.provider, course.area || course.city].filter(Boolean).join(' · '),
-                meta: [course.mode, course.duration].filter(Boolean).join(' · '),
-                price: course.free ? 'Free' : `₹${course.fee.toLocaleString('en-IN')}`,
-                image: course.image || null,
-                badge: course.demo ? 'Sample' : course.verified ? 'Verified' : undefined,
-                onClick: () => openCourse(course),
-              }))}
-              emptyLabel="No courses match these filters."
-            />
+            <ClassesStyleThreeCards courses={results} onOpen={(course) => setSelected(course)} />
           ) : activeStyle === 'timetable' ? (
             <ClassTimetable courses={results} onOpen={openCourse} />
           ) : (
@@ -946,7 +948,19 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
         </div>
       </div>
 
-      {selected && (
+      {selected && activeStyle === 'style3' && (
+        <ClassesStyleThreeDetail
+          key={`style3-${selected.id}`}
+          course={selected}
+          onClose={() => { setSelected(null); setEnrolled(null); }}
+          onEnroll={() => {
+            if (selected.demo) setEnrolled(selected.id);
+            else setEnrollCourse(selected);
+          }}
+        />
+      )}
+
+      {selected && activeStyle !== 'style3' && (
         <CourseDetail
           key={selected.id}
           item={selected}

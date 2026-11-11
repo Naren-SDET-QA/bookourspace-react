@@ -33,3 +33,20 @@ android/app/src/main/assets/capacitor.config.json
 ios/App/App/public/
 ios/App/App/capacitor.config.json
 .worktrees/
+
+# Local code-graph index (AST cache, machine-specific).
+.code-graph/
+
+# graphify-out/ code graph (generated, machine-specific).
+graphify-out/
+
+# Generated review screenshots and exported legacy assets.
+screenshots/
+docs/legacy-aistudio-assets/
+brand-assets/
+
+# Local-only probe/config files.
+opencode.json
+probe-confirm.mjs
+shot-request.mjs
+test-request-ui.mjs

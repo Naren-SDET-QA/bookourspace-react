@@ -31,6 +31,12 @@ export type PgBathroomKind = 'attached' | 'common' | 'mixed' | null;
 export type PgOccupant = 'student' | 'working' | 'mixed' | null;
 export type PgKind = 'pg' | 'hostel' | null;
 
+export interface PgRoomTypePrice {
+  label: string;
+  price: number | null;
+  deposit: string | null;
+}
+
 export interface PgCard {
   id: string;
   title: string;
@@ -60,6 +66,24 @@ export interface PgCard {
   facilities: DetailRow[];
   rules: DetailRow[];
   providerName: string;
+  /** Full owner-supplied detail used by the common PG property page. */
+  availableFor: string;
+  preferredTenant: string;
+  availableFrom: string;
+  totalCapacity: number | null;
+  parking: string;
+  roomCleaning: string;
+  noticePeriod: string;
+  gateClosingTime: string;
+  powerBackup: string;
+  wifi: string;
+  bathroom: string;
+  housekeeping: string;
+  roomTypes: PgRoomTypePrice[];
+  lat: number | null;
+  lng: number | null;
+  rating: number | null;
+  reviewCount: number;
 }
 
 export interface PgFilters {
@@ -224,6 +248,35 @@ export function pgKindOf(rawText: string): PgKind {
   return null;
 }
 
+function boundedNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+function parenthetical(value: string): string {
+  const match = /\(([^)]+)\)/.exec(value);
+  return match ? match[1].trim() : '';
+}
+
+function parseRoomTypePrices(
+  highlight: string,
+  sharingText: string,
+  rent: number | null,
+  deposit: string | null,
+): PgRoomTypePrice[] {
+  const rows: PgRoomTypePrice[] = [];
+  const pattern = /([^|,]+?)\s*:\s*₹\s*([\d,]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(highlight)) !== null) {
+    const label = match[1].trim().replace(/^[-•\s]+/, '').slice(0, 60);
+    const price = Number(match[2].replace(/,/g, ''));
+    if (!label || !Number.isFinite(price) || price <= 0) continue;
+    rows.push({ label, price, deposit });
+  }
+  if (rows.length > 0) return rows;
+  return [{ label: sharingText || 'Room type as listed', price: rent, deposit }];
+}
+
 export function parsePgListing(listing: MarketplaceListing): PgCard {
   const fields = listing.customFieldValues ?? {};
   const images = listingImageSources(listing.images, listing);
@@ -233,6 +286,28 @@ export function parsePgListing(listing: MarketplaceListing): PgCard {
   // Do not infer a resident audience from a loosely named subcategory. Only
   // structured owner-provided audience fields are specific enough to filter.
   const audienceText = `${text(fields.occupantType)} ${text(fields.genderPolicy)}`;
+  const gender = pgGenderOf(listing);
+  const occupant = pgOccupantOf(audienceText);
+  const facilities = FACILITY_FIELDS.flatMap(([key, label]) => {
+    const value = text(fields[key]);
+    return value ? [{ label, value }] : [];
+  });
+  const rules = RULE_FIELDS.flatMap(([key, label]) => {
+    const value = text(fields[key]);
+    return value ? [{ label, value }] : [];
+  });
+  const facilityValue = (label: string) => facilities.find((row) => row.label === label)?.value || '';
+  const ruleValue = (label: string) => rules.find((row) => row.label === label)?.value || '';
+  const genderPolicy = text(fields.genderPolicy);
+  const sharingTextForRoomTypes = sharingText;
+  const deposit = text(fields.securityDeposit) || null;
+  const preferredTenant = text(fields.preferredTenant)
+    || text(fields.occupantType)
+    || parenthetical(genderPolicy)
+    || (occupant === 'student' ? 'Students'
+      : occupant === 'working' ? 'Working professionals'
+        : occupant === 'mixed' ? 'Students & working professionals'
+          : '');
   return {
     id: listing.id,
     title: listing.title,
@@ -241,17 +316,17 @@ export function parsePgListing(listing: MarketplaceListing): PgCard {
     city: text(listing.location?.city),
     rentRupees: isPositiveNumber(listing.price) ? listing.price : null,
     rentUnit: text(listing.priceUnit) || '/month',
-    gender: pgGenderOf(listing),
-    genderPolicy: text(fields.genderPolicy),
+    gender,
+    genderPolicy,
     sharingText,
-    deposit: text(fields.securityDeposit) || null,
+    deposit,
     food: text(fields.foodIncluded) || null,
     attachedBath: text(fields.attachedWashroom) || null,
     acText,
     hasAc,
     hasNonAc,
     bathroomKind: pgBathroomKindOf(text(fields.attachedWashroom)),
-    occupant: pgOccupantOf(audienceText),
+    occupant,
     kind: pgKindOf(`${listing.categoryId} ${listing.subcategory} ${text(fields.propertyType)}`),
     bedsAvailable: typeof fields.bedsAvailable === 'number' ? fields.bedsAvailable : null,
     verified: listing.isVerified === true,
@@ -259,15 +334,26 @@ export function parsePgListing(listing: MarketplaceListing): PgCard {
     photos: images,
     photoCount: images.length,
     description: listing.description,
-    facilities: FACILITY_FIELDS.flatMap(([key, label]) => {
-      const value = text(fields[key]);
-      return value ? [{ label, value }] : [];
-    }),
-    rules: RULE_FIELDS.flatMap(([key, label]) => {
-      const value = text(fields[key]);
-      return value ? [{ label, value }] : [];
-    }),
+    facilities,
+    rules,
     providerName: text(listing.providerName),
+    availableFor: genderPolicy || pgGenderLabel(gender),
+    preferredTenant,
+    availableFrom: text(fields.availableFrom) || text(fields.availableDate) || text(fields.moveInDate),
+    totalCapacity: boundedNumber(fields.totalCapacity),
+    parking: text(fields.parking) || text(fields.parkingFacility) || facilityValue('Parking'),
+    roomCleaning: text(fields.roomCleaning) || facilityValue('Housekeeping'),
+    noticePeriod: ruleValue('Notice period'),
+    gateClosingTime: ruleValue('Gate timing'),
+    powerBackup: facilityValue('Power backup'),
+    wifi: facilityValue('Internet'),
+    bathroom: facilityValue('Bathroom') || text(fields.attachedWashroom),
+    housekeeping: facilityValue('Housekeeping'),
+    roomTypes: parseRoomTypePrices(text(fields.sharingHighlight), sharingTextForRoomTypes, isPositiveNumber(listing.price) ? listing.price : null, deposit),
+    lat: typeof listing.location?.lat === 'number' && Number.isFinite(listing.location.lat) ? listing.location.lat : null,
+    lng: typeof listing.location?.lng === 'number' && Number.isFinite(listing.location.lng) ? listing.location.lng : null,
+    rating: isPositiveNumber(listing.providerRating) && listing.reviewCount > 0 ? listing.providerRating : null,
+    reviewCount: Number.isFinite(listing.reviewCount) ? listing.reviewCount : 0,
   };
 }
 
