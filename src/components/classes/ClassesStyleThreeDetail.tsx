@@ -141,10 +141,10 @@ export function ClassesStyleThreeDetail({ course, onClose, onEnroll }: ClassesSt
   };
 
   return (
-    <div className="fixed inset-0 z-[95] overflow-y-auto bg-white text-[#1e1b4b] dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="classes-style3-detail-title">
+    <div data-testid="class-detail-modal" className="fixed inset-0 z-[95] overflow-y-auto bg-white text-[#1e1b4b] dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="classes-style3-detail-title">
       <header className="sticky top-0 z-20 border-b border-[#ece8fb] bg-white/95 px-3 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
         <div className="mx-auto flex max-w-3xl items-center gap-2">
-          <button type="button" onClick={onClose} aria-label="Back to all classes" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#ece8fb] text-[#4c1d95] hover:bg-[#f5f3ff] dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+          <button type="button" onClick={onClose} aria-label="Close" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#ece8fb] text-[#4c1d95] hover:bg-[#f5f3ff] dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           </button>
           <p className="min-w-0 flex-1 truncate text-sm font-black">Course Details</p>
@@ -280,13 +280,13 @@ export function ClassesStyleThreeDetail({ course, onClose, onEnroll }: ClassesSt
         )}
 
         <section className="mt-3 rounded-2xl border border-[#ece8fb] p-3 dark:border-slate-800">
-          <h2 className="text-[11px] font-black uppercase tracking-wide text-slate-500">Batches &amp; Timings</h2>
+          <h2 className="text-[11px] font-black uppercase tracking-wide text-slate-500">Batches &amp; timings</h2>
           {course.batches.length > 0 ? (
             <div className="mt-2 space-y-1.5">
               {course.batches.map((item, index) => (
                 <div key={`${item.slot}-${item.days}-${index}`} className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${index === 0 ? 'border-[#7c3aed] bg-[#f5f3ff]' : 'border-[#ece8fb] bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
                   <div className="min-w-0">
-                    <p className="truncate text-[10px] font-black">{item.slot === 'Evening' ? 'Regular Batch' : item.slot === 'Weekend' ? 'Weekend Batch' : item.slot || 'Batch'} · {item.days}</p>
+                    <p className="truncate text-[10px] font-black">{item.slot || 'Batch'} · {item.days}</p>
                     <p className="text-[9px] font-semibold text-slate-500">{item.label}</p>
                   </div>
                   <span className={`h-3.5 w-3.5 shrink-0 rounded-full border-2 ${index === 0 ? 'border-[#7c3aed] bg-[#7c3aed]' : 'border-slate-300'}`} aria-hidden="true" />
@@ -296,6 +296,7 @@ export function ClassesStyleThreeDetail({ course, onClose, onEnroll }: ClassesSt
           ) : (
             <p className="mt-2 text-[10px] text-slate-500">Timing is shared by the institute on enquiry.</p>
           )}
+          {course.seats !== null && <p className="mt-2 text-[9px] font-bold text-slate-500">Seats left: {course.seats}</p>}
           {course.startDate && <p className="mt-2 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">Next batch: {course.startDate}</p>}
         </section>
 
@@ -408,7 +409,7 @@ export function ClassesStyleThreeDetail({ course, onClose, onEnroll }: ClassesSt
               <Phone className="h-4 w-4" aria-hidden="true" /> Call Institute · {BOS_CONTACT_PHONE}
             </a>
           )}
-          <button type="button" onClick={onEnroll} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#7c3aed] text-xs font-black text-white transition hover:bg-[#6d28d9]">
+          <button type="button" onClick={onEnroll} aria-label="Select batch & enroll" className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#7c3aed] text-xs font-black text-white transition hover:bg-[#6d28d9]">
             Enroll Now
           </button>
         </div>

@@ -56,4 +56,27 @@ const variants: MarketplaceListing[] = variantSeeds.map((seed, index) => {
   };
 });
 
-export const DEMO_PG_LISTINGS: MarketplaceListing[] = [...initialPGListings, ...variants];
+const mumbaiDemoListing: MarketplaceListing = {
+  ...initialPGListings[0],
+  id: 'pg-demo-mumbai-andheri-east',
+  title: 'Demo PG — Andheri East City Preview',
+  titleTe: 'డెమో పీజీ — అంధేరి ఈస్ట్ సిటీ ప్రివ్యూ',
+  titleHi: 'डेमो पीजी — अंधेरी ईस्ट सिटी प्रीव्यू',
+  categoryId: 'pg-professionals',
+  subcategory: 'City preview PG',
+  subcategoryTe: 'సిటీ ప్రివ్యూ పీజీ',
+  price: 11000,
+  status: 'active',
+  isVerified: true,
+  isFeatured: false,
+  providerId: 'demo-pg-provider-mumbai',
+  providerName: 'Demo PG Partner Mumbai',
+  location: {
+    ...initialPGListings[0].location,
+    city: 'Mumbai',
+    area: 'Andheri East',
+    distanceKm: 1.4,
+  },
+};
+
+export const DEMO_PG_LISTINGS: MarketplaceListing[] = [...initialPGListings, ...variants, mumbaiDemoListing];
