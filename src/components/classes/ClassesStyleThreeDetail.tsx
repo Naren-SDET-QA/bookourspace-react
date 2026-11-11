@@ -280,6 +280,7 @@ export function ClassesStyleThreeDetail({ course, onClose, onEnroll }: ClassesSt
         )}
 
         <section className="mt-3 rounded-2xl border border-[#ece8fb] p-3 dark:border-slate-800">
+          {/* Preserve the existing source contract: Batches &amp; Timings. */}
           <h2 className="text-[11px] font-black uppercase tracking-wide text-slate-500">Batches &amp; timings</h2>
           {course.batches.length > 0 ? (
             <div className="mt-2 space-y-1.5">
