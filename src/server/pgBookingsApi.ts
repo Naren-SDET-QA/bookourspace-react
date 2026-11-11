@@ -133,7 +133,7 @@ export function registerPgBookingsApi(app: express.Express, dependencies: PgBook
     if (!repository) return unavailable(request, response);
     const actor = actorOf(request, dependencies.verifySession);
     if (!actor) return response.status(401).json({ ok: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
-    if (actor.authProvider !== 'google') return response.status(403).json({ ok: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
+    if (!['google', 'email_otp'].includes(String(actor.authProvider))) return response.status(403).json({ ok: false, error: 'VERIFIED_AUTH_IDENTITY_REQUIRED' });
     if (actor.role !== 'customer') return response.status(403).json({ ok: false, error: 'CUSTOMER_ROLE_REQUIRED' });
     try {
       const booking = await repository.createBooking(actor, request.body || {});

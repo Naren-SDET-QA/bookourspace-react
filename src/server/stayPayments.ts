@@ -19,6 +19,7 @@ import {
   verifyRazorpayCheckoutSignature,
   verifyRazorpayWebhookSignature,
 } from './stayRazorpay';
+import { sendStayPaymentSuccessEmail } from './resendTransactionalEmails';
 
 // SQL DATE (OID 1082) is a calendar date, not an instant. Letting node-postgres
 // turn it into a JS Date shifts it across timezones and made refund windows
@@ -210,7 +211,7 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
 
   function actorOf(req: express.Request): Actor | null {
     const session = deps.verifySession(req);
-    if (!session?.supabaseUserId || session.authProvider !== 'google' || !UUID.test(String(session.supabaseUserId))) return null;
+    if (!session?.supabaseUserId || !['google', 'email_otp'].includes(String(session.authProvider)) || !UUID.test(String(session.supabaseUserId))) return null;
     const role = session.role === 'admin' || session.role === 'provider' ? session.role : 'customer';
     return { supabaseUserId: String(session.supabaseUserId), role, email: String(session.email || '').trim().toLowerCase() };
   }
@@ -679,7 +680,7 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
     amountPaise: number;
     payloadHash: string;
   }) {
-    return withProviderTransaction(async (client) => {
+    const result = await withProviderTransaction(async (client) => {
       const query = await client.query(
         `select public.settle_stay_provider_event($1,$2,$3,$4,$5,$6,$7,$8) as payload`,
         [
@@ -690,6 +691,42 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
       );
       return query.rows[0]?.payload;
     });
+    if (input.eventType === 'payment.captured' && result?.status === 'verified') {
+      try {
+        const booking = await withProviderTransaction(async (client) => {
+          const query = await client.query(
+            `select b.id as booking_id, b.customer_name, b.check_in::text as check_in,
+                    b.check_out::text as check_out, b.total_paise, b.payment_status,
+                    p.name as property_name, rt.name as room_type_name, gc.guest_email
+               from public.payment_intents pi
+               join public.bookings b on b.id = pi.booking_id
+               join public.stay_properties p on p.listing_id = b.listing_id
+               left join public.stay_room_types rt on rt.id = b.room_type_id
+               left join public.stay_booking_guest_contacts gc on gc.booking_id = b.id and gc.guest_user_id = b.user_id
+              where pi.id = $1 limit 1`,
+            [input.intentId || ''],
+          );
+          return query.rows[0] || null;
+        });
+        if (booking?.guest_email) {
+          void sendStayPaymentSuccessEmail({
+            bookingId: String(booking.booking_id),
+            recipient: String(booking.guest_email).trim().toLowerCase(),
+            guestName: String(booking.customer_name || 'Guest'),
+            propertyName: String(booking.property_name || 'BookOurSpace stay'),
+            roomType: String(booking.room_type_name || 'Room'),
+            checkIn: String(booking.check_in || ''),
+            checkOut: String(booking.check_out || ''),
+            totalPaise: Number(booking.total_paise || input.amountPaise),
+            paymentStatus: String(booking.payment_status || 'verified'),
+            paymentReference: input.providerPaymentId,
+          }, { env }).catch(() => undefined);
+        }
+      } catch {
+        // Email delivery is best effort and must never undo a verified payment.
+      }
+    }
+    return result;
   }
 
   function parseRazorpayEvent(body: any): {

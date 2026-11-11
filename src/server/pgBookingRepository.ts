@@ -12,7 +12,7 @@ export class PgBookingError extends Error {
   }
 }
 
-export type PgActor = ProviderListingActor & { supabaseUserId: string; authProvider: 'google' };
+export type PgActor = ProviderListingActor & { supabaseUserId: string; authProvider: 'google' | 'email_otp' };
 
 function safeDate(value: unknown): string {
   const date = typeof value === 'string' ? value : '';
@@ -71,8 +71,8 @@ export class PgBookingRepository {
   }
 
   private assertIdentity(actor: ProviderListingActor | null, roles: string[]): asserts actor is PgActor {
-    if (!actor || !actor.supabaseUserId || !UUID.test(actor.supabaseUserId) || actor.authProvider !== 'google') {
-      throw new PgBookingError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!actor || !actor.supabaseUserId || !UUID.test(actor.supabaseUserId) || !['google', 'email_otp'].includes(String(actor.authProvider))) {
+      throw new PgBookingError('VERIFIED_AUTH_IDENTITY_REQUIRED', 401);
     }
     if (!roles.includes(actor.role)) throw new PgBookingError('FORBIDDEN_ROLE', 403);
   }
