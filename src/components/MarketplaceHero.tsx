@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, CheckCircle2, MapPin, Sparkles } from 'lucide-react';
+import { ArrowRight, CheckCircle2, MapPin } from 'lucide-react';
 import SafeImage from './SafeImage';
 import type { AppLanguage } from '../utils/translations';
 
@@ -26,9 +26,6 @@ export const MarketplaceHero: React.FC<MarketplaceHeroProps> = ({
 }) => {
   const copy = currentLang === 'te'
     ? {
-        eyebrow: 'బుక్ అవర్ స్పేస్ మార్కెట్‌ప్లేస్',
-        title: 'మీ రోజుకు సరిపోయే స్పేస్‌ను కనుగొనండి.',
-        body: 'పీజీలు, క్లాసులు, హాళ్లు, సేవలు, స్టేలు మరియు సినిమాలను ఒకే చోట చూడండి.',
         explore: 'లిస్టింగ్‌లను చూడండి',
         location: 'లొకేషన్ ఎంచుకోండి',
         listings: 'యాక్టివ్ లిస్టింగ్‌లు',
@@ -38,9 +35,6 @@ export const MarketplaceHero: React.FC<MarketplaceHeroProps> = ({
       }
     : currentLang === 'hi'
     ? {
-        eyebrow: 'बुक अवर स्पेस मार्केटप्लेस',
-        title: 'अपने दिन के लिए सही स्पेस खोजें।',
-        body: 'PG, क्लास, हॉल, सेवाएं, स्टे और मूवीज़ एक ही जगह देखें।',
         explore: 'लिस्टिंग देखें',
         location: 'लोकेशन चुनें',
         listings: 'सक्रिय लिस्टिंग',
@@ -49,9 +43,6 @@ export const MarketplaceHero: React.FC<MarketplaceHeroProps> = ({
         realMedia: 'वास्तविक लिस्टिंग मीडिया',
       }
     : {
-        eyebrow: 'BOOKOURSPACE MARKETPLACE',
-        title: 'Find a space that fits your day.',
-        body: 'Compare PGs, classes, halls, services, stays, and movies in one place.',
         explore: 'Explore listings',
         location: 'Choose location',
         listings: 'Active listings',
@@ -62,7 +53,7 @@ export const MarketplaceHero: React.FC<MarketplaceHeroProps> = ({
 
   return (
     <section
-      aria-labelledby="bookourspace-marketplace-hero-title"
+      aria-label="BookOurSpace Marketplace"
       className="relative isolate overflow-hidden rounded-[24px] border border-emerald-200/80 bg-[#F0F8EE] px-4 py-5 shadow-[0_12px_32px_-20px_rgba(15,118,110,0.35)] dark:border-emerald-900/70 dark:bg-[#10231F] sm:px-7 sm:py-7"
     >
       <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-emerald-200/60 blur-3xl dark:bg-emerald-800/30" />
@@ -70,19 +61,7 @@ export const MarketplaceHero: React.FC<MarketplaceHeroProps> = ({
 
       <div className="relative z-10 grid items-center gap-5 sm:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.8fr)] sm:gap-8">
         <div className="min-w-0">
-          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-white/75 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950/45 dark:text-emerald-100">
-            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{copy.eyebrow}</span>
-          </div>
-
-          <h1 id="bookourspace-marketplace-hero-title" className="max-w-xl text-[clamp(1.75rem,6vw,3.5rem)] font-black leading-[0.98] tracking-[-0.045em] text-emerald-950 dark:text-emerald-50">
-            {copy.title}
-          </h1>
-          <p className="mt-3 max-w-xl text-sm font-medium leading-6 text-emerald-900/80 dark:text-emerald-100/80 sm:text-base">
-            {copy.body}
-          </p>
-
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={onExplore}

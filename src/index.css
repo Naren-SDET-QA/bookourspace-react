@@ -1,6 +1,29 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
+/* PG owner workspace: Airbnb-inspired warmth, coral actions, and quiet neutrals. */
+.pg-owner-airbnb [class~="bg-[#071d42]"] { background-color: #222222 !important; }
+.pg-owner-airbnb [class~="bg-[#f7f9fc]"] { background-color: #f7f7f7 !important; }
+.pg-owner-airbnb [class~="bg-[#2554db]"],
+.pg-owner-airbnb [class~="bg-emerald-500"] { background-color: #ff385c !important; }
+.pg-owner-airbnb [class~="text-[#2554db]"],
+.pg-owner-airbnb [class~="text-emerald-600"] { color: #ff385c !important; }
+.pg-owner-airbnb [class~="border-[#2554db]"],
+.pg-owner-airbnb [class~="border-emerald-400"] { border-color: #ff385c !important; }
+.pg-owner-airbnb [class~="focus:border-[#2554db]"]:focus,
+.pg-owner-airbnb [class~="hover:border-[#2554db]"]:hover { border-color: #ff385c !important; }
+.pg-owner-airbnb [class~="hover:bg-blue-700"]:hover { background-color: #e31c5f !important; }
+.pg-owner-airbnb [class~="bg-blue-50"],
+.pg-owner-airbnb [class~="bg-blue-50/70"] { background-color: #fff1f2 !important; }
+.pg-owner-airbnb [class~="border-blue-100"],
+.pg-owner-airbnb [class~="border-blue-200"] { border-color: #fecdd3 !important; }
+.pg-owner-airbnb [class~="text-blue-900"] { color: #9f1239 !important; }
+.pg-owner-airbnb [class~="bg-blue-100"] { background-color: #ffe4e6 !important; }
+.pg-owner-airbnb [class~="text-blue-200"] { color: #fecdd3 !important; }
+.pg-owner-airbnb [class*="shadow-blue"] { --tw-shadow-color: rgba(255, 56, 92, .2) !important; }
+.pg-owner-airbnb [class~="border-slate-200"] { border-color: #ebebeb !important; }
+.pg-owner-airbnb [class~="bg-slate-100"] { background-color: #f7f7f7 !important; }
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 .bos-entry-screen {
