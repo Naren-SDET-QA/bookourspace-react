@@ -167,6 +167,8 @@ async function openClasses(page: Page): Promise<void> {
 
 async function waitForSessionHydration(page: Page): Promise<void> {
   await expect(page.getByTestId('bookourspace-welcome')).toBeHidden({ timeout: 30_000 });
+  const essentialOnly = page.getByRole('button', { name: 'Essential only', exact: true });
+  if (await essentialOnly.isVisible().catch(() => false)) await essentialOnly.click();
 }
 
 async function api(
