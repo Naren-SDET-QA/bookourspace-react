@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import SafeImage from './SafeImage';
+import { loadAdminContentSettings } from '../utils/adminEnterpriseStore';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -344,14 +345,100 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
   const [checkedCategoriesBySection, setCheckedCategoriesBySection] = useState<
     Record<MarketSectionType, string[]>
-  >({
-    pg_hostels: [],
-    classes: [],
-    venues: [],
-    services: [],
-    hotel_stay: [],
-    movies: [],
+  >(() => {
+    const empty: Record<MarketSectionType, string[]> = {
+      pg_hostels: [],
+      classes: [],
+      venues: [],
+      services: [],
+      hotel_stay: [],
+      movies: [],
+    };
+    try {
+      const raw = window.localStorage.getItem('bos_category_checklist_v1');
+      if (!raw) return empty;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const key of Object.keys(empty) as MarketSectionType[]) {
+        if (Array.isArray(parsed[key])) {
+          empty[key] = (parsed[key] as unknown[]).filter((id): id is string => typeof id === 'string');
+        }
+      }
+    } catch {
+      /* default to showing every category */
+    }
+    return empty;
   });
+  const [checklistTouchedBySection, setChecklistTouchedBySection] = useState<
+    Record<MarketSectionType, boolean>
+  >(() => {
+    const empty: Record<MarketSectionType, boolean> = {
+      pg_hostels: false,
+      classes: false,
+      venues: false,
+      services: false,
+      hotel_stay: false,
+      movies: false,
+    };
+    try {
+      const raw = window.localStorage.getItem('bos_category_checklist_touched_v1');
+      if (!raw) return empty;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const key of Object.keys(empty) as MarketSectionType[]) {
+        empty[key] = parsed[key] === true;
+      }
+    } catch {
+      /* default to showing every category */
+    }
+    return empty;
+  });
+  const [categoryBarVisible, setCategoryBarVisible] = useState(() => {
+    try {
+      return loadAdminContentSettings().categoryBarVisible !== false;
+    } catch {
+      return true;
+    }
+  });
+  const [categoryBarLayout, setCategoryBarLayout] = useState<'single' | 'multi'>(() => {
+    try {
+      return loadAdminContentSettings().categoryBarLayout === 'multi' ? 'multi' : 'single';
+    } catch {
+      return 'single';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('bos_category_checklist_v1', JSON.stringify(checkedCategoriesBySection));
+    } catch {
+      /* selection remains in memory */
+    }
+  }, [checkedCategoriesBySection]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('bos_category_checklist_touched_v1', JSON.stringify(checklistTouchedBySection));
+    } catch {
+      /* selection remains in memory */
+    }
+  }, [checklistTouchedBySection]);
+
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const settings = loadAdminContentSettings();
+        setCategoryBarVisible(settings.categoryBarVisible !== false);
+        setCategoryBarLayout(settings.categoryBarLayout === 'multi' ? 'multi' : 'single');
+      } catch {
+        setCategoryBarLayout('single');
+      }
+    };
+    window.addEventListener('bos-admin-content-settings-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('bos-admin-content-settings-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
 
   const t = translations[currentLang] || translations.te;
   const ui = getUILabels(currentLang);
@@ -385,18 +472,23 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   const currentCheckedIds = checkedCategoriesBySection[activeMarketSection] || [];
 
   // When the user selects checkboxes in the "More" option, ONLY those selected categories display in the category section
-  const displayedCategories =
-    currentCheckedIds.length > 0
-      ? allSectionCategories.filter((cat) => currentCheckedIds.includes(cat.id))
-      : allSectionCategories;
+  const checklistActive = checklistTouchedBySection[activeMarketSection] === true;
+  const displayedCategories = checklistActive
+    ? allSectionCategories.filter((cat) => currentCheckedIds.includes(cat.id))
+    : allSectionCategories;
 
   const handleToggleChecklistCategory = (catId: string) => {
+    setChecklistTouchedBySection((prev) => ({ ...prev, [activeMarketSection]: true }));
     setCheckedCategoriesBySection((prev) => {
       const currentList = prev[activeMarketSection] || [];
       const exists = currentList.includes(catId);
       const nextList = exists
         ? currentList.filter((id) => id !== catId)
         : [...currentList, catId];
+      if (exists && selectedCategory === catId) {
+        onSelectCategory('all');
+        onSelectSubcategory('all');
+      }
       return {
         ...prev,
         [activeMarketSection]: nextList,
@@ -405,6 +497,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   };
 
   const handleSelectAllChecklist = () => {
+    setChecklistTouchedBySection((prev) => ({ ...prev, [activeMarketSection]: true }));
     setCheckedCategoriesBySection((prev) => ({
       ...prev,
       [activeMarketSection]: allSectionCategories.map((c) => c.id),
@@ -412,6 +505,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   };
 
   const handleClearChecklist = () => {
+    setChecklistTouchedBySection((prev) => ({ ...prev, [activeMarketSection]: false }));
     setCheckedCategoriesBySection((prev) => ({
       ...prev,
       [activeMarketSection]: [],
@@ -1047,18 +1141,6 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
               movies: currentLang === 'en' ? 'Movies' : ui.secMoviesShort,
             }}
           />
-          {onOpenServicesDiscovery && (
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={onOpenServicesDiscovery}
-                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-violet-200 bg-white px-4 text-xs font-extrabold text-violet-800 shadow-xs transition hover:border-violet-400 hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 dark:border-violet-900 dark:bg-slate-900 dark:text-violet-200 dark:hover:bg-violet-950"
-              >
-                <span aria-hidden="true">✦</span>
-                <span>Explore all services</span>
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1338,13 +1420,17 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
       )}
 
       {/* 2. HORIZONTAL CATEGORY PILLS STRIP */}
-      <div className={`bg-transparent relative ${hideCategoryRibbon ? 'hidden' : ''}`}>
+      <div className={`bg-transparent relative ${hideCategoryRibbon || !categoryBarVisible ? 'hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-2.5 sm:px-6 pb-2 pt-0.5">
           <div className="flex items-center justify-between gap-2">
             {/* Horizontal Scrollable Pill Categories matching reference screenshots */}
             <div
               style={{ zoom: categoryZoom }}
-              className="bos-rail-3d flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 flex-1 min-w-0 lg:flex-wrap lg:overflow-visible"
+              className={`bos-rail-3d flex items-center gap-2 py-1 flex-1 min-w-0 ${
+                categoryBarLayout === 'multi'
+                  ? 'flex-wrap overflow-visible'
+                  : 'flex-nowrap overflow-x-auto no-scrollbar scroll-smooth'
+              }`}
             >
               {/* "All PGs / All Courses / All Venues / All Services / All Hotels / All Movies" Pill */}
               <button

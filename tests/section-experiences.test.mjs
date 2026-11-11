@@ -114,6 +114,36 @@ test('sharing filters only match options the owner actually listed', () => {
   assert.equal(matchesPgSharing('', '2'), false);
 });
 
+test('PG detail carries the common occupancy, charges, amenity and rule information', () => {
+  const card = parsePgListing(pgListing({
+    customFieldValues: {
+      ...pgListing().customFieldValues,
+      sharingHighlight: '2-Sharing AC: ₹8,500 | Single AC: ₹14,000',
+      totalCapacity: 45,
+      housekeeping: 'Daily Room & Bathroom Deep Cleaning',
+      parking: 'Bike parking',
+      powerBackup: '100% Generator Backup',
+    },
+    location: { city: 'Hyderabad', area: 'Madhapur / Hitech City', lat: 17.4485, lng: 78.3748 },
+  }));
+  assert.equal(card.availableFor, 'Men Only (Working IT Professionals & Graduates)');
+  assert.equal(card.preferredTenant, 'Working IT Professionals & Graduates');
+  assert.equal(card.noticePeriod, '15 Days Advance Notice');
+  assert.equal(card.gateClosingTime, '11:30 PM');
+  assert.equal(card.totalCapacity, 45);
+  assert.equal(card.parking, 'Bike parking');
+  assert.equal(card.roomCleaning, 'Daily Room & Bathroom Deep Cleaning');
+  assert.equal(card.powerBackup, '100% Generator Backup');
+  assert.equal(card.rating, 4.8);
+  assert.equal(card.reviewCount, 168);
+  assert.equal(card.lat, 17.4485);
+  assert.equal(card.lng, 78.3748);
+  assert.deepEqual(card.roomTypes, [
+    { label: '2-Sharing AC', price: 8500, deposit: '₹2,000 Refundable Security Deposit' },
+    { label: 'Single AC', price: 14000, deposit: '₹2,000 Refundable Security Deposit' },
+  ]);
+});
+
 test('PG card keeps one photo for cards and the real gallery for details', () => {
   const card = parsePgListing(pgListing());
   assert.equal(card.photo, 'https://images.example.com/pg-301-a.jpg');

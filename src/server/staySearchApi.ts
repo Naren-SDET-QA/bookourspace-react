@@ -61,6 +61,8 @@ const TRANSIENT_DATABASE_CODES = new Set([
   '08000', '08003', '08006', '57P01', '53300',
   'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
 ]);
+const PERMISSION_DATABASE_CODES = new Set(['42501', '0LP01']);
+const PERMISSION_BACKOFF_MS = 30_000;
 
 export function registerStaySearchApi(app: express.Express, deps: StaySearchApiDeps): void {
   const env = deps.env || process.env;
@@ -79,6 +81,17 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
   }
 
   const pool = deps.pool || getSharedPostgresPool(connectionString, env);
+  // A grants/RLS problem is permanent until an operator repairs the database.
+  // Do not keep opening transactions and logging the same 42501 on every
+  // render while the local/hosted migration is being corrected.
+  let permissionUnavailableUntil = 0;
+
+  const permissionUnavailable = (res: express.Response) => bad(
+    res,
+    503,
+    'STAY_SEARCH_UNAVAILABLE',
+    'Stay search is temporarily unavailable while the database access policy is being repaired. No stays are shown as available.',
+  );
 
   async function withActor<T>(
     run: (client: PoolClient) => Promise<T>,
@@ -149,6 +162,8 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
     const parsed = parseStaySearchQuery(req.query as Record<string, unknown>, istTodayIso());
     if (!parsed.ok) return bad(res, 400, parsed.error, parsed.message);
     const query = parsed.query;
+
+    if (permissionUnavailableUntil > Date.now()) return permissionUnavailable(res);
 
     try {
       const result = await withActor(
@@ -265,6 +280,10 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
       const parameterDiagnostic = String(error?.message || '').match(/parameter \$\d+/i)?.[0] || '';
       const positionDiagnostic = /^\d+$/.test(String(error?.position || '')) ? `position ${error.position}` : '';
       console.error('[stay-search] PostgreSQL query failed', errorCode, parameterDiagnostic, positionDiagnostic);
+      if (PERMISSION_DATABASE_CODES.has(String(error?.code || ''))) {
+        permissionUnavailableUntil = Date.now() + PERMISSION_BACKOFF_MS;
+        return permissionUnavailable(res);
+      }
       if (TRANSIENT_DATABASE_CODES.has(String(error?.code || ''))) {
         return bad(res, 503, 'STAY_SEARCH_DATABASE_UNAVAILABLE', 'Stay search is temporarily unavailable. Please try again.');
       }

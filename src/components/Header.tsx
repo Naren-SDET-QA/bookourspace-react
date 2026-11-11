@@ -214,16 +214,12 @@ export const Header: React.FC<HeaderProps> = ({
             title={userName}
           >
             <SafeImage category="general"
-              src="/assets/optimized/profile-avatar-256.webp"
+              src={userAvatar || '/assets/optimized/profile-avatar-256.webp'}
               alt={userName}
               referrerPolicy="no-referrer"
               className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover bg-purple-900"
               sizes="32px"
               priority
-              onError={(e) => {
-                // Fallback avatar if local image needs initial load
-                (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80';
-              }}
             />
           </button>
         </div>
