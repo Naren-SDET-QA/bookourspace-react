@@ -134,6 +134,7 @@ async function newPage(
       try {
         localStorage.setItem('bos_session_token_v1', token);
         localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(storedUser));
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: new Date().toISOString() }));
       } catch {
         // Ignore storage failures on non-origin documents.
       }
