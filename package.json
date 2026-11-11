@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "dev:local": "bash scripts/dev-with-stays-db.sh",
+    "dev:3010": "PORT=3010 VITE_ENABLE_DEMO_DATA=true bash scripts/dev-with-stays-db.sh",
+    "dev:ensure": "PORT=3010 bash scripts/ensure-dev-3010.sh",
     "dev:web": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
