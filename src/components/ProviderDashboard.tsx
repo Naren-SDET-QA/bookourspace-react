@@ -17,6 +17,7 @@ import {
   TrendingUp,
   Hotel,
   BedDouble,
+  LayoutDashboard,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { AppLanguage, getSubcategoryDisplayName, getPriceUnitDisplayName } from '../utils/translations';
@@ -26,6 +27,7 @@ import { CraftoPosterGenerator } from './CraftoPosterGenerator';
 import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
 import HostStayWorkspace from './HostStayWorkspace';
 import PgProviderWorkspace from './PgProviderWorkspace';
+import { PgOwnerDashboard } from './pg/PgOwnerDashboard';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -63,7 +65,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
-  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory'>('listings');
+  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory' | 'pg_owner'>('listings');
 
   // D3 Chart Computations for Analytics & Performance Tab
   const d3Analytics = useMemo(() => {
@@ -302,6 +304,19 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {/* Navigation Sub-Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-4 overflow-x-auto no-scrollbar">
+        <button
+          onClick={() => setActiveSubTab('pg_owner')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'pg_owner'
+              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+          data-testid="provider-pg-owner-tab"
+        >
+          <LayoutDashboard className="w-4 h-4 text-violet-600" />
+          <span>PG Owner</span>
+        </button>
+
         <button
           onClick={() => setActiveSubTab('pg_inventory')}
           className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
@@ -646,6 +661,15 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {activeSubTab === 'stays' && <HostStayWorkspace />}
 
+      {activeSubTab === 'pg_owner' && (
+        <PgOwnerDashboard
+          listings={myListings}
+          bookings={bookings}
+          enquiries={enquiries}
+          onOpenPostWizard={onOpenPostWizard}
+          profileName={supabaseProfile?.full_name}
+        />
+      )}
       {activeSubTab === 'pg_inventory' && <PgProviderWorkspace />}
 
       {/* --- SUBTAB 1: MY LISTINGS --- */}
