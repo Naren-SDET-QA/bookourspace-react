@@ -11,7 +11,9 @@ interface ClassesStyleThreeCardsProps {
 
 const feeLabel = (course: CourseListing): string => {
   if (course.free || course.fee === 0) return 'Free';
-  return `₹${Math.round(course.fee).toLocaleString('en-IN')}`;
+  const amount = `₹${Math.round(course.fee).toLocaleString('en-IN')}`;
+  const unit = course.feeUnit === 'course' ? '/course' : course.feeUnit === 'month' ? '/month' : course.feeUnit === 'hour' ? '/hour' : '/session';
+  return course.liveCalendar ? `From ${amount}${unit}` : amount;
 };
 
 function modeDisplay(course: CourseListing): string {
@@ -28,6 +30,7 @@ export function ClassesStyleThreeCards({ courses, onOpen }: ClassesStyleThreeCar
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {courses.map((course) => {
         const batch = course.batches[0];
+        const liveBatchCount = course.liveBatchCount ?? course.batches.length;
         const favorite = isCourseFavorite(course.id);
         return (
           <article
@@ -38,7 +41,9 @@ export function ClassesStyleThreeCards({ courses, onOpen }: ClassesStyleThreeCar
             <button type="button" onClick={() => onOpen(course)} className="relative block aspect-[16/9] w-full overflow-hidden text-left">
               <SafeImage src={course.image} alt={course.title} category="classes" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" sizes="(max-width: 640px) 92vw, 560px" />
               <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[9px] font-black text-white shadow-sm">
-                <BadgeCheck className="h-3 w-3" aria-hidden="true" /> {course.verified ? 'Verified' : course.demo ? 'Sample' : 'Listed'}
+                <BadgeCheck className="h-3 w-3" aria-hidden="true" /> {course.liveCalendar
+                  ? `${liveBatchCount} live batch${liveBatchCount === 1 ? '' : 'es'}`
+                  : course.verified ? 'Verified' : course.demo ? 'Sample' : 'Listed'}
               </span>
               <span className="absolute right-2.5 top-2.5 rounded-full bg-white/95 px-2.5 py-1 text-[9px] font-black text-violet-700 shadow-sm">
                 {modeDisplay(course)}
@@ -114,6 +119,7 @@ export function ClassesStyleThreeCards({ courses, onOpen }: ClassesStyleThreeCar
 
                 <button
                   type="button"
+                  aria-label={`View ${course.title}`}
                   onClick={() => onOpen(course)}
                   className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-1 rounded-xl bg-[#7c3aed] text-[11px] font-black text-white transition hover:bg-[#6d28d9]"
                 >
