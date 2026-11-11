@@ -286,8 +286,8 @@ test('a stale responsive variant falls back to the persisted original photo afte
   });
   await page.goto('/#venues', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Open All Sections & Quick Menu' }).waitFor({ timeout: 30_000 });
-  await expect(page.getByText('Venue agenda')).toBeVisible({ timeout: 30_000 });
-  const image = page.locator('section[aria-label="Venues agenda"] img[data-safe-image]').first();
+  await expect(page.getByRole('heading', { name: /All Venues & Halls/ })).toBeVisible({ timeout: 30_000 });
+  const image = page.locator('article img[data-safe-image]').first();
   await expect(image).toBeVisible();
   await image.scrollIntoViewIfNeeded();
   await expect(image).toHaveAttribute('data-image-state', 'loaded');
@@ -299,8 +299,8 @@ test('a stale responsive variant falls back to the persisted original photo afte
   const originalSignRequestsBeforeReload = originalSignRequests;
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Open All Sections & Quick Menu' }).waitFor({ timeout: 30_000 });
-  await expect(page.getByText('Venue agenda')).toBeVisible({ timeout: 30_000 });
-  const reloadedImage = page.locator('section[aria-label="Venues agenda"] img[data-safe-image]').first();
+  await expect(page.getByRole('heading', { name: /All Venues & Halls/ })).toBeVisible({ timeout: 30_000 });
+  const reloadedImage = page.locator('article img[data-safe-image]').first();
   await expect(reloadedImage).toBeVisible();
   await reloadedImage.scrollIntoViewIfNeeded();
   await expect(reloadedImage).toHaveAttribute('data-image-state', 'loaded');
