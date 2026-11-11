@@ -93,6 +93,7 @@ export default function SafeImage({
   const [signedSource, setSignedSource] = useState('');
   const [signedSrcSet, setSignedSrcSet] = useState('');
   const refreshAttempted = useRef(false);
+  const srcSetRetryAttempted = useRef(false);
   const sourceKeyRef = useRef(resetKey);
   sourceKeyRef.current = resetKey;
 
@@ -128,6 +129,7 @@ export default function SafeImage({
     setSignedSource('');
     setSignedSrcSet('');
     refreshAttempted.current = false;
+    srcSetRetryAttempted.current = false;
   }, [cleanSource, localFallback, resetKey]);
 
   const storageSource = isSupabaseStorageSource(cleanSource);
@@ -166,13 +168,24 @@ export default function SafeImage({
       }}
       onError={() => {
         setLoaded(false);
+        // A stale responsive candidate can fail even when the original upload
+        // is still valid. Retry the signed original before refreshing URLs or
+        // showing a fallback so reloads do not hide a real uploaded photo.
+        if (storageSource && signedSrcSet && !srcSetRetryAttempted.current) {
+          srcSetRetryAttempted.current = true;
+          setSignedSrcSet('');
+          return;
+        }
         if (storageSource && (isPublicImageStorageSource(cleanSource) || isProfileImageStorageSource(cleanSource)) && !refreshAttempted.current) {
           refreshAttempted.current = true;
           void resolveResponsiveMediaSource(cleanSource, true)
             .then((resolved) => {
               if (sourceKeyRef.current === resetKey) {
                 setSignedSource(resolved.src);
-                setSignedSrcSet(resolved.srcSet || '');
+                // Stay on the known-good original after recovery. Reinstalling
+                // the same responsive candidates would immediately re-select
+                // a stale or missing variant and repeat the failure.
+                setSignedSrcSet('');
                 setFallbackStage(0);
               }
             })
