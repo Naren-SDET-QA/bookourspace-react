@@ -18,7 +18,7 @@ export interface ProviderListingActor {
   phone?: string;
   googleSub?: string;
   avatarUrl?: string;
-  authProvider?: 'google';
+  authProvider?: 'google' | 'email_otp';
   role: 'customer' | 'provider' | 'admin';
   providerId?: string;
 }
@@ -622,8 +622,8 @@ export class ProviderListingRepository {
   }
 
   async profileForIdentity(actor: ProviderListingActor): Promise<any | null> {
-    if (actor.authProvider !== 'google' || !actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId)) {
-      throw new ProviderListingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!['google', 'email_otp'].includes(String(actor.authProvider)) || !actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId)) {
+      throw new ProviderListingRepositoryError('VERIFIED_AUTH_IDENTITY_REQUIRED', 401);
     }
     return this.transaction(actor, async (client) => {
       const { rows } = await client.query(

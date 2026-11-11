@@ -6,6 +6,17 @@ export interface VerifiedGoogleIdentity {
   avatarUrl?: string;
 }
 
+interface VerifiedGoogleIdentityWithProvider extends VerifiedGoogleIdentity {
+  provider: 'google';
+}
+
+export interface VerifiedEmailIdentity {
+  id: string;
+  email: string;
+  provider: 'email_otp';
+  name?: string;
+}
+
 const SUPABASE_AUTH_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isValidSupabaseAuthUserId(value: string): boolean {
@@ -18,17 +29,17 @@ export function canLinkSupabaseAuthIdentity(existingId: string | undefined, inco
   return !existingId || existingId.trim().toLowerCase() === incomingId.trim().toLowerCase();
 }
 
-interface VerifyGoogleIdentityInput {
+interface VerifyIdentityInput {
   projectUrl: string;
   publishableKey: string;
   accessToken: string;
   fetchImpl?: typeof fetch;
 }
 
-/** Verify a Supabase access token with Supabase Auth and require a Google identity. */
-export async function verifySupabaseGoogleIdentity(
-  input: VerifyGoogleIdentityInput
-): Promise<VerifiedGoogleIdentity | null> {
+async function verifySupabaseIdentity(
+  input: VerifyIdentityInput,
+  requiredProvider: 'google' | 'email',
+): Promise<VerifiedGoogleIdentityWithProvider | VerifiedEmailIdentity | null> {
   const projectUrl = input.projectUrl.trim().replace(/\/+$/, '');
   const publishableKey = input.publishableKey.trim();
   const accessToken = input.accessToken.trim();
@@ -57,31 +68,57 @@ export async function verifySupabaseGoogleIdentity(
     const id = typeof user?.id === 'string' ? user.id.trim() : '';
     const email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : '';
     const emailVerified = Boolean(user?.email_confirmed_at || user?.email_verified === true);
-    const googleIdentity = Array.isArray(user?.identities)
-      ? user.identities.find((identity: any) => identity?.provider === 'google')
+    const providerIdentity = Array.isArray(user?.identities)
+      ? user.identities.find((identity: any) => identity?.provider === requiredProvider)
       : null;
-    const googleProvider = user?.app_metadata?.provider === 'google' || Boolean(googleIdentity);
+    const providerVerified = user?.app_metadata?.provider === requiredProvider || Boolean(providerIdentity);
     const isSupabaseAuthUuid = isValidSupabaseAuthUserId(id);
-    if (!isSupabaseAuthUuid || !emailVerified || !googleProvider || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+    if (!isSupabaseAuthUuid || !emailVerified || !providerVerified || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
 
-    const identityData = googleIdentity?.identity_data || {};
+    const identityData = providerIdentity?.identity_data || {};
     const userMetadata = user?.user_metadata || {};
     const nameValue = identityData.full_name || identityData.name || userMetadata.full_name || userMetadata.name;
     const avatarValue = identityData.avatar_url || identityData.picture || userMetadata.avatar_url || userMetadata.picture;
+    if (requiredProvider === 'email') {
+      return {
+        id,
+        email,
+        provider: 'email_otp',
+        ...(typeof nameValue === 'string' && nameValue.trim() ? { name: nameValue.trim() } : {}),
+      };
+    }
     const googleSub = typeof identityData.sub === 'string' && identityData.sub.trim()
       ? identityData.sub.trim()
       : id;
-
     return {
       id,
       email,
       googleSub,
+      provider: 'google',
       ...(typeof nameValue === 'string' && nameValue.trim() ? { name: nameValue.trim() } : {}),
       ...(typeof avatarValue === 'string' && avatarValue.trim() ? { avatarUrl: avatarValue.trim() } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** Verify a Supabase access token with Supabase Auth and require a Google identity. */
+export async function verifySupabaseGoogleIdentity(
+  input: VerifyIdentityInput
+): Promise<VerifiedGoogleIdentity | null> {
+  const identity = await verifySupabaseIdentity(input, 'google');
+  if (identity?.provider !== 'google') return null;
+  const { provider: _provider, ...googleIdentity } = identity;
+  return googleIdentity;
+}
+
+/** Verify a Supabase access token issued after email OTP verification. */
+export async function verifySupabaseEmailIdentity(
+  input: VerifyIdentityInput
+): Promise<VerifiedEmailIdentity | null> {
+  const identity = await verifySupabaseIdentity(input, 'email');
+  return identity?.provider === 'email_otp' ? identity : null;
 }
 
 async function callSupabaseRpc<T>(input: {

@@ -112,8 +112,26 @@ export async function signUpWithEmailPassword(
 }
 
 export async function signInWithMagicLinkOtp(email: string) {
-  void email;
-  throw new Error('Email OTP sign-in is disabled. Use Google Sign-In.');
+  const normalized = email.trim().toLowerCase();
+  if (!supabase) throw new Error('Email OTP sign-in is unavailable until Supabase Auth is configured.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid email address.');
+  const { error } = await supabase.auth.signInWithOtp({
+    email: normalized,
+    options: { shouldCreateUser: true },
+  });
+  if (error) throw error;
+  return { ok: true, email: normalized };
+}
+
+export async function verifyEmailOtp(email: string, token: string) {
+  if (!supabase) throw new Error('Email OTP sign-in is unavailable until Supabase Auth is configured.');
+  const normalized = email.trim().toLowerCase();
+  const code = token.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid email address.');
+  if (!/^\d{6}$/.test(code)) throw new Error('Enter the six-digit code from your email.');
+  const { data, error } = await supabase.auth.verifyOtp({ email: normalized, token: code, type: 'email' });
+  if (error || !data.session) throw error || new Error('That code is invalid or expired.');
+  return data.session;
 }
 
 export async function signOutSupabase() {
@@ -646,9 +664,11 @@ export function subscribeToRlsChanges(onRefresh: () => void): () => void {
 // GOOGLE-ONLY OAUTH SESSION & AUTHORITATIVE TOKEN HELPERS
 // ============================================================================
 
+export type AuthoritativeAuthProvider = 'google' | 'email_otp';
+
 export interface AuthoritativeGoogleUser {
   id: string;
-  googleSub: string;
+  googleSub?: string;
   name: string;
   email: string;
   phone: string;
@@ -662,7 +682,7 @@ export interface AuthoritativeGoogleUser {
   totalBookings: number;
   totalListings: number;
   walletBalance: number;
-  authProvider: 'google';
+  authProvider: AuthoritativeAuthProvider;
 }
 
 const SESSION_TOKEN_STORAGE_KEY = 'bos_session_token_v1';
@@ -723,7 +743,7 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
 
 /**
  * Initiates Google OAuth via Supabase (when configured) or via `/api/auth/google/authenticate`
- * and `/api/auth/google/url` popup flow. Enforces Google-only authentication, auto-registration
+ * and `/api/auth/google/url` popup flow. Enforces verified identity authentication, auto-registration
  * for new users, existing user sign-in, role-based routing, and account blocking checks.
  */
 export async function authenticateWithGoogleServer(params: {
@@ -788,6 +808,40 @@ export async function authenticateWithGoogleServer(params: {
       error: 'NETWORK_ERROR',
       message: err?.message || 'Google authentication failed.',
     };
+  }
+}
+
+export async function authenticateWithEmailOtpServer(accessToken: string): Promise<{
+  ok: boolean;
+  httpStatus: number;
+  isNewUser?: boolean;
+  user?: AuthoritativeGoogleUser;
+  sessionToken?: string;
+  redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
+  error?: string;
+  message?: string;
+}> {
+  if (!accessToken?.trim()) return { ok: false, httpStatus: 401, error: 'VERIFIED_EMAIL_OTP_SESSION_REQUIRED', message: 'Verify the email code before requesting an application session.' };
+  try {
+    const resp = await fetch('/api/auth/email-otp/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken.trim()}` },
+      body: JSON.stringify({ supabaseProjectId: SUPABASE_PROJECT_ID }),
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok && data.user && data.sessionToken) setStoredAuthoritativeSession(data.sessionToken, data.user);
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      httpStatus: resp.status,
+      isNewUser: data.isNewUser,
+      user: data.user,
+      sessionToken: data.sessionToken,
+      redirectTarget: data.redirectTarget,
+      error: data.error,
+      message: data.message,
+    };
+  } catch (error: any) {
+    return { ok: false, httpStatus: 500, error: 'NETWORK_ERROR', message: error?.message || 'Email OTP authentication failed.' };
   }
 }
 

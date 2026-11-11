@@ -4,6 +4,8 @@ import { type PoolClient } from 'pg';
 import { validateGuestDetails } from '../lib/stayGuestValidation';
 import { stayListingUnbookableReason, stayPayload } from '../lib/stayListingGate';
 import { issueBookingQr } from './bookingQr';
+import { sendStayBookingConfirmationEmail, sendStayReminderEmail } from './resendTransactionalEmails';
+import { sendBookingNotificationEmails } from './bookingNotificationEmails';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { getSharedPostgresPool } from './postgresPool';
 
@@ -106,9 +108,76 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
     }
   }
 
+  async function runStayReminderSweep(): Promise<void> {
+    if (env.RESEND_REMINDERS_ENABLED !== '1') return;
+    const checkInHour = Math.max(0, Math.min(23, Number(env.BOS_STAY_CHECK_IN_HOUR || 12)));
+    try {
+      const rows = await withServer(async (client) => {
+        const result = await client.query(
+          `select b.id as booking_id, b.customer_name, b.check_in::text as check_in,
+                  b.check_out::text as check_out, b.total_paise, b.payment_status,
+                  b.payload, p.name as property_name, rt.name as room_type_name,
+                  gc.guest_email
+             from public.bookings b
+             join public.stay_properties p on p.listing_id = b.listing_id
+             left join public.stay_room_types rt on rt.id = b.room_type_id
+             left join public.stay_booking_guest_contacts gc on gc.booking_id = b.id and gc.guest_user_id = b.user_id
+            where b.status = 'confirmed'
+              and b.check_in >= ((now() at time zone 'Asia/Kolkata')::date)
+              and b.check_in <= ((now() at time zone 'Asia/Kolkata')::date + 3)
+              and gc.guest_email is not null`,
+        );
+        return result.rows;
+      });
+      const now = Date.now();
+      for (const row of rows) {
+        const checkIn = String(row.check_in || '');
+        const checkInAt = Date.parse(`${checkIn}T${String(checkInHour).padStart(2, '0')}:00:00+05:30`);
+        if (!Number.isFinite(checkInAt)) continue;
+        const hours = (checkInAt - now) / 3_600_000;
+        let reminderHours: 24 | 2 | null = null;
+        if (Math.abs(hours - 24) <= 0.25) reminderHours = 24;
+        else if (Math.abs(hours - 2) <= 0.25) reminderHours = 2;
+        if (reminderHours === null) continue;
+        const payload = row.payload && typeof row.payload === 'object' ? row.payload as Record<string, unknown> : {};
+        if (payload[`reminder${reminderHours}Sent`] === true) continue;
+        const result = await sendStayReminderEmail({
+          bookingId: String(row.booking_id),
+          recipient: String(row.guest_email).trim().toLowerCase(),
+          guestName: String(row.customer_name || 'Guest'),
+          propertyName: String(row.property_name || 'BookOurSpace stay'),
+          roomType: String(row.room_type_name || 'Room'),
+          checkIn,
+          checkOut: String(row.check_out || ''),
+          totalPaise: Number(row.total_paise || 0),
+          paymentStatus: String(row.payment_status || 'verified'),
+          reminderHours,
+        }, { env });
+        if (result.ok) {
+          await withServer(async (client) => {
+            await client.query(
+              `update public.bookings
+                  set payload = jsonb_set(coalesce(payload, '{}'::jsonb), $2::text[], 'true'::jsonb, true)
+                where id = $1 and status = 'confirmed'`,
+              [String(row.booking_id), `{reminder${reminderHours}Sent}`],
+            );
+          });
+        }
+      }
+    } catch {
+      // Reminder delivery is best effort and never affects booking traffic.
+    }
+  }
+
+  if (env.RESEND_REMINDERS_ENABLED === '1') {
+    const timer = setInterval(() => { void runStayReminderSweep(); }, 15 * 60_000);
+    timer.unref?.();
+    void runStayReminderSweep();
+  }
+
   function actorOf(req: express.Request) {
     const session = deps.verifySession(req);
-    if (!session?.supabaseUserId || session.authProvider !== 'google' || !UUID.test(String(session.supabaseUserId))) return null;
+    if (!session?.supabaseUserId || !['google', 'email_otp'].includes(String(session.authProvider)) || !UUID.test(String(session.supabaseUserId))) return null;
     return {
       supabaseUserId: String(session.supabaseUserId),
       role: String(session.role || 'customer'),
@@ -355,19 +424,59 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
         );
         if (Number(confirmed.rows[0]?.result) !== 1) return { error: 'HOLD_EXPIRED' as const };
         const after = await client.query(
-          `select booking_id, total_paise from public.stay_allocations where hold_token = $1`,
+          `select a.booking_id, a.total_paise, b.customer_name, b.check_in::text as check_in,
+                  b.check_out::text as check_out, b.payment_status,
+                  p.name as property_name, rt.name as room_type_name, gc.guest_email,
+                  owner.email as owner_email, owner.full_name as owner_name
+             from public.stay_allocations a
+             join public.bookings b on b.id = a.booking_id
+             join public.stay_properties p on p.listing_id = b.listing_id
+             left join public.profiles owner on owner.id = p.owner_user_id
+             left join public.stay_room_types rt on rt.id = b.room_type_id
+             left join public.stay_booking_guest_contacts gc on gc.booking_id = b.id and gc.guest_user_id = b.user_id
+            where a.hold_token = $1`,
           [token],
         );
+        const booking = after.rows[0];
         return {
-          bookingId: after.rows[0]?.booking_id || bookingId,
-          totalPaise: Number(after.rows[0]?.total_paise || 0),
+          bookingId: booking?.booking_id || bookingId,
+          totalPaise: Number(booking?.total_paise || 0),
           replayed: false,
+          emailDetails: booking ? {
+            bookingId: String(booking.booking_id || bookingId),
+            recipient: String(booking.guest_email || actor.email || '').trim().toLowerCase(),
+            guestName: String(booking.customer_name || actor.email || 'Guest'),
+            propertyName: String(booking.property_name || 'BookOurSpace stay'),
+            roomType: String(booking.room_type_name || 'Room'),
+            checkIn: String(booking.check_in || ''),
+            checkOut: String(booking.check_out || ''),
+            totalPaise: Number(booking.total_paise || 0),
+            paymentStatus: String(booking.payment_status || 'verified'),
+            ownerEmail: String(booking.owner_email || '').trim().toLowerCase(),
+            ownerName: String(booking.owner_name || '').trim(),
+          } : null,
         };
       }, actor.supabaseUserId);
       if ('error' in result) {
         return bad(res, 409, String(result.error), 'The hold expired. Start a new hold.');
       }
-      res.status(201).json({ ok: true, ...result });
+      if (result.emailDetails?.recipient) {
+        void sendStayBookingConfirmationEmail(result.emailDetails, { env }).catch(() => undefined);
+      }
+      if (result.emailDetails?.ownerEmail) {
+        void sendBookingNotificationEmails([{
+          kind: 'new_booking_received',
+          recipient: result.emailDetails.ownerEmail,
+          recipientName: result.emailDetails.ownerName || undefined,
+          bookingId: String(result.emailDetails.bookingId),
+          listingTitle: String(result.emailDetails.propertyName || 'BookOurSpace stay'),
+          status: 'confirmed',
+          scheduledDate: String(result.emailDetails.checkIn || ''),
+          timeSlot: `${String(result.emailDetails.checkIn || '')} – ${String(result.emailDetails.checkOut || '')}`,
+        }], { env }).catch(() => undefined);
+      }
+      const { emailDetails: _emailDetails, ...publicResult } = result;
+      res.status(201).json({ ok: true, ...publicResult });
     } catch (error: any) {
       const message = String(error?.message || '');
       if (error?.code === '42501') {
@@ -426,6 +535,45 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
           return bad(res, 404, 'BOOKING_NOT_FOUND', 'Booking not found.');
         }
         return bad(res, 403, 'FORBIDDEN', 'This account cannot cancel that booking.');
+      }
+      try {
+        const booking = await withServer(async (client) => {
+          const query = await client.query(
+            `select b.id as booking_id, b.listing_title, b.scheduled_date, b.scheduled_time,
+                    p.name as property_name, gc.guest_email, gc.guest_name,
+                    owner.email as owner_email, owner.full_name as owner_name
+               from public.bookings b
+               join public.stay_properties p on p.listing_id = b.listing_id
+               left join public.stay_booking_guest_contacts gc on gc.booking_id = b.id and gc.guest_user_id = b.user_id
+               left join public.profiles owner on owner.id = p.owner_user_id
+              where b.id = $1 limit 1`,
+            [bookingId],
+          );
+          return query.rows[0] || null;
+        });
+        const recipients = [
+          booking?.guest_email ? {
+            kind: 'booking_cancelled' as const,
+            recipient: String(booking.guest_email).trim().toLowerCase(),
+            recipientName: String(booking.guest_name || '').trim() || undefined,
+          } : null,
+          booking?.owner_email ? {
+            kind: 'booking_cancelled' as const,
+            recipient: String(booking.owner_email).trim().toLowerCase(),
+            recipientName: String(booking.owner_name || '').trim() || undefined,
+          } : null,
+        ].filter(Boolean).map((recipient) => ({
+          ...recipient!,
+          bookingId,
+          listingTitle: String(booking?.property_name || booking?.listing_title || 'BookOurSpace stay'),
+          status: 'cancelled',
+          scheduledDate: String(booking?.scheduled_date || ''),
+          timeSlot: String(booking?.scheduled_time || 'nightly'),
+          reason: String(result.refundPolicy || 'Booking cancelled'),
+        }));
+        void sendBookingNotificationEmails(recipients, { env }).catch(() => undefined);
+      } catch {
+        // Notification delivery is best effort and never changes cancellation state.
       }
       res.json({
         ok: true,
@@ -512,6 +660,36 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
         return payload;
       });
       if (result?.ok === false) return bad(res, 409, String(result.error || 'REQUEST_FAILED'), 'The request could not be created.');
+      if (result?.bookingId && result?.replayed !== true) {
+        try {
+          const owner = await withServer(async (client) => {
+            const query = await client.query(
+              `select b.id as booking_id, b.listing_title, b.status, b.scheduled_date,
+                      b.scheduled_time, owner.email as owner_email, owner.full_name as owner_name
+                 from public.bookings b
+                 join public.stay_properties p on p.listing_id = b.listing_id
+                 left join public.profiles owner on owner.id = p.owner_user_id
+                where b.id = $1 limit 1`,
+              [String(result.bookingId)],
+            );
+            return query.rows[0] || null;
+          });
+          if (owner?.owner_email) {
+            void sendBookingNotificationEmails([{
+              kind: 'new_booking_received',
+              recipient: String(owner.owner_email).trim().toLowerCase(),
+              recipientName: String(owner.owner_name || '').trim() || undefined,
+              bookingId: String(owner.booking_id || result.bookingId),
+              listingTitle: String(owner.listing_title || 'BookOurSpace stay'),
+              status: String(owner.status || 'pending_approval'),
+              scheduledDate: String(owner.scheduled_date || checkIn),
+              timeSlot: `${String(owner.scheduled_date || checkIn)} – ${checkOut}`,
+            }], { env }).catch(() => undefined);
+          }
+        } catch {
+          // Notification delivery is best effort and never rolls back a stay request.
+        }
+      }
       res.status(result?.replayed ? 200 : 201).json(result);
     } catch (error: any) {
       const message = String(error?.message || '');

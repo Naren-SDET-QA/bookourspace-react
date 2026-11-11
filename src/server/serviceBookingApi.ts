@@ -9,10 +9,16 @@ import {
   ProviderListingRepositoryError,
   type ProviderListingActor,
 } from './providerListingRepository';
+import {
+  sendBookingNotificationEmails,
+  type BookingNotificationContext,
+  type BookingNotificationKind,
+} from './bookingNotificationEmails';
 
 export interface ServiceBookingApiDependencies {
   repository: ServiceBookingRepository;
   verifySession: (request: express.Request) => ProviderListingActor | null;
+  env?: NodeJS.ProcessEnv;
 }
 
 function sendError(response: express.Response, error: unknown): void {
@@ -39,7 +45,7 @@ function sessionOrReject(
     response.status(403).json({ ok: false, error: 'FORBIDDEN_ROLE' });
     return null;
   }
-  if (actor.authProvider !== 'google' || !actor.supabaseUserId) {
+  if (!['google', 'email_otp'].includes(String(actor.authProvider)) || !actor.supabaseUserId) {
     response.status(403).json({
       ok: false,
       error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED',
@@ -52,11 +58,39 @@ function sessionOrReject(
 
 const ACTIONS = new Set<ServiceBookingAction>(['accept', 'reject', 'start', 'complete', 'cancel', 'reschedule']);
 
+async function dispatchServiceNotification(
+  context: BookingNotificationContext,
+  kind: BookingNotificationKind,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const common = {
+    bookingId: context.bookingId,
+    listingTitle: context.listingTitle,
+    status: context.status || undefined,
+    scheduledDate: context.scheduledDate || undefined,
+    timeSlot: context.timeSlot || undefined,
+    reason: context.reason,
+  };
+  const recipients = kind === 'new_service_booking'
+    ? context.providerEmail ? [{ ...common, kind, recipient: context.providerEmail, recipientName: context.providerName || undefined }] : []
+    : [
+        ...(context.customerEmail ? [{ ...common, kind, recipient: context.customerEmail, recipientName: context.customerName || undefined }] : []),
+        ...(kind === 'booking_cancelled' && context.providerEmail ? [{ ...common, kind, recipient: context.providerEmail, recipientName: context.providerName || undefined }] : []),
+      ];
+  if (recipients.length === 0) return;
+  try {
+    await sendBookingNotificationEmails(recipients, { env });
+  } catch (error) {
+    logSafeError('service-bookings', `dispatch ${kind}`, error);
+  }
+}
+
 export function registerServiceBookingApi(
   app: express.Express,
   dependencies: ServiceBookingApiDependencies,
 ): void {
   const { repository, verifySession } = dependencies;
+  const env = dependencies.env || process.env;
 
   // Public configuration. Secrets are never returned; only whether the server
   // has a payment provider configured. A UPI QR/intent is an instruction, not
@@ -83,6 +117,11 @@ export function registerServiceBookingApi(
     if (!actor) return;
     try {
       const result = await repository.createBooking(actor, request.body || {});
+      if (!result.idempotent) {
+        void repository.notificationContext(actor, result.booking.id)
+          .then((context) => dispatchServiceNotification(context, 'new_service_booking', env))
+          .catch((error) => logSafeError('service-bookings', 'load new booking notification context', error));
+      }
       response.status(result.idempotent ? 200 : 201).json({ ok: true, ...result, source: 'postgres' });
     } catch (error) {
       sendError(response, error);
@@ -109,6 +148,16 @@ export function registerServiceBookingApi(
     }
     try {
       const result = await repository.transition(actor, String(request.params.id || ''), action, request.body || {});
+      if (!result.idempotent) {
+        const kind: BookingNotificationKind = action === 'accept'
+          ? 'booking_approved'
+          : action === 'reject' || action === 'cancel'
+            ? 'booking_cancelled'
+            : 'booking_status_changed';
+        void repository.notificationContext(actor, result.booking.id)
+          .then((context) => dispatchServiceNotification(context, kind, env))
+          .catch((error) => logSafeError('service-bookings', `load ${kind} notification context`, error));
+      }
       response.json({ ok: true, ...result, source: 'postgres' });
     } catch (error) {
       sendError(response, error);
