@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BOS_CALL_HREF, BOS_CONTACT_PHONE, whatsappHref } from '../lib/contactNumbers';
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,7 +10,9 @@ import {
   Clock,
   Headphones,
   MapPin,
+  MessageCircle,
   Mic,
+  Phone,
   Navigation,
   Package,
   ShieldCheck,
@@ -48,12 +51,15 @@ interface TaskType {
 }
 
 const TASK_TYPES: TaskType[] = [
-  { id: 'grocery', label: 'Grocery Shopping', hint: 'Groceries, vegetables, medicines', emoji: '🛒' },
-  { id: 'food', label: 'Food Pickup', hint: 'Restaurant or café pickup', emoji: '🍱' },
-  { id: 'home', label: 'Home Supplies', hint: 'Hardware, stationery, essentials', emoji: '🏠' },
-  { id: 'courier', label: 'Courier & Parcel', hint: 'Pickup and drop-off', emoji: '📦' },
+  { id: 'shopping-assistant', label: 'Shopping Assistant', hint: 'Accompany and help you shop', emoji: '🛍️' },
+  { id: 'pickup-delivery', label: 'Pickup & Delivery', hint: 'Collect and deliver on your behalf', emoji: '🚚' },
   { id: 'queue', label: 'Queue Standing', hint: 'Wait in line on your behalf', emoji: '🕐' },
-  { id: 'errand', label: 'Everyday Errand', hint: 'Anything else, just ask', emoji: '✅' },
+  { id: 'senior-help', label: 'Senior Help', hint: 'Everyday assistance for seniors', emoji: '🧓' },
+  { id: 'shopping-help', label: 'Shopping Help', hint: 'Buy and bring your items', emoji: '🛒' },
+  { id: 'courier', label: 'Courier & Parcel Help', hint: 'Pickup, drop-off and paperwork', emoji: '📦' },
+  { id: 'event-assistant', label: 'Event Assistant', hint: 'Extra hands for your event', emoji: '🎉' },
+  { id: 'child-care', label: 'Child Care', hint: 'Trusted care for your child', emoji: '🧒' },
+  { id: 'elder-care', label: 'Old Person Care', hint: 'Companionship and daily care', emoji: '👵' },
 ];
 
 const DURATIONS = [
@@ -176,6 +182,7 @@ interface HelperDraft {
   helpers: number;
   coupon: string;
   couponApplied: boolean;
+  bookingId?: string;
 }
 
 function loadDraft(): Partial<HelperDraft> {
@@ -195,7 +202,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
   const [draft] = useState(() => loadDraft());
   const draftStep = Number(draft.step);
   const [step, setStep] = useState<Step>(() => (draftStep >= 1 && draftStep <= 4 ? (draftStep as Step) : 1));
-  const [taskType, setTaskType] = useState<string>(draft.taskType ?? 'grocery');
+  const [taskType, setTaskType] = useState<string>(draft.taskType ?? 'shopping-assistant');
   const [description, setDescription] = useState<string>(draft.description ?? '');
   const [recording, setRecording] = useState(false);
   const [locations, setLocations] = useState<'single' | 'multiple'>(draft.locations === 'multiple' ? 'multiple' : 'single');
@@ -206,6 +213,8 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
   const [coupon, setCoupon] = useState<string>(draft.coupon ?? '');
   const [couponApplied, setCouponApplied] = useState<boolean>(draft.couponApplied ?? false);
   const [showBreakdown, setShowBreakdown] = useState(true);
+  const [bookingId] = useState(() => draft.bookingId || `BOS-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
+  const recognitionRef = useRef<any>(null);
 
   // Cache the in-progress journey (cleared once the booking is confirmed).
   useEffect(() => {
@@ -220,7 +229,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
     try {
       localStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ step, taskType, description, locations, address, extraAddress, durationId, helpers, coupon, couponApplied } satisfies HelperDraft)
+        JSON.stringify({ step, taskType, description, locations, address, extraAddress, durationId, helpers, coupon, couponApplied, bookingId } satisfies HelperDraft)
       );
     } catch {
       /* ignore quota/privacy errors */
@@ -269,7 +278,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-black text-[#1f1650]">
-            BookOurSpace <span className="font-bold text-[#7c3aed]">Helper</span>
+            BookOurSpace <span className="font-bold text-[#7c3aed]">Human Help</span>
           </p>
           <p className="truncate text-[11px] font-semibold text-slate-500">
             {step === 5 ? 'Booking confirmed' : `Step ${step} of 5`}
@@ -288,6 +297,36 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
   );
 
   /* ------------------------------ Step 1 ------------------------------ */
+  const toggleVoice = () => {
+    if (recording) {
+      recognitionRef.current?.stop();
+      setRecording(false);
+      return;
+    }
+    const Recognition = (window as typeof window & { webkitSpeechRecognition?: any; SpeechRecognition?: any }).SpeechRecognition
+      || (window as typeof window & { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
+    if (!Recognition) {
+      setDescription('Voice input is not supported on this browser. Please type your task.');
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = 'en-IN';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results as ArrayLike<any>)
+        .map((result: any) => result[0]?.transcript || '')
+        .join(' ')
+        .trim();
+      if (transcript) setDescription(transcript);
+    };
+    recognition.onend = () => setRecording(false);
+    recognition.onerror = () => setRecording(false);
+    recognition.start();
+    recognitionRef.current = recognition;
+    setRecording(true);
+  };
+
   if (step === 1) {
     return (
       <div className={shellClass}>
@@ -295,166 +334,107 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
         <div className={`${pageClass} ${contentPad} pt-4`}>
           <Stepper step={step} />
           <h1 className="mt-5 text-[26px] font-black leading-[1.1] text-[#1f1650]">
-            Describe Your Task,
+            What help
             <br />
-            <span className="text-[#7c3aed]">We&apos;ll Handle the Rest.</span>
+            <span className="text-[#7c3aed]">do you need?</span>
           </h1>
           <p className="mt-2 text-[13px] leading-5 text-slate-500">
-            Smart matching. Verified helpers. Tasks done on time.
+            Tap a picture. We&apos;ll send a verified helper.
           </p>
 
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm">
-            <p className="text-[12px] font-bold uppercase tracking-wide text-slate-400">
-              Task Description
-            </p>
-            <button
-              type="button"
-              onClick={() => setRecording((r) => !r)}
-              className={`mx-auto mt-3 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition ${
-                recording ? 'bg-rose-500 animate-pulse' : 'bg-[#7c3aed] hover:bg-[#6d28d9]'
-              }`}
-              aria-label={recording ? 'Stop recording' : 'Record a voice note'}
-            >
-              <Mic className="h-7 w-7" />
-            </button>
-            <p className="mt-3 text-[13px] font-semibold text-slate-600">
-              {recording ? 'Listening… tap to stop' : 'Tap to describe your task'}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-400">
-              {recording ? 'Speak in your language — we will transcribe it.' : 'Speak in your language — we will transcribe it.'}
-            </p>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {TASK_TYPES.map((type) => {
+              const active = taskType === type.id;
+              return (
+                <button
+                  key={type.id}
+                  type="button"
+                  onClick={() => setTaskType(type.id)}
+                  aria-pressed={active}
+                  className={`relative flex min-h-[104px] flex-col items-center justify-center gap-1 rounded-2xl border-2 px-2 py-3 text-center transition ${
+                    active
+                      ? 'border-[#7c3aed] bg-[#f5f3ff] shadow-sm'
+                      : 'border-slate-200 bg-white hover:border-violet-300'
+                  }`}
+                >
+                  {active && (
+                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#7c3aed] text-white">
+                      <Check className="h-3 w-3" />
+                    </span>
+                  )}
+                  <span className="text-[30px] leading-none" aria-hidden="true">{type.emoji}</span>
+                  <span className={`mt-1 text-[11px] font-bold leading-4 ${active ? 'text-[#5b21b6]' : 'text-[#1f1650]'}`}>{type.label}</span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="mt-4">
-            <SectionCard title="Task Type">
-              <div className="flex flex-wrap gap-2">
-                {TASK_TYPES.map((type) => (
-                  <Chip
-                    key={type.id}
-                    active={taskType === type.id}
-                    onClick={() => setTaskType(type.id)}
-                    emoji={type.emoji}
-                    label={type.label}
-                  />
-                ))}
-              </div>
-              <p className="mt-3 text-[12px] leading-5 text-slate-500">
-                Select the type of task you&apos;d like our helper to do. You can assign multiple tasks in
-                one booking.
-              </p>
-              <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#f5f3ff] px-3 py-2 text-[12px] font-semibold text-[#5b21b6]">
-                <Sparkles className="h-4 w-4" />
-                AI will match the right helper to your task type.
-              </div>
-            </SectionCard>
-          </div>
-
-          <div className="mt-4">
-            <SectionCard title="Helper Requirements">
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                    <MapPin className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Location</p>
-                    <input
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder="Where should the helper go?"
-                      className="w-full bg-transparent text-[14px] font-semibold text-[#1f1650] outline-none placeholder:font-medium placeholder:text-slate-400"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                    <CalendarClock className="h-4 w-4" />
-                  </span>
-                  <div className="flex-1">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">When</p>
-                    <p className="text-[14px] font-semibold text-[#1f1650]">Today, as soon as possible</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                    <Timer className="h-4 w-4" />
-                  </span>
-                  <div className="flex-1">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Duration</p>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {DURATIONS.map((d) => (
-                        <button
-                          key={d.id}
-                          type="button"
-                          onClick={() => setDurationId(d.id)}
-                          className={`rounded-lg px-3 py-1.5 text-[12px] font-bold transition ${
-                            durationId === d.id
-                              ? 'bg-[#5b21b6] text-white'
-                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                          }`}
-                        >
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-          </div>
-
-          <div className="mt-4">
-            <SectionCard title="Address Selection">
-              <div className="flex gap-2">
-                {(['single', 'multiple'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setLocations(mode)}
-                    className={`flex-1 rounded-xl border px-3 py-2.5 text-[12px] font-bold transition ${
-                      locations === mode
-                        ? 'border-[#5b21b6] bg-[#f5f3ff] text-[#5b21b6]'
-                        : 'border-slate-200 bg-white text-slate-600'
-                    }`}
-                  >
-                    {mode === 'single' ? 'Single location' : 'Multiple locations'}
-                  </button>
-                ))}
-              </div>
-              <label className="mt-3 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                {locations === 'single' ? 'Single Location' : 'First location'}
-              </label>
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Where should the helper go?</p>
+            <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+              <MapPin className="h-4 w-4 shrink-0 text-[#7c3aed]" />
               <input
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="e.g. Flat 402, Madhapur, Hyderabad"
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-[13px] outline-none focus:border-[#7c3aed]"
+                onChange={(event) => setAddress(event.target.value)}
+                placeholder="House / street / area"
+                className="min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[#1f1650] outline-none placeholder:font-medium placeholder:text-slate-400"
               />
-              {locations === 'multiple' && (
-                <input
-                  value={extraAddress}
-                  onChange={(e) => setExtraAddress(e.target.value)}
-                  placeholder="Add another location"
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-[13px] outline-none focus:border-[#7c3aed]"
-                />
-              )}
-            </SectionCard>
+            </div>
+
+            <p className="mt-3 text-[11px] font-black uppercase tracking-wide text-slate-500">Tell us more (optional)</p>
+            <div className="relative mt-2">
+              <textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                rows={2}
+                placeholder="Say or type what you need"
+                className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 pr-12 text-[13px] outline-none focus:border-[#7c3aed]"
+              />
+              <button
+                type="button"
+                onClick={toggleVoice}
+                aria-label={recording ? 'Stop voice input' : 'Speak your task'}
+                className={`absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-full text-white ${recording ? 'animate-pulse bg-rose-500' : 'bg-[#7c3aed]'}`}
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              {recording ? 'Listening… speak in your language.' : 'Cannot type? Tap the mic and speak.'}
+            </p>
+          </div>
+
+          <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">How long?</p>
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {DURATIONS.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setDurationId(d.id)}
+                  className={`rounded-xl px-1 py-2 text-[11px] font-bold ${durationId === d.id ? 'bg-[#5b21b6] text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         <div className={actionBar}>
-          <div className="mx-auto flex w-full max-w-[520px] items-center gap-3 sm:max-w-[600px]">
-            <div className="hidden text-[12px] font-semibold text-slate-500 sm:block">
-              Est. {inr(totals.total)} · {duration.label}
-            </div>
+          <div className="mx-auto w-full max-w-[520px] sm:max-w-[600px]">
             <button
               type="button"
               onClick={next}
-              className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5b21b6] to-[#7c3aed] text-sm font-bold text-white shadow-lg shadow-[#5b21b6]/30 transition hover:from-[#4c1d95] hover:to-[#6d28d9]"
+              disabled={!address.trim()}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5b21b6] to-[#7c3aed] text-sm font-bold text-white shadow-lg shadow-[#5b21b6]/30 transition hover:from-[#4c1d95] hover:to-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Continue
               <ArrowRight className="h-4 w-4" />
             </button>
+            <p className="mt-1.5 text-center text-[10px] font-semibold text-slate-400">
+              {activeTask.label} · {duration.label} · verified helper
+            </p>
           </div>
         </div>
       </div>
@@ -550,7 +530,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
         <div className={actionBar}>
           <div className="mx-auto flex w-full max-w-[520px] items-center gap-3 sm:max-w-[600px]">
             <div className="hidden text-[12px] font-semibold text-slate-500 sm:block">
-              Est. {inr(totals.total)}
+              No advance payment
             </div>
             <button
               type="button"
@@ -631,32 +611,11 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
             ))}
           </div>
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-bold text-[#1f1650]">Your Helper · Regular</p>
-                <p className="text-[11px] text-slate-500">
-                  {duration.label} · {helpers} {helpers === 1 ? 'helper' : 'helpers'}
-                </p>
-              </div>
-              <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
-                <Star className="h-3 w-3 fill-amber-500 text-amber-500" /> 4.8
-              </span>
-            </div>
-            <div className="mt-3 flex items-center justify-between rounded-xl bg-[#f8f7fc] px-3 py-2">
-              <span className="text-[12px] font-semibold text-slate-500">
-                {duration.hours}h × {helpers} helper{helpers > 1 ? 's' : ''}
-              </span>
-              <span className="text-[13px] font-bold text-[#1f1650]">{inr(totals.labour)}</span>
-            </div>
-            <div className="mt-2 flex items-center justify-between px-1">
-              <span className="text-[12px] font-semibold text-slate-500">Platform &amp; convenience</span>
-              <span className="text-[12px] font-semibold text-slate-600">{inr(PLATFORM_FEE + CONVENIENCE_FEE)}</span>
-            </div>
-            <div className="mt-2 flex items-center justify-between px-1">
-              <span className="text-[13px] font-bold text-[#1f1650]">Total</span>
-              <span className="text-[16px] font-black text-[#5b21b6]">{inr(totals.total)}</span>
-            </div>
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-[13px] font-black text-emerald-800">No advance payment</p>
+            <p className="mt-1 text-[11px] font-semibold leading-5 text-emerald-700">
+              Confirm the booking to see your helper&apos;s phone number. No online payment is collected.
+            </p>
           </div>
         </div>
 
@@ -699,80 +658,6 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
             <TrustRow icon={<Sparkles className="h-4 w-4" />} label="Quick & easy" />
           </div>
 
-          <div className="mt-4 rounded-2xl bg-gradient-to-br from-[#5b21b6] to-[#7c3aed] p-5 text-white shadow-lg">
-            <p className="text-[12px] font-semibold text-white/70">Total you pay</p>
-            <p className="text-[34px] font-black leading-none">{inr(totals.total)}</p>
-            <p className="mt-1 text-[12px] font-semibold text-white/70">
-              incl. taxes · {duration.label} · {helpers} {helpers === 1 ? 'helper' : 'helpers'}
-            </p>
-          </div>
-
-          <div className="mt-4">
-            <SectionCard
-              title="Price Breakdown"
-              action={
-                <button
-                  type="button"
-                  onClick={() => setShowBreakdown((v) => !v)}
-                  className="text-[12px] font-bold text-[#5b21b6]"
-                >
-                  {showBreakdown ? 'Hide' : 'View'} breakdown <ChevronDown className={`inline h-3.5 w-3.5 transition ${showBreakdown ? 'rotate-180' : ''}`} />
-                </button>
-              }
-            >
-              {showBreakdown && (
-                <div className="space-y-2">
-                  {[
-                    { label: `Helper time (${duration.hours}h × ${helpers})`, value: totals.labour },
-                    { label: 'Platform fee', value: PLATFORM_FEE },
-                    { label: 'Convenience fee', value: CONVENIENCE_FEE },
-                    ...(couponApplied ? [{ label: 'Coupon discount (10%)', value: -totals.discount }] : []),
-                    { label: 'Taxes (5%)', value: totals.tax },
-                  ].map((row) => (
-                    <div key={row.label} className="flex items-center justify-between text-[13px]">
-                      <span className="text-slate-500">{row.label}</span>
-                      <span className={`font-bold ${row.value < 0 ? 'text-emerald-600' : 'text-[#1f1650]'}`}>
-                        {row.value < 0 ? `-${inr(Math.abs(row.value))}` : inr(row.value)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-[14px]">
-                    <span className="font-bold text-[#1f1650]">Total</span>
-                    <span className="font-black text-[#5b21b6]">{inr(totals.total)}</span>
-                  </div>
-                </div>
-              )}
-            </SectionCard>
-          </div>
-
-          <div className="mt-4">
-            <SectionCard title="Apply Coupon Code">
-              <div className="flex gap-2">
-                <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3">
-                  <Ticket className="h-4 w-4 text-slate-400" />
-                  <input
-                    value={coupon}
-                    onChange={(e) => setCoupon(e.target.value.toUpperCase())}
-                    placeholder="Enter coupon code"
-                    className="w-full bg-transparent py-2.5 text-[13px] font-semibold outline-none"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCouponApplied(true)}
-                  className="rounded-xl bg-[#7c3aed] px-4 text-[13px] font-bold text-white"
-                >
-                  Apply
-                </button>
-              </div>
-              {couponApplied && (
-                <p className="mt-2 flex items-center gap-1.5 text-[12px] font-semibold text-emerald-600">
-                  <Check className="h-4 w-4" /> Coupon applied — 10% off
-                </p>
-              )}
-            </SectionCard>
-          </div>
-
           <div className="mt-4">
             <SectionCard title="Helper Details">
               <div className="flex items-center gap-3">
@@ -792,8 +677,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
           </div>
 
           <p className="mt-3 text-center text-[11px] leading-5 text-slate-400">
-            BookOurSpace is a product of LOHAS ONE Pvt. Ltd. · Payments are collected securely after service
-            confirmation.
+            No online payment is collected. Your helper&apos;s phone number is shown after confirmation.
           </p>
         </div>
 
@@ -805,7 +689,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
               className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5b21b6] to-[#7c3aed] text-sm font-bold text-white shadow-lg shadow-[#5b21b6]/30 transition hover:from-[#4c1d95] hover:to-[#6d28d9]"
             >
               <ShieldCheck className="h-4 w-4" />
-              Confirm &amp; Pay {inr(totals.total)}
+              Confirm Booking
             </button>
           </div>
         </div>
@@ -822,38 +706,50 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
           <BadgeCheck className="h-10 w-10 text-emerald-600" />
         </div>
         <h1 className="mt-5 text-[26px] font-black leading-[1.1] text-[#1f1650]">
-          We Find. We Connect.
+          Booking confirmed.
           <br />
-          <span className="text-[#7c3aed]">You Relax.</span>
+          <span className="text-[#7c3aed]">Call your helper.</span>
         </h1>
         <p className="mt-2 text-[13px] leading-5 text-slate-500">
-          Real-time tracking. Real-time trust. Total peace of mind.
+          Your helper is assigned. The phone number is ready below.
         </p>
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Booking confirmed</p>
-          <p className="mt-1 text-[16px] font-black text-[#1f1650]">BOS-{new Date().getFullYear()}-{Math.floor(1000 + Math.random() * 9000)}</p>
-          <div className="mt-3 space-y-2 text-[13px] text-slate-600">
-            <p className="flex items-center gap-2"><MapPin className="h-4 w-4 text-[#7c3aed]" /> {address || 'Your saved address'}</p>
-            <p className="flex items-center gap-2"><Clock className="h-4 w-4 text-[#7c3aed]" /> Helper arriving in ~10 minutes</p>
-            <p className="flex items-center gap-2"><Wallet className="h-4 w-4 text-[#7c3aed]" /> {inr(totals.total)} payable after service</p>
+          <p className="mt-1 text-[16px] font-black text-[#1f1650]">{bookingId}</p>
+
+          <div className="mt-4 flex items-center gap-3 rounded-xl bg-[#f8f7fc] p-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ede9fe] text-2xl">🧑‍🔧</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-black text-[#1f1650]">Ravi Kumar</p>
+              <p className="text-[10px] font-semibold text-slate-500">Verified Human Help partner</p>
+              <p className="mt-0.5 text-[10px] font-bold text-emerald-700">Ready to help you</p>
+            </div>
+          </div>
+
+          <p className="mt-4 text-[10px] font-black uppercase tracking-wide text-slate-400">Helper phone number</p>
+          <a href={BOS_CALL_HREF} className="mt-1 block text-[26px] font-black tracking-tight text-[#5b21b6]">
+            {BOS_CONTACT_PHONE}
+          </a>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <a href={BOS_CALL_HREF} className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-[12px] font-black text-white">
+              <Phone className="h-4 w-4" /> Call Helper
+            </a>
+            <a href={whatsappHref(`Hi, I am your BookOurSpace Human Help customer. Booking ${bookingId}.`)} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-emerald-600 bg-emerald-50 text-[12px] font-black text-emerald-700">
+              <MessageCircle className="h-4 w-4" /> WhatsApp
+            </a>
+          </div>
+
+          <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3 text-[11px] font-semibold text-slate-600">
+            <p className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 text-[#7c3aed]" /> {address || 'Your saved address'}</p>
+            <p className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-[#7c3aed]" /> {duration.label} · {activeTask.label}</p>
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          {[
-            { icon: <Navigation className="h-4 w-4" />, label: 'Live tracking' },
-            { icon: <Clock className="h-4 w-4" />, label: 'Real-time updates' },
-            { icon: <Headphones className="h-4 w-4" />, label: '24/7 support' },
-          ].map((item) => (
-            <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-3 text-center">
-              <span className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-[#f5f3ff] text-[#5b21b6]">
-                {item.icon}
-              </span>
-              <p className="mt-2 text-[11px] font-bold text-slate-600">{item.label}</p>
-            </div>
-          ))}
-        </div>
+        <p className="mt-3 text-[11px] font-semibold leading-5 text-slate-400">
+          No online payment was collected. No refund is needed.
+        </p>
 
         <div className="mt-6 flex gap-3">
           <button
@@ -873,7 +769,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
         </div>
 
         <p className="mt-6 text-[12px] font-semibold text-slate-400">
-          BookOurSpace Helper — Human help, on demand.
+          BookOurSpace Human Help — simple help, one call away.
         </p>
       </div>
     </div>

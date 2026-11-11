@@ -507,7 +507,7 @@ dbTest('browser: customer books, provider completes and records collection, Admi
         localStorage.setItem('bos_session_token_v1', value);
         localStorage.setItem('bos_entry_choice_v1', 'signed-in');
         localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
-        localStorage.setItem('bos_section_styles_v2', JSON.stringify({ pg: 'style2', stay: 'airbnb', services: 'old' }));
+        localStorage.setItem('bos_section_styles_v2', JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'old' }));
       } catch { /* storage unavailable */ }
     }, authToken);
     await context.route('**/*', async (route) => {

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('shared selected city reaches the PG Style 2 city filter', async ({ page }) => {
+test('shared selected city reaches the PG Style 3 page', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('bos_selected_location', JSON.stringify({
       state: 'Maharashtra',
@@ -22,9 +22,9 @@ test('shared selected city reaches the PG Style 2 city filter', async ({ page })
     await expect(sharedLocation).toContainText('Mumbai');
   }
   await header.getByTestId('market-section-pg_hostels').click();
-  await page.evaluate(() => { window.location.hash = 'pg/style2'; });
-  await expect(page.getByPlaceholder('Search Location')).toBeVisible();
-  await expect(page.getByLabel('PG city')).toHaveValue('Mumbai');
+  await page.evaluate(() => { window.location.hash = 'pg/style3'; });
+  await expect(page.locator('article[aria-label^="PG listing"]').first()).toBeVisible({ timeout: 30_000 });
+  await expect(sharedLocation).toContainText('Mumbai');
 });
 
 test('India location picker ranks names, aliases and PIN across modules', async ({ page }) => {

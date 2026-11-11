@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getPgStyle, saveStylePreference, styleFromHash, type PgStyle } from '../lib/sectionStyleSettings';
+import type { PgStyle } from '../lib/sectionStyleSettings';
 import {
   ArrowLeft,
   Check,
@@ -37,11 +37,11 @@ import { canContactOwner } from '../lib/servicesStayRules';
 import { useOwnerContact } from '../lib/useOwnerContact';
 import { FilterChip, Pagination, SafeImage, SkeletonGrid, StatePanel } from './sectionChrome';
 import { PgDekhoExperience } from './PGDekhoExperience';
-import { SectionStyleTabs, type SectionStyleNumber } from './sectionStyle/SectionStyleTabs';
 import { PGListingCard } from './pg/PGListingCard';
 import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 import { DEMO_PG_LISTINGS } from '../data/demoPgListings';
-import { StyleThreeList } from './sectionStyle/StyleThreeList';
+import { PgStyleThreeCards } from './pg/PgStyleThreeCards';
+import { PgStyleThreeDetail } from './pg/PgStyleThreeDetail';
 import { PgBookingPanel } from './PgBookingPanel';
 
 interface PGSectionExperienceProps {
@@ -56,6 +56,10 @@ interface PGSectionExperienceProps {
   inline?: boolean;
   /** Centrally published Style 1/2/3 choice. */
   style?: PgStyle;
+  /** Header category selection (`all` shows everything). */
+  selectedCategory?: string;
+  /** Header subcategory selection (`all` shows everything). */
+  selectedSubcategory?: string;
 }
 
 const GENDER_TABS: Array<{ value: PgGenderFilter; label: string }> = [
@@ -116,7 +120,7 @@ function DetailList({ title, rows }: { title: string; rows: Array<{ label: strin
   );
 }
 
-export function PGSectionExperience({ listings, isLoading = false, moduleLabel, moduleHeadline, onClose, inline = false, selectedCity, style }: PGSectionExperienceProps) {
+export function PGSectionExperience({ listings, isLoading = false, moduleLabel, moduleHeadline, onClose, inline = false, selectedCity, style, selectedCategory = 'all', selectedSubcategory = 'all' }: PGSectionExperienceProps) {
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [gender, setGender] = useState<PgGenderFilter>('all');
@@ -137,35 +141,10 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<PgCard | null>(null);
-  const [experienceTab, setExperienceTab] = useState<'old' | 'pgdekho' | 'style3'>(() => {
-    const routeStyle = styleFromHash('pg');
-    if (routeStyle === '1' || routeStyle === 'style1' || routeStyle === 'old') return 'old';
-    if (routeStyle === '2' || routeStyle === 'style2' || routeStyle === 'pgdekho') return 'pgdekho';
-    if (routeStyle === '3' || routeStyle === 'style3' || routeStyle === 'pgstyle3') return 'style3';
-    if (style === 'style3') return 'style3';
-    if (style === 'style2') return 'pgdekho';
-    if (style === 'style1') return 'old';
-    if (getPgStyle() === 'style3') return 'style3';
-    return getPgStyle() === 'style2' ? 'pgdekho' : 'old';
-  });
+  const [style3StartTab, setStyle3StartTab] = useState<'about' | 'owner'>('about');
+  // PG is locked to Style 3 by product decision.
+  const [experienceTab] = useState<'old' | 'pgdekho' | 'style3'>('style3');
   const owner = useOwnerContact('pg');
-
-  useEffect(() => {
-    const onHash = () => {
-      const routeStyle = styleFromHash('pg');
-      if (routeStyle === '1' || routeStyle === 'style1' || routeStyle === 'old') setExperienceTab('old');
-      else if (routeStyle === '2' || routeStyle === 'style2' || routeStyle === 'pgdekho') setExperienceTab('pgdekho');
-      else if (routeStyle === '3' || routeStyle === 'style3' || routeStyle === 'pgstyle3') setExperienceTab('style3');
-    };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-
-  // Centrally published style changes apply without a reload.
-  useEffect(() => {
-    if (!style || styleFromHash('pg')) return;
-    setExperienceTab(style === 'style3' ? 'style3' : style === 'style2' ? 'pgdekho' : 'old');
-  }, [style]);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(queryInput), 250);
@@ -191,10 +170,26 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
   // Demo mode guarantees enough PG cards for every style (>= 10 on page one),
   // without changing production inventory.
   const allListings = useMemo(() => {
-    if (!DEMO_DATA_ENABLED) return listings;
-    const existing = new Set(listings.map((listing) => listing.id));
-    return [...listings, ...DEMO_PG_LISTINGS.filter((listing) => !existing.has(listing.id))];
-  }, [listings]);
+    const existing = new Set(listings.map((item) => item.id));
+    const combined = DEMO_DATA_ENABLED
+      ? [...listings, ...DEMO_PG_LISTINGS.filter((listing) => !existing.has(listing.id))]
+      : listings;
+    const categoryId = String(selectedCategory || 'all');
+    const subcategory = String(selectedSubcategory || 'all').trim().toLowerCase();
+    return combined.filter((listing) => {
+      if (categoryId !== 'all' && listing.categoryId !== categoryId) return false;
+      if (subcategory !== 'all') {
+        const haystack = [
+          listing.subcategory,
+          listing.title,
+          String(listing.customFieldValues?.propertyType || ''),
+          String(listing.customFieldValues?.category || ''),
+        ].join(' ').toLowerCase();
+        if (!haystack.includes(subcategory)) return false;
+      }
+      return true;
+    });
+  }, [listings, selectedCategory, selectedSubcategory]);
 
   const cards = useMemo(
     () => allListings.filter(isPgListing).filter((listing) => listing.status === 'active').map(parsePgListing),
@@ -256,8 +251,9 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
     setKind('any');
   };
 
-  const openDetails = (card: PgCard) => {
+  const openDetails = (card: PgCard, startTab: 'about' | 'owner' = 'about') => {
     setSelected(card);
+    setStyle3StartTab(startTab);
     void owner.open(card.id);
   };
 
@@ -269,18 +265,10 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
       ? 'Owner contact is disabled for this service right now.'
       : owner.message;
 
-  const changePgStyle = (value: SectionStyleNumber) => {
-    const next = value === 1 ? 'old' : value === 2 ? 'pgdekho' : 'style3';
-    saveStylePreference('pg', next === 'old' ? 'style1' : next === 'pgdekho' ? 'style2' : 'style3');
-    setExperienceTab(next);
-    window.location.hash = `pg/${value === 1 ? 'style1' : value === 2 ? 'style2' : 'style3'}`;
-  };
-
   if (experienceTab === 'pgdekho') {
     return (
       <>
-        <SectionStyleTabs active={2} onChange={changePgStyle} label="PG display style" className="border-b border-slate-200 bg-white" />
-        <PgDekhoExperience inline={inline} showTabBar={false} listings={allListings} selectedCity={selectedCity} onClose={onClose} onSwitchToOld={() => { setExperienceTab('old'); window.location.hash = 'pg/style1'; }} />
+        <PgDekhoExperience inline={inline} showTabBar={false} listings={allListings} selectedCity={selectedCity} onClose={onClose} onSwitchToOld={() => undefined} />
       </>
     );
   }
@@ -326,13 +314,6 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
           </span>
         </div>
       </header>
-
-      <SectionStyleTabs
-        active={experienceTab === 'old' ? 1 : 3}
-        onChange={changePgStyle}
-        label="PG display style"
-        className="border-b border-slate-200 bg-white"
-      />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 pt-8 sm:px-6">
         <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-purple-50 to-white p-6 sm:p-9 dark:from-violet-950/40 dark:via-purple-950/30 dark:to-slate-950">
@@ -528,19 +509,10 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
             />
           )}
           {experienceTab === 'style3' && state === 'results' && (
-            <StyleThreeList
-              label="PGs style 3 list"
-              items={visible.map((card) => ({
-                id: card.id,
-                title: card.title,
-                subtitle: [pgGenderLabel(card.gender), [card.locality, card.city].filter(Boolean).join(', ')].filter(Boolean).join(' · '),
-                meta: [card.sharingText, card.food, card.acText].filter(Boolean).join(' · '),
-                price: [formatInr(card.rentRupees), card.rentRupees !== null ? card.rentUnit : null].filter(Boolean).join(' ') || 'Rent on request',
-                image: card.photo,
-                badge: card.verified ? 'Verified' : undefined,
-                onClick: () => openDetails(card),
-              }))}
-              emptyLabel="No PGs match these filters."
+            <PgStyleThreeCards
+              cards={visible}
+              onOpen={(card) => openDetails(card)}
+              onCall={(card) => openDetails(card, 'owner')}
             />
           )}
           {state === 'results' && experienceTab !== 'style3' && (
@@ -560,7 +532,7 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
         <Pagination page={safePage} totalPages={totalPages} onChange={setPage} tone="emerald" />
       </main>
 
-      {selected && (
+      {selected && experienceTab !== 'style3' && (
         <div className="fixed inset-0 z-[72] overflow-y-auto bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="pg-detail-title">
           <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="mx-auto flex max-w-4xl items-center gap-3">
@@ -704,6 +676,20 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
             </div>
           </div>
         </div>
+      )}
+      {selected && experienceTab === 'style3' && (
+        <PgStyleThreeDetail
+          card={selected}
+          initialTab={style3StartTab}
+          onClose={() => setSelected(null)}
+          canCall={canCall}
+          canWhatsapp={canWhatsapp}
+          ownerBusy={owner.busy}
+          ownerState={owner.state}
+          contactNote={contactNote}
+          onCall={() => void owner.contact('call')}
+          onWhatsapp={() => void owner.contact('whatsapp')}
+        />
       )}
     </div>
   );
