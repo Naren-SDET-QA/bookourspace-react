@@ -12,12 +12,12 @@ import {
   type StayBookingRow,
 } from '../../lib/stayCheckoutClient';
 import { buildAuthHeaders } from '../../lib/supabaseClient';
+import { indiaTodayIso } from '../../lib/indiaDate';
 import { loadRazorpayScript } from '../../utils/razorpayLoader';
 import { StayReceiptModal } from './StayReceiptModal';
 
 function todayIso(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return indiaTodayIso();
 }
 
 function stayPhase(booking: StayBookingRow): { label: string; tone: string } {
