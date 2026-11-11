@@ -34,7 +34,8 @@
     "cap:open:ios": "cap open ios",
     "cap:android:debug": "npm run build && cap sync android && cd android && ./gradlew assembleDebug",
     "cap:ios:debug": "npm run build && cap sync ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test:realtime": "bash supabase/tests/run_local_supabase_realtime_e2e.sh"
   },
   "dependencies": {
     "@capacitor/android": "8.6.0",

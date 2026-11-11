@@ -65,7 +65,9 @@ test('GPS rate limit and tiny payloads protect Realtime and database quotas', ()
   assert.match(migration, /interval '5 seconds'/);
   assert.match(migration, /TRACKING_UPDATE_TOO_FREQUENT/);
   assert.match(tracking, /TRACKING_UPDATE_INTERVAL_MS = 12_000/);
-  assert.match(client, /5_000/);
+  assert.match(tracking, /return 5_000/);
+  assert.match(tracking, /return 8_000/);
+  assert.match(client, /return \(\) => \{\}/);
   assert.match(client, /supabase_realtime|postgres_changes/);
   assert.ok(PRO.realtimeMaxMessageBytes >= 1024 * 1024);
 });

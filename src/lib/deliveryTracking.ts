@@ -142,3 +142,32 @@ export function trackingStatusLabel(status: DeliveryStatus): string {
     case 'rejected': return 'Rejected';
   }
 }
+
+export interface TrackingPollState {
+  online: boolean;
+  visible: boolean;
+  status: DeliveryStatus;
+  trackingEnabled: boolean;
+  hasLocation: boolean;
+  capturedAt?: string | null;
+  /** Supabase Realtime is the primary transport when configured. */
+  realtime: boolean;
+  now?: number;
+}
+
+/**
+ * Adaptive fallback cadence. Realtime remains primary; this runner only reads
+ * the server snapshot. It stops for terminal/inactive tracking and backs off
+ * when the tab is hidden or offline, so a fallback deployment does not keep
+ * polling forever.
+ */
+export function nextTrackingPollDelay(input: TrackingPollState): number | null {
+  if (!input.trackingEnabled || isTerminalDeliveryStatus(input.status)) return null;
+  if (!input.online) return 30_000;
+  if (!input.visible) return 30_000;
+  if (input.realtime) return 60_000;
+  if (!input.hasLocation) return 4_000;
+  const stale = isLocationStale(input.capturedAt || 0, input.now ?? Date.now());
+  if (stale) return 5_000;
+  return 8_000;
+}

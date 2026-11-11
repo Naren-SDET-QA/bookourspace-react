@@ -296,7 +296,7 @@ try {
   const search = applicantPage.locator('#pg-search');
   await search.waitFor({ timeout: 20_000 });
   await search.fill(listingTitle);
-  await applicantPage.getByRole('button', { name: `View details for ${listingTitle}` }).click();
+  await applicantPage.getByRole('article', { name: `PG listing ${listingTitle}` }).getByRole('button', { name: 'View', exact: true }).click();
   const detail = applicantPage.getByRole('region', { name: 'PG availability and booking' });
   await detail.waitFor();
   const inventoryEditor = detail.locator('details').filter({ has: applicantPage.getByText('Manage room and bed inventory') });
@@ -335,8 +335,8 @@ try {
   }
   assert.ok(customerListing, `approved listing missing from customer PostgreSQL feed: ${JSON.stringify(customerFeed.body?.listings?.map((listing) => ({ id: listing.id, title: listing.title, status: listing.status, categoryId: listing.categoryId })))}`);
   await customerPage.locator('#pg-search').fill(listingTitle);
-  await customerPage.getByRole('button', { name: `View details for ${listingTitle}` }).waitFor({ timeout: 20_000 });
-  await customerPage.getByRole('button', { name: `View details for ${listingTitle}` }).click();
+  await customerPage.getByRole('article', { name: `PG listing ${listingTitle}` }).waitFor({ timeout: 20_000 });
+  await customerPage.getByRole('article', { name: `PG listing ${listingTitle}` }).getByRole('button', { name: 'View', exact: true }).click();
   const customerDetail = customerPage.getByRole('region', { name: 'PG availability and booking' });
   await customerDetail.waitFor();
   await customerPage.getByLabel('Move-in date').fill(futureDate(20));
@@ -346,8 +346,9 @@ try {
   await customerDetail.getByRole('status').filter({ hasText: /Reservation .* confirmed/ }).waitFor({ timeout: 20_000 });
   await customerPage.getByRole('button', { name: 'Pay at the property' }).click();
   await customerPage.getByRole('status').filter({ hasText: 'does not collect or verify this payment' }).waitFor({ timeout: 10_000 });
-  await customerPage.getByRole('dialog').getByRole('button', { name: 'All PGs', exact: true }).click();
-  await customerPage.getByRole('navigation', { name: 'Bottom Navigation' }).getByRole('button').nth(2).click();
+  await customerPage.keyboard.press('Escape');
+  await customerPage.waitForTimeout(300);
+  await customerPage.getByRole('navigation', { name: 'Bottom Navigation' }).getByRole('button', { name: 'My Bookings' }).click();
   const bookings = customerPage.getByRole('region', { name: 'PG bookings' });
   const reservation = bookings.locator('article').filter({ hasText: listingTitle });
   await reservation.waitFor({ timeout: 15_000 });
@@ -364,7 +365,7 @@ try {
 
   await customerPage.goto(`${uiUrl}/#pg/style1`, { waitUntil: 'domcontentloaded' });
   await customerPage.locator('#pg-search').fill(listingTitle);
-  await customerPage.getByRole('button', { name: `View details for ${listingTitle}` }).click();
+  await customerPage.getByRole('article', { name: `PG listing ${listingTitle}` }).getByRole('button', { name: 'View', exact: true }).click();
   const availability = customerPage.getByRole('region', { name: 'PG availability and booking' });
   await customerPage.getByLabel('Move-in date').fill(futureDate(20));
   await customerPage.getByRole('button', { name: 'Check live availability' }).click();

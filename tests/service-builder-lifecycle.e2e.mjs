@@ -1121,6 +1121,10 @@ dbTest('browser: real device GPS, server OTP, polling fallback and delivery conf
     const trackingPanel = customerPage.getByRole('dialog', { name: 'Live delivery tracking' });
     await expect(trackingPanel.getByRole('button', { name: 'Generate single-use OTP' })).toBeVisible({ timeout: 15_000 });
     await expect(trackingPanel).not.toContainText('Last GPS waiting', { timeout: 15_000 });
+    await customerBrowser.context.setOffline(true);
+    await expect(trackingPanel.getByText(/You are offline/)).toBeVisible({ timeout: 8_000 });
+    await customerBrowser.context.setOffline(false);
+    await expect(trackingPanel.getByText(/You are offline/)).toBeHidden({ timeout: 8_000 });
     await trackingPanel.getByRole('button', { name: 'Generate single-use OTP' }).click();
     const otpLocator = trackingPanel.getByText(/^\d{6}$/);
     await expect(otpLocator).toBeVisible({ timeout: 10_000 });
@@ -1155,6 +1159,69 @@ dbTest('browser: real device GPS, server OTP, polling fallback and delivery conf
     assert.deepEqual(browserErrors, [], 'mobile GPS/OTP journey should not raise uncaught page errors');
   } finally {
     for (const context of contexts) await context.close();
+    await browser.close();
+  }
+});
+
+
+dbTest('browser: denied GPS permission is reported and never invents a location', async () => {
+  const booking = await request('POST', '/api/services/bookings', customerToken, {
+    idempotencyKey: randomUUID(),
+    listingId: listings.groceries,
+    categoryConfigId: 'groceries_delivery',
+    scheduledDate: targetDate(6),
+    timeSlot: '14:00',
+    serviceAddress: 'Flat 801, Kondapur, Hyderabad',
+    customerPhone: '+91 90000 00010',
+    paymentMode: 'pay_after_service',
+    deliveryMode: 'home_delivery',
+    quantity: 1,
+    fieldValues: {
+      basketSize: 'Small (up to 10 items)',
+      substitutions: 'Allow similar substitutions',
+    },
+  });
+  assert.equal(booking.status, 201, JSON.stringify(booking.data));
+  const bookingRef = booking.data.booking.bookingRef;
+  const bookingId = booking.data.booking.id;
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'accept' })).status, 200);
+  assert.equal((await request('POST', `/api/services/bookings/${bookingId}/actions`, groceriesToken, { action: 'start' })).status, 200);
+
+  const browser = await chromium.launch();
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+  try {
+    await context.addInitScript((value) => {
+      try {
+        localStorage.setItem('bos_session_token_v1', value);
+        localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
+        localStorage.setItem('bos_section_styles_v2', JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'old' }));
+      } catch { /* storage unavailable */ }
+    }, groceriesToken);
+    await context.route('**/*', async (route) => {
+      try {
+        if (new URL(route.request().url()).origin === serverUrl) await route.continue();
+        else await route.abort('blockedbyclient');
+      } catch { /* page closed */ }
+    });
+    const page = await context.newPage();
+    await page.goto(`${serverUrl}/#services/old`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'My service jobs' })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'My service jobs' }).click();
+    const job = page.locator('article').filter({ hasText: bookingRef });
+    await expect(job.getByRole('button', { name: 'Share live GPS' })).toBeVisible();
+    await job.getByRole('button', { name: 'Share live GPS' }).click();
+    const publisher = page.getByRole('dialog', { name: 'Helper live location sharing' });
+    await expect(publisher.getByRole('button', { name: 'Share live location' })).toBeVisible({ timeout: 15_000 });
+    await publisher.getByRole('button', { name: 'Share live location' }).click();
+    await expect(publisher).toContainText(/Permission denied/, { timeout: 10_000 });
+    const stored = await pool.query(
+      'select count(*)::int as count from public.service_tracking_locations where booking_id = $1',
+      [bookingId],
+    );
+    assert.equal(stored.rows[0].count, 0, 'denied GPS permission must not create a location row');
+  } finally {
+    await context.close();
     await browser.close();
   }
 });

@@ -11,6 +11,7 @@ import {
   isLocationStale,
   isValidCoordinate,
   isTerminalDeliveryStatus,
+  nextTrackingPollDelay,
   normalizeOtp,
   trackingStatusLabel,
 } from '../src/lib/deliveryTracking.ts';
@@ -58,6 +59,22 @@ test('OTP generation is customer-only, single-use and prescription gated', () =>
   assert.equal(canCreateDeliveryOtp({ actorId: 'h', customerId: 'c', status: 'accepted', trackingEnabled: true, requiresPrescription: false, prescriptionStatus: 'not_required' }), false);
 });
 
+test('adaptive fallback polling stops for inactive tracking and backs off offline/hidden', () => {
+  const base = {
+    online: true, visible: true, status: 'in_progress', trackingEnabled: true,
+    hasLocation: true, capturedAt: new Date().toISOString(), realtime: false,
+  };
+  assert.equal(nextTrackingPollDelay({ ...base, status: 'completed' }), null);
+  assert.equal(nextTrackingPollDelay({ ...base, status: 'cancelled' }), null);
+  assert.equal(nextTrackingPollDelay({ ...base, trackingEnabled: false }), null);
+  assert.equal(nextTrackingPollDelay({ ...base, online: false }), 30_000);
+  assert.equal(nextTrackingPollDelay({ ...base, visible: false }), 30_000);
+  assert.equal(nextTrackingPollDelay({ ...base, realtime: true }), 60_000);
+  assert.equal(nextTrackingPollDelay({ ...base, hasLocation: false, capturedAt: null }), 4_000);
+  assert.equal(nextTrackingPollDelay({ ...base, capturedAt: new Date(Date.now() - 120_000).toISOString() }), 5_000);
+  assert.equal(nextTrackingPollDelay(base), 8_000);
+});
+
 test('tracking migration is additive and secures RLS, OTP and realtime', () => {
   const migration = source('supabase/migrations/20261111190000_universal_delivery_tracking.sql');
   assert.match(migration, /service_tracking_locations/);
@@ -99,6 +116,7 @@ test('customer and provider booking surfaces expose real tracking entry points',
   const customer = source('src/components/ServiceCustomerBookings.tsx');
   const provider = source('src/components/ServiceOperationsWorkspace.tsx');
   assert.match(customer, /DeliveryTrackingPanel/);
+  assert.match(source('src/components/tracking/DeliveryTrackingPanel.tsx'), /You are offline/);
   assert.match(customer, /Track live/);
   assert.match(provider, /HelperTrackingPublisher/);
   assert.match(provider, /Share live GPS/);

@@ -39,6 +39,8 @@ export interface DeliveryTrackingSnapshot {
   events: TrackingEvent[];
 }
 
+export const hasRealtimeTransport = Boolean(supabase);
+
 const configured = () => {
   if (!supabase) throw new Error('SUPABASE_UNAVAILABLE');
   return supabase;
@@ -267,11 +269,9 @@ export function subscribeToDeliveryTracking(
   onStatus?: (status: string) => void,
 ): () => void {
   if (!supabase) {
-    // Local/self-hosted browsers without the Supabase Realtime client still get
-    // live status and GPS through a short server poll. Hosted deployments keep
-    // the Realtime channel below.
-    const timer = window.setInterval(onChange, 5_000);
-    return () => window.clearInterval(timer);
+    // The adaptive server poll in useDeliveryTracking is the fallback. Do not
+    // create a second fixed timer here; that would double database reads.
+    return () => {};
   }
   const client = configured();
   const channel = client

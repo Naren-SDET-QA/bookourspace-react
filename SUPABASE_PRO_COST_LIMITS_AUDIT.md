@@ -63,6 +63,26 @@ Database/storage estimate:
 - Egress is dominated by listing/media delivery (Smart CDN/cached egress), not GPS;
   map tiles are requested from OpenStreetMap, not Supabase.
 
+## Adaptive polling fallback (2026-11-11 audit)
+
+The fixed 5-second fallback was replaced with `nextTrackingPollDelay`:
+
+| State | Poll delay |
+|---|---:|
+| Terminal or tracking disabled | **none** |
+| Offline | 30 s |
+| Tab hidden | 30 s |
+| Supabase Realtime configured | 60 s safety read only |
+| Waiting for first GPS point | 4 s |
+| Stale GPS point | 5 s |
+| Live, fresh GPS point | 8 s |
+
+The fallback reads the app server API, not Supabase Realtime, so it does not consume
+the 5M Realtime message quota. Polling stops entirely once tracking is inactive, and
+the Realtime channel is dropped at the same point. At ~250 simultaneous tracked
+deliveries this removes the duplicate fixed interval and eliminates background polling
+after completion.
+
 ## Mitigations already in the repository
 
 1. **Server rate guard** rejects more than one GPS row per booking per 5 seconds
@@ -74,6 +94,10 @@ Database/storage estimate:
 4. **Payloads are tiny** (coordinates + accuracy + timestamp), far below the 3 MB message cap.
 5. **No image/document bytes in Realtime**; documents use private Storage references.
 6. **Pro spend caps stay enabled by default**; no automatic overage spend is introduced.
+7. **Private booking-document upload is scoped to the authenticated user’s own path**;
+   reads remain owner/Super-Admin only, and the bucket keeps its 25 MB per-file limit.
+   A malicious direct uploader is still bounded by the 100 GB Pro storage quota; a
+   future signed-upload endpoint can add a per-booking quota if abuse is observed.
 
 ## Verdict
 

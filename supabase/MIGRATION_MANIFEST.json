@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 75,
+  "migrationCount": 76,
   "migrations": [
     {
       "order": 2,
@@ -614,6 +614,14 @@
       "file": "supabase/migrations/20261111200000_dynamic_service_category_builder.sql",
       "bytes": 85321,
       "sha256": "e9dd007b7207194f275915dba5a3a8f6859c4c38b80e13886fea21a7e1620ec4"
+    },
+    {
+      "order": 77,
+      "version": "20261111210000",
+      "name": "service_document_storage_access",
+      "file": "supabase/migrations/20261111210000_service_document_storage_access.sql",
+      "bytes": 1825,
+      "sha256": "bc14451da077e9f5868f5a42f6a8ac8ce94ef194396c01bb498401754e88434e"
     }
   ],
   "review": {

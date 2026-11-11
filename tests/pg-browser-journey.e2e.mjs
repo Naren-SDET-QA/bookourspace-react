@@ -116,7 +116,7 @@ try {
     // -------------------------------------------------- signed-out discovery
     const detailsButton = page
       .getByRole('article', { name: `PG listing ${listingTitle}` })
-      .getByRole('button', { name: 'View & book' });
+      .getByRole('button', { name: /^(View & book|View)$/ });
     const listed = await detailsButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the approved PG listing is rendered in the discovery feed`, listed);
     if (!listed) {
@@ -171,7 +171,7 @@ try {
 
     const signedInButton = page
       .getByRole('article', { name: `PG listing ${listingTitle}` })
-      .getByRole('button', { name: 'View & book' });
+      .getByRole('button', { name: /^(View & book|View)$/ });
     const signedInListed = await signedInButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the signed-in customer still sees the listing`, signedInListed);
     if (signedInListed) {

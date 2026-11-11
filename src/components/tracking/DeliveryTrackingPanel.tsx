@@ -15,7 +15,7 @@ function ageLabel(capturedAt: string | undefined, now = Date.now()): string {
 }
 
 export function DeliveryTrackingPanel({ bookingId, onClose }: { bookingId: string; onClose: () => void }) {
-  const { snapshot, loading, error, stale, live, refresh } = useDeliveryTracking(bookingId);
+  const { snapshot, loading, error, stale, live, online, refresh } = useDeliveryTracking(bookingId);
   const [otp, setOtp] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState('');
@@ -65,6 +65,11 @@ export function DeliveryTrackingPanel({ bookingId, onClose }: { bookingId: strin
           {error && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
               Tracking unavailable: {error}. No location is shown unless the assigned helper publishes real device GPS.
+            </div>
+          )}
+          {!online && (
+            <div role="status" className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-[11px] font-semibold text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200">
+              You are offline. Live updates are paused; the last known status stays visible and polling resumes when the connection returns.
             </div>
           )}
 
