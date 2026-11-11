@@ -1,8 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import SafeImage from './SafeImage';
 import * as d3 from 'd3';
 import { 
-  PlusCircle, 
   Eye, 
   MessageSquare, 
   Sparkles, 
@@ -32,6 +31,7 @@ interface ProviderDashboardProps {
   onOpenPaymentModal: (planName: string, amount: number) => void;
   onOpenChatWithCustomer: (customerId: string, customerName: string, listingTitle: string) => void;
   onSwitchToAdminReview?: () => void;
+  onSwitchToMarketplace?: () => void;
   currentLang?: AppLanguage;
 }
 
@@ -40,6 +40,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   onOpenPaymentModal,
   onOpenChatWithCustomer,
   onSwitchToAdminReview,
+  onSwitchToMarketplace,
   currentLang = 'en',
 }) => {
   const { listings, enquiries, bookings, postingPlans, deleteListing, toggleFeaturedListing, supabaseProfile } = useMarketplace();
@@ -63,7 +64,11 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
-  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory'>('listings');
+  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory'>('pg_inventory');
+
+  useEffect(() => {
+    setActiveSubTab('pg_inventory');
+  }, []);
 
   // D3 Chart Computations for Analytics & Performance Tab
   const d3Analytics = useMemo(() => {
@@ -148,66 +153,6 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-24">
-      {/* Top Provider Hero Card */}
-      <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-3xl p-5 sm:p-7 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <SafeImage category="general"
-            src={supabaseProfile?.avatar_url || '/assets/optimized/profile-avatar-256.webp'}
-            alt={supabaseProfile?.full_name ? `${supabaseProfile.full_name} profile photo` : 'Provider profile photo'}
-            className="w-16 h-16 rounded-2xl object-cover ring-2 ring-emerald-400 bg-slate-800"
-          />
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xl sm:text-2xl font-black">
-                {loc('Provider & Seller Hub', 'ప్రొవైడర్ & సెల్లర్ హబ్', 'प्रोवाइडर और सेलर हब')}
-              </h2>
-              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{loc('PROVIDER ACCOUNT', 'ప్రొవైడర్ ఖాతా', 'प्रोवाइडर खाता')}</span>
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-emerald-200/80 mt-0.5">
-              {loc(
-                'Submit provider requests & listings. Once Admin reviews and approves, your listing goes live in the application!',
-                'ప్రొవైడర్ దరఖాస్తులు & లిస్టింగ్‌లను సమర్పించండి. అడ్మిన్ ఆమోదించిన వెంటనే మీ లిస్టింగ్ యాప్‌లో కనిపిస్తుంది!',
-                'प्रोवाइडर अनुरोध और लिस्टिंग जमा करें। एडमिन की मंजूरी के तुरंत बाद आपकी लिस्टिंग ऐप में लाइव हो जाएगी!'
-              )}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {pendingListings.length > 0 && onSwitchToAdminReview && (
-            <button
-              onClick={onSwitchToAdminReview}
-              className="py-2.5 px-4 bg-white/15 hover:bg-white/25 text-amber-300 border border-amber-400/40 font-black text-xs sm:text-sm rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>
-                {loc(
-                  `🛡️ Admin Review Queue (${pendingListings.length})`,
-                  `🛡️ అడ్మిన్ పరిశీలన జాబితా (${pendingListings.length})`,
-                  `🛡️ एडमिन समीक्षा कतार (${pendingListings.length})`
-                )}
-              </span>
-            </button>
-          )}
-          <button
-            onClick={onOpenPostWizard}
-            className="py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-md flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>
-              {loc(
-                '+ Register as Provider & Submit Listing Request',
-                '+ ప్రొవైడర్‌గా నమోదు & లిస్టింగ్ దరఖాస్తు సమర్పణ',
-                '+ प्रोवाइडर के रूप में पंजीकरण करें और लिस्टिंग अनुरोध भेजें'
-              )}
-            </span>
-          </button>
-        </div>
-      </div>
-
       {/* Pending Admin Approval Alert Banner (Display only for Admin) */}
       {pendingListings.length > 0 && onSwitchToAdminReview && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-700 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -312,7 +257,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           data-testid="provider-pg-inventory-tab"
         >
           <BedDouble className="w-4 h-4 text-violet-600" />
-          <span>PG &amp; Hostel Inventory</span>
+          <span>PG Owner Dashboard</span>
         </button>
 
         <button
@@ -646,7 +591,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {activeSubTab === 'stays' && <HostStayWorkspace />}
 
-      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace />}
+      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
 
       {/* --- SUBTAB 1: MY LISTINGS --- */}
       {activeSubTab === 'listings' && (

@@ -2929,6 +2929,18 @@ Task:
                from public.profiles p
               where p.account_status = 'active'
                 and (case when $1 = 'admin' then (p.is_super_admin is true or p.role = 'admin') else p.role = $1 end)
+                and (
+                  $1 <> 'provider'
+                  or exists (
+                    select 1
+                      from public.listings l
+                     where l.owner_id = p.id
+                       and (
+                         lower(coalesce(l.category_id, '')) like 'pg-%'
+                         or lower(coalesce(l.entity_type, '')) like '%pg%'
+                       )
+                  )
+                )
               order by (p.is_super_admin is true) desc, p.created_at asc
               limit 1`,
             [role],

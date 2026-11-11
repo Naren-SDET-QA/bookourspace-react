@@ -243,11 +243,11 @@ function PgDateBlocks({ listingId, rooms, onChanged }: { listingId: string; room
     finally { setBusy(false); }
   }
 
-  return <section aria-label="Block PG bed dates" className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900 dark:bg-amber-950/20">
-    <h4 className="font-bold text-slate-900 dark:text-slate-100">Block bed dates</h4>
+  return <details aria-label="Block PG bed dates" className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+    <summary className="cursor-pointer list-none font-bold text-slate-900 marker:hidden dark:text-slate-100">Block bed dates <span className="ml-2 text-xs font-semibold text-amber-700 dark:text-amber-300">Expand / close</span></summary>
     <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Unavailable dates are stored in PostgreSQL. End date is exclusive. A block cannot overlap an existing reservation or another active block.</p>
     {error && <p role="alert" className="mt-2 text-xs text-rose-700 dark:text-rose-300">{error.replaceAll('_', ' ').toLowerCase()}</p>}
-    <form className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5" onSubmit={(event) => void create(event)}>
+    <form className="mt-3 grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))' }} onSubmit={(event) => void create(event)}>
       <label className="grid gap-1 text-xs font-semibold">Bed
         <select aria-label="Bed to block" required value={unitId} onChange={(event) => setUnitId(event.target.value)} className="min-h-10 rounded-xl border border-slate-300 bg-white px-2 text-sm dark:bg-slate-900" disabled={!beds.length}>
           {beds.map((bed) => <option key={bed.id} value={bed.id}>{bed.roomName} · {bed.label}</option>)}
@@ -265,7 +265,7 @@ function PgDateBlocks({ listingId, rooms, onChanged }: { listingId: string; room
       </li>)}
       {blocks.length === 0 && <li className="text-xs text-slate-500">No active date blocks.</li>}
     </ul>
-  </section>;
+  </details>;
 }
 
 /**
