@@ -36,7 +36,8 @@ as samples and must never be treated as inventory.
 
 ```bash
 npm install
-npm run dev:local   # starts the bundled local PostgreSQL workflow
+npm run dev          # frontend/compatibility preview; PostgreSQL is optional outside production
+npm run dev:local    # starts the bundled local PostgreSQL workflow
 npm run lint
 npm run build
 npm test            # unit/API tests

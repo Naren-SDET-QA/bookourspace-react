@@ -96,6 +96,7 @@ import {
   AuthoritativeGoogleUser,
   setStoredAuthoritativeSession,
   authenticateWithGoogleServer,
+  authenticateWithEmailOtpServer,
   signInWithSupabaseGoogleOAuth,
   fetchGoogleOAuthConfig,
   fetchCurrentAuthSession,
@@ -469,18 +470,23 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (inFlight?.accessToken === accessToken) {
       return inFlight.promise;
     }
-    const promise = authenticateWithGoogleServer({
-      accessToken: session.access_token,
-      email: session.user.email,
-      name:
-        session.user.user_metadata?.full_name ||
-        session.user.user_metadata?.name,
-      googleSub: session.user.user_metadata?.sub || session.user.id,
-      avatarUrl:
-        session.user.user_metadata?.avatar_url ||
-        session.user.user_metadata?.picture,
-      allowRoleChange: false,
-    }).then((result) => {
+    const isEmailOtp = session.user.app_metadata?.provider === 'email'
+      || session.user.identities?.some((identity) => identity.provider === 'email');
+    const authPromise = isEmailOtp
+      ? authenticateWithEmailOtpServer(session.access_token)
+      : authenticateWithGoogleServer({
+        accessToken: session.access_token,
+        email: session.user.email,
+        name:
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name,
+        googleSub: session.user.user_metadata?.sub || session.user.id,
+        avatarUrl:
+          session.user.user_metadata?.avatar_url ||
+          session.user.user_metadata?.picture,
+        allowRoleChange: false,
+      });
+    const promise = authPromise.then((result) => {
       if (result.ok && result.user) {
         googleSessionSyncCache.current = { accessToken, result };
       }

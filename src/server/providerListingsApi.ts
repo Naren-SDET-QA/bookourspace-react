@@ -57,7 +57,7 @@ function googleActorOrReject(
     response.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
     return null;
   }
-  if (actor.authProvider !== 'google' || !actor.supabaseUserId) {
+  if (!['google', 'email_otp'].includes(String(actor.authProvider)) || !actor.supabaseUserId) {
     response.status(403).json({ ok: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
     return null;
   }
