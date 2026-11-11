@@ -19,6 +19,8 @@ import {
   isSupabaseConfigured,
   fetchGoogleOAuthConfig,
   signInWithSupabaseGoogleOAuth,
+  signInWithMagicLinkOtp,
+  verifyEmailOtp,
 } from '../lib/supabaseClient';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { launchGoogleOAuthWindow } from '../lib/googleOAuthLauncher';
@@ -59,6 +61,9 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [emailOtpEmail, setEmailOtpEmail] = useState('');
+  const [emailOtpCode, setEmailOtpCode] = useState('');
+  const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [localDevLoading, setLocalDevLoading] = useState<'admin' | 'customer' | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -87,6 +92,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     if (!isOpen) return;
     setErrorMsg(null);
     setInfoMsg(null);
+    setEmailOtpSent(false);
+    setEmailOtpCode('');
   }, [isOpen]);
 
   useEffect(() => {
@@ -306,6 +313,38 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     await handlePopupGoogleSignIn();
   };
 
+  const handleRequestEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg(null);
+    setInfoMsg(null);
+    try {
+      const result = await signInWithMagicLinkOtp(emailOtpEmail);
+      setEmailOtpEmail(result.email);
+      setEmailOtpSent(true);
+      setInfoMsg('We sent a six-digit sign-in code. It expires shortly and can be used only once.');
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'Could not send the email sign-in code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg(null);
+    setInfoMsg(null);
+    try {
+      await verifyEmailOtp(emailOtpEmail, emailOtpCode);
+      setInfoMsg('Email verified. Completing secure sign-in…');
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'That code is invalid or expired.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     setLoading(true);
     setErrorMsg(null);
@@ -385,10 +424,10 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             </div>
             <div>
               <h3 id="bos-auth-title" className="text-base font-black">
-                {activeAccount ? 'Your Account' : 'Sign In with Google'}
+                {activeAccount ? 'Your Account' : 'Sign In'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {activeAccount ? 'Signed in and verified.' : 'Continue with Google to book and save.'}
+                {activeAccount ? 'Signed in and verified.' : 'Continue with Google or email OTP to book and save.'}
               </p>
             </div>
           </div>
@@ -599,6 +638,68 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
+
+            <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+              <p className="text-xs font-black text-slate-800 dark:text-slate-200">Or sign in with email OTP</p>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                Supabase Auth verifies the email code before BookOurSpace creates an application session.
+              </p>
+              {!emailOtpSent ? (
+                <form onSubmit={handleRequestEmailOtp} className="mt-3 space-y-2">
+                  <label className="sr-only" htmlFor="bos-email-otp-email">Email address</label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      id="bos-email-otp-email"
+                      type="email"
+                      autoComplete="email"
+                      value={emailOtpEmail}
+                      onChange={(e) => setEmailOtpEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      required
+                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-10 pr-3.5 py-2.5 text-xs outline-hidden focus:border-[#4A148C]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading || !isSupabaseConfigured}
+                    className="w-full py-2.5 px-4 rounded-xl border border-[#4A148C] text-[#4A148C] dark:text-purple-300 dark:border-purple-400 text-xs font-black disabled:opacity-50"
+                  >
+                    {loading ? 'Sending code…' : 'Send email OTP'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyEmailOtp} className="mt-3 space-y-2">
+                  <label className="sr-only" htmlFor="bos-email-otp-code">Six-digit email code</label>
+                  <input
+                    id="bos-email-otp-code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={emailOtpCode}
+                    onChange={(e) => setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="123456"
+                    required
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-center tracking-[0.35em] text-sm font-black outline-hidden focus:border-[#4A148C]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading || emailOtpCode.length !== 6}
+                    className="w-full py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-black disabled:opacity-50"
+                  >
+                    {loading ? 'Verifying…' : 'Verify email OTP'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEmailOtpSent(false); setEmailOtpCode(''); setInfoMsg(null); }}
+                    className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                  >
+                    Use a different email
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         )}
       </div>

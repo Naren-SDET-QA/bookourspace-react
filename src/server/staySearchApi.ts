@@ -623,6 +623,19 @@ async function runSearch(
         and l.payload->>'stayLifecycle' = 'approved'
       join public.public_provider_profile_projection host on host.id = p.owner_user_id and host.verified is true
       left join lateral (
+        select jsonb_agg(
+                 'storage://' || asset.bucket_id || '/' || asset.object_path
+                 order by asset.display_order, asset.created_at, asset.id
+               ) as images
+          from public.media_assets asset
+         where asset.owner_id = l.owner_id
+           and asset.parent_type = 'provider_listing'
+           and asset.parent_id = l.id
+           and asset.bucket_id = 'bos-public-media'
+           and asset.privacy = 'public'
+           and asset.processing_status = 'ready'
+      ) media on true
+      left join lateral (
         select
           min(rt.base_price_paise) as min_price_paise,
           max(rt.max_adults + rt.max_children) as max_guests,

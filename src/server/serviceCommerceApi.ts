@@ -111,7 +111,7 @@ export function registerServiceCommerceApi(app: express.Express, dependencies: S
   function actorOf(req: express.Request): ProviderListingActor | null {
     const session = dependencies.verifySession(req);
     if (!session?.supabaseUserId || !UUID.test(String(session.supabaseUserId))) return null;
-    if (session.authProvider !== 'google') return null;
+    if (!['google', 'email_otp'].includes(String(session.authProvider))) return null;
     return session;
   }
 

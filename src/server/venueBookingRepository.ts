@@ -2,6 +2,7 @@ import { type Pool, type PoolClient } from 'pg';
 import type { ProviderListingActor } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { closeSharedPostgresPool, getSharedPostgresPool } from './postgresPool';
+import type { BookingNotificationContext } from './bookingNotificationEmails';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -12,7 +13,7 @@ export class VenueBookingError extends Error {
   }
 }
 
-export type VenueActor = ProviderListingActor & { supabaseUserId: string; authProvider: 'google' };
+export type VenueActor = ProviderListingActor & { supabaseUserId: string; authProvider: 'google' | 'email_otp' };
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -37,8 +38,8 @@ export class VenueBookingRepository {
   async close() { await closeSharedPostgresPool(); }
 
   private assertActor(actor: ProviderListingActor | null, roles: string[]): asserts actor is VenueActor {
-    if (!actor || !actor.supabaseUserId || !UUID.test(actor.supabaseUserId) || actor.authProvider !== 'google') {
-      throw new VenueBookingError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!actor || !actor.supabaseUserId || !UUID.test(actor.supabaseUserId) || !['google', 'email_otp'].includes(String(actor.authProvider))) {
+      throw new VenueBookingError('VERIFIED_AUTH_IDENTITY_REQUIRED', 401);
     }
     if (!roles.includes(actor.role)) throw new VenueBookingError('FORBIDDEN_ROLE', 403);
   }
@@ -265,6 +266,48 @@ export class VenueBookingRepository {
     return this.transaction(actor, async (client) => {
       const result = await client.query('select public.venue_booking_action($1::uuid,$2,$3) as booking', [bookingId,action,reason]);
       return record(result.rows[0]?.booking);
+    });
+  }
+
+  /**
+   * Resolve notification recipients server-side after the booking RPC has
+   * enforced ownership. Contact data is never included in venue API payloads.
+   */
+  async notificationContext(actor: ProviderListingActor | null, bookingId: string): Promise<BookingNotificationContext> {
+    this.assertActor(actor, ['customer', 'provider', 'admin']);
+    if (!UUID.test(bookingId)) throw new VenueBookingError('VENUE_BOOKING_NOT_FOUND', 404);
+    return this.transaction(actor, async (client) => {
+      const { rows } = await client.query(
+        `select b.id, b.booking_ref, b.status, b.starts_at, b.ends_at, b.cancellation_reason,
+                l.title as listing_title,
+                customer.email as customer_email, customer.full_name as customer_name,
+                owner.email as provider_email, owner.full_name as provider_name
+           from public.venue_bookings b
+           join public.listings l on l.id = b.listing_id
+           left join public.profiles customer on customer.id = b.customer_user_id
+           left join public.profiles owner on owner.id = b.owner_user_id
+          where b.id = $1
+            and (b.customer_user_id = auth.uid() or b.owner_user_id = auth.uid() or public.is_admin())
+          limit 1`,
+        [bookingId],
+      );
+      const row = rows[0];
+      if (!row) throw new VenueBookingError('VENUE_BOOKING_NOT_FOUND', 404);
+      const startsAt = row.starts_at instanceof Date ? row.starts_at.toISOString() : String(row.starts_at || '');
+      const endsAt = row.ends_at instanceof Date ? row.ends_at.toISOString() : String(row.ends_at || '');
+      return {
+        bookingId: String(row.id),
+        bookingRef: String(row.booking_ref || ''),
+        listingTitle: String(row.listing_title || 'BookOurSpace venue'),
+        customerEmail: row.customer_email ?? null,
+        customerName: row.customer_name ?? null,
+        providerEmail: row.provider_email ?? null,
+        providerName: row.provider_name ?? null,
+        status: row.status ?? null,
+        scheduledDate: startsAt,
+        timeSlot: startsAt && endsAt ? `${startsAt} – ${endsAt}` : startsAt || null,
+        reason: row.cancellation_reason ?? null,
+      };
     });
   }
 

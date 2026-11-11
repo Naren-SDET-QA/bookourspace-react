@@ -7,6 +7,7 @@ import {
   canLinkSupabaseAuthIdentity,
   isValidSupabaseAuthUserId,
   verifySupabaseGoogleIdentity,
+  verifySupabaseEmailIdentity,
   verifySupabaseSuperAdmin,
   manageSupabaseUserAccess,
   listSupabaseUserProfiles,
@@ -43,6 +44,11 @@ import { VenueBookingRepository } from './src/server/venueBookingRepository';
 import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
 import { registerMediaValidationApi } from './src/server/mediaValidationApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
+import { registerResendDevelopmentTestApi } from './src/server/resendEmail';
+import { registerEvolutionDevelopmentTestApi } from './src/server/evolutionWhatsApp';
+import { sendBookingNotificationEmails } from './src/server/bookingNotificationEmails';
+import { buildWhatsAppFaqReply } from './src/server/whatsappFaq';
+import { sendPgQaSampleEmails } from './src/server/pgQaEmailSamples';
 import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
 import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
 import { apiNoStoreByDefault } from './src/server/apiCachePrivacy';
@@ -556,7 +562,56 @@ async function startServer() {
       message: 'This preview serves the frontend only. Configure the development PostgreSQL target for server-backed routes.',
     });
   });
+  registerResendDevelopmentTestApi(app, {
+    env: process.env,
+    isAdmin: (request) => {
+      const claims = verifySessionTokenFromRequest(request);
+      return Boolean(claims && hasCurrentAdminSession(claims));
+    },
+  });
 
+  registerEvolutionDevelopmentTestApi(app, {
+    env: process.env,
+    isAdmin: (request) => {
+      const claims = verifySessionTokenFromRequest(request);
+      return Boolean(claims && hasCurrentAdminSession(claims));
+    },
+  });
+
+  // Sends a complete, fixed-recipient PG QA sample pack in development only.
+  // Every sample is marked developmentOnlyTest and remains subject to the
+  // Resend API key/domain checks; production and inbound receiving are never
+  // enabled by this route.
+  if (process.env.NODE_ENV === 'development') {
+    app.post('/api/dev/resend/pg-samples', async (req, res) => {
+      const claims = verifySessionTokenFromRequest(req);
+      if (!claims || !hasCurrentAdminSession(claims)) {
+        res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+        return;
+      }
+      const recipient = String(process.env.RESEND_DEV_TEST_RECIPIENT || '').trim().toLowerCase();
+      if (req.body?.confirmSend !== true || !recipient || String(req.body?.to || '').trim().toLowerCase() !== recipient) {
+        res.status(400).json({ ok: false, error: 'RESEND_EXPLICIT_TEST_AUTHORIZATION_REQUIRED', requirement: 'POST the configured test recipient with confirmSend=true.' });
+        return;
+      }
+      const results = await sendPgQaSampleEmails({
+        recipient,
+        bookingId: 'pg-qa-sample-20261111',
+        guestName: 'BookOurSpace QA',
+        propertyName: 'Sri Sai Executive PG — QA Sample',
+        roomType: 'Single occupancy room',
+        checkIn: '2026-12-10',
+        checkOut: '2026-12-11',
+        amountPaise: 125000,
+      }, { env: process.env });
+      const failed = results.filter((result) => !result.ok);
+      if (failed.length > 0) {
+        res.status(503).json({ ok: false, sent: results.filter((result) => result.ok).length, failed: failed.map((result) => ({ error: result.error, blockedReasons: result.blockedReasons })) });
+        return;
+      }
+      res.json({ ok: true, sent: results.length, ids: results.map((result) => result.ok ? result.id : null), recipient, samples: ['confirmation', 'cancellation', 'invoice_offer', 'alert'] });
+    });
+  }
   // 0. PostgreSQL-backed live page configuration and admin module settings.
   //    Exactly one route owner is registered per process: PostgreSQL when
   //    configured, otherwise the local-only JSON compatibility handlers.
@@ -1296,7 +1351,7 @@ Task:
     providerId?: string;
     googleSub?: string;
     avatarUrl?: string;
-    authProvider: 'google';
+    authProvider: 'google' | 'email_otp';
     verified: boolean;
     kycDocument: string;
     accountStatus: 'active' | 'suspended' | 'blocked' | 'pending_verification';
@@ -1730,7 +1785,7 @@ Task:
     role: 'customer' | 'provider' | 'admin';
     providerId?: string;
     phone?: string;
-    authProvider?: 'google';
+    authProvider?: 'google' | 'email_otp';
     issuedAt: number;
     expiresAt?: number;
   }
@@ -1868,6 +1923,22 @@ Task:
     return item;
   }
 
+  function findAuthoritativeUser(store: AuthoritativeStore, userId?: string, providerId?: string): AuthoritativeUserRecord | null {
+    const cleanUserId = String(userId || '').trim().toLowerCase();
+    const cleanProviderId = String(providerId || '').trim().toLowerCase();
+    return store.users.find((user) =>
+      (cleanUserId && (user.id.toLowerCase() === cleanUserId || String(user.supabaseUserId || '').toLowerCase() === cleanUserId))
+      || (cleanProviderId && String(user.providerId || '').toLowerCase() === cleanProviderId)
+    ) || null;
+  }
+
+  function dispatchAuthoritativeBookingEmails(
+    details: Parameters<typeof sendBookingNotificationEmails>[0],
+  ): void {
+    void sendBookingNotificationEmails(details, { env: process.env })
+      .catch((error) => logSafeError('notifications', 'dispatch booking notification emails', error));
+  }
+
   // Same resolver as the browser client: without an explicit URL no target is
   // selected, and an invalid configuration fails closed instead of falling
   // back to production.
@@ -1899,7 +1970,7 @@ Task:
     serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   });
 
-  function authenticateOrRegisterGoogleUser(params: {
+  function authenticateOrRegisterUser(params: {
     supabaseUserId: string;
     email: string;
     name?: string;
@@ -1909,6 +1980,7 @@ Task:
     requestedRole?: string;
     allowRoleChange?: boolean;
     city?: string;
+    authProvider?: 'google' | 'email_otp';
   }):
     | {
         ok: true;
@@ -1939,13 +2011,14 @@ Task:
       return {
         ok: false,
         status: 400,
-        error: 'INVALID_GOOGLE_EMAIL',
-        message: 'A valid Google account email address is required for Google OAuth sign-in.',
+        error: 'INVALID_AUTH_EMAIL',
+        message: 'A valid email address is required for sign-in.',
       };
     }
 
     const store = loadAuthoritativeStore();
-    const cleanSub = String(params.googleSub || `google-${cleanEmail}`).trim();
+    const authProvider = params.authProvider || 'google';
+    const cleanSub = String(params.googleSub || (authProvider === 'google' ? `google-${cleanEmail}` : '')).trim();
     const nowIso = new Date().toISOString();
 
     // Check if user already exists by googleSub or email
@@ -1993,7 +2066,8 @@ Task:
       // Existing user sign-in: preserve existing role and data by default
       existingUser.lastLoginAt = nowIso;
       existingUser.supabaseUserId = cleanSupabaseUserId;
-      existingUser.googleSub = existingUser.googleSub || cleanSub;
+      existingUser.googleSub = existingUser.googleSub || cleanSub || undefined;
+      existingUser.authProvider = authProvider;
       if (params.name && params.name.trim() && !existingUser.name) {
         existingUser.name = params.name.trim();
       }
@@ -2037,7 +2111,7 @@ Task:
             ? existingUser.providerId || `prov-${existingUser.id.toLowerCase()}`
             : undefined,
         phone: existingUser.phone,
-        authProvider: 'google',
+        authProvider,
         issuedAt: Date.now(),
       };
       const sessionToken = signSessionToken(claims);
@@ -2052,8 +2126,8 @@ Task:
       };
     }
 
-    // Automatic New-User Registration via Google OAuth:
-    // Google signups always begin as customers. Provider promotion happens
+    // Automatic New-User Registration via a verified Auth identity:
+    // new signups always begin as customers. Provider promotion happens
     // through the reviewed registration workflow; Admin requires bootstrap.
     const reqRole = String(params.requestedRole || 'customer').toLowerCase();
     if (reqRole === 'admin') {
@@ -2085,11 +2159,11 @@ Task:
       phone: (params.phone && params.phone.trim()) || '',
       role: assignedRole,
       providerId: assignedRole === 'provider' ? `prov-${newId.toLowerCase()}` : undefined,
-      googleSub: cleanSub,
+      ...(cleanSub ? { googleSub: cleanSub } : {}),
       avatarUrl:
         params.avatarUrl ||
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-      authProvider: 'google',
+      authProvider,
       verified: true,
       kycDocument: 'Google OAuth 2.0 Verified',
       accountStatus: 'active',
@@ -2111,8 +2185,8 @@ Task:
     appendAuthoritativeNotification(store, {
       recipientUserId: newUser.id,
       targetRole: assignedRole === 'provider' ? 'providers' : 'customers',
-      title: '🎉 Welcome to BookOurSpace (Google Verified)',
-      message: `Account registered automatically via Google OAuth for ${newUser.name} (${newUser.email}) as ${assignedRole.toUpperCase()}.`,
+      title: '🎉 Welcome to BookOurSpace',
+      message: `Account registered automatically via verified ${authProvider === 'google' ? 'Google' : 'email OTP'} for ${newUser.name} (${newUser.email}) as ${assignedRole.toUpperCase()}.`,
       type: 'approval',
     });
 
@@ -2135,7 +2209,7 @@ Task:
       role: newUser.role,
       providerId: newUser.providerId,
       phone: newUser.phone,
-      authProvider: 'google',
+      authProvider,
       issuedAt: Date.now(),
     };
     const sessionToken = signSessionToken(claims);
@@ -2310,7 +2384,7 @@ Task:
 
     // Identity and email come only from Supabase Auth. New users are customers;
     // existing server-assigned roles and the server-side admin allowlist remain authoritative.
-    const result = authenticateOrRegisterGoogleUser({
+    const result = authenticateOrRegisterUser({
       supabaseUserId: identity.id,
       email: identity.email,
       name: identity.name,
@@ -2387,6 +2461,145 @@ Task:
     res.status(result.isNewUser ? 201 : 200).json({
       ok: true,
       authProvider: 'google',
+      supabaseProjectId: SUPABASE_PROJECT_ID,
+      isNewUser: result.isNewUser,
+      user: responseUser,
+      sessionToken: responseSessionToken,
+      claims: responseClaims,
+      redirectTarget: responseRedirectTarget,
+    });
+  });
+
+  // Email OTP is an additional Supabase Auth identity. The code is issued and
+  // verified by Supabase Auth; this endpoint only exchanges the verified
+  // Supabase session for the same server-authoritative BOS session used by
+  // Google sign-in.
+  app.post('/api/auth/email-otp/authenticate', async (req, res) => {
+    const accessToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!accessToken) {
+      res.status(401).json({ ok: false, error: 'VERIFIED_EMAIL_OTP_SESSION_REQUIRED', message: 'Verify the email code before requesting an application session.' });
+      return;
+    }
+    if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey) {
+      res.status(503).json({ ok: false, error: 'SUPABASE_AUTH_NOT_CONFIGURED', message: 'Email OTP sign-in is unavailable until Supabase Auth is configured.' });
+      return;
+    }
+    const identity = await verifySupabaseEmailIdentity({
+      projectUrl: SUPABASE_PROJECT_URL,
+      publishableKey: serverSupabaseConfig.publishableKey,
+      accessToken,
+    });
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'INVALID_EMAIL_OTP_SESSION', message: 'Supabase Auth did not verify an active email OTP identity.' });
+      return;
+    }
+
+    const result = authenticateOrRegisterUser({
+      supabaseUserId: identity.id,
+      email: identity.email,
+      name: identity.name,
+      authProvider: 'email_otp',
+      requestedRole: 'customer',
+      allowRoleChange: false,
+    });
+    if (!result.ok) {
+      res.status(result.status).json(result);
+      return;
+    }
+
+    let responseSessionToken = result.sessionToken;
+    let responseClaims = result.claims;
+    let responseUser = result.user;
+    let responseRedirectTarget = result.redirectTarget;
+
+    if (IS_PRODUCTION_RUNTIME) {
+      if (!providerListingRepository) {
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
+        return;
+      }
+      try {
+        const profile = await providerListingRepository.profileForIdentity({
+          userId: '',
+          supabaseUserId: identity.id,
+          email: identity.email,
+          name: identity.name || identity.email,
+          authProvider: 'email_otp',
+          role: 'customer',
+        });
+        const profileRole = String(profile?.role || '') as SessionClaims['role'];
+        if (!profile || !['customer', 'provider', 'admin'].includes(profileRole) || profile.account_status !== 'active') {
+          res.status(403).json({ ok: false, error: 'AUTH_PROFILE_INACTIVE' });
+          return;
+        }
+        const claims: SessionClaims = {
+          userId: String(profile.id),
+          supabaseUserId: identity.id,
+          email: identity.email,
+          name: identity.name || profile.full_name || identity.email,
+          phone: profile.phone || '',
+          role: profileRole,
+          authProvider: 'email_otp',
+          issuedAt: Date.now(),
+          expiresAt: Date.now() + 12 * 60 * 60_000,
+        };
+        responseClaims = claims;
+        responseSessionToken = signSessionToken(claims);
+        responseRedirectTarget = resolveRoleRedirectTarget(profileRole);
+        responseUser = {
+          ...result.user,
+          id: String(profile.id),
+          supabaseUserId: identity.id,
+          name: claims.name || identity.email,
+          email: identity.email,
+          phone: claims.phone || '',
+          role: profileRole,
+          authProvider: 'email_otp' as const,
+          verified: true,
+          accountStatus: profile.account_status,
+        };
+      } catch (error) {
+        logSafeError('auth', 'email OTP profile lookup', error);
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
+        return;
+      }
+    } else if (providerListingRepository) {
+      try {
+        const profile = await providerListingRepository.profileForIdentity({
+          userId: result.user.id,
+          supabaseUserId: identity.id,
+          email: identity.email,
+          name: identity.name || identity.email,
+          authProvider: 'email_otp',
+          role: result.user.role,
+        });
+        if (profile) {
+          const profileRole = String(profile.role) as SessionClaims['role'];
+          const store = loadAuthoritativeStore();
+          const storedUser = store.users.find((user) => user.id === result.user.id);
+          if (storedUser) {
+            storedUser.role = profileRole;
+            storedUser.supabaseUserId = identity.id;
+            storedUser.authProvider = 'email_otp';
+            if (!saveAuthoritativeStore(store)) {
+              res.status(503).json({ ok: false, error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE' });
+              return;
+            }
+            responseUser = storedUser;
+            responseClaims = { ...result.claims, role: profileRole, authProvider: 'email_otp' };
+            responseSessionToken = signSessionToken(responseClaims);
+            responseRedirectTarget = resolveRoleRedirectTarget(profileRole);
+          }
+        }
+      } catch (error) {
+        logSafeError('auth', 'email OTP profile sync', error);
+        res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
+        return;
+      }
+    }
+
+    res.status(result.isNewUser ? 201 : 200).json({
+      ok: true,
+      authProvider: 'email_otp',
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
       user: responseUser,
@@ -2525,7 +2738,7 @@ Task:
     }
 
     if (IS_PRODUCTION_RUNTIME) {
-      if (!providerListingRepository || !claims.supabaseUserId || claims.authProvider !== 'google') {
+      if (!providerListingRepository || !claims.supabaseUserId || !['google', 'email_otp'].includes(String(claims.authProvider))) {
         res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -2792,7 +3005,7 @@ Task:
     }
 
     if (IS_PRODUCTION_RUNTIME) {
-      if (!providerListingRepository || !claims.supabaseUserId || claims.authProvider !== 'google') {
+      if (!providerListingRepository || !claims.supabaseUserId || !['google', 'email_otp'].includes(String(claims.authProvider))) {
         res.status(503).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -3626,19 +3839,54 @@ Task:
       verifiedIntent.updatedAt = new Date(now).toISOString();
     }
 
+    const customerUser = findAuthoritativeUser(store, customerUserId);
+    const providerUser = findAuthoritativeUser(store, undefined, newBooking.providerId);
     appendAuthoritativeNotification(store, {
       recipientUserId: customerUserId,
-      targetRole: 'all_users',
-      title: '📅 Booking Confirmed & Signed QR Pass Ready',
-      message: `${newBooking.customerName} booked "${newBooking.listingTitle}" for ${newBooking.scheduledDate} (${newBooking.timeSlot}). Pass: ${newBooking.passCode}`,
+      targetRole: 'customer',
+      title: 'New booking confirmed',
+      message: `${newBooking.listingTitle} is confirmed for ${newBooking.scheduledDate} (${newBooking.timeSlot}). Your signed pass is ${newBooking.passCode}.`,
       type: 'booking',
       linkId: newBooking.id,
     });
+    if (providerUser) {
+      appendAuthoritativeNotification(store, {
+        recipientUserId: providerUser.id,
+        targetRole: 'provider',
+        title: 'New booking received',
+        message: `${newBooking.customerName} booked "${newBooking.listingTitle}" for ${newBooking.scheduledDate} (${newBooking.timeSlot}).`,
+        type: 'booking',
+        linkId: newBooking.id,
+      });
+    }
 
     if (!saveAuthoritativeStore(store)) {
       res.status(500).json({ ok: false, error: 'BOOKING_PERSIST_FAILED', message: 'The booking was not confirmed because persistence failed.' });
       return;
     }
+
+    dispatchAuthoritativeBookingEmails([
+      ...(customerUser?.email ? [{
+        kind: 'new_booking_confirmed' as const,
+        recipient: customerUser.email,
+        recipientName: customerUser.name,
+        bookingId: newBooking.id,
+        listingTitle: newBooking.listingTitle,
+        status: newBooking.status,
+        scheduledDate: newBooking.scheduledDate,
+        timeSlot: newBooking.timeSlot,
+      }] : []),
+      ...(providerUser?.email ? [{
+        kind: 'new_booking_received' as const,
+        recipient: providerUser.email,
+        recipientName: providerUser.name,
+        bookingId: newBooking.id,
+        listingTitle: newBooking.listingTitle,
+        status: newBooking.status,
+        scheduledDate: newBooking.scheduledDate,
+        timeSlot: newBooking.timeSlot,
+      }] : []),
+    ]);
 
     res.status(201).json({
       ok: true,
@@ -3667,7 +3915,7 @@ Task:
       res.status(401).json({ ok: false, verified: false, error: 'UNAUTHORIZED_SESSION' });
       return;
     }
-    if (claims.authProvider !== 'google' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(claims.supabaseUserId || ''))) {
+    if (!['google', 'email_otp'].includes(String(claims.authProvider)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(claims.supabaseUserId || ''))) {
       res.status(401).json({ ok: false, verified: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
       return;
     }
@@ -3906,7 +4154,7 @@ Task:
           user.supabaseUserId?.toLowerCase() === String(claims.supabaseUserId).toLowerCase() &&
           user.id.toLowerCase() === claims.userId.toLowerCase()
         );
-        if (!currentUser || currentUser.authProvider !== 'google' || currentUser.accountStatus !== 'active' || currentUser.role !== claims.role) {
+        if (!currentUser || !['google', 'email_otp'].includes(String(currentUser.authProvider)) || currentUser.accountStatus !== 'active' || currentUser.role !== claims.role) {
           return response(403, 'ACTIVE_PROFILE_REQUIRED');
         }
         if (currentUser.role !== 'provider' && currentUser.role !== 'admin') return response(403, 'PROVIDER_OR_ADMIN_REQUIRED');
@@ -4315,6 +4563,29 @@ Task:
     });
   });
 
+  // Development-safe automated FAQ response. It returns the reply to the
+  // authenticated customer and records an in-app notification; no WhatsApp
+  // provider or outbound message is invoked by this endpoint.
+  app.post('/api/whatsapp/faq-reply', (req, res) => {
+    if (IS_PRODUCTION_RUNTIME) return res.status(503).json({ ok: false, error: 'WHATSAPP_PROVIDER_NOT_CONFIGURED' });
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    if (claims.role !== 'customer') return res.status(403).json({ ok: false, error: 'CUSTOMER_SESSION_REQUIRED' });
+    const question = String(req.body?.question || '').trim();
+    if (!question || question.length > 500) return res.status(400).json({ ok: false, error: 'FAQ_QUESTION_REQUIRED' });
+    const reply = buildWhatsAppFaqReply(question);
+    const store = loadAuthoritativeStore();
+    appendAuthoritativeNotification(store, {
+      recipientUserId: claims.userId,
+      targetRole: 'customer',
+      title: 'WhatsApp FAQ message',
+      message: reply,
+      type: 'booking',
+    });
+    saveAuthoritativeStore(store);
+    res.json({ ok: true, automated: true, channel: 'whatsapp', delivery: 'api_response', reply });
+  });
+
   app.post('/api/notifications/send', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     const store = loadAuthoritativeStore();
@@ -4458,6 +4729,7 @@ Task:
     registerServiceBookingApi(app, {
       repository: serviceBookingRepository,
       verifySession: verifySessionTokenFromRequest,
+      env: process.env,
     });
   }
 
@@ -5489,19 +5761,56 @@ Task:
       details: `Cancelled unpaid booking ${booking.passCode} (${booking.listingTitle}). Released seats [${releasedSeats.join(', ')}]. No payment or refund was recorded.`,
     });
 
+    const customerUser = findAuthoritativeUser(store, booking.customerUserId);
+    const providerUser = findAuthoritativeUser(store, undefined, booking.providerId);
     appendAuthoritativeNotification(store, {
       recipientUserId: booking.customerUserId,
-      targetRole: 'all_users',
-      title: 'Movie booking cancelled',
+      targetRole: 'customer',
+      title: 'Booking cancelled',
       message: `Pass ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released. No payment or refund was recorded.`,
       type: 'booking',
       linkId: booking.id,
     });
+    if (providerUser) {
+      appendAuthoritativeNotification(store, {
+        recipientUserId: providerUser.id,
+        targetRole: 'provider',
+        title: 'Booking cancelled',
+        message: `Pass ${booking.passCode} for "${booking.listingTitle}" was cancelled. No payment or refund was recorded.`,
+        type: 'booking',
+        linkId: booking.id,
+      });
+    }
 
     if (!saveAuthoritativeStore(store)) {
       res.status(500).json({ ok: false, error: 'CANCELLATION_PERSIST_FAILED', message: 'Cancellation could not be persisted; no cancellation confirmation was issued.' });
       return;
     }
+
+    dispatchAuthoritativeBookingEmails([
+      ...(customerUser?.email ? [{
+        kind: 'booking_cancelled' as const,
+        recipient: customerUser.email,
+        recipientName: customerUser.name,
+        bookingId: booking.id,
+        listingTitle: booking.listingTitle,
+        status: booking.status,
+        scheduledDate: booking.scheduledDate,
+        timeSlot: booking.timeSlot,
+        reason: booking.cancellationReason,
+      }] : []),
+      ...(providerUser?.email ? [{
+        kind: 'booking_cancelled' as const,
+        recipient: providerUser.email,
+        recipientName: providerUser.name,
+        bookingId: booking.id,
+        listingTitle: booking.listingTitle,
+        status: booking.status,
+        scheduledDate: booking.scheduledDate,
+        timeSlot: booking.timeSlot,
+        reason: booking.cancellationReason,
+      }] : []),
+    ]);
 
     res.json({
       ok: true,

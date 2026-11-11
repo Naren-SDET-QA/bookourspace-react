@@ -5,6 +5,7 @@ import {
 } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { closeSharedPostgresPool, getSharedPostgresPool } from './postgresPool';
+import type { BookingNotificationContext } from './bookingNotificationEmails';
 
 /**
  * Server-authoritative Services booking repository.
@@ -277,8 +278,8 @@ export class ServiceBookingRepository {
     if (!actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId)) {
       throw new ServiceBookingRepositoryError('VERIFIED_AUTH_ID_REQUIRED', 401);
     }
-    if (actor.authProvider !== 'google') {
-      throw new ServiceBookingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!['google', 'email_otp'].includes(String(actor.authProvider))) {
+      throw new ServiceBookingRepositoryError('VERIFIED_AUTH_IDENTITY_REQUIRED', 401);
     }
     const { rows } = await client.query(
       'select id, email, full_name, phone, role, account_status from public.profiles where id = auth.uid() limit 1',
@@ -333,6 +334,47 @@ export class ServiceBookingRepository {
       [id],
     );
     return rows[0] || null;
+  }
+
+  /**
+   * Read the private notification context only after the caller has passed the
+   * normal booking authorization checks. Email addresses never leave this
+   * server-side helper or appear in booking API responses.
+   */
+  async notificationContext(actor: ProviderListingActor, bookingId: string): Promise<BookingNotificationContext> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      const { rows } = await client.query(
+        `select b.id, b.booking_ref, b.status, b.scheduled_date, b.time_slot,
+                b.cancellation_reason, l.title as listing_title,
+                customer.email as customer_email, customer.full_name as customer_name,
+                provider.email as provider_email, provider.full_name as provider_name
+           from public.service_bookings b
+           join public.listings l on l.id = b.listing_id
+           left join public.profiles customer on customer.id = b.customer_id
+           left join public.profiles provider on provider.id = b.provider_id
+          where b.id = $1
+            and (b.customer_id = auth.uid() or b.provider_id = auth.uid() or public.is_admin())
+          limit 1`,
+        [bookingId],
+      );
+      const row = rows[0];
+      if (!row) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+      return {
+        bookingId: String(row.id),
+        bookingRef: String(row.booking_ref || ''),
+        listingTitle: String(row.listing_title || 'BookOurSpace service'),
+        customerEmail: row.customer_email ?? null,
+        customerName: row.customer_name ?? null,
+        providerEmail: row.provider_email ?? null,
+        providerName: row.provider_name ?? null,
+        status: row.status ?? null,
+        scheduledDate: isoDate(row.scheduled_date),
+        timeSlot: row.time_slot ?? null,
+        reason: row.cancellation_reason ?? null,
+      };
+    });
   }
 
   private async appendEvent(

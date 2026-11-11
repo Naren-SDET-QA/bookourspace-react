@@ -1,6 +1,11 @@
 import type express from 'express';
 import crypto from 'node:crypto';
 import { VenueBookingError, VenueBookingRepository } from './venueBookingRepository';
+import {
+  sendBookingNotificationEmails,
+  type BookingNotificationContext,
+  type BookingNotificationEmailDetails,
+} from './bookingNotificationEmails';
 
 export interface VenueBookingsApiDependencies {
   repository?: VenueBookingRepository | null;
@@ -39,6 +44,31 @@ function sendError(res: express.Response, error: unknown) {
   }
   console.error('[venue-bookings] database operation failed', sqlCode || 'NO_CODE');
   return res.status(500).json({ ok: false, error: 'VENUE_BOOKING_OPERATION_FAILED' });
+}
+
+async function dispatchVenueNotifications(
+  context: BookingNotificationContext,
+  kinds: Array<'new_booking_confirmed' | 'new_booking_received' | 'booking_approved' | 'booking_status_changed' | 'booking_cancelled'>,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const details: BookingNotificationEmailDetails[] = [];
+  for (const kind of kinds) {
+    if (kind === 'new_booking_received' && context.providerEmail) {
+      details.push({ kind, recipient: context.providerEmail, recipientName: context.providerName || undefined, bookingId: context.bookingId, listingTitle: context.listingTitle, status: context.status || undefined, scheduledDate: context.scheduledDate || undefined, timeSlot: context.timeSlot || undefined });
+    }
+    if (kind !== 'new_booking_received' && context.customerEmail) {
+      details.push({ kind, recipient: context.customerEmail, recipientName: context.customerName || undefined, bookingId: context.bookingId, listingTitle: context.listingTitle, status: context.status || undefined, scheduledDate: context.scheduledDate || undefined, timeSlot: context.timeSlot || undefined, reason: context.reason });
+    }
+    if (kind === 'booking_cancelled' && context.providerEmail) {
+      details.push({ kind, recipient: context.providerEmail, recipientName: context.providerName || undefined, bookingId: context.bookingId, listingTitle: context.listingTitle, status: context.status || undefined, scheduledDate: context.scheduledDate || undefined, timeSlot: context.timeSlot || undefined, reason: context.reason });
+    }
+  }
+  if (!details.length) return;
+  try {
+    await sendBookingNotificationEmails(details, { env });
+  } catch (error) {
+    console.error('[venue-bookings] notification dispatch failed', error);
+  }
 }
 
 export function registerVenueBookingsApi(app: express.Express, deps: VenueBookingsApiDependencies) {
@@ -112,7 +142,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
   app.post('/api/venue-bookings', async(req,res)=>{
     if(!repo)return unavailable(req,res); const actor=actorOf(req,deps.verifySession);
     if(!actor)return res.status(401).json({ok:false,error:'VERIFIED_GOOGLE_IDENTITY_REQUIRED'});
-    if(actor.authProvider!=='google'||actor.role!=='customer')return res.status(403).json({ok:false,error:'CUSTOMER_GOOGLE_IDENTITY_REQUIRED'});
+    if(!['google','email_otp'].includes(String(actor.authProvider))||actor.role!=='customer')return res.status(403).json({ok:false,error:'CUSTOMER_VERIFIED_IDENTITY_REQUIRED'});
     const paymentMode=String(req.body?.paymentMode||'pay_at_venue');
     // The custom HMAC hook below is a test fixture, not a Razorpay or UPI
     // adapter. Keep it unreachable from development and production clients.
@@ -120,6 +150,15 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
     if(paymentMode!=='pay_at_venue'&&!onlineAllowed)return res.status(503).json({ok:false,error:'VERIFIED_ONLINE_PAYMENT_UNAVAILABLE'});
     try{
       const b=await repo.createBooking(actor,req.body||{});
+      const bookingId = String(b.id || '');
+      if (bookingId && b.idempotent !== true) {
+        const kinds = String(b.status || '') === 'confirmed'
+          ? ['new_booking_confirmed', 'new_booking_received'] as const
+          : ['new_booking_received'] as const;
+        void repo.notificationContext(actor, bookingId)
+          .then((context) => dispatchVenueNotifications(context, [...kinds], env))
+          .catch((error) => console.error('[venue-bookings] notification context failed', error));
+      }
       res.status(b.idempotent?200:201).json({ok:true,booking:b,source:'postgres'});
     }catch(error){sendError(res,error);}
   });
@@ -134,11 +173,29 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
     const action=String(req.body?.action||''); const reason=String(req.body?.reason||'');
     if(!['accept','reject','cancel','complete','admin_override'].includes(action))return res.status(400).json({ok:false,error:'INVALID_VENUE_BOOKING_ACTION'});
     if(action==='admin_override' && (actor.role!=='admin'||reason.trim().length<5))return res.status(403).json({ok:false,error:'AUDITED_ADMIN_REASON_REQUIRED'});
-    try{res.json({ok:true,booking:await repo.action(actor,String(req.params.id),action,reason),source:'postgres'});}catch(error){sendError(res,error);}
+    try{
+      const booking = await repo.action(actor,String(req.params.id),action,reason);
+      const bookingId = String(booking.id || req.params.id || '');
+      const kind = action === 'accept' || action === 'admin_override' && String(booking.status || '') === 'confirmed'
+        ? 'booking_approved'
+        : action === 'reject' || action === 'cancel' || action === 'admin_override'
+          ? 'booking_cancelled'
+          : 'booking_status_changed';
+      void repo.notificationContext(actor, bookingId)
+        .then((context) => dispatchVenueNotifications(context, [kind], env))
+        .catch((error) => console.error('[venue-bookings] notification context failed', error));
+      res.json({ok:true,booking,source:'postgres'});
+    }catch(error){sendError(res,error);}
   });
   app.patch('/api/provider/venue-bookings/:id/reschedule', async(req,res)=>{
     if(!repo)return unavailable(req,res); const actor=actorOf(req,deps.verifySession); if(!actor)return res.status(401).json({ok:false,error:'VERIFIED_GOOGLE_IDENTITY_REQUIRED'});
-    try{res.json({ok:true,booking:await repo.reschedule(actor,String(req.params.id),String(req.body?.startsAt||''),String(req.body?.endsAt||''),String(req.body?.slotType||'')),source:'postgres'});}catch(error){sendError(res,error);}
+    try{
+      const booking = await repo.reschedule(actor,String(req.params.id),String(req.body?.startsAt||''),String(req.body?.endsAt||''),String(req.body?.slotType||''));
+      void repo.notificationContext(actor, String(req.params.id))
+        .then((context) => dispatchVenueNotifications(context, ['booking_status_changed'], env))
+        .catch((error) => console.error('[venue-bookings] notification context failed', error));
+      res.json({ok:true,booking,source:'postgres'});
+    }catch(error){sendError(res,error);}
   });
 
   app.post('/api/venue-bookings/:id/disputes', async(req,res)=>{
@@ -161,7 +218,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
   });
   app.post('/api/venue-bookings/:id/payment-intent', async(req,res)=>{
     if(!repo)return unavailable(req,res); const actor=actorOf(req,deps.verifySession); if(!actor)return res.status(401).json({ok:false,error:'VERIFIED_GOOGLE_IDENTITY_REQUIRED'});
-    if(actor.role!=='customer'||actor.authProvider!=='google')return res.status(403).json({ok:false,error:'CUSTOMER_GOOGLE_IDENTITY_REQUIRED'});
+    if(actor.role!=='customer'||!['google','email_otp'].includes(String(actor.authProvider)))return res.status(403).json({ok:false,error:'CUSTOMER_VERIFIED_IDENTITY_REQUIRED'});
     const provider=String(req.body?.provider||'');
     if(!sandboxOnline||!['sandbox','razorpay','upi_webhook'].includes(provider))return res.status(503).json({ok:false,error:'VERIFIED_ONLINE_PAYMENT_UNAVAILABLE'});
     try{const intent=await repo.insertPaymentIntent(actor,String(req.params.id),provider,null);res.status(201).json({ok:true,intent:{id:intent.id,amountPaise:Number(intent.amount_paise),provider,expiresAt:intent.expires_at},source:'postgres'});}catch(error){sendError(res,error);}

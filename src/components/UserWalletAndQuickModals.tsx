@@ -187,7 +187,7 @@ export const UserWalletAndLedgerSection: React.FC<{
 };
 
 const SITE_FAQ = [
-  { q: 'How do I sign in?', a: 'Production BookOurSpace uses Google Sign-In only. New Google accounts receive a profile automatically. Email and password login is not offered.' },
+  { q: 'How do I sign in?', a: 'BookOurSpace supports Google Sign-In and secure email OTP. New accounts receive a customer profile automatically. Password login is not offered.' },
   { q: 'How do I search across PG, classes, halls, services, stays and movies?', a: 'Use the search bar in the header, or the location picker for city, area, village, mandal or PIN. Results stay inside the module you are browsing.' },
   { q: 'How do bookings and payments work?', a: 'Book from a listing. Razorpay Checkout, UPI and Pay after service stay available where the module supports them. Unverified screenshots are never treated as paid.' },
   { q: 'How do Movies work?', a: 'Movies shows theatre showtimes only. There are no seats, tickets, payments or refunds in Movies.' },
