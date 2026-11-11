@@ -91,9 +91,13 @@ test('Google AI Studio-style preview signs real venue media in the Halls shell',
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ signedURL: '/assets/fallbacks/venues.svg' }),
+      body: JSON.stringify({ signedURL: '/assets/aistudio/WhatsApp_Image_2026-10-17_at_7.17.13_PM_64b54ca7.jpeg' }),
     });
   });
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/assets/aistudio/**', (route) => route.fulfill({
+    path: 'public/assets/aistudio/WhatsApp_Image_2026-10-17_at_7.17.13_PM_64b54ca7.jpeg',
+    contentType: 'image/jpeg',
+  }));
   await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/rest/v1/media_assets**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -132,7 +136,9 @@ test('Google AI Studio-style preview signs real venue media in the Halls shell',
   await agendaImages.first().scrollIntoViewIfNeeded();
   expect(signedRequests, 'AI Studio preview must request a signed Storage URL').toBeGreaterThan(0);
   await expect(agendaImages.first()).toHaveAttribute('data-image-source-status', 'authorized-media');
-  await expect(agendaImages.first()).toHaveAttribute('src', /\/assets\/fallbacks\/venues\.svg$/);
+  await expect(agendaImages.first()).toHaveAttribute('src', /\/assets\/aistudio\/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
+  await expect(agendaImages.first()).toHaveAttribute('data-image-state', 'loaded');
+  expect(await agendaImages.first().evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
 
   const signedRequestsBeforeReload = signedRequests;
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -146,7 +152,9 @@ test('Google AI Studio-style preview signs real venue media in the Halls shell',
     timeout: 10_000,
   }).toBeGreaterThan(signedRequestsBeforeReload);
   await expect(reloadedAgendaImage).toHaveAttribute('data-image-source-status', 'authorized-media');
-  await expect(reloadedAgendaImage).toHaveAttribute('src', /\/assets\/fallbacks\/venues\.svg$/);
+  await expect(reloadedAgendaImage).toHaveAttribute('src', /\/assets\/aistudio\/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
+  await expect(reloadedAgendaImage).toHaveAttribute('data-image-state', 'loaded');
+  expect(await reloadedAgendaImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
 });
 
 test('AI Studio preview decodes a re-signed Storage photo at natural size', async ({ page }) => {
@@ -204,4 +212,99 @@ test('AI Studio preview decodes a re-signed Storage photo at natural size', asyn
   await expect(image).toHaveAttribute('data-image-state', 'loaded');
   expect(await image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
   expect(signedRequests).toBeGreaterThan(0);
+});
+
+test('a stale responsive variant falls back to the persisted original photo after reload', async ({ page }) => {
+  await page.route('https://images.unsplash.com/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#64748b"/></svg>'),
+  }));
+  let variantSignRequests = 0;
+  let originalSignRequests = 0;
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/object/sign/**', async (route) => {
+    const requestUrl = decodeURIComponent(route.request().url());
+    const isVariant = requestUrl.includes('venue-stale-variant.webp');
+    if (isVariant) variantSignRequests += 1;
+    else originalSignRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        signedURL: isVariant
+          ? '/assets/aistudio/venue-stale-variant-missing.webp'
+          : '/assets/aistudio/WhatsApp_Image_2026-10-17_at_7.17.13_PM_64b54ca7.jpeg',
+      }),
+    });
+  });
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/assets/aistudio/**', (route) => {
+    if (route.request().url().includes('venue-stale-variant-missing.webp')) {
+      return route.fulfill({ status: 404, contentType: 'text/plain', body: 'stale variant missing' });
+    }
+    return route.fulfill({
+      path: 'public/assets/aistudio/WhatsApp_Image_2026-10-17_at_7.17.13_PM_64b54ca7.jpeg',
+      contentType: 'image/jpeg',
+    });
+  });
+  await page.route('**/rest/v1/media_assets**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([{
+      variants: [{
+        object_path: 'owner/listing/venue-stale-variant.webp',
+        width: 640,
+        height: 360,
+        mime_type: 'image/webp',
+        file_size_bytes: 1,
+      }],
+    }]),
+  }));
+  await page.route('**/api/marketplace/listings', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      source: 'postgresql',
+      listings: [{
+        id: 'stale-variant-venue-1',
+        title: 'Persisted venue photo with stale variant',
+        categoryId: 'venue-marriage',
+        subcategory: 'Function Hall',
+        entityType: 'venue',
+        price: 25000,
+        priceUnit: 'event',
+        providerName: 'Verified venue owner',
+        createdAt: '2026-11-10',
+        attributes: {
+          images: ['storage://bos-public-media/owner/listing/venue-original.webp'],
+          location: { city: 'Hyderabad', area: 'Banjara Hills' },
+        },
+      }],
+    }),
+  }));
+  await page.addInitScript(() => {
+    window.localStorage.setItem('bos_section_style_prefs_v1', JSON.stringify({ venues: 'agenda' }));
+  });
+  await page.goto('/#venues', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Open All Sections & Quick Menu' }).waitFor({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: /All Venues & Halls/ })).toBeVisible({ timeout: 30_000 });
+  const image = page.locator('article img[data-safe-image]').first();
+  await expect(image).toBeVisible();
+  await image.scrollIntoViewIfNeeded();
+  await expect(image).toHaveAttribute('data-image-state', 'loaded');
+  expect(await image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+  expect(await image.evaluate((element: HTMLImageElement) => element.currentSrc)).toMatch(/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
+  expect(variantSignRequests).toBeGreaterThan(0);
+  expect(originalSignRequests).toBeGreaterThan(0);
+
+  const originalSignRequestsBeforeReload = originalSignRequests;
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Open All Sections & Quick Menu' }).waitFor({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: /All Venues & Halls/ })).toBeVisible({ timeout: 30_000 });
+  const reloadedImage = page.locator('article img[data-safe-image]').first();
+  await expect(reloadedImage).toBeVisible();
+  await reloadedImage.scrollIntoViewIfNeeded();
+  await expect(reloadedImage).toHaveAttribute('data-image-state', 'loaded');
+  await expect.poll(() => originalSignRequests, { timeout: 10_000 }).toBeGreaterThan(originalSignRequestsBeforeReload);
+  expect(await reloadedImage.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+  expect(await reloadedImage.evaluate((element: HTMLImageElement) => element.currentSrc)).toMatch(/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
 });

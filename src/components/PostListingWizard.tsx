@@ -1482,6 +1482,30 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
             : 'service';
       const listingId = `lst-${crypto.randomUUID()}`;
       const requestId = crypto.randomUUID();
+      const listingPayload = {
+        description: description.trim(),
+        location: { city: city.trim(), area: area.trim(), pincode: pincode.trim() },
+        images: [],
+        customFieldValues,
+        ...(runningBatchUrl.trim() ? { runningBatchUrl: runningBatchUrl.trim() } : {}),
+      };
+      // Create the durable listing before uploading media. This gives every
+      // object a real parent row, so a reload can recover the ready media even
+      // if the follow-up payload update is interrupted.
+      const createdResponse = await saveServerProviderListing(null, {
+        id: listingId,
+        requestId,
+        title: cleanTitle,
+        categoryId: activeSectionCat.id,
+        subcategory: selectedSubcategory,
+        entityType,
+        price: listingPrice,
+        priceUnit: priceUnit.trim() || 'quote',
+        payload: listingPayload,
+      });
+      if (!createdResponse.ok || createdResponse.data.source !== 'postgres' || !createdResponse.listing || createdResponse.listing.status !== 'pending_approval') {
+        throw new Error(createdResponse.data.error || 'The server did not confirm a pending PostgreSQL listing.');
+      }
       const uploadForListing = createMediaUploadHandler(selectedSection, 'provider_listing', listingId);
       const imageReferences: string[] = [];
       for (let index = 0; index < uploadedImages.length; index += 1) {
@@ -1500,27 +1524,16 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
         });
         imageReferences.push(result.objectPath);
       }
-      const response = await saveServerProviderListing(null, {
-        id: listingId,
-        requestId,
-        title: cleanTitle,
-        categoryId: activeSectionCat.id,
-        subcategory: selectedSubcategory,
-        entityType,
-        price: listingPrice,
-        priceUnit: priceUnit.trim() || 'quote',
-        payload: {
-          description: description.trim(),
-          location: { city: city.trim(), area: area.trim(), pincode: pincode.trim() },
-          images: imageReferences,
-          customFieldValues,
-          ...(runningBatchUrl.trim() ? { runningBatchUrl: runningBatchUrl.trim() } : {}),
-        },
-      });
-      if (!response.ok || response.data.source !== 'postgres' || !response.listing || response.listing.status !== 'pending_approval') {
-        throw new Error(response.data.error || 'The server did not confirm a pending PostgreSQL listing.');
+      let pending = createdResponse.listing;
+      if (imageReferences.length > 0) {
+        const mediaResponse = await saveServerProviderListing(listingId, {
+          payload: { images: imageReferences },
+        });
+        if (!mediaResponse.ok || mediaResponse.data.source !== 'postgres' || !mediaResponse.listing || mediaResponse.listing.status !== 'pending_approval') {
+          throw new Error(mediaResponse.data.error || 'The server saved the listing but could not attach its media references.');
+        }
+        pending = mediaResponse.listing;
       }
-      const pending = response.listing;
       setSubmittedPendingListing(pending);
       setStep(4);
       setProviderSubmissionMessage('Listing saved in PostgreSQL as pending admin review. Uploaded media was validated against its stored object before publication. No listing fee or payment was taken.');

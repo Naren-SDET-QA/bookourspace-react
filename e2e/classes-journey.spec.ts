@@ -134,6 +134,7 @@ async function newPage(
       try {
         localStorage.setItem('bos_session_token_v1', token);
         localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(storedUser));
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: new Date().toISOString() }));
       } catch {
         // Ignore storage failures on non-origin documents.
       }
@@ -161,7 +162,14 @@ async function newPage(
 
 async function openClasses(page: Page): Promise<void> {
   await page.goto(`${harness.uiUrl}/#classes`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('bookourspace-welcome')).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Classes & Training' })).toBeVisible({ timeout: 30_000 });
+}
+
+async function waitForSessionHydration(page: Page): Promise<void> {
+  await expect(page.getByTestId('bookourspace-welcome')).toBeHidden({ timeout: 30_000 });
+  const essentialOnly = page.getByRole('button', { name: 'Essential only', exact: true });
+  if (await essentialOnly.isVisible().catch(() => false)) await essentialOnly.click();
 }
 
 async function api(
@@ -273,6 +281,7 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   // provider away from the public marketplace shell).
   const trainer = await newPage(browser, USERS.provider);
   await trainer.page.goto(`${harness.uiUrl}/`, { waitUntil: 'domcontentloaded' });
+  await waitForSessionHydration(trainer.page);
   const providerHub = trainer.page.getByRole('button', { name: 'Provider Hub', exact: true });
   await expect(providerHub).toBeVisible({ timeout: 30_000 });
   await providerHub.click();
@@ -322,6 +331,7 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   // Admin uses the real admin console review queue.
   const admin = await newPage(browser, USERS.admin);
   await admin.page.goto(`${harness.uiUrl}/`, { waitUntil: 'domcontentloaded' });
+  await waitForSessionHydration(admin.page);
   const adminConsole = admin.page.locator('footer').getByRole('button', { name: /^Admin\b/i }).first();
   await expect(adminConsole).toBeVisible({ timeout: 30_000 });
   await adminConsole.click();

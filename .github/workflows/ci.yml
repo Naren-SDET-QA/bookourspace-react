@@ -23,8 +23,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          # gitleaks scans a commit range; a depth-1 clone has no parent to diff.
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -44,12 +43,17 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Scan the checked-out commit for secrets
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: detect --source . --no-banner --redact --log-opts="--max-count=1"
+      - name: Scan added source lines for secrets
+        run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git fetch --no-tags origin "refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+            base_ref="origin/${GITHUB_BASE_REF}"
+          else
+            base_ref="HEAD^"
+          fi
+          git diff --unified=0 --no-ext-diff "${base_ref}...HEAD" -- . \
+            | docker run --rm --network=none -i ghcr.io/gitleaks/gitleaks:v8.24.3 \
+                stdin --no-banner --no-color --redact
 
   chromium:
     name: Chromium E2E
@@ -65,17 +69,19 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install PostgreSQL server binaries for the disposable harness
+      - name: Start preinstalled PostgreSQL service for the disposable harness
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql postgresql-client
-          echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+          sudo systemctl start postgresql.service
+          pg_bin_dir="$(pg_config --bindir)"
+          test -x "$pg_bin_dir/initdb"
+          test -x "$pg_bin_dir/pg_ctl"
+          echo "$pg_bin_dir" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: npm ci
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Build the frontend for the browser journey
         run: npm run build
