@@ -57,10 +57,6 @@ function loadBarcode(): Promise<Buffer | null> {
   return barcodePromise;
 }
 
-function pngDataUri(source: Buffer): string {
-  return `data:image/png;base64,${source.toString('base64')}`;
-}
-
 function copy(kind: PgQaSampleKind, details: PgQaSampleDetails): { subject: string; title: string; message: string; status: string } {
   if (kind === 'confirmation') return {
     subject: `PG booking confirmed: ${details.propertyName}`,
@@ -102,8 +98,10 @@ export async function buildPgQaSampleEmail(kind: PgQaSampleKind, details: PgQaSa
   const barcode = await loadBarcode();
   if (!logo) throw new Error('BOOKOURSPACE_LOGO_MISSING');
   if (!barcode) throw new Error('BOOKOURSPACE_BARCODE_MISSING');
-  const logoSrc = pngDataUri(logo);
-  const barcodeSrc = pngDataUri(barcode);
+  // Use the matching inline attachment content IDs. Data URLs are blocked by
+  // common mail clients and were the cause of the broken branded images.
+  const logoSrc = 'cid:bos-logo';
+  const barcodeSrc = 'cid:bos-qr';
   const attachments: NonNullable<TransactionalEmailInput['attachments']> = [
     { filename: 'BookOurSpace-Brand-Logo.png', content: logo, contentType: 'image/png', contentId: 'bos-logo' },
     { filename: `BookOurSpace-PG-${kind}-Barcode.png`, content: barcode, contentType: 'image/png', contentId: 'bos-qr' },

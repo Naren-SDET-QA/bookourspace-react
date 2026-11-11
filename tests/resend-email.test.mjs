@@ -249,8 +249,9 @@ test('PG QA sample emails include the official logo, branded QR, and invoice PDF
   const barcodeAsset = await readFile('public/assets/brand/bos-booking-barcode-brand.png');
   assert.deepEqual(Buffer.from(confirmation.attachments[1].content), barcodeAsset);
   assert.equal(confirmation.attachments[2].contentType, 'application/pdf');
-  assert.match(confirmation.html, /src="data:image\/png;base64,/g);
-  assert.equal((confirmation.html.match(/src="data:image\/png;base64,/g) || []).length, 2);
+  assert.match(confirmation.html, /src="cid:bos-logo"/);
+  assert.match(confirmation.html, /src="cid:bos-qr"/);
+  assert.doesNotMatch(confirmation.html, /src="data:image\/png;base64,/);
 
   const cancelled = await buildPgQaSampleEmail('cancellation', details);
   assert.equal(cancelled.attachments.length, 2);
