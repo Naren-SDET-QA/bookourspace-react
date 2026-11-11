@@ -29,6 +29,7 @@ import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/serve
 import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
+import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
 import { ClassEnrollmentRepository } from './src/server/classEnrollmentRepository';
 import { registerClassEnrollmentApi } from './src/server/classEnrollmentApi';
@@ -360,6 +361,18 @@ async function startServer() {
     } catch {
       await serviceBookingRepository.close();
       throw new Error('SERVICE_BOOKINGS_DATABASE_UNAVAILABLE');
+    }
+  }
+
+  // Dynamic service categories share the same canonical database. The
+  // repository is optional locally (public reads then fail closed with 503)
+  // and is re-verified on every administrative request.
+  const serviceCatalogRepository = ServiceCatalogRepository.fromEnvironment();
+  if (serviceCatalogRepository) {
+    try {
+      await serviceCatalogRepository.verifyConnection();
+    } catch {
+      throw new Error('SERVICE_CATALOG_DATABASE_UNAVAILABLE');
     }
   }
 
@@ -4460,6 +4473,13 @@ Task:
       verifySession: verifySessionTokenFromRequest,
     });
   }
+
+  // Dynamic Super Admin service categories, provider licences and document
+  // review. All write authorization is re-derived from profiles in SQL.
+  registerServiceCatalogApi(app, {
+    repository: serviceCatalogRepository,
+    verifySession: verifySessionTokenFromRequest,
+  });
 
   // Real slot availability, provider schedule/profile and server-verified UPI
   // settlement. Fails closed with 503 when PostgreSQL is not configured.

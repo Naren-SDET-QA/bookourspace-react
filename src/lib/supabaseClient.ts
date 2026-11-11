@@ -1432,7 +1432,10 @@ export async function fetchServerMarketplaceListings(): Promise<{
                   )
                 ))
             : [],
-          customFieldValues: attributes.customFieldValues && typeof attributes.customFieldValues === 'object' ? attributes.customFieldValues : {},
+          customFieldValues: {
+            ...(attributes.customFieldValues && typeof attributes.customFieldValues === 'object' ? attributes.customFieldValues : {}),
+            ...(typeof attributes.sectionType === 'string' ? { sectionType: attributes.sectionType } : {}),
+          },
         } as MarketplaceListing;
       });
     return { source: String(data.source || ''), listings };

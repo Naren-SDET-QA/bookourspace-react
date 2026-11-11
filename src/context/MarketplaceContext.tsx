@@ -63,9 +63,15 @@ function mapPostgresPublicListing(entry: any): MarketplaceListing {
     createdAt: String(entry?.createdAt || '').slice(0, 10),
     viewsCount: 0,
     enquiriesCount: 0,
-    customFieldValues: attributes.customFieldValues && typeof attributes.customFieldValues === 'object'
-      ? attributes.customFieldValues
-      : {},
+    customFieldValues: {
+      ...(attributes.customFieldValues && typeof attributes.customFieldValues === 'object'
+        ? attributes.customFieldValues
+        : {}),
+      // The reviewed listing payload carries the marketplace section marker at
+      // its root. Preserve it so dynamic, non-catalog service categories are
+      // recognised by the shared service surfaces.
+      ...(typeof attributes.sectionType === 'string' ? { sectionType: attributes.sectionType } : {}),
+    },
     postingPlanId: '',
     expiresAt: '',
     reported: false,

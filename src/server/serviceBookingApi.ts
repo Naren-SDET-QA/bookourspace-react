@@ -115,6 +115,44 @@ export function registerServiceBookingApi(
     }
   });
 
+  app.post('/api/services/bookings/:id/confirm-delivery', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
+    if (!actor) return;
+    try {
+      const booking = await repository.confirmDelivery(actor, String(request.params.id || ''));
+      response.json({ ok: true, booking, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/otp', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['customer']);
+    if (!actor) return;
+    try {
+      const code = await repository.createDeliveryOtp(actor, String(request.params.id || ''));
+      response.status(201).json({ ok: true, code, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/verify-otp', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
+    if (!actor) return;
+    const code = String(request.body?.code || '').trim();
+    if (!/^\d{6}$/.test(code)) {
+      response.status(400).json({ ok: false, error: 'OTP_INVALID' });
+      return;
+    }
+    try {
+      const verified = await repository.verifyDeliveryOtp(actor, String(request.params.id || ''), code);
+      response.json({ ok: true, verified, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
   app.get('/api/services/earnings', async (request, response) => {
     const actor = sessionOrReject(request, response, verifySession, ['provider']);
     if (!actor) return;

@@ -9,6 +9,7 @@ export interface ServiceBooking {
   bookingRef: string;
   listingId: string;
   listingTitle: string;
+  categoryId: string;
   status: 'requested' | 'accepted' | 'in_progress' | 'completed' | 'cancelled' | 'rejected';
   paymentMode: 'pay_after_service' | 'upi_qr' | 'upi_intent' | 'razorpay';
   paymentStatus: 'due' | 'declared' | 'settled' | 'refunded' | 'failed' | 'waived';
@@ -20,6 +21,32 @@ export interface ServiceBooking {
   serviceAddress: string;
   notes: string | null;
   customerPhone: string;
+  categoryConfigId: string | null;
+  categoryConfigVersion: number | null;
+  quantity: number;
+  recurrenceFrequency: 'none' | 'daily' | 'weekly' | 'monthly';
+  recurrenceOccurrences: number | null;
+  paymentEnabled: boolean;
+  assignmentMode: 'customer_selects' | 'platform_managed' | 'admin_assigns';
+  deliveryMode: 'on_site' | 'home_delivery' | 'pickup' | 'digital';
+  fieldValues: Record<string, string | number | boolean | string[] | null>;
+  documents: Array<{
+    id: string;
+    documentKey: string;
+    reference: string;
+    fileName: string | null;
+    mimeType: string | null;
+    status: 'pending' | 'verified' | 'rejected';
+    reviewNote: string | null;
+    reviewedAt: string | null;
+    createdAt: string;
+  }>;
+  trackingEnabled: boolean;
+  liveMapEnabled: boolean;
+  otpEnabled: boolean;
+  deliveryConfirmationEnabled: boolean;
+  deliveryConfirmedAt: string | null;
+  prescriptionStatus: 'not_required' | 'pending' | 'verified' | 'rejected';
   createdAt: string;
 }
 
@@ -94,6 +121,12 @@ export function createServiceBooking(input: {
   notes?: string;
   paymentMode: ServiceBooking['paymentMode'];
   idempotencyKey: string;
+  categoryConfigId?: string;
+  deliveryMode?: 'on_site' | 'home_delivery' | 'pickup' | 'digital';
+  quantity?: number;
+  recurrence?: { frequency: 'none' | 'daily' | 'weekly' | 'monthly'; occurrences?: number | null } | null;
+  fieldValues?: Record<string, string | number | boolean | string[] | null>;
+  documents?: Array<{ key: string; reference: string; fileName?: string; mimeType?: string }>;
 }): Promise<{ booking: ServiceBooking; idempotent: boolean }> {
   return request('/api/services/bookings', { method: 'POST', body: JSON.stringify(input) });
 }
@@ -162,6 +195,27 @@ export function fetchServiceEarnings(): Promise<{ earnings: ServiceEarnings }> {
   return request('/api/services/earnings');
 }
 
+export function confirmServiceDelivery(bookingId: string): Promise<{ booking: ServiceBooking }> {
+  return request(`/api/services/bookings/${encodeURIComponent(bookingId)}/confirm-delivery`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function createBookingDeliveryOtp(bookingId: string): Promise<{ code: string }> {
+  return request(`/api/services/bookings/${encodeURIComponent(bookingId)}/otp`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function verifyBookingDeliveryOtp(bookingId: string, code: string): Promise<{ verified: boolean }> {
+  return request(`/api/services/bookings/${encodeURIComponent(bookingId)}/verify-otp`, {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
 export function upiIntentUrl(config: ServicePaymentConfig, amount: number, note: string): string | null {
   if (!config.upi.enabled || !config.upi.vpa) return null;
   const params = new URLSearchParams({
@@ -199,6 +253,39 @@ export function serviceBookingErrorMessage(error: unknown): string {
     PAYMENT_ALREADY_RECORDED: 'A payment is already recorded or awaiting review for this job.',
     REVIEW_ALREADY_SUBMITTED: 'You have already reviewed this booking.',
     SERVICE_API_UNAVAILABLE: 'Service booking is not enabled in this environment.',
+    SERVICE_CATEGORY_DISABLED: 'This service category is currently disabled.',
+    SERVICE_CATEGORY_NOT_FOUND: 'This service category no longer exists.',
+    SERVICE_CATEGORY_LISTING_MISMATCH: 'That listing does not belong to this service category.',
+    SERVICE_REQUIRED_FIELDS_MISSING: 'Complete the required booking fields.',
+    SERVICE_REQUIRED_DOCUMENTS_MISSING: 'Attach the required documents before booking.',
+    SERVICE_UNKNOWN_FIELD: 'One of the submitted fields is not part of this service.',
+    SERVICE_UNKNOWN_DOCUMENT: 'One of the submitted documents is not required by this service.',
+    SERVICE_INVALID_DOCUMENT_REFERENCE: 'Use a secure storage:// or https:// document reference.',
+    SERVICE_DOCUMENT_TYPE_NOT_ALLOWED: 'That document type is not accepted.',
+    SERVICE_INVALID_FIELD_VALUE: 'Check the highlighted booking field.',
+    SERVICE_INVALID_QUANTITY: 'Choose a quantity within the allowed range.',
+    SERVICE_DELIVERY_MODE_NOT_ALLOWED: 'Choose an offered delivery option.',
+    SERVICE_INVALID_RECURRENCE: 'Choose fewer recurring deliveries.',
+    RECURRING_NOT_AVAILABLE: 'This service does not offer that recurring schedule.',
+    SERVICE_LEAD_TIME_NOT_MET: 'Choose a later time. This service needs more notice.',
+    SERVICE_DATE_TOO_FAR: 'Choose a date within the booking window.',
+    SERVICE_INVALID_AMOUNT: 'The computed amount is outside the allowed range.',
+    MEDICINE_PRESCRIPTION_REQUIRED: 'Medicine bookings require a prescription document.',
+    LICENSED_PHARMACY_REQUIRED: 'Medicine delivery requires a verified licensed pharmacy.',
+    PRESCRIPTION_NOT_VERIFIED: 'The pharmacy must verify the prescription before handover.',
+    SERVICE_DOCUMENTS_NOT_VERIFIED: 'Required documents must be verified before this booking can complete.',
+    DELIVERY_CONFIRMATION_REQUIRED: 'Confirm the handover before completing this booking.',
+    OTP_DISABLED_FOR_SERVICE: 'This service does not use a customer OTP.',
+    PAYMENT_DISABLED_FOR_SERVICE: 'This service does not collect payment through BookOurSpace.',
+    ADMIN_APPROVAL_REQUIRED: 'An administrator must accept this booking.',
+    DELIVERY_CONFIRMATION_NOT_REQUIRED: 'This service does not require a delivery confirmation.',
+    OTP_REQUIRED_FOR_CONFIRMATION: 'Verify the customer OTP to confirm this handover.',
+    OTP_NOT_FOUND: 'Generate the customer OTP first.',
+    OTP_ALREADY_USED: 'That OTP was already used.',
+    OTP_EXPIRED: 'That OTP expired. Ask the customer to generate a new one.',
+    OTP_ATTEMPTS_EXCEEDED: 'Too many wrong OTP attempts. Ask for a fresh OTP.',
+    OTP_INVALID: 'Enter the 6-digit OTP.',
+    TRACKING_NOT_ACTIVE: 'Tracking is not active for this booking.',
   };
   return messages[error.code] || `The request failed (${error.code}). Try again.`;
 }

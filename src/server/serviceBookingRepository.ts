@@ -5,6 +5,20 @@ import {
 } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { closeSharedPostgresPool, getSharedPostgresPool } from './postgresPool';
+import {
+  assertServiceBookingWindow,
+  computeServiceBookingAmount,
+  isMedicineServiceCategory,
+  normalizeServiceBookingDocuments,
+  normalizeServiceBookingFieldValues,
+  normalizeServiceCategoryConfig,
+  normalizeServiceRecurrence,
+  type ServiceBookingDocumentView,
+  type ServiceBookingFieldValues,
+  type ServiceCategoryConfig,
+  type ServiceDocumentInput,
+  type ServiceRecurrenceFrequency,
+} from '../lib/serviceCatalog';
 
 /**
  * Server-authoritative Services booking repository.
@@ -44,6 +58,22 @@ export interface ServiceBookingRecord {
   amount: number;
   currency: string;
   amountBasis: string;
+  categoryConfigId: string | null;
+  categoryConfigVersion: number | null;
+  quantity: number;
+  recurrenceFrequency: ServiceRecurrenceFrequency;
+  recurrenceOccurrences: number | null;
+  paymentEnabled: boolean;
+  assignmentMode: 'customer_selects' | 'platform_managed' | 'admin_assigns';
+  deliveryMode: 'on_site' | 'home_delivery' | 'pickup' | 'digital';
+  fieldValues: ServiceBookingFieldValues;
+  documents: ServiceBookingDocumentView[];
+  trackingEnabled: boolean;
+  liveMapEnabled: boolean;
+  otpEnabled: boolean;
+  deliveryConfirmationEnabled: boolean;
+  deliveryConfirmedAt: string | null;
+  prescriptionStatus: 'not_required' | 'pending' | 'verified' | 'rejected';
   cancellationReason: string | null;
   acceptedAt: string | null;
   startedAt: string | null;
@@ -127,6 +157,26 @@ function toBooking(row: any): ServiceBookingRecord {
     amount: Number(row.amount || 0),
     currency: String(row.currency || 'INR'),
     amountBasis: String(row.amount_basis || 'listing_price'),
+    categoryConfigId: row.category_config_id ? String(row.category_config_id) : null,
+    categoryConfigVersion: row.category_config_version === null || row.category_config_version === undefined
+      ? null
+      : Number(row.category_config_version),
+    quantity: Number(row.quantity || 1),
+    recurrenceFrequency: (row.recurrence_frequency || 'none') as ServiceRecurrenceFrequency,
+    recurrenceOccurrences: row.recurrence_occurrences === null || row.recurrence_occurrences === undefined
+      ? null
+      : Number(row.recurrence_occurrences),
+    paymentEnabled: row.payment_enabled !== false,
+    assignmentMode: (row.assignment_mode || 'customer_selects') as ServiceBookingRecord['assignmentMode'],
+    deliveryMode: (row.delivery_mode || 'on_site') as ServiceBookingRecord['deliveryMode'],
+    fieldValues: (row.field_values && typeof row.field_values === 'object' ? row.field_values : {}) as ServiceBookingFieldValues,
+    documents: Array.isArray(row.documents) ? row.documents : [],
+    trackingEnabled: row.delivery_profile ? row.delivery_profile.tracking_enabled !== false : true,
+    liveMapEnabled: row.delivery_profile ? row.delivery_profile.live_map_enabled !== false : true,
+    otpEnabled: row.delivery_profile ? row.delivery_profile.otp_enabled !== false : true,
+    deliveryConfirmationEnabled: row.delivery_profile ? row.delivery_profile.delivery_confirmation_enabled === true : false,
+    deliveryConfirmedAt: row.delivery_profile ? iso(row.delivery_profile.delivery_confirmed_at) : null,
+    prescriptionStatus: (row.delivery_profile?.prescription_status || 'not_required') as ServiceBookingRecord['prescriptionStatus'],
     cancellationReason: row.cancellation_reason ?? null,
     acceptedAt: iso(row.accepted_at),
     startedAt: iso(row.started_at),
@@ -219,10 +269,12 @@ function normalizeSlotKey(raw: string): string | null {
 
 export class ServiceBookingRepository {
   private readonly pool: Pool;
+  private readonly tenantId: string;
 
   constructor(connectionString: string, environment: NodeJS.ProcessEnv = process.env) {
     assertPostgresConnectionTarget(connectionString, environment);
     this.pool = getSharedPostgresPool(connectionString, environment);
+    this.tenantId = String(environment.BOS_SERVICE_TENANT_ID || 'default').trim() || 'default';
   }
 
   static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): ServiceBookingRepository | null {
@@ -323,6 +375,60 @@ export class ServiceBookingRepository {
     }
   }
 
+  private async hydrateBookings(client: PoolClient, rows: any[]): Promise<ServiceBookingRecord[]> {
+    if (!rows.length) return [];
+    const ids = rows.map((row) => String(row.id));
+    const [fieldResult, documentResult, deliveryResult] = await Promise.all([
+      client.query('select booking_id, data from public.service_booking_field_values where booking_id = any($1::uuid[])', [ids]),
+      client.query(
+        `select id, booking_id, document_key, document_reference, file_name, mime_type,
+                status, review_note, reviewed_at, created_at
+           from public.service_booking_documents
+          where booking_id = any($1::uuid[])
+          order by created_at, id`,
+        [ids],
+      ),
+      client.query(
+        `select booking_id, tracking_enabled, live_map_enabled, otp_enabled,
+                delivery_confirmation_enabled, delivery_confirmed_at, prescription_status
+           from public.service_delivery_profiles
+          where booking_id = any($1::uuid[])`,
+        [ids],
+      ),
+    ]);
+    const fieldMap = new Map<string, ServiceBookingFieldValues>();
+    for (const row of fieldResult.rows) fieldMap.set(String(row.booking_id), row.data || {});
+    const documentMap = new Map<string, ServiceBookingDocumentView[]>();
+    for (const row of documentResult.rows) {
+      const list = documentMap.get(String(row.booking_id)) || [];
+      list.push({
+        id: String(row.id),
+        documentKey: String(row.document_key),
+        reference: String(row.document_reference),
+        fileName: row.file_name ?? null,
+        mimeType: row.mime_type ?? null,
+        status: row.status,
+        reviewNote: row.review_note ?? null,
+        reviewedAt: iso(row.reviewed_at),
+        createdAt: iso(row.created_at) || '',
+      });
+      documentMap.set(String(row.booking_id), list);
+    }
+    const deliveryMap = new Map<string, any>();
+    for (const row of deliveryResult.rows) deliveryMap.set(String(row.booking_id), row);
+    return rows.map((row) => toBooking({
+      ...row,
+      field_values: fieldMap.get(String(row.id)) || {},
+      documents: documentMap.get(String(row.id)) || [],
+      delivery_profile: deliveryMap.get(String(row.id)) || null,
+    }));
+  }
+
+  private async hydrateBooking(client: PoolClient, row: any): Promise<ServiceBookingRecord> {
+    const [booking] = await this.hydrateBookings(client, [row]);
+    return booking;
+  }
+
   private async fetchBooking(client: PoolClient, id: string): Promise<any | null> {
     const { rows } = await client.query(
       `select b.*, l.title as listing_title
@@ -366,10 +472,11 @@ export class ServiceBookingRepository {
     if (serviceAddress.length < 5 || serviceAddress.length > 500) throw new ServiceBookingRepositoryError('INVALID_SERVICE_ADDRESS', 400);
     const customerPhone = safeText(input.customerPhone);
     if (!/^\+?[0-9][0-9\s().-]{5,22}$/.test(customerPhone)) throw new ServiceBookingRepositoryError('INVALID_CUSTOMER_PHONE', 400);
-    const paymentMode = safeText(input.paymentMode, 'pay_after_service');
+    let paymentMode = safeText(input.paymentMode, 'pay_after_service');
     if (!PAYMENT_MODES.has(paymentMode)) throw new ServiceBookingRepositoryError('INVALID_PAYMENT_MODE', 400);
     const notes = safeText(input.notes).slice(0, 2000);
     const addressNotes = safeText(input.addressNotes).slice(0, 500);
+    const requestedConfigId = safeText(input.categoryConfigId);
 
     return this.transaction(actor, async (client) => {
       await this.requireActiveProfile(client, actor);
@@ -385,7 +492,7 @@ export class ServiceBookingRepository {
         if (replay.listing_id !== listingId || isoDate(replay.scheduled_date) !== scheduledDate || replay.time_slot !== timeSlot) {
           throw new ServiceBookingRepositoryError('IDEMPOTENCY_KEY_CONFLICT', 409);
         }
-        return { booking: toBooking(replay), idempotent: true };
+        return { booking: await this.hydrateBooking(client, replay), idempotent: true };
       }
 
       const listing = await client.query(
@@ -400,6 +507,96 @@ export class ServiceBookingRepository {
       }
       if (!row.owner_id) throw new ServiceBookingRepositoryError('SERVICE_PROVIDER_NOT_AVAILABLE', 409);
 
+      let categoryConfigId: string | null = null;
+      let categoryConfigVersion: number | null = null;
+      let configSnapshot: ServiceCategoryConfig | null = null;
+      let quantity = 1;
+      let recurrenceFrequency: ServiceRecurrenceFrequency = 'none';
+      let recurrenceOccurrences: number | null = null;
+      let paymentEnabled = true;
+      let assignmentMode: ServiceBookingRecord['assignmentMode'] = 'customer_selects';
+      let deliveryMode: ServiceBookingRecord['deliveryMode'] = 'on_site';
+      let amount = Number(row.price || 0);
+      let amountBasis = String(row.price_unit || 'listed price');
+      let fieldValues: ServiceBookingFieldValues = {};
+      let documents: ServiceDocumentInput[] = [];
+
+      const configId = requestedConfigId || String(row.category_id || '');
+      if (configId) {
+        const configResult = await client.query(
+          `select category.id, category.enabled, version.version_number, version.config
+             from public.service_category_configs category
+             join public.service_category_config_versions version on version.id = category.current_version_id
+            where category.id = $1 and category.tenant_id = $2
+            limit 1`,
+          [configId, this.tenantId],
+        );
+        const configRow = configResult.rows[0];
+        if (!configRow) {
+          if (requestedConfigId) throw new ServiceBookingRepositoryError('SERVICE_CATEGORY_NOT_FOUND', 404);
+        } else {
+          if (configRow.enabled !== true) throw new ServiceBookingRepositoryError('SERVICE_CATEGORY_DISABLED', 409);
+          let normalized: ServiceCategoryConfig;
+          try {
+            normalized = normalizeServiceCategoryConfig(String(configRow.id), configRow.config);
+          } catch (error) {
+            const code = (error as { code?: string }).code || 'SERVICE_CATALOG_INVALID_CONFIG';
+            throw new ServiceBookingRepositoryError(code, 400);
+          }
+          if (String(row.category_id || '') !== String(configRow.id)
+              && !normalized.legacyCategoryIds.includes(String(row.category_id || ''))) {
+            throw new ServiceBookingRepositoryError('SERVICE_CATEGORY_LISTING_MISMATCH', 409);
+          }
+          categoryConfigId = String(configRow.id);
+          categoryConfigVersion = Number(configRow.version_number);
+          configSnapshot = normalized;
+          paymentEnabled = normalized.toggles.payment;
+          if (!paymentEnabled) paymentMode = 'pay_after_service';
+          assignmentMode = normalized.providerAssignment;
+          const requestedDeliveryMode = safeText(input.deliveryMode, normalized.deliveryModes[0] || 'on_site');
+          if (!normalized.deliveryModes.includes(requestedDeliveryMode as any)) {
+            throw new ServiceBookingRepositoryError('SERVICE_DELIVERY_MODE_NOT_ALLOWED', 400);
+          }
+          deliveryMode = requestedDeliveryMode as ServiceBookingRecord['deliveryMode'];
+
+          try {
+            assertServiceBookingWindow(normalized, scheduledDate, timeSlot);
+            const recurrenceInput = (input.recurrence && typeof input.recurrence === 'object')
+              ? input.recurrence as Record<string, unknown>
+              : null;
+            const recurrence = normalizeServiceRecurrence(
+              normalized,
+              normalized.bookingType === 'recurring' && normalized.recurring.enabled
+                ? recurrenceInput || { frequency: normalized.recurring.defaultFrequency }
+                : recurrenceInput,
+            );
+            recurrenceFrequency = recurrence.frequency;
+            recurrenceOccurrences = recurrence.occurrences;
+            const priced = computeServiceBookingAmount(normalized, Number(row.price || 0), input.quantity);
+            amount = priced.amount;
+            quantity = priced.quantity;
+            amountBasis = priced.basis;
+            fieldValues = normalizeServiceBookingFieldValues(normalized, input.fieldValues);
+            documents = normalizeServiceBookingDocuments(normalized, input.documents);
+          } catch (error) {
+            const code = (error as { code?: string }).code || 'SERVICE_CATALOG_INVALID_CONFIG';
+            throw new ServiceBookingRepositoryError(code, 400);
+          }
+
+          if (isMedicineServiceCategory(categoryConfigId, normalized)) {
+            // Provider credentials are deliberately not customer-readable via
+            // RLS. The security-definer predicate answers only yes/no.
+            const licence = await client.query(
+              'select public.service_provider_has_license($1,$2) as licensed',
+              [row.owner_id, categoryConfigId],
+            );
+            if (licence.rows[0]?.licensed !== true) {
+              throw new ServiceBookingRepositoryError('LICENSED_PHARMACY_REQUIRED', 409);
+            }
+          }
+        }
+      }
+
       // Availability is checked against the provider's own schedule, blackout
       // dates and opening window before the row is attempted.
       await this.assertSlotWindow(client, listingId, scheduledDate, slotKey);
@@ -409,25 +606,66 @@ export class ServiceBookingRepository {
           `insert into public.service_bookings
             (idempotency_key, listing_id, customer_id, provider_id, category_id, subcategory,
              scheduled_date, time_slot, slot_key, service_address, address_notes, customer_phone, notes,
-             status, payment_mode, payment_status, amount, amount_basis)
+             status, payment_mode, payment_status, amount, amount_basis,
+             category_config_id, category_config_version, config_snapshot, quantity,
+             recurrence_frequency, recurrence_occurrences, payment_enabled, assignment_mode, delivery_mode)
            values ($1, $2, auth.uid(), $3, $4, $5, $6, $7, $15, $8, NULLIF($9, ''), $10, NULLIF($11, ''),
-                   'requested', $12, 'due', $13, $14)
+                   'requested', $12, 'due', $13, $14, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24)
            returning id`,
           [
             idempotencyKey, listingId, row.owner_id, String(row.category_id || ''), String(row.subcategory || ''),
             scheduledDate, timeSlot, serviceAddress, addressNotes, customerPhone, notes,
-            paymentMode, Number(row.price || 0), String(row.price_unit || 'listed price'), slotKey,
+            paymentMode, amount, amountBasis, slotKey,
+            categoryConfigId, categoryConfigVersion,
+            configSnapshot ? JSON.stringify(configSnapshot) : null,
+            quantity, recurrenceFrequency, recurrenceOccurrences, paymentEnabled, assignmentMode, deliveryMode,
           ],
         );
-        await this.appendEvent(client, inserted.rows[0].id, actor, null, 'requested', 'Service booking requested');
-        const booking = await this.fetchBooking(client, inserted.rows[0].id);
-        return { booking: toBooking(booking), idempotent: false };
+        const bookingId = String(inserted.rows[0].id);
+        if (configSnapshot) {
+          await client.query(
+            `insert into public.service_booking_field_values (booking_id, data)
+             values ($1, $2::jsonb)
+             on conflict (booking_id) do update set data = excluded.data, updated_at = now()`,
+            [bookingId, JSON.stringify(fieldValues)],
+          );
+          for (const document of documents) {
+            await client.query(
+              `insert into public.service_booking_documents
+                (booking_id, document_key, document_reference, file_name, mime_type, status, uploaded_by)
+               values ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), 'pending', auth.uid())
+               on conflict (booking_id, document_key) do update
+                 set document_reference = excluded.document_reference,
+                     file_name = excluded.file_name,
+                     mime_type = excluded.mime_type,
+                     status = 'pending', reviewed_by = null, reviewed_at = null, review_note = null,
+                     updated_at = now()`,
+              [bookingId, document.key, document.reference, document.fileName || '', document.mimeType || ''],
+            );
+          }
+        }
+        await this.appendEvent(client, bookingId, actor, null, 'requested', 'Service booking requested');
+        const booking = await this.fetchBooking(client, bookingId);
+        return { booking: await this.hydrateBooking(client, booking), idempotent: false };
       } catch (error) {
         if (isSlotConflict(error)) {
           throw new ServiceBookingRepositoryError('SERVICE_SLOT_ALREADY_BOOKED', 409);
         }
         if (isUniqueViolation(error, 'service_bookings_customer_idempotency')) {
           throw new ServiceBookingRepositoryError('DUPLICATE_BOOKING_REQUEST', 409);
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        const dynamic: Array<[string, number]> = [
+          ['SERVICE_REQUIRED_DOCUMENTS_MISSING', 400],
+          ['SERVICE_REQUIRED_FIELDS_MISSING', 400],
+          ['MEDICINE_PRESCRIPTION_REQUIRED', 409],
+          ['LICENSED_PHARMACY_REQUIRED', 409],
+          ['SERVICE_CATEGORY_DISABLED', 409],
+          ['PAYMENT_DISABLED_FOR_SERVICE', 409],
+          ['SERVICE_BOOKING_CONFIG_IMMUTABLE', 409],
+        ];
+        for (const [code, status] of dynamic) {
+          if (message.includes(code)) throw new ServiceBookingRepositoryError(code, status);
         }
         throw error;
       }
@@ -451,7 +689,7 @@ export class ServiceBookingRepository {
                    b.scheduled_date desc, b.created_at desc
           limit 500`,
       );
-      return rows.map(toBooking);
+      return this.hydrateBookings(client, rows);
     });
   }
 
@@ -472,6 +710,69 @@ export class ServiceBookingRepository {
       const isProvider = booking.provider_id === actor.supabaseUserId;
       const isAdmin = actor.role === 'admin';
       if (!isCustomer && !isProvider && !isAdmin) throw new ServiceBookingRepositoryError('BOOKING_FORBIDDEN', 403);
+
+      let dynamicConfig: ServiceCategoryConfig | null = null;
+      if (booking.config_snapshot && typeof booking.config_snapshot === 'object') {
+        try {
+          dynamicConfig = normalizeServiceCategoryConfig(String(booking.category_config_id || ''), booking.config_snapshot);
+        } catch {
+          dynamicConfig = null;
+        }
+      }
+
+      if (action === 'reschedule' && dynamicConfig) {
+        try {
+          assertServiceBookingWindow(dynamicConfig, safeText(payload.scheduledDate), safeText(payload.timeSlot));
+        } catch (error) {
+          const code = (error as { code?: string }).code || 'SERVICE_INVALID_DATE';
+          throw new ServiceBookingRepositoryError(code, 400);
+        }
+      }
+
+      if (action === 'accept' && dynamicConfig) {
+        if (dynamicConfig.approvalWorkflow.requiresAdminApproval && !isAdmin) {
+          throw new ServiceBookingRepositoryError('ADMIN_APPROVAL_REQUIRED', 409);
+        }
+        if (isMedicineServiceCategory(String(booking.category_config_id || ''), dynamicConfig)) {
+          const licence = await client.query(
+            `select 1 from public.service_provider_credentials
+              where provider_id = $1 and tenant_id = $2
+                and credential_type = 'pharmacy_license' and status = 'verified'
+                and (expires_on is null or expires_on >= current_date)
+                and (category_id is null or category_id = $3)
+              limit 1`,
+            [booking.provider_id, this.tenantId, booking.category_config_id],
+          );
+          if (!licence.rows[0]) throw new ServiceBookingRepositoryError('LICENSED_PHARMACY_REQUIRED', 409);
+        }
+      }
+
+      if (action === 'complete' && dynamicConfig) {
+        const profile = await client.query(
+          'select * from public.service_delivery_profiles where booking_id = $1 limit 1',
+          [bookingId],
+        );
+        const deliveryProfile = profile.rows[0];
+        if (isMedicineServiceCategory(String(booking.category_config_id || ''), dynamicConfig)) {
+          if (!deliveryProfile || deliveryProfile.prescription_status !== 'verified') {
+            throw new ServiceBookingRepositoryError('PRESCRIPTION_NOT_VERIFIED', 409);
+          }
+        }
+        if (deliveryProfile?.delivery_confirmation_enabled && !deliveryProfile.delivery_confirmed_at) {
+          throw new ServiceBookingRepositoryError('DELIVERY_CONFIRMATION_REQUIRED', 409);
+        }
+        if (dynamicConfig.approvalWorkflow.requiresDocumentVerification) {
+          for (const requirement of dynamicConfig.documents) {
+            if (!requirement.required || !requirement.verificationRequired) continue;
+            const verified = await client.query(
+              `select 1 from public.service_booking_documents
+                where booking_id = $1 and document_key = $2 and status = 'verified' limit 1`,
+              [bookingId, requirement.key],
+            );
+            if (!verified.rows[0]) throw new ServiceBookingRepositoryError('SERVICE_DOCUMENTS_NOT_VERIFIED', 409);
+          }
+        }
+      }
 
       const targets: Record<ServiceBookingAction, ServiceBookingStatus> = {
         accept: 'accepted',
@@ -508,12 +809,12 @@ export class ServiceBookingRepository {
           client, bookingId, actor, booking.status, booking.status,
           safeText(payload.note, `Rescheduled to ${scheduledDate} ${timeSlot}`).slice(0, 1000),
         );
-        return { booking: toBooking(await this.fetchBooking(client, bookingId)), idempotent: false };
+        return { booking: await this.hydrateBooking(client, await this.fetchBooking(client, bookingId)), idempotent: false };
       }
 
       const target = targets[action];
       if (booking.status === target) {
-        return { booking: toBooking(await this.fetchBooking(client, bookingId)), idempotent: true };
+        return { booking: await this.hydrateBooking(client, await this.fetchBooking(client, bookingId)), idempotent: true };
       }
 
       if (action === 'cancel') {
@@ -565,7 +866,73 @@ export class ServiceBookingRepository {
         throw error;
       }
       await this.appendEvent(client, bookingId, actor, booking.status, target, reason || `Service booking ${action}`);
-      return { booking: toBooking(await this.fetchBooking(client, bookingId)), idempotent: false };
+      return { booking: await this.hydrateBooking(client, await this.fetchBooking(client, bookingId)), idempotent: false };
+    });
+  }
+
+  async confirmDelivery(actor: ProviderListingActor, bookingId: string): Promise<ServiceBookingRecord> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'provider' && actor.role !== 'admin') {
+      throw new ServiceBookingRepositoryError('PROVIDER_ACTION_REQUIRED', 403);
+    }
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      const { rows } = await client.query('select * from public.service_bookings where id = $1 for update', [bookingId]);
+      if (!rows[0]) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+      if (rows[0].provider_id !== actor.supabaseUserId && actor.role !== 'admin') {
+        throw new ServiceBookingRepositoryError('BOOKING_FORBIDDEN', 403);
+      }
+      try {
+        await client.query('select public.confirm_service_delivery($1)', [bookingId]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const codes = ['PRESCRIPTION_NOT_VERIFIED', 'OTP_REQUIRED_FOR_CONFIRMATION', 'DELIVERY_CONFIRMATION_NOT_REQUIRED', 'TRACKING_NOT_ACTIVE'];
+        for (const code of codes) {
+          if (message.includes(code)) throw new ServiceBookingRepositoryError(code, 409);
+        }
+        throw error;
+      }
+      return this.hydrateBooking(client, await this.fetchBooking(client, bookingId));
+    });
+  }
+
+  async createDeliveryOtp(actor: ProviderListingActor, bookingId: string): Promise<string> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'customer') throw new ServiceBookingRepositoryError('CUSTOMER_SESSION_REQUIRED', 403);
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      try {
+        const { rows } = await client.query('select public.create_delivery_otp($1) as code', [bookingId]);
+        return String(rows[0]?.code || '');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const codes = ['OTP_DISABLED_FOR_SERVICE', 'PRESCRIPTION_NOT_VERIFIED', 'TRACKING_NOT_ACTIVE', 'FORBIDDEN', 'BOOKING_NOT_FOUND'];
+        for (const code of codes) {
+          if (message.includes(code)) throw new ServiceBookingRepositoryError(code, code === 'BOOKING_NOT_FOUND' ? 404 : code === 'FORBIDDEN' ? 403 : 409);
+        }
+        throw error;
+      }
+    });
+  }
+
+  async verifyDeliveryOtp(actor: ProviderListingActor, bookingId: string, code: string): Promise<boolean> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'provider' && actor.role !== 'admin') {
+      throw new ServiceBookingRepositoryError('PROVIDER_ACTION_REQUIRED', 403);
+    }
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      try {
+        const { rows } = await client.query('select public.verify_delivery_otp($1,$2) as verified', [bookingId, code]);
+        return rows[0]?.verified === true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const codes = ['OTP_NOT_FOUND', 'OTP_ALREADY_USED', 'OTP_EXPIRED', 'OTP_ATTEMPTS_EXCEEDED', 'OTP_INVALID', 'TRACKING_NOT_ACTIVE', 'FORBIDDEN', 'BOOKING_NOT_FOUND'];
+        for (const code of codes) {
+          if (message.includes(code)) throw new ServiceBookingRepositoryError(code, code === 'FORBIDDEN' ? 403 : code === 'BOOKING_NOT_FOUND' ? 404 : 409);
+        }
+        throw error;
+      }
     });
   }
 
@@ -586,6 +953,7 @@ export class ServiceBookingRepository {
       if (!booking) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
       if (booking.provider_id !== actor.supabaseUserId) throw new ServiceBookingRepositoryError('BOOKING_FORBIDDEN', 403);
       if (booking.status !== 'completed') throw new ServiceBookingRepositoryError('BOOKING_NOT_COMPLETED', 409);
+      if (booking.payment_enabled === false) throw new ServiceBookingRepositoryError('PAYMENT_DISABLED_FOR_SERVICE', 409);
       if (!['due', 'failed'].includes(booking.payment_status)) {
         throw new ServiceBookingRepositoryError('PAYMENT_ALREADY_RECORDED', 409);
       }
@@ -672,7 +1040,7 @@ export class ServiceBookingRepository {
       );
       return {
         claim: toClaim(claimRow.rows[0]),
-        booking: toBooking(await this.fetchBooking(client, claim.booking_id)),
+        booking: await this.hydrateBooking(client, await this.fetchBooking(client, claim.booking_id)),
       };
     });
   }

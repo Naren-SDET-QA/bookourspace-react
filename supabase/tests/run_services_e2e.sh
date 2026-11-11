@@ -196,7 +196,16 @@ SERVICES_EXIT=$?
 sed -E 's/(postgres(ql)?:\/\/)[^@ ]+@/\1[redacted]@/g' "$OUT/services-node.out" | tail -70
 [ "$SERVICES_EXIT" = "0" ] || fail "services lifecycle E2E (see $OUT/services-node.out)"
 
-echo "=== 5. direct SQL invariants ==="
+echo "=== 5. Dynamic Super Admin Service Builder E2E ==="
+BOS_LISTINGS_DATABASE_URL="postgres://postgres@127.0.0.1:$PGPORT/$DB?sslmode=disable" \
+NODE_ENV=test \
+node --import tsx --test "$REPO_ROOT/tests/service-builder-lifecycle.e2e.mjs" \
+  > "$OUT/service-builder-node.out" 2>&1
+BUILDER_EXIT=$?
+sed -E 's/(postgres(ql)?:\/\/)[^@ ]+@/\1[redacted]@/g' "$OUT/service-builder-node.out" | tail -90
+[ "$BUILDER_EXIT" = "0" ] || fail "dynamic service builder E2E (see $OUT/service-builder-node.out)"
+
+echo "=== 6. direct SQL invariants ==="
 DUP=$(pq -d "$DB" -tAc "
   select count(*) from public.service_bookings a
   join public.service_bookings b
@@ -210,13 +219,18 @@ INTENTS=$(pq -d "$DB" -tAc "select count(*) from public.service_payment_intents"
 REFUNDED=$(pq -d "$DB" -tAc "select count(*) from public.service_payment_intents where status = 'refunded'")
 RLS=$(pq -d "$DB" -tAc "select relrowsecurity from pg_class where oid='public.service_payment_intents'::regclass")
 LEAK=$(pq -q -d "$DB" -tAc "begin; set local test.uid='b1c2d3e4-3333-4444-8555-666677778888'; set local role authenticated; select count(*) from public.service_payment_intents; commit;" 2>/dev/null | tr -d ' ')
+CONFIGS=$(pq -d "$DB" -tAc "select count(*) from public.service_category_configs where tenant_id='default' and id in ('human_help','medicine_delivery','water_delivery');")
+MEDICINE_HARD=$(pq -d "$DB" -tAc "select count(*) from public.service_category_configs c join public.service_category_config_versions v on v.id=c.current_version_id where c.id='medicine_delivery' and v.config->'toggles'->>'prescriptionVerification'='true' and v.config->'documents' @> '[{\"key\":\"prescription\",\"required\":true}]'::jsonb;")
 echo "    duplicate live slots=$DUP (must be 0) null_slot_keys=$NULL_KEYS intents=$INTENTS events=$EVENTS refunded=$REFUNDED rls=$RLS cross_customer_rows=$LEAK (must be 0)"
+echo "    baseline service categories=$CONFIGS (must be 3) medicine_hard_rules=$MEDICINE_HARD (must be 1)"
 [ "$DUP" = "0" ] || fail "two live bookings share a canonical slot"
 [ "$INTENTS" -ge 3 ] || fail "expected at least 4 payment intents, found $INTENTS"
 [ "$EVENTS" -ge 4 ] || fail "expected signed provider events, found $EVENTS"
 [ "$REFUNDED" -ge 1 ] || fail "no refunded service payment recorded"
 [ "$RLS" = "t" ] || fail "service_payment_intents RLS is disabled"
 [ "$LEAK" != "0" ] && [ "$LEAK" != "" ] && fail "RLS exposed another customer's payment intents"
+[ "$CONFIGS" = "3" ] || fail "baseline service categories missing"
+[ "$MEDICINE_HARD" = "1" ] || fail "medicine hard rules are not published"
 
 echo "=== 6. verdict ==="
 echo "    PASS schedule=posted availability=real slots=canonical settlement=signed_provider_event"

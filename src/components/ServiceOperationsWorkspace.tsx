@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  confirmServiceDelivery,
   decideServicePaymentClaim,
   fetchServiceBookings,
   fetchServiceEarnings,
@@ -27,6 +28,18 @@ import {
   type ServicePaymentClaim,
 } from '../lib/servicesBookingClient';
 import { HelperTrackingPublisher } from './tracking/HelperTrackingPublisher';
+import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
+import { categoryConfigForListing, isMedicineServiceCategory } from '../lib/serviceCatalog';
+import {
+  fetchProviderCredentials,
+  fetchServiceCatalogVerifications,
+  reviewServiceCredential,
+  reviewServiceDocument,
+  serviceCatalogErrorMessage,
+  submitProviderCredential,
+  type ServiceVerificationsResponse,
+} from '../lib/serviceCatalogClient';
+import type { ServiceCredentialView } from '../lib/serviceCatalog';
 
 interface ServiceOperationsWorkspaceProps {
   role: 'provider' | 'admin';
@@ -59,19 +72,34 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
   const [claimNote, setClaimNote] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState<Record<string, string>>({});
   const [trackingBookingId, setTrackingBookingId] = useState('');
+  const { categories: serviceCatalog } = usePublicServiceCatalog();
+  const [credentials, setCredentials] = useState<ServiceCredentialView[]>([]);
+  const [verifications, setVerifications] = useState<ServiceVerificationsResponse | null>(null);
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [credentialDraft, setCredentialDraft] = useState({
+    credentialType: 'pharmacy_license' as 'pharmacy_license' | 'professional_license' | 'other',
+    licenseNumber: '',
+    issuingAuthority: '',
+    expiresOn: '',
+    documentReference: '',
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [bookingResult, claimResult, earningResult] = await Promise.all([
+      const [bookingResult, claimResult, earningResult, credentialResult, verificationResult] = await Promise.all([
         fetchServiceBookings(),
         fetchServicePaymentClaims().catch(() => ({ claims: [] as ServicePaymentClaim[] })),
         role === 'provider' ? fetchServiceEarnings().catch(() => ({ earnings: null })) : Promise.resolve({ earnings: null }),
+        role === 'provider' ? fetchProviderCredentials().catch(() => ({ credentials: [] as ServiceCredentialView[] })) : Promise.resolve({ credentials: [] as ServiceCredentialView[] }),
+        role === 'admin' ? fetchServiceCatalogVerifications().catch(() => null) : Promise.resolve(null),
       ]);
       setBookings(bookingResult.bookings);
       setClaims(claimResult.claims);
       setEarnings(earningResult.earnings);
+      setCredentials(credentialResult.credentials);
+      setVerifications(verificationResult);
     } catch (caught) {
       setError(serviceBookingErrorMessage(caught));
     } finally {
@@ -158,6 +186,57 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
     }
   };
 
+  const confirmDelivery = async (booking: ServiceBooking) => {
+    setBusyId(booking.id);
+    setError('');
+    try {
+      const result = await confirmServiceDelivery(booking.id);
+      setBookings((current) => current.map((row) => (row.id === booking.id ? result.booking : row)));
+      setNotice(`Handover confirmed for ${booking.bookingRef}.`);
+    } catch (caught) {
+      setError(serviceBookingErrorMessage(caught));
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const submitLicence = async () => {
+    setBusyId('licence');
+    setError('');
+    try {
+      const result = await submitProviderCredential({
+        credentialType: credentialDraft.credentialType,
+        licenseNumber: credentialDraft.licenseNumber,
+        issuingAuthority: credentialDraft.issuingAuthority,
+        expiresOn: credentialDraft.expiresOn || undefined,
+        categoryId: 'medicine_delivery',
+        documentReference: credentialDraft.documentReference || undefined,
+      });
+      setCredentials((current) => [result.credential, ...current]);
+      setNotice('Licence submitted for administrator verification.');
+      setCredentialDraft({ credentialType: 'pharmacy_license', licenseNumber: '', issuingAuthority: '', expiresOn: '', documentReference: '' });
+    } catch (caught) {
+      setError(serviceCatalogErrorMessage(caught));
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const decideVerification = async (kind: 'document' | 'credential', id: string, status: 'verified' | 'rejected') => {
+    setBusyId(id);
+    setError('');
+    try {
+      if (kind === 'document') await reviewServiceDocument(id, status, reviewNotes[id] || '');
+      else await reviewServiceCredential(id, status, reviewNotes[id] || '');
+      setVerifications(await fetchServiceCatalogVerifications());
+      setNotice(`${kind === 'document' ? 'Document' : 'Licence'} ${status}.`);
+    } catch (caught) {
+      setError(serviceCatalogErrorMessage(caught));
+    } finally {
+      setBusyId('');
+    }
+  };
+
   const pendingClaims = claims.filter((claim) => claim.status === 'pending');
 
   return (
@@ -200,6 +279,44 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
           </section>
         )}
 
+        {role === 'provider' && (
+          <section className="rounded-2xl border border-sky-200 bg-sky-50/40 p-4 dark:border-sky-900 dark:bg-sky-950/20" aria-labelledby="credentials-title">
+            <h2 id="credentials-title" className="flex items-center gap-2 text-base font-extrabold"><ShieldCheck className="h-4 w-4 text-sky-700" aria-hidden="true" /> Professional licences</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">Medicine delivery requires an active pharmacy licence verified by an administrator. Uploading a licence does not verify it automatically.</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Licence type
+                <select value={credentialDraft.credentialType} onChange={(event) => setCredentialDraft((current) => ({ ...current, credentialType: event.target.value as typeof current.credentialType }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-xs dark:border-slate-700 dark:bg-slate-800">
+                  <option value="pharmacy_license">Pharmacy licence</option>
+                  <option value="professional_license">Professional licence</option>
+                  <option value="other">Other credential</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Licence number
+                <input value={credentialDraft.licenseNumber} onChange={(event) => setCredentialDraft((current) => ({ ...current, licenseNumber: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+              </label>
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Issuing authority
+                <input value={credentialDraft.issuingAuthority} onChange={(event) => setCredentialDraft((current) => ({ ...current, issuingAuthority: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+              </label>
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Expires on
+                <input type="date" value={credentialDraft.expiresOn} onChange={(event) => setCredentialDraft((current) => ({ ...current, expiresOn: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+              </label>
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 sm:col-span-2">Private document reference
+                <input value={credentialDraft.documentReference} onChange={(event) => setCredentialDraft((current) => ({ ...current, documentReference: event.target.value }))} placeholder="storage://bos-private-documents/…" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 font-mono text-[10px] dark:border-slate-700 dark:bg-slate-800" />
+              </label>
+            </div>
+            <button type="button" disabled={busyId === 'licence'} onClick={() => void submitLicence()} className="mt-3 min-h-10 rounded-xl bg-sky-700 px-4 text-xs font-bold text-white disabled:opacity-60">Submit for verification</button>
+            <div className="mt-3 space-y-2">
+              {credentials.map((credential) => (
+                <div key={credential.id} className="rounded-xl border border-slate-200 bg-white p-2 text-[11px] dark:border-slate-700 dark:bg-slate-900">
+                  <p className="font-bold">{credential.credentialType} · {credential.licenseNumber}</p>
+                  <p className="mt-0.5 text-slate-500 dark:text-slate-400">{credential.status}{credential.expiresOn ? ` · expires ${credential.expiresOn}` : ''}{credential.reviewNote ? ` · ${credential.reviewNote}` : ''}</p>
+                </div>
+              ))}
+              {credentials.length === 0 && <p className="rounded-xl border border-dashed border-slate-300 p-3 text-[11px] text-slate-500 dark:border-slate-700">No licence submitted yet.</p>}
+            </div>
+          </section>
+        )}
+
         {role === 'admin' && (
           <section aria-labelledby="claims-title">
             <h2 id="claims-title" className="flex items-center gap-2 text-base font-extrabold"><ShieldCheck className="h-4 w-4 text-violet-600" aria-hidden="true" /> Pending payment claims ({pendingClaims.length})</h2>
@@ -227,6 +344,46 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
           </section>
         )}
 
+        {role === 'admin' && (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4 dark:border-amber-900 dark:bg-amber-950/20" aria-labelledby="verification-title">
+            <h2 id="verification-title" className="flex items-center gap-2 text-base font-extrabold"><ShieldCheck className="h-4 w-4 text-amber-700" aria-hidden="true" /> Document & licence verification</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">Prescriptions and required documents must be reviewed with a note. Medicine handover stays blocked until the prescription is verified.</p>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <div className="space-y-2">
+                <h3 className="text-xs font-black">Pending customer documents ({verifications?.documents.length || 0})</h3>
+                {(verifications?.documents || []).map((document) => (
+                  <div key={document.id} className="rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+                    <p className="text-[11px] font-black">{document.documentKey} · {document.bookingRef}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{document.listingTitle}</p>
+                    <p className="mt-0.5 break-all font-mono text-[9px] text-slate-400">{document.reference}</p>
+                    <input value={reviewNotes[document.id] || ''} onChange={(event) => setReviewNotes((current) => ({ ...current, [document.id]: event.target.value }))} placeholder="Review note (required)" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-800" />
+                    <div className="mt-1 flex gap-1.5">
+                      <button type="button" disabled={busyId === document.id} onClick={() => void decideVerification('document', document.id, 'verified')} className="min-h-8 rounded-lg bg-emerald-700 px-3 text-[10px] font-bold text-white disabled:opacity-50">Verify</button>
+                      <button type="button" disabled={busyId === document.id} onClick={() => void decideVerification('document', document.id, 'rejected')} className="min-h-8 rounded-lg border border-rose-300 px-3 text-[10px] font-bold text-rose-700 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300">Reject</button>
+                    </div>
+                  </div>
+                ))}
+                {!verifications?.documents.length && <p className="rounded-xl border border-dashed border-slate-300 p-3 text-[11px] text-slate-500 dark:border-slate-700">No documents waiting.</p>}
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xs font-black">Pending provider licences ({verifications?.credentials.length || 0})</h3>
+                {(verifications?.credentials || []).map((credential) => (
+                  <div key={credential.id} className="rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+                    <p className="text-[11px] font-black">{credential.credentialType} · {credential.providerName || credential.providerId}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{credential.licenseNumber}{credential.expiresOn ? ` · expires ${credential.expiresOn}` : ''}</p>
+                    <input value={reviewNotes[credential.id] || ''} onChange={(event) => setReviewNotes((current) => ({ ...current, [credential.id]: event.target.value }))} placeholder="Review note (required)" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-800" />
+                    <div className="mt-1 flex gap-1.5">
+                      <button type="button" disabled={busyId === credential.id} onClick={() => void decideVerification('credential', credential.id, 'verified')} className="min-h-8 rounded-lg bg-emerald-700 px-3 text-[10px] font-bold text-white disabled:opacity-50">Verify licence</button>
+                      <button type="button" disabled={busyId === credential.id} onClick={() => void decideVerification('credential', credential.id, 'rejected')} className="min-h-8 rounded-lg border border-rose-300 px-3 text-[10px] font-bold text-rose-700 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300">Reject</button>
+                    </div>
+                  </div>
+                ))}
+                {!verifications?.credentials.length && <p className="rounded-xl border border-dashed border-slate-300 p-3 text-[11px] text-slate-500 dark:border-slate-700">No licences waiting.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
         <section aria-labelledby="jobs-title">
           <h2 id="jobs-title" className="text-base font-extrabold">{role === 'admin' ? 'All service bookings' : 'Assigned service jobs'}</h2>
           {loading ? (
@@ -240,6 +397,21 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
               {bookings.map((booking) => {
                 const busy = busyId === booking.id;
                 const draft = reschedule[booking.id] || { date: booking.scheduledDate, slot: booking.timeSlot };
+                const configured = categoryConfigForListing(serviceCatalog, booking.categoryConfigId || booking.categoryId);
+                const medicineBooking = configured
+                  ? isMedicineServiceCategory(configured.id, configured.config)
+                  : booking.prescriptionStatus !== 'not_required';
+                const missingVerifiedDocument = Boolean(
+                  configured?.config.approvalWorkflow.requiresDocumentVerification
+                  && configured.config.documents.some((requirement) => (
+                    requirement.required
+                    && requirement.verificationRequired
+                    && !booking.documents.some((document) => document.documentKey === requirement.key && document.status === 'verified')
+                  )),
+                );
+                const completionBlocked = (booking.deliveryConfirmationEnabled && !booking.deliveryConfirmedAt)
+                  || (medicineBooking && booking.prescriptionStatus !== 'verified')
+                  || missingVerifiedDocument;
                 return (
                   <article key={booking.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -254,7 +426,26 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
                     </div>
                     <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{booking.serviceAddress}</p>
                     {booking.notes && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Customer note: {booking.notes}</p>}
-                    <p className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-300">{money(booking.amount)} · {booking.paymentMode === 'pay_after_service' ? 'pay after service' : 'UPI'}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-300">{money(booking.amount)} · {booking.paymentEnabled ? (booking.paymentMode === 'pay_after_service' ? 'pay after service' : 'UPI') : 'payment handled directly'}</p>
+                    {configured && (
+                      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950/40">
+                        <p className="font-black text-slate-700 dark:text-slate-200">{configured.config.name} · v{booking.categoryConfigVersion}{booking.quantity > 1 ? ` · quantity ${booking.quantity}` : ''}{` · ${booking.deliveryMode.replace(/_/g, ' ')}`}{booking.recurrenceFrequency !== 'none' ? ` · ${booking.recurrenceFrequency} × ${booking.recurrenceOccurrences || '?'}` : ''}</p>
+                        <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                          {Object.entries(booking.fieldValues).map(([key, value]) => (
+                            <p key={key} className="text-slate-600 dark:text-slate-300"><span className="font-bold">{key}:</span> {Array.isArray(value) ? value.join(', ') : String(value)}</p>
+                          ))}
+                        </div>
+                        {booking.documents.length > 0 && (
+                          <div className="mt-1 border-t border-slate-200 pt-1 dark:border-slate-700">
+                            {booking.documents.map((document) => (
+                              <p key={document.id} className="text-slate-600 dark:text-slate-300"><span className="font-bold">{document.documentKey}:</span> {document.status}{document.reviewNote ? ` · ${document.reviewNote}` : ''}</p>
+                            ))}
+                          </div>
+                        )}
+                        {medicineBooking && <p className={`mt-1 font-bold ${booking.prescriptionStatus === 'verified' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>Prescription: {booking.prescriptionStatus.replace('_', ' ')}</p>}
+                        {booking.deliveryConfirmationEnabled && <p className={`mt-1 font-bold ${booking.deliveryConfirmedAt ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>Handover: {booking.deliveryConfirmedAt ? 'confirmed' : 'not confirmed'}</p>}
+                      </div>
+                    )}
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {role !== 'admin' && booking.status === 'requested' && (
@@ -273,7 +464,10 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
                       {role !== 'admin' && booking.status === 'in_progress' && (
                         <>
                           <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
-                          <button type="button" disabled={busy} onClick={() => void act(booking, 'complete')} className="min-h-10 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-60">Mark completed</button>
+                          {booking.deliveryConfirmationEnabled && !booking.deliveryConfirmedAt && !booking.otpEnabled && (
+                            <button type="button" disabled={busy} onClick={() => void confirmDelivery(booking)} className="min-h-10 rounded-xl bg-amber-600 px-4 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-60">Confirm handover</button>
+                          )}
+                          <button type="button" disabled={busy || completionBlocked} title={completionBlocked ? 'Verify required documents and confirm the handover first.' : undefined} onClick={() => void act(booking, 'complete')} className="min-h-10 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-60">Mark completed</button>
                         </>
                       )}
                       {role !== 'admin' && ['requested', 'accepted'].includes(booking.status) && (
@@ -283,7 +477,7 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
                           <button type="button" disabled={busy} onClick={() => void act(booking, 'reschedule')} className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-violet-300 px-3 text-[11px] font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-60 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"><CalendarClock className="h-3.5 w-3.5" aria-hidden="true" /> Save slot</button>
                         </div>
                       )}
-                      {role !== 'admin' && booking.status === 'completed' && ['due', 'failed'].includes(booking.paymentStatus) && (
+                      {role !== 'admin' && booking.paymentEnabled && booking.status === 'completed' && ['due', 'failed'].includes(booking.paymentStatus) && (
                         <div className="w-full rounded-xl border border-violet-200 p-3 dark:border-violet-900">
                           <p className="text-[11px] font-bold text-violet-800 dark:text-violet-200">Record collected payment for admin verification</p>
                           <div className="mt-2 grid gap-2 sm:grid-cols-3">

@@ -83,9 +83,15 @@ export function DeliveryTrackingPanel({ bookingId, onClose }: { bookingId: strin
                 </span>
               </div>
 
-              <DeliveryTrackingMap point={point} stale={stale} label="Helper live location" />
+              {snapshot.liveMapEnabled ? (
+                <DeliveryTrackingMap point={point} stale={stale} label="Helper live location" />
+              ) : (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                  The live map is turned off for this service. Status and handover confirmation still update here.
+                </p>
+              )}
 
-              {point && (
+              {point && snapshot.liveMapEnabled && (
                 <a
                   href={`https://www.openstreetmap.org/?mlat=${point.latitude}&mlon=${point.longitude}#map=17/${point.latitude}/${point.longitude}`}
                   target="_blank"
@@ -106,7 +112,19 @@ export function DeliveryTrackingPanel({ bookingId, onClose }: { bookingId: strin
                 <p className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-[11px] font-semibold text-sky-800">Recurring delivery: {snapshot.recurrenceRule}.</p>
               )}
 
-              {live && !isTerminalDeliveryStatus(snapshot.status) && (
+              {snapshot.deliveryConfirmationEnabled && (
+                <p className={`rounded-xl border p-3 text-[11px] font-semibold ${snapshot.deliveryConfirmedAt ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                  Delivery confirmation: {snapshot.deliveryConfirmedAt ? 'confirmed at handover' : 'waiting for the assigned provider to confirm handover'}.
+                </p>
+              )}
+
+              {live && !isTerminalDeliveryStatus(snapshot.status) && !snapshot.otpEnabled && (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                  This service does not use a customer OTP. The assigned provider confirms handover in the provider workspace.
+                </p>
+              )}
+
+              {live && !isTerminalDeliveryStatus(snapshot.status) && snapshot.otpEnabled && (
                 <section className="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
                   <h3 className="flex items-center gap-1.5 text-[12px] font-black text-[#1f1650] dark:text-white"><ShieldCheck className="h-4 w-4 text-emerald-600" /> {config?.otpLabel || 'Delivery OTP'}</h3>
                   <p className="mt-1 text-[10px] font-semibold leading-4 text-slate-500">Generate a single-use in-app OTP. Show it to the assigned helper only at handover. It expires in 10 minutes and can be used once.</p>

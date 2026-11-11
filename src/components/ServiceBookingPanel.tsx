@@ -11,6 +11,20 @@ import {
   type ServicePaymentConfig,
 } from '../lib/servicesBookingClient';
 import {
+  assertServiceBookingWindow,
+  computeServiceBookingAmount,
+  isMedicineServiceCategory,
+  normalizeServiceBookingDocuments,
+  normalizeServiceBookingFieldValues,
+  normalizeServiceRecurrence,
+  serviceCatalogErrorMessage,
+  type PublicServiceCategory,
+  type ServiceBookingFieldValues,
+  type ServiceRecurrenceFrequency,
+} from '../lib/serviceCatalog';
+import { DynamicBookingFields } from './serviceCatalog/DynamicBookingFields';
+import type { BookingDocumentValue } from './serviceCatalog/BookingDocumentField';
+import {
   createServicePaymentIntent,
   fetchServiceAvailability,
   fetchServicePaymentStatus,
@@ -24,6 +38,8 @@ import {
 
 interface ServiceBookingPanelProps {
   listing: { id: string; title: string; providerName: string };
+  /** Published Super Admin configuration for this listing's category. */
+  categoryConfig?: PublicServiceCategory | null;
   onClose: () => void;
   onBooked?: (booking: ServiceBooking) => void;
 }
@@ -37,7 +53,8 @@ function newBookingKey(): string {
   return '00000000-0000-4000-8000-' + String(Date.now()).padStart(12, '0').slice(-12);
 }
 
-export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBookingPanelProps) {
+export function ServiceBookingPanel({ listing, categoryConfig, onClose, onBooked }: ServiceBookingPanelProps) {
+  const dynamicConfig = categoryConfig?.config || null;
   const [config, setConfig] = useState<ServicePaymentConfig | null>(null);
   const [profile, setProfile] = useState<ServiceProviderProfile | null>(null);
   const [scheduledDate, setScheduledDate] = useState(isoPlusDays(1));
@@ -50,6 +67,12 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
   const [customerPhone, setCustomerPhone] = useState('');
   const [notes, setNotes] = useState('');
   const [paymentMode, setPaymentMode] = useState<'pay_after_service' | 'upi_intent'>('pay_after_service');
+  const [deliveryMode, setDeliveryMode] = useState('on_site');
+  const [quantity, setQuantity] = useState(1);
+  const [fieldValues, setFieldValues] = useState<ServiceBookingFieldValues>({});
+  const [documents, setDocuments] = useState<Record<string, BookingDocumentValue>>({});
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<string>('none');
+  const [recurrenceOccurrences, setRecurrenceOccurrences] = useState<number | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState(newBookingKey);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -57,6 +80,20 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
   const [intent, setIntent] = useState<ServicePaymentIntent | null>(null);
   const [intentStatus, setIntentStatus] = useState<string>('');
 
+
+  useEffect(() => {
+    if (!dynamicConfig) return;
+    setQuantity(dynamicConfig.pricing.minQuantity);
+    setDeliveryMode(dynamicConfig.deliveryModes[0] || 'on_site');
+    setFieldValues({});
+    setDocuments({});
+    setRecurrenceFrequency(
+      dynamicConfig.bookingType === 'recurring' && dynamicConfig.recurring.enabled
+        ? dynamicConfig.recurring.defaultFrequency
+        : 'none',
+    );
+    setRecurrenceOccurrences(dynamicConfig.recurring.maxOccurrences);
+  }, [categoryConfig?.id, categoryConfig?.versionNumber]);
 
   useEffect(() => {
     let active = true;
@@ -123,6 +160,44 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
     setError('');
     try {
       if (!selectedSlot) throw Object.assign(new Error('slot'), { code: 'SERVICE_SLOT_UNAVAILABLE' });
+      let dynamicPayload: {
+        categoryConfigId?: string;
+        deliveryMode?: 'on_site' | 'home_delivery' | 'pickup' | 'digital';
+        quantity?: number;
+        recurrence?: { frequency: ServiceRecurrenceFrequency; occurrences: number | null };
+        fieldValues?: ServiceBookingFieldValues;
+        documents?: Array<{ key: string; reference: string; fileName?: string; mimeType?: string }>;
+        paymentMode?: ServiceBooking['paymentMode'];
+      } = {};
+      if (dynamicConfig && categoryConfig) {
+        try {
+          assertServiceBookingWindow(dynamicConfig, scheduledDate, selectedSlot.start);
+          const recurrence = normalizeServiceRecurrence(
+            dynamicConfig,
+            recurrenceFrequency === 'none' ? null : { frequency: recurrenceFrequency, occurrences: recurrenceOccurrences },
+          );
+          const normalizedFields = normalizeServiceBookingFieldValues(dynamicConfig, fieldValues);
+          const normalizedDocuments = normalizeServiceBookingDocuments(
+            dynamicConfig,
+            Object.entries(documents)
+              .filter(([, value]) => value.reference.trim())
+              .map(([key, value]) => ({ key, reference: value.reference, fileName: value.fileName, mimeType: value.mimeType })),
+          );
+          dynamicPayload = {
+            categoryConfigId: categoryConfig.id,
+            deliveryMode: deliveryMode as 'on_site' | 'home_delivery' | 'pickup' | 'digital',
+            quantity,
+            recurrence,
+            fieldValues: normalizedFields,
+            documents: normalizedDocuments,
+            ...(dynamicConfig.toggles.payment ? {} : { paymentMode: 'pay_after_service' as const }),
+          };
+        } catch (validationError) {
+          setError(serviceCatalogErrorMessage(validationError));
+          setSubmitting(false);
+          return;
+        }
+      }
       const result = await createServiceBooking({
         listingId: listing.id,
         scheduledDate,
@@ -132,8 +207,9 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
         addressNotes,
         customerPhone,
         notes,
-        paymentMode,
+        paymentMode: dynamicPayload.paymentMode || paymentMode,
         idempotencyKey,
+        ...dynamicPayload,
       });
       setCreated(result.booking);
       onBooked?.(result.booking);
@@ -197,6 +273,30 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
               <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Agreed amount</dt><dd className="font-bold">₹{created.amount.toLocaleString('en-IN')} <span className="text-[11px] font-normal text-slate-500">({created.amountBasis})</span></dd></div>
               <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Payment</dt><dd className="font-semibold">{paid ? 'Paid · verified settlement' : intent ? 'Awaiting verified settlement' : 'Due after service'}</dd></div>
               <div className="flex items-start justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Address</dt><dd className="max-w-[60%] text-right font-semibold">{created.serviceAddress}</dd></div>
+              {created.quantity > 1 && <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Quantity</dt><dd className="font-semibold">{created.quantity}</dd></div>}
+              {created.categoryConfigId && <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Delivery</dt><dd className="font-semibold capitalize">{created.deliveryMode.replace(/_/g, ' ')}</dd></div>}
+              {created.recurrenceFrequency !== 'none' && <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Repeats</dt><dd className="font-semibold">{created.recurrenceFrequency}{created.recurrenceOccurrences ? ` × ${created.recurrenceOccurrences}` : ''}</dd></div>}
+              {created.categoryConfigId && <div className="flex items-center justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">Service</dt><dd className="font-semibold">{categoryConfig?.config.name || created.categoryConfigId} · v{created.categoryConfigVersion}</dd></div>}
+              {created.fieldValues && Object.keys(created.fieldValues).length > 0 && (
+                <div className="col-span-full border-t border-slate-200 pt-3 dark:border-slate-800">
+                  <dt className="text-slate-500 dark:text-slate-400">Service details</dt>
+                  <dd className="mt-1 space-y-1">
+                    {Object.entries(created.fieldValues).map(([key, value]) => (
+                      <p key={key} className="flex justify-between gap-3 text-xs"><span className="text-slate-500 dark:text-slate-400">{key}</span><span className="text-right font-semibold">{Array.isArray(value) ? value.join(', ') : String(value)}</span></p>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {created.documents?.length > 0 && (
+                <div className="col-span-full border-t border-slate-200 pt-3 dark:border-slate-800">
+                  <dt className="text-slate-500 dark:text-slate-400">Documents</dt>
+                  <dd className="mt-1 space-y-1">
+                    {created.documents.map((document) => (
+                      <p key={document.id} className="flex justify-between gap-3 text-xs"><span className="text-slate-500 dark:text-slate-400">{document.documentKey}</span><span className="font-semibold capitalize">{document.status}</span></p>
+                    ))}
+                  </dd>
+                </div>
+              )}
             </dl>
 
             {intent && (
@@ -278,6 +378,24 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
               )}
             </p>
 
+            {dynamicConfig && (
+              <DynamicBookingFields
+                config={dynamicConfig}
+                values={fieldValues}
+                onValue={(key, value) => setFieldValues((current) => ({ ...current, [key]: value }))}
+                deliveryMode={deliveryMode}
+                onDeliveryMode={setDeliveryMode}
+                quantity={quantity}
+                onQuantity={setQuantity}
+                recurrenceFrequency={recurrenceFrequency}
+                onRecurrenceFrequency={setRecurrenceFrequency}
+                recurrenceOccurrences={recurrenceOccurrences}
+                onRecurrenceOccurrences={setRecurrenceOccurrences}
+                documents={documents}
+                onDocument={(key, value) => setDocuments((current) => ({ ...current, [key]: value }))}
+              />
+            )}
+
             <label className="block text-xs font-bold text-slate-600 dark:text-slate-300">
               <span className="mb-1 flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-violet-600" aria-hidden="true" /> Service address</span>
               <textarea required rows={2} minLength={5} maxLength={500} value={serviceAddress} onChange={(event) => setServiceAddress(event.target.value)} placeholder="Flat / house, street, area, landmark" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
@@ -298,6 +416,27 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
               <textarea rows={2} maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe the problem, appliance model, or scope" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
             </label>
 
+            {dynamicConfig && (
+              <div className="rounded-2xl border border-violet-200 bg-violet-50/60 p-3 text-xs dark:border-violet-900 dark:bg-violet-950/20">
+                <p className="font-black text-violet-900 dark:text-violet-100">
+                  {dynamicConfig.pricing.mode === 'quote'
+                    ? 'Price confirmed by the provider'
+                    : `Estimated ₹${computeServiceBookingAmount(dynamicConfig, 0, quantity).amount.toLocaleString('en-IN')}`}
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-slate-600 dark:text-slate-300">
+                  {dynamicConfig.name}
+                  {dynamicConfig.pricing.quantityEnabled ? ` · quantity ${quantity}` : ''}
+                  {` · ${deliveryMode.replace(/_/g, ' ')}`}
+                  {recurrenceFrequency !== 'none' ? ` · ${recurrenceFrequency} repeat` : ''}
+                  {' · '}
+                  {dynamicConfig.toggles.gpsTracking ? 'live GPS tracking' : 'no live GPS'}
+                  {dynamicConfig.toggles.customerOtp ? ' · customer OTP' : ''}
+                  {isMedicineServiceCategory(categoryConfig?.id || '', dynamicConfig) ? ' · prescription verified by a licensed pharmacy' : ''}
+                </p>
+              </div>
+            )}
+
+            {(!dynamicConfig || dynamicConfig.toggles.payment) && (
             <fieldset className="rounded-2xl border border-violet-100 p-3 dark:border-violet-900">
               <legend className="px-1 text-xs font-bold text-slate-600 dark:text-slate-300">Payment</legend>
               <div className="space-y-2">
@@ -313,6 +452,12 @@ export function ServiceBookingPanel({ listing, onClose, onBooked }: ServiceBooki
                 )}
               </div>
             </fieldset>
+            )}
+            {dynamicConfig && !dynamicConfig.toggles.payment && (
+              <p className="rounded-2xl border border-slate-200 p-3 text-[11px] leading-5 text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                This service does not collect payment through BookOurSpace. Settle any charges directly with the provider.
+              </p>
+            )}
 
             {error && <FormStatus tone="error">{error}</FormStatus>}
 

@@ -4,16 +4,19 @@ import { DeliveryTrackingMap } from './DeliveryTrackingMap';
 import { useDeliveryTracking, useHelperLocationPublisher } from '../../hooks/useDeliveryTracking';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { verifyDeliveryOtp } from '../../lib/deliveryTrackingClient';
+import { confirmServiceDelivery, serviceBookingErrorMessage } from '../../lib/servicesBookingClient';
 import { DELIVERY_TRACKING_CONFIG, isTerminalDeliveryStatus, isLiveDeliveryStatus, normalizeOtp, trackingStatusLabel } from '../../lib/deliveryTracking';
 
 export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: string; onClose: () => void }) {
-  const { snapshot, error } = useDeliveryTracking(bookingId);
+  const { snapshot, error, refresh } = useDeliveryTracking(bookingId);
   const [sharing, setSharing] = useState(false);
   const { point, error: gpsError, watching, backgroundPaused } = useDeviceLocation(sharing);
   const { publishedAt, publishError } = useHelperLocationPublisher(bookingId, sharing, point, snapshot?.status);
   const [otp, setOtp] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
   const config = snapshot ? DELIVERY_TRACKING_CONFIG[snapshot.serviceKind] : null;
   const live = Boolean(snapshot && isLiveDeliveryStatus(snapshot.status) && snapshot.trackingEnabled && !isTerminalDeliveryStatus(snapshot.status));
 
@@ -62,7 +65,9 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
 
               {!live ? (
                 <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                  GPS sharing is available only while this booking is accepted or in progress. It stops automatically when the booking completes or is cancelled.
+                  {snapshot.trackingEnabled === false
+                    ? 'Live GPS is turned off for this service. Use the handover confirmation below instead.'
+                    : 'GPS sharing is available only while this booking is accepted or in progress. It stops automatically when the booking completes or is cancelled.'}
                 </p>
               ) : (
                 <>
@@ -81,6 +86,39 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
                 </>
               )}
 
+              {snapshot.deliveryConfirmationEnabled && !snapshot.otpEnabled && (
+                <section className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
+                  <h3 className="flex items-center gap-1.5 text-[12px] font-black text-amber-900 dark:text-amber-100"><CheckCircle2 className="h-4 w-4" /> Delivery confirmation</h3>
+                  <p className="mt-1 text-[10px] font-semibold text-amber-900/80 dark:text-amber-100/80">
+                    {snapshot.deliveryConfirmedAt ? 'Handover is already confirmed for this booking.' : 'Confirm the handover only after the customer has received the service.'}
+                  </p>
+                  {!snapshot.deliveryConfirmedAt && (
+                    <button
+                      type="button"
+                      disabled={confirmBusy}
+                      onClick={async () => {
+                        setConfirmBusy(true);
+                        setConfirmMessage('');
+                        try {
+                          await confirmServiceDelivery(bookingId);
+                          setConfirmMessage('Handover confirmed.');
+                          await refresh();
+                        } catch (caught) {
+                          setConfirmMessage(serviceBookingErrorMessage(caught));
+                        } finally {
+                          setConfirmBusy(false);
+                        }
+                      }}
+                      className="mt-2 h-10 w-full rounded-xl bg-amber-600 text-[11px] font-black text-white disabled:opacity-50"
+                    >
+                      {confirmBusy ? 'Confirming…' : 'Confirm handover'}
+                    </button>
+                  )}
+                  {confirmMessage && <p className={`mt-2 text-[10px] font-semibold ${confirmMessage === 'Handover confirmed.' ? 'text-emerald-700' : 'text-rose-600'}`}>{confirmMessage}</p>}
+                </section>
+              )}
+
+              {snapshot.otpEnabled ? (
               <section className="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
                 <h3 className="flex items-center gap-1.5 text-[12px] font-black text-[#1f1650] dark:text-white"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Verify customer OTP</h3>
                 <p className="mt-1 text-[10px] font-semibold text-slate-500">Ask the customer for the 6-digit in-app {config?.otpLabel || 'delivery OTP'} at handover. It is single-use and expires in 10 minutes.</p>
@@ -90,6 +128,11 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
                 </div>
                 {otpMessage && <p className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${otpMessage.startsWith('OTP verified') ? 'text-emerald-700' : 'text-rose-600'}`}><CheckCircle2 className="h-3 w-3" /> {otpMessage}</p>}
               </section>
+              ) : (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                  This service does not use a customer OTP. Complete the handover confirmation instead.
+                </p>
+              )}
             </>
           )}
         </div>

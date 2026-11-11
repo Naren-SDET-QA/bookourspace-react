@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 73,
+  "migrationCount": 75,
   "migrations": [
     {
       "order": 2,
@@ -598,6 +598,22 @@
       "file": "supabase/migrations/20261108150000_superadmin_module_visibility.sql",
       "bytes": 963,
       "sha256": "66dc7a930565aef9e838f2f75cf4e277e75660d360555190621393a01e32c78d"
+    },
+    {
+      "order": 75,
+      "version": "20261111190000",
+      "name": "universal_delivery_tracking",
+      "file": "supabase/migrations/20261111190000_universal_delivery_tracking.sql",
+      "bytes": 17092,
+      "sha256": "9f1e35d4da409c1fe616f3e2934d576095e0783778f9e5bbf417cd45af5b4181"
+    },
+    {
+      "order": 76,
+      "version": "20261111200000",
+      "name": "dynamic_service_category_builder",
+      "file": "supabase/migrations/20261111200000_dynamic_service_category_builder.sql",
+      "bytes": 81726,
+      "sha256": "199cbf5ec47803d3d4af4e47e53f155b58d2ee1454278e16629395efa6117ae9"
     }
   ],
   "review": {

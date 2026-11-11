@@ -26,7 +26,12 @@ export interface DeliveryTrackingSnapshot {
   trackingStartedAt: string | null;
   trackingStoppedAt: string | null;
   serviceKind: DeliveryKind;
+  categoryId: string | null;
   trackingEnabled: boolean;
+  liveMapEnabled: boolean;
+  otpEnabled: boolean;
+  deliveryConfirmationEnabled: boolean;
+  deliveryConfirmedAt: string | null;
   prescriptionStatus: 'not_required' | 'pending' | 'verified' | 'rejected';
   recurrenceRule: 'none' | 'daily' | 'weekly' | 'custom';
   latestLocation: TrackingPoint | null;
@@ -71,7 +76,7 @@ export async function fetchDeliveryTracking(bookingId: string): Promise<Delivery
   if (!booking) throw new Error('BOOKING_NOT_FOUND');
 
   const [{ data: profile }, { data: locations }, { data: events }] = await Promise.all([
-    client.from('service_delivery_profiles').select('service_kind, tracking_enabled, prescription_status, recurrence_rule').eq('booking_id', bookingId).maybeSingle(),
+    client.from('service_delivery_profiles').select('service_kind, category_id, tracking_enabled, live_map_enabled, otp_enabled, delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule').eq('booking_id', bookingId).maybeSingle(),
     client.from('service_tracking_locations').select('latitude, longitude, accuracy_meters, captured_at').eq('booking_id', bookingId).order('captured_at', { ascending: false }).limit(1),
     client.from('service_tracking_events').select('id, event_type, note, created_at').eq('booking_id', bookingId).order('created_at', { ascending: false }).limit(20),
   ]);
@@ -88,7 +93,12 @@ export async function fetchDeliveryTracking(bookingId: string): Promise<Delivery
     trackingStartedAt: booking.tracking_started_at || null,
     trackingStoppedAt: booking.tracking_stopped_at || null,
     serviceKind: mapKind(profile?.service_kind),
+    categoryId: profile?.category_id ? String(profile.category_id) : null,
     trackingEnabled: profile?.tracking_enabled !== false,
+    liveMapEnabled: profile?.live_map_enabled !== false,
+    otpEnabled: profile?.otp_enabled !== false,
+    deliveryConfirmationEnabled: profile?.delivery_confirmation_enabled === true,
+    deliveryConfirmedAt: profile?.delivery_confirmed_at ? String(profile.delivery_confirmed_at) : null,
     prescriptionStatus: (profile?.prescription_status || 'not_required') as DeliveryTrackingSnapshot['prescriptionStatus'],
     recurrenceRule: (profile?.recurrence_rule || 'none') as DeliveryTrackingSnapshot['recurrenceRule'],
     latestLocation: mapPoint(Array.isArray(locations) ? locations[0] : null),
