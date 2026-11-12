@@ -53,7 +53,8 @@ function sessionOrReject(
     });
     return null;
   }
-  return actor;
+  const businessId = String(request.header('x-business-id') || '').trim();
+  return businessId ? { ...actor, businessId } : actor;
 }
 
 const ACTIONS = new Set<ServiceBookingAction>(['accept', 'reject', 'start', 'complete', 'cancel', 'reschedule']);

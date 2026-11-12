@@ -2678,7 +2678,7 @@ Task:
 
   // Independent business context for provider-owned APIs. Missing, invalid,
   // suspended or revoked context is rejected; administrators retain access.
-  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
+  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/provider-portal', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
     if (String(req.path || '').startsWith('/registrations')) return next();
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) return void res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });

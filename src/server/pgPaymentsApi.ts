@@ -74,7 +74,8 @@ function sendError(response: express.Response, error: unknown) {
 function actorOf(request: express.Request, verifySession: PgPaymentsApiDependencies['verifySession']) {
   const actor = verifySession(request);
   if (!actor || !actor.supabaseUserId || !UUID.test(String(actor.supabaseUserId))) return null;
-  return actor;
+  const businessId = String(request.header('x-business-id') || '').trim();
+  return businessId ? { ...actor, businessId } : actor;
 }
 
 function merchantVpa(env: NodeJS.ProcessEnv): string {

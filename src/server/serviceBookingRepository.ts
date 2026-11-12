@@ -482,7 +482,7 @@ export class ServiceBookingRepository {
       const scope = actor.role === 'admin'
         ? 'true'
         : actor.role === 'provider'
-          ? 'b.provider_id = auth.uid()'
+          ? 'b.provider_id = auth.uid() and ($1::uuid is null or b.business_id=$1::uuid)'
           : 'b.customer_id = auth.uid()';
       const { rows } = await client.query(
         `select b.*, l.title as listing_title
@@ -492,6 +492,7 @@ export class ServiceBookingRepository {
           order by case b.status when 'requested' then 0 when 'accepted' then 1 when 'in_progress' then 2 else 3 end,
                    b.scheduled_date desc, b.created_at desc
           limit 500`,
+        [actor.businessId || null],
       );
       return rows.map(toBooking);
     });
@@ -655,7 +656,7 @@ export class ServiceBookingRepository {
   async listPaymentClaims(actor: ProviderListingActor): Promise<ServicePaymentClaimRecord[]> {
     return this.transaction(actor, async (client) => {
       await this.requireActiveProfile(client, actor);
-      const scope = actor.role === 'admin' ? 'true' : 'c.claimed_by = auth.uid()';
+      const scope = actor.role === 'admin' ? 'true' : 'c.claimed_by = auth.uid() and ($1::uuid is null or b.business_id=$1::uuid)';
       const { rows } = await client.query(
         `select c.*, b.booking_ref
            from public.service_payment_claims c
@@ -663,6 +664,7 @@ export class ServiceBookingRepository {
           where ${scope}
           order by case c.status when 'pending' then 0 else 1 end, c.created_at desc
           limit 500`,
+        [actor.businessId || null],
       );
       return rows.map(toClaim);
     });

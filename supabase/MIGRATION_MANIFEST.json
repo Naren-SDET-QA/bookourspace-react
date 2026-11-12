@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 95,
+  "migrationCount": 98,
   "migrations": [
     {
       "order": 2,
@@ -774,6 +774,30 @@
       "file": "supabase/migrations/20261112260000_admin_stay_rpc_finalize.sql",
       "bytes": 10831,
       "sha256": "97289022147a64c3e40245a65aab1581afaabac9900ebc5c5ffcc654ebed4bf3"
+    },
+    {
+      "order": 97,
+      "version": "20261112270000",
+      "name": "institute_member_business_isolation",
+      "file": "supabase/migrations/20261112270000_institute_member_business_isolation.sql",
+      "bytes": 2498,
+      "sha256": "84f1be4f5143bcebd81e25016bbd734832db3f3bb9400ee5a741da52fd8c1b85"
+    },
+    {
+      "order": 98,
+      "version": "20261112280000",
+      "name": "strict_record_business_assignment",
+      "file": "supabase/migrations/20261112280000_strict_record_business_assignment.sql",
+      "bytes": 5423,
+      "sha256": "1e4032d0dd96153672f7233929b511778f3352c46a8f2cdad0cccd9c67229275"
+    },
+    {
+      "order": 99,
+      "version": "20261112290000",
+      "name": "record_business_function_privileges",
+      "file": "supabase/migrations/20261112290000_record_business_function_privileges.sql",
+      "bytes": 143,
+      "sha256": "c6b3fa6021066b4a02e8c1634d37c3721a5f54943b6a39473f61bde80c6e5b85"
     }
   ],
   "review": {
