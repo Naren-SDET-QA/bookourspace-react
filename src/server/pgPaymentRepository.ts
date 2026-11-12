@@ -442,8 +442,12 @@ export class PgPaymentRepository {
                 c."decided_at" as "decidedAt", c."created_at" as "createdAt"
            from public.pg_payment_claims c
           where c.booking_id = $1
+            and ($2::uuid is null or exists (
+              select 1 from public.bookings b join public.listings l on l.id=b.listing_id
+               where b.id=c.booking_id and l.business_id=$2::uuid
+            ))
           order by c.created_at desc`,
-        [bookingId],
+        [bookingId, actor?.businessId || null],
       );
       return result.rows;
     });
@@ -482,8 +486,12 @@ export class PgPaymentRepository {
                 i.provider, i."provider_payment_id" as "providerPaymentId", i."issued_at" as "issuedAt"
            from public.pg_invoices i
           where i.booking_id = $1
+            and ($2::uuid is null or exists (
+              select 1 from public.bookings b join public.listings l on l.id=b.listing_id
+               where b.id=i.booking_id and l.business_id=$2::uuid
+            ))
           order by i.issued_at desc`,
-        [bookingId],
+        [bookingId, actor?.businessId || null],
       );
       return result.rows;
     });

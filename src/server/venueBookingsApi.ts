@@ -15,7 +15,9 @@ export interface VenueBookingsApiDependencies {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const actorOf = (req: express.Request, verify: VenueBookingsApiDependencies['verifySession']) => {
-  const actor = verify(req);
+  const base = verify(req);
+  const businessId = String(req.header('x-business-id') || '').trim();
+  const actor = base && businessId ? { ...base, businessId } : base;
   return actor?.supabaseUserId && UUID.test(String(actor.supabaseUserId)) ? actor : null;
 };
 

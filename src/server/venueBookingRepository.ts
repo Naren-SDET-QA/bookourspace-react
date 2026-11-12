@@ -244,8 +244,8 @@ export class VenueBookingRepository {
                    from public.venue_booking_disputes d where d.booking_id=b.id) as disputes
            from public.venue_bookings b join public.listings l on l.id=b.listing_id
            join public.venue_booking_settings s on s.listing_id=b.listing_id
-          where ($1='mine' and b.customer_user_id=auth.uid()) or ($1='owner' and b.owner_user_id=auth.uid()) or ($1='admin' and public.is_admin())
-          order by b.starts_at desc limit 200`, [scope],
+          where ($1='mine' and b.customer_user_id=auth.uid()) or ($1='owner' and b.owner_user_id=auth.uid() and ($2::uuid is null or b.business_id=$2::uuid)) or ($1='admin' and public.is_admin())
+          order by b.starts_at desc limit 200`, [scope, actor.businessId || null],
       );
       return result.rows.map((row) => ({
         id:row.id, bookingRef:row.booking_ref, listingId:row.listing_id, listingTitle:row.listing_title,

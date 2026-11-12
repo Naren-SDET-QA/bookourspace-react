@@ -117,6 +117,15 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     }
     const screenId = String(req.params.screenId || '').trim();
     if (!screenId) return res.status(400).json({ ok: false, error: 'SCREEN_ID_REQUIRED' });
+    const businessId = String(req.header('x-business-id') || '').trim();
+    if (claims.role === 'provider' && businessId) {
+      const scoped = await deps.pool.query(
+        `select 1 from public.cinema_screens s join public.listings l on l.id=s.cinema_listing_id
+          where s.id=$1 and l.owner_id=$2 and l.business_id=$3 limit 1`,
+        [screenId, claims.supabaseUserId || claims.userId, businessId],
+      );
+      if (scoped.rowCount === 0) return res.status(403).json({ ok: false, error: 'SCREEN_BUSINESS_ACCESS_DENIED' });
+    }
     const body = (req.body || {}) as Record<string, unknown>;
     const nextShowtimes = body.showtimes === undefined ? null : showtimes(body.showtimes);
     if (body.showtimes === undefined || !nextShowtimes) {

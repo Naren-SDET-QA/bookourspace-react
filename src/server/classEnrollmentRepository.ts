@@ -461,6 +461,7 @@ export class ClassEnrollmentRepository {
         ? `true`
         : `(e.student_id = auth.uid() or exists (
              select 1 from public.listings l where l.id = e.listing_id and l.owner_id = auth.uid()
+               and ($1::uuid is null or l.business_id=$1::uuid)
            ))`;
       const { rows } = await client.query(
         `select e.*, b.title as batch_title, b.start_date, b.start_time, b.end_time,
@@ -474,6 +475,7 @@ export class ClassEnrollmentRepository {
           where ${scoped}
           order by e.created_at desc
           limit 300`,
+        [identity.businessId || null],
       );
       return rows.map(toEnrollment);
     });
@@ -492,8 +494,10 @@ export class ClassEnrollmentRepository {
       const clauses: string[] = [];
       const values: unknown[] = [];
       if (identity.role !== 'admin') {
+        values.push(identity.businessId || null);
         clauses.push(`exists (
           select 1 from public.listings l where l.id = b.listing_id and l.owner_id = auth.uid()
+            and ($${values.length}::uuid is null or l.business_id=$${values.length}::uuid)
         )`);
       }
       if (status) {
