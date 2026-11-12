@@ -860,8 +860,18 @@ async function startServer() {
   });
 
   // 5. GET & POST Automated Billing Engine Endpoints
-  app.get('/api/billing/records', (_req, res) => {
+  app.get('/api/billing/records', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed session is required.' });
+      return;
+    }
+    if (claims.role !== 'admin' || !hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY', message: 'Billing records require a verified Admin session.' });
+      return;
+    }
     const store = loadServerStore();
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json({
       ok: true,
       records: store.billingRecords,
@@ -869,6 +879,15 @@ async function startServer() {
   });
 
   app.post('/api/billing/run-cycle', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed session is required.' });
+      return;
+    }
+    if (claims.role !== 'admin' || !hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY', message: 'Running a billing cycle requires a verified Admin session.' });
+      return;
+    }
     const {
       cycleName = 'End-of-Cycle Automated Run',
       commissionPercent = 10,
@@ -6191,6 +6210,14 @@ Task:
   // 15D. CUSTOMER CINEMA SUPPORT & DISPUTE TICKETS
   app.post('/api/movies/support', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed customer session is required to open a support ticket.' });
+      return;
+    }
+    if (claims.role !== 'customer') {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_CUSTOMER_ONLY', message: 'Only a customer may open a cinema support ticket.' });
+      return;
+    }
     const {
       bookingId,
       passCode,
@@ -6199,8 +6226,6 @@ Task:
       subject,
       message,
       description,
-      customerName,
-      customerPhone,
     } = req.body || {};
 
     const finalSubject = String(subject || issueCategory || category || 'Cinema Support Request').trim();
@@ -6230,9 +6255,9 @@ Task:
       subject: finalSubject,
       message: finalMessage,
       description: finalMessage,
-      customerUserId: claims?.userId || 'guest',
-      customerName: String(customerName || claims?.name || 'Movie Customer'),
-      customerPhone: String(customerPhone || claims?.phone || '+91 98480 12345'),
+      customerUserId: claims.userId,
+      customerName: String(claims.name || 'Movie Customer'),
+      customerPhone: String(claims.phone || ''),
       status: 'open',
       resolutionNote: '',
       createdAt: nowIso,
@@ -6257,7 +6282,11 @@ Task:
 
   app.patch('/api/movies/support/:ticketId', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role === 'customer') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed provider or admin session is required.' });
+      return;
+    }
+    if (claims.role !== 'provider' && claims.role !== 'admin') {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_PROVIDER_OR_ADMIN_ONLY',
@@ -6285,8 +6314,8 @@ Task:
       id: `MOV-AUD-${Date.now().toString().slice(-5)}`,
       timestamp: target.updatedAt,
       createdAt: target.updatedAt,
-      actor: claims?.name || claims?.userId || 'Cinema Admin',
-      role: claims?.role || 'admin',
+      actor: claims.name || claims.userId,
+      role: claims.role,
       action: 'RESOLVED_SUPPORT_TICKET',
       targetId: ticketId,
       details: `Ticket ${ticketId} marked ${status}: ${resolutionNote}`,

@@ -81,9 +81,15 @@ function card(page: Page, title: string) {
 }
 
 async function expectTotal(page: Page, total: number) {
-  // The heading wording is "N stays" in the current UI; older builds said
-  // "N verified stays". Accept both while still asserting the exact count.
-  await expect(page.getByText(new RegExp(`^${total} (?:verified )?stays?`)).first()).toBeVisible({ timeout: 20_000 });
+  // Curated mode reports the count on its "Show all N stays" button, and each
+  // city rail reports "N verified stays"; older builds had a single heading.
+  // Accept any of them while still asserting the exact number.
+  await expect.poll(async () => {
+    const showAll = await page.getByRole('button', { name: `Show all ${total} stays` }).count();
+    const heading = await page.getByText(new RegExp(`^${total} (?:verified )?stays?`)).count();
+    const cityRail = await page.getByText(new RegExp(`^${total} verified stays? in `)).count();
+    return showAll + heading + cityRail > 0;
+  }, { timeout: 20_000 }).toBe(true);
 }
 
 async function openFilters(page: Page) {
