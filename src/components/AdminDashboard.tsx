@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
+import { motion } from 'motion/react';
 import SafeImage, { imageCategoryFor } from './SafeImage';
 import { BusinessAccessPanel } from './admin/BusinessAccessPanel';
 import { firstUsableListingImage } from '../lib/media/signedStorageUrl';
@@ -155,6 +156,7 @@ export type SuperAdminSectionId =
   | 'business_access'
   | 'content_management'
   | 'listings_venues'
+  | 'stays'
   | 'pg_hostels'
   | 'bookings_events'
   | 'feature_management'
@@ -1453,6 +1455,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       icon: Building2,
     },
     {
+      id: 'stays',
+      label: 'Hotels & Stays',
+      badge: 'Inventory',
+      icon: Building2,
+    },
+    {
       id: 'pg_hostels',
       label: 'PGs & Hostels',
       badge: pgAdminBookingCount || undefined,
@@ -1812,7 +1820,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               Super Admin Menu
             </span>
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-              14 Sections
+              15 Sections
             </span>
           </div>
 
@@ -4796,9 +4804,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
+          {activeSection === 'stays' && (
+            <motion.div
+              className="space-y-5"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600">
+                  Section 06a • Hotels &amp; Stays Operations
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                  Hotels &amp; Stays (review, inventory &amp; room operations)
+                </h3>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Review host submissions, inspect the audit trail, and manage properties, room types and physical units.
+                  Publishing remains protected by the server-side Super Admin workflow.
+                </p>
+              </div>
+              <AdminStayInventory />
+            </motion.div>
+          )}
+
           {activeSection === 'listings_venues' && (
             <div className="space-y-5">
-              <AdminStayInventory />
               <AdminMarketplaceListings />
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">

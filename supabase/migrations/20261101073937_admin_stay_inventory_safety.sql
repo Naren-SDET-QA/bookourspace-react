@@ -305,7 +305,7 @@ begin
   v_property_type := coalesce(nullif(p_property->>'property_type', ''), 'hotel');
 
   if v_title is null or v_category is null or v_subcategory is null
-     or v_category !~* '^(hotels?|stays?)(-|$)'
+     or (v_category not in ('hotel_stay','hotels','hotel','stays','stay') and public.live_edit_listing_module(v_category, v_entity_type) is distinct from 'hotel_stay')
      or v_listing_price < 0
      or v_listing_price::text in ('NaN', 'Infinity', '-Infinity')
      or v_listing_status not in ('pending_approval', 'active', 'expired')

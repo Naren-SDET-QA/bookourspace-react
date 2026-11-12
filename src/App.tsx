@@ -101,6 +101,7 @@ const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
   { id: 'analytics_performance', label: 'Analytics' },
   { id: 'user_management', label: 'Users' },
   { id: 'listings_venues', label: 'Listings & Venues' },
+  { id: 'stays', label: 'Hotels & Stays' },
   { id: 'bookings_events', label: 'Bookings' },
   { id: 'payment_management', label: 'Payments' },
   { id: 'content_management', label: 'Content' },

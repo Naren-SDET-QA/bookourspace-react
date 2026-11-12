@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { hotelStayCategories } from '../data/moduleCategories';
 import { buildAuthHeaders, supabase } from '../lib/supabaseClient';
 import { stayLifecycleOf, stayPayload } from '../lib/stayListingGate';
 
@@ -37,12 +38,19 @@ type Provider = { id: string; full_name: string | null; email: string | null };
 type StayRow = StayDraft & { propertyId: string; listingTitle: string };
 
 const PAGE_SIZE = 20;
+const STAY_CATEGORY_OPTIONS = [
+  { id: 'hotel_stay', label: 'Hotels & Stays (module)' },
+  { id: 'hotels', label: 'Hotels (legacy)' },
+  { id: 'hotel', label: 'Hotel (legacy)' },
+  { id: 'stays', label: 'Stays (legacy)' },
+  ...hotelStayCategories.map((category) => ({ id: category.id, label: category.name })),
+];
 const blankRoom = (): RoomTypeDraft => ({
   name: '', max_adults: 2, max_children: 0, base_price_paise: 0,
   amenities: [], is_active: true, units: [{ label: '', floor: '', is_active: true }],
 });
 const blankStay = (ownerId = ''): StayDraft => ({
-  listingId: '', ownerId, title: '', categoryId: 'hotels', subcategory: 'hotel',
+  listingId: '', ownerId, title: '', categoryId: 'hotel-budget', subcategory: 'hotel',
   listingStatus: 'pending_approval', existingPayload: {}, name: '', propertyType: 'hotel',
   city: '', area: '', address: '', description: '', basePriceRupees: '0', taxPercent: '12',
   amenities: '', isActive: true, roomTypes: [blankRoom()],
@@ -251,7 +259,7 @@ export function AdminStayInventory() {
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <select aria-label="Stay provider" value={draft.ownerId} onChange={(event) => setInput({ ownerId: event.target.value })} required className="rounded-lg border p-2 text-xs"><option value="">Choose active provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.full_name || provider.email || provider.id}</option>)}</select>
           <input aria-label="Listing title" placeholder="Listing title" value={draft.title} onChange={(event) => setInput({ title: event.target.value })} required className="rounded-lg border p-2 text-xs" />
-          <input aria-label="Category ID" placeholder="Category ID" value={draft.categoryId} onChange={(event) => setInput({ categoryId: event.target.value })} required className="rounded-lg border p-2 text-xs" />
+          <select aria-label="Stay category" value={draft.categoryId} onChange={(event) => setInput({ categoryId: event.target.value })} required className="rounded-lg border p-2 text-xs"><option value="">Choose stay category</option>{STAY_CATEGORY_OPTIONS.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
           <input aria-label="Property name" placeholder="Property name" value={draft.name} onChange={(event) => setInput({ name: event.target.value })} required className="rounded-lg border p-2 text-xs" />
           <select aria-label="Property type" value={draft.propertyType} onChange={(event) => setInput({ propertyType: event.target.value })} className="rounded-lg border p-2 text-xs">{['hotel','resort','homestay','apartment','villa','guesthouse'].map((type) => <option key={type} value={type}>{type}</option>)}</select>
           <input aria-label="City" placeholder="City" value={draft.city} onChange={(event) => setInput({ city: event.target.value })} required className="rounded-lg border p-2 text-xs" />
