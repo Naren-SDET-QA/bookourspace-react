@@ -12,6 +12,8 @@ the browser and never invents an identity: after verification it independently
 re-verifies the Supabase access token, then mints its normal HMAC application
 session.
 
+![BookOurSpace email OTP login screen](login-preview.png)
+
 ## Flow
 
 1. The visitor enters an email address on `#login`.
