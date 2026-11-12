@@ -2,10 +2,12 @@ import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import SafeImage, { imageCategoryFor } from './SafeImage';
 import { BusinessAccessPanel } from './admin/BusinessAccessPanel';
+import { MoviesShowtimes } from './MoviesShowtimes';
 import { firstUsableListingImage } from '../lib/media/signedStorageUrl';
 import {
   Layers,
   ShieldCheck,
+  Film,
   DollarSign,
   CheckCircle2,
   XCircle,
@@ -157,6 +159,7 @@ export type SuperAdminSectionId =
   | 'content_management'
   | 'listings_venues'
   | 'stays'
+  | 'movies_showtimes'
   | 'pg_hostels'
   | 'bookings_events'
   | 'feature_management'
@@ -1453,6 +1456,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       label: 'Listings & Venues',
       badge: listings.length,
       icon: Building2,
+    },
+    {
+      id: 'movies_showtimes',
+      label: 'Movies & Showtimes',
+      badge: 'Verified',
+      icon: Film,
     },
     {
       id: 'stays',
@@ -4804,6 +4813,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
+          {activeSection === 'movies_showtimes' && <MoviesShowtimes inline />}
           {activeSection === 'stays' && (
             <motion.div
               className="space-y-5"

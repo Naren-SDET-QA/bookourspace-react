@@ -12,12 +12,7 @@ import {
   Clock,
   XCircle,
   Image as ImageIcon,
-  BarChart3,
   TrendingUp,
-  Hotel,
-  BedDouble,
-  BriefcaseBusiness,
-  GraduationCap,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { AppLanguage, getSubcategoryDisplayName, getPriceUnitDisplayName } from '../utils/translations';
@@ -25,14 +20,15 @@ import { transliterateLatinToScript } from '../utils/i18nEngine';
 import { UniversalBarcode, StandaloneBarcodeVerifierHub, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
 import { CraftoPosterGenerator } from './CraftoPosterGenerator';
 import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
-import HostStayWorkspace from './HostStayWorkspace';
 import PgProviderWorkspace from './PgProviderWorkspace';
 import InstituteOwnerDashboard from './InstituteOwnerDashboard';
-import StaysOwnerAdminDashboard from './StaysOwnerAdminDashboard';
-import ServicesProviderDashboard from './ServicesProviderDashboard';
-import type { ProviderPortalModule } from './ProviderPortalShell';
+import StaysOwnerAdminDashboard, { stayOwnerSections, type StayOwnerSection } from './StaysOwnerAdminDashboard';
+import ServicesProviderDashboard, { serviceSections, type ServiceView } from './ServicesProviderDashboard';
+import ProviderPortalShell, { type ProviderPortalModule } from './ProviderPortalShell';
+import { accessScopeFrom, grantedSections, moduleGranted } from '../lib/businessAccess';
 import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
 import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
+import { BusinessStaffPanel } from './pg/BusinessStaffPanel';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -111,15 +107,65 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   const activeListings = businessListings.filter(l => l.status === 'active');
   const totalViews = businessListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
-  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'services' | 'pg_inventory' | 'institute'>('pg_inventory');
+  type ProviderWorkspaceTab = 'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'services' | 'pg_inventory' | 'institute' | 'team';
+  const [activeSubTab, setActiveSubTab] = useState<ProviderWorkspaceTab>('pg_inventory');
+
+  // Stays and home services share this navigation. Their sections live here so
+  // the modules never render a second nested sidebar of their own.
+  const [staySection, setStaySection] = useState<StayOwnerSection>('overview');
+  const [serviceSection, setServiceSection] = useState<ServiceView>('overview');
+
+  // Access scope of the signed-in member inside the selected business. `null`
+  // means unrestricted (owners, and members without a grant row).
+  const accessScope = accessScopeFrom(selectedBusiness);
+  const BUSINESS_MODULE_FOR_TAB: Partial<Record<ProviderWorkspaceTab, string>> = {
+    pg_inventory: 'pg_hostels', institute: 'classes', stays: 'hotel_stay', services: 'services',
+  };
+  const PORTAL_MODULE_FOR_TAB: Record<ProviderWorkspaceTab, ProviderPortalModule> = {
+    pg_inventory: 'pg', institute: 'institute', stays: 'stays', services: 'services', team: 'team',
+    listings: 'listings', analytics: 'analytics', enquiries: 'enquiries', bookings: 'bookings', plans: 'plans', visiting_card: 'visiting_card',
+  };
+  const tabAllowed = (tab: ProviderWorkspaceTab) => {
+    const moduleKey = BUSINESS_MODULE_FOR_TAB[tab];
+    return !moduleKey || moduleGranted(accessScope, moduleKey);
+  };
+  const allowedPortalModules: ProviderPortalModule[] = (Object.keys(PORTAL_MODULE_FOR_TAB) as ProviderWorkspaceTab[])
+    .filter((tab) => tabAllowed(tab) && (tab !== 'team' || !accessScope))
+    .map((tab) => PORTAL_MODULE_FOR_TAB[tab]);
+  const staySectionKeys = grantedSections(accessScope, 'hotel_stay');
+  const serviceSectionKeys = grantedSections(accessScope, 'services');
+  const activeStaySection: StayOwnerSection = staySectionKeys && !staySectionKeys.includes(staySection)
+    ? ((staySectionKeys[0] as StayOwnerSection) || 'overview')
+    : staySection;
+  const activeServiceSection: ServiceView = serviceSectionKeys && !serviceSectionKeys.includes(serviceSection)
+    ? ((serviceSectionKeys[0] as ServiceView) || 'overview')
+    : serviceSection;
+  const sectionRail: Array<{ key: string; label: string; icon: React.ComponentType<{ className?: string }>; active: boolean; onSelect: () => void }> =
+    activeSubTab === 'stays'
+      ? stayOwnerSections
+          .filter(({ key }) => !staySectionKeys || staySectionKeys.includes(key))
+          .map(({ key, label, icon }) => ({ key, label, icon, active: activeStaySection === key, onSelect: () => setStaySection(key) }))
+      : activeSubTab === 'services'
+      ? serviceSections
+          .filter(({ key }) => !serviceSectionKeys || serviceSectionKeys.includes(key))
+          .map(({ key, label, icon }) => ({ key, label, icon, active: activeServiceSection === key, onSelect: () => setServiceSection(key) }))
+      : [];
+
+  // A restricted member never lands on a workspace they may not open.
+  useEffect(() => {
+    if (tabAllowed(activeSubTab)) return;
+    const next = (Object.keys(BUSINESS_MODULE_FOR_TAB) as ProviderWorkspaceTab[]).find(tabAllowed);
+    setActiveSubTab(next || 'listings');
+  }, [activeSubTab, selectedBusiness?.allowed_modules?.join(',')]);
 
   const navigatePortalModule = (module: ProviderPortalModule) => {
-    const mapping: Partial<Record<ProviderPortalModule, typeof activeSubTab>> = {
-      pg: 'pg_inventory', stays: 'stays', services: 'services', institute: 'institute', listings: 'listings', reports: 'analytics',
+    const mapping: Record<ProviderPortalModule, ProviderWorkspaceTab> = {
+      pg: 'pg_inventory', stays: 'stays', services: 'services', institute: 'institute', team: 'team', listings: 'listings', analytics: 'analytics', enquiries: 'enquiries', bookings: 'bookings', plans: 'plans', visiting_card: 'visiting_card',
     };
-    const target = mapping[module];
-    if (target) setActiveSubTab(target);
+    setActiveSubTab(mapping[module]);
   };
+
+  const activePortalModule: ProviderPortalModule = activeSubTab === 'pg_inventory' ? 'pg' : activeSubTab;
 
   useEffect(() => {
     setActiveSubTab(initialWorkspace === 'institute' ? 'institute' : 'pg_inventory');
@@ -207,7 +253,15 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   }, [totalViews, enquiries.length, bookings.length]);
 
   return (
-    <div className="space-y-6 pb-24">
+    <ProviderPortalShell
+      activeModule={activePortalModule}
+      onNavigate={navigatePortalModule}
+      allowedModules={allowedPortalModules}
+      role={supabaseProfile?.role}
+      title="Provider workspace"
+      subtitle={selectedBusiness ? `${selectedBusiness.name} · ${BUSINESS_MODULE_LABELS[selectedBusiness.module_type]}` : 'Business operations'}
+    >
+    <div className="min-w-0 space-y-6 pb-24">
       {/* Pending Admin Approval Alert Banner (Display only for Admin) */}
       {pendingListings.length > 0 && onSwitchToAdminReview && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-700 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -281,7 +335,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       )}
 
       {/* KPI Numbers */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             {loc('Approved Live Posts', 'ఆమోదించబడిన పోస్ట్‌లు', 'स्वीकृत लाइव पोस्ट')}
@@ -325,156 +379,30 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         />
       </div>
 
-      {/* Navigation Sub-Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-4 overflow-x-auto no-scrollbar">
-        <button
-          onClick={() => setActiveSubTab('pg_inventory')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-            activeSubTab === 'pg_inventory'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-          data-testid="provider-pg-inventory-tab"
+      {sectionRail.length > 0 && (
+        <nav
+          aria-label={activeSubTab === 'stays' ? 'Stay hosting sections' : 'Home services sections'}
+          className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]"
         >
-          <BedDouble className="w-4 h-4 text-violet-600" />
-          <span>PG Owner Dashboard</span>
-        </button>
+          {sectionRail.map(({ key, label, icon: Icon, active, onSelect }) => (
+            <button
+              key={key}
+              type="button"
+              aria-current={active ? 'true' : undefined}
+              onClick={() => {
+                onSelect();
+                requestAnimationFrame(() => document.getElementById('provider-workspace-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+              }}
+              className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition ${active ? 'border-[#527a40] bg-[#527a40] text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="whitespace-nowrap">{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
 
-        <button
-          onClick={() => setActiveSubTab('institute')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-            activeSubTab === 'institute'
-              ? 'border-[#ff385c] text-[#e31c5f]'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-          data-testid="provider-institute-workspace-tab"
-        >
-          <GraduationCap className="w-4 h-4 text-[#ff385c]" />
-          <span>Institute workspace</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('listings')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'listings'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          {loc(
-            `My Provider Listings (${businessListings.length})`,
-            `నా ప్రొవైడర్ లిస్టింగ్‌లు (${businessListings.length})`,
-            `मेरी प्रोवाइडर लिस्टिंग (${businessListings.length})`
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('analytics')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-            activeSubTab === 'analytics'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4 text-purple-600" />
-          <span>
-            {loc(
-              'Analytics & Performance (D3)',
-              'అనలిటిక్స్ & పనితీరు (D3)',
-              'एनालिटिक्स और प्रदर्शन (D3)'
-            )}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('enquiries')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'enquiries'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          {loc(
-            `Customer Enquiries & Chats (${enquiries.length})`,
-            `కస్టమర్ ఎంక్వైరీలు & చాట్‌లు (${enquiries.length})`,
-            `ग्राहक पूछताछ और चैट (${enquiries.length})`
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('bookings')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'bookings'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          {loc(
-            `Bookings & Applications (${bookings.length})`,
-            `బుకింగ్‌లు & దరఖాస్తులు (${bookings.length})`,
-            `बुकिंग और आवेदन (${bookings.length})`
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('plans')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'plans'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          {loc(
-            'Posting Plans & Upgrades',
-            'పోస్టింగ్ ప్లాన్‌లు & అప్‌గ్రేడ్‌లు',
-            'पोस्टिंग प्लान और अपग्रेड'
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('visiting_card')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-            activeSubTab === 'visiting_card'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-amber-500" />
-          <span>
-            {loc(
-              'Digital Visiting Card Studio',
-              'డిజిటల్ విజిటింగ్ కార్డ్ స్టూడియో',
-              'डिजिटल विजिटिंग कार्ड स्टूडियो'
-            )}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('stays')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-            activeSubTab === 'stays'
-              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Hotel className="w-4 h-4 text-purple-600" />
-          <span>Stay hosting</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('services')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-            activeSubTab === 'services'
-              ? 'border-[#527a40] text-[#527a40]'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-          data-testid="provider-services-dashboard-tab"
-        >
-          <BriefcaseBusiness className="w-4 h-4 text-[#527a40]" />
-          <span>Home services</span>
-        </button>
-      </div>
-
+      <div id="provider-workspace-content" className="scroll-mt-64" />
       {/* --- SUBTAB: ANALYTICS & PERFORMANCE (D3 CHARTS) --- */}
       {activeSubTab === 'analytics' && (
         <div className="space-y-5 animate-in fade-in duration-200">
@@ -695,11 +623,13 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
-      {activeSubTab === 'stays' && <StaysOwnerAdminDashboard role={supabaseProfile?.role} onNavigate={navigatePortalModule} />}
+      {activeSubTab === 'stays' && <StaysOwnerAdminDashboard role={supabaseProfile?.role} section={activeStaySection} onSectionChange={setStaySection} sections={(staySectionKeys as StayOwnerSection[] | null) || undefined} />}
 
-      {activeSubTab === 'services' && <ServicesProviderDashboard role={supabaseProfile?.role} onNavigate={navigatePortalModule} />}
+      {activeSubTab === 'services' && <ServicesProviderDashboard role={supabaseProfile?.role} section={activeServiceSection} onSectionChange={setServiceSection} />}
 
       {activeSubTab === 'pg_inventory' && <PgProviderWorkspace businessId={selectedBusinessId || undefined} businessRole={selectedBusiness?.role} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
+
+      {activeSubTab === 'team' && <BusinessStaffPanel businessId={selectedBusinessId || undefined} canInvite={['owner', 'manager'].includes(String(selectedBusiness?.role || ''))} />}
 
       {activeSubTab === 'institute' && <InstituteOwnerDashboard onSwitchToMarketplace={onSwitchToMarketplace} />}
 
@@ -1050,5 +980,6 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
     </div>
+    </ProviderPortalShell>
   );
 };

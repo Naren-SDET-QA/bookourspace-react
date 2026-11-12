@@ -54,6 +54,16 @@ export interface ServicePaymentStatus {
   refundAmount: number | null;
 }
 
+export interface ServiceProviderSchedule {
+  workingDays: number[];
+  dayStart: string;
+  dayEnd: string;
+  slotMinutes: number;
+  serviceAreas: string[];
+  travelRadiusKm: number | null;
+  configured: boolean;
+}
+
 function sessionToken(): string | null {
   try {
     return (
@@ -117,6 +127,10 @@ export function updateProviderSchedule(input: {
   travelRadiusKm?: number | null;
 }): Promise<{ ok: boolean }> {
   return request('/api/services/provider/schedule', { method: 'PUT', body: JSON.stringify(input) });
+}
+
+export function fetchProviderSchedule(): Promise<{ schedule: ServiceProviderSchedule | null }> {
+  return request('/api/services/provider/schedule');
 }
 
 export function blockProviderDate(date: string, reason?: string): Promise<{ ok: boolean }> {

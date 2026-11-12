@@ -2687,8 +2687,21 @@ Task:
     // business gate applies to provider-owned data and admin bypasses above.
     if (claims.role === 'customer') return next();
     if (!pgRuntimePool) return void res.status(503).json({ ok: false, error: 'BUSINESS_DATABASE_UNAVAILABLE' });
-    const businessId = String(req.header('x-business-id') || '').trim();
-    if (!/^[0-9a-f-]{36}$/i.test(businessId)) return void res.status(403).json({ ok: false, error: 'BUSINESS_CONTEXT_REQUIRED' });
+    let businessId = String(req.header('x-business-id') || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(businessId)) {
+      // A single-business owner does not need to choose: derive the only active
+      // membership server-side. Multi-business owners must send a selection.
+      const candidates = await pgRuntimePool.query(
+        `select b.id from public.businesses b
+           join public.business_members m on m.business_id=b.id and m.user_id=$1 and m.status='active'
+          where b.approval_status='approved' and b.is_enabled=true
+          order by b.created_at limit 2`,
+        [claims.supabaseUserId || claims.userId],
+      );
+      if (candidates.rowCount === 1) businessId = String(candidates.rows[0].id);
+      else return void res.status(403).json({ ok: false, error: 'BUSINESS_CONTEXT_REQUIRED' });
+    }
+    req.headers['x-business-id'] = businessId;
     try {
       const { rows } = await pgRuntimePool.query(
         `select b.id,b.module_type,b.approval_status,b.is_enabled,m.role,

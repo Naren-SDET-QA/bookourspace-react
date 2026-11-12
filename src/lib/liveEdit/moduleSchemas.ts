@@ -107,7 +107,7 @@ export const LIVE_EDIT_MODULE_SCHEMAS: Record<LiveEditModule, LiveEditModuleSche
     module: 'pg_hostels',
     store: 'supabase_listings',
     categoryPrefixes: ['pg-'],
-    priceUnits: ['/month', '/bed', '/day', '/week'],
+    priceUnits: ['/month', '/bed', '/day', '/week', '/property'],
     detailFields: PG_DETAIL_FIELDS,
     facilitySuggestions: ['Wi-Fi', 'Food included', 'AC', 'Power backup', 'Laundry', 'Housekeeping', 'CCTV', 'Parking', 'Gym', 'Attached bathroom'],
     descriptionMaxLength: 5000,

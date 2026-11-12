@@ -202,6 +202,7 @@ const SECTION_PRICE_UNITS: Record<
     { value: '/month', labelEn: 'Per Month (Monthly PG/Hostel Rent)', labelTe: 'నెలకు (నెలవారీ పీజీ అద్దె)', labelHi: 'प्रति माह (मासिक पीजी किराया)' },
     { value: '/day', labelEn: 'Per Day (Daily / Short Stay)', labelTe: 'రోజుకు (రోజువారీ స్టే)', labelHi: 'प्रति दिन (दैनिक स्टे)' },
     { value: '/bed', labelEn: 'Per Bed / Month', labelTe: 'ఒక్కో బెడ్‌కు / నెల', labelHi: 'प्रति बेड / माह' },
+    { value: '/property', labelEn: 'For the complete property (sale)', labelTe: 'పూర్తి ప్రాపర్టీకి (అమ్మకం)', labelHi: 'पूरी प्रॉपर्टी के लिए (बिक्री)' },
   ],
   classes: [
     { value: '/course', labelEn: 'Full Course Package Fee', labelTe: 'పూర్తి కోర్సు ఫీజు', labelHi: 'पूरा कोर्स शुल्क' },
@@ -246,6 +247,30 @@ function buildCategorySpecificProviderConfig(
 ): CategoryProviderConfig {
   // 1. PG & HOSTELS SECTION — tailored to the exact PG category (Boys, Girls, Co-Living, AC, Non-AC, Room-Only, Daily, etc.)
   if (section === 'pg_hostels') {
+    if (categoryId === 'pg-property-sale') {
+      return {
+        providerNameEn: 'PG property owner',
+        providerNameTe: 'పీజీ ప్రాపర్టీ యజమాని',
+        providerNameHi: 'पीजी प्रॉपर्टी मालिक',
+        titlePlaceholderEn: 'e.g. Fully operational 24-bed PG building for sale',
+        titlePlaceholderTe: 'ఉదా: అమ్మకానికి పూర్తిగా నడుస్తున్న 24 బెడ్ల పీజీ భవనం',
+        titlePlaceholderHi: 'उदा: बिक्री के लिए पूरी तरह संचालित 24-बेड पीजी भवन',
+        descPlaceholderEn: 'Describe the property, operating status, rooms, beds, facilities, documents and handover terms…',
+        descPlaceholderTe: 'ప్రాపర్టీ, గదులు, బెడ్లు, సదుపాయాలు, పత్రాలు మరియు హ్యాండోవర్ వివరాలను రాయండి…',
+        descPlaceholderHi: 'प्रॉपर्टी, कमरे, बेड, सुविधाएं, दस्तावेज़ और हैंडओवर विवरण लिखें…',
+        coverImageUrl: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=800&q=80',
+        defaultPrice: '',
+        defaultPriceUnit: '/property',
+        fields: [
+          { key: 'transactionType', labelEn: 'Transaction type *', labelTe: 'లావాదేవీ రకం *', labelHi: 'लेन-देन का प्रकार *', type: 'select', options: ['For Sale'] },
+          { key: 'propertyType', labelEn: 'PG property type *', labelTe: 'పీజీ ప్రాపర్టీ రకం *', labelHi: 'पीजी प्रॉपर्टी प्रकार *', type: 'select', options: ['PG building', 'Hostel building', 'Co-living property'] },
+          { key: 'ownershipStatus', labelEn: 'Ownership / handover status *', labelTe: 'యాజమాన్యం / హ్యాండోవర్ స్థితి *', labelHi: 'स्वामित्व / हैंडओवर स्थिति *', type: 'select', options: ['Owner-operated', 'Leased with transfer terms', 'Vacant property ready to operate'] },
+          { key: 'roomsAndBeds', labelEn: 'Rooms and beds', labelTe: 'గదులు మరియు బెడ్లు', labelHi: 'कमरे और बेड', type: 'text', placeholder: 'e.g. 12 rooms / 24 beds' },
+          { key: 'builtUpArea', labelEn: 'Built-up area', labelTe: 'నిర్మిత విస్తీర్ణం', labelHi: 'निर्मित क्षेत्र', type: 'text', placeholder: 'e.g. 4,500 sq.ft' },
+          { key: 'documentsAndFacilities', labelEn: 'Documents and facilities', labelTe: 'పత్రాలు మరియు సదుపాయాలు', labelHi: 'दस्तावेज़ और सुविधाएं', type: 'text', placeholder: 'e.g. title deed, lift, parking, kitchen, approvals' },
+        ],
+      };
+    }
     const isGirls = /girl|women|female/i.test(categoryId + catNameEn + subcategoryEn);
     const isColiving = /coliving|co-living|couple|family/i.test(categoryId + catNameEn + subcategoryEn);
     const isDaily = /daily|short|guest/i.test(categoryId + catNameEn + subcategoryEn);

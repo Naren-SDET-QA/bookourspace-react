@@ -76,3 +76,16 @@ test('every institute navigation destination has a render branch', () => {
     assert.match(ui, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });
+
+test('provider workspace navigation is reachable at narrow widths', () => {
+  const provider = fs.readFileSync(path.join(root, 'src/components/ProviderDashboard.tsx'), 'utf8');
+  const shell = fs.readFileSync(path.join(root, 'src/components/ProviderPortalShell.tsx'), 'utf8');
+  // The shared provider shell owns navigation at every width: a persistent
+  // sidebar above the md breakpoint and a drawer below it. Modules must not add
+  // a second selector or nested sidebar of their own.
+  assert.match(provider, /<ProviderPortalShell/);
+  assert.match(provider, /onNavigate=\{navigatePortalModule\}/);
+  assert.match(shell, /aria-label="Open navigation"/);
+  assert.match(shell, /aria-label="Provider portal navigation"/);
+  assert.match(shell, /md:hidden/);
+});

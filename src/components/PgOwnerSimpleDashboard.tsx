@@ -52,12 +52,12 @@ export default function PgOwnerSimpleDashboard({
           <h2 className="text-3xl font-black tracking-tight text-slate-950 dark:text-white">PG Owner Dashboard</h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Good to see you, {ownerName}. Manage your properties, beds and bookings.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => onNavigate('properties')} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 text-sm font-black text-[#2554db] shadow-sm hover:bg-blue-50 dark:border-blue-900 dark:bg-slate-900 dark:hover:bg-blue-950/30">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+          <button type="button" onClick={() => onNavigate('properties')} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-white px-2 text-[12px] font-black text-[#2554db] shadow-sm hover:bg-blue-50 sm:px-4 sm:text-sm dark:border-blue-900 dark:bg-slate-900 dark:hover:bg-blue-950/30">
             <Building2 className="h-4 w-4" /> Manage properties
           </button>
           {onAddProperty && (
-            <button type="button" onClick={onAddProperty} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#2554db] px-4 text-sm font-black text-white shadow-lg shadow-blue-200/50 hover:bg-blue-700 dark:shadow-none">
+            <button type="button" onClick={onAddProperty} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#2554db] px-2 text-[12px] font-black text-white shadow-lg shadow-blue-200/50 hover:bg-blue-700 sm:px-4 sm:text-sm dark:shadow-none">
               <Plus className="h-4 w-4" /> Add property
             </button>
           )}

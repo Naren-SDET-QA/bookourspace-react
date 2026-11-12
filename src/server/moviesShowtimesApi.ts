@@ -42,12 +42,14 @@ function mapRow(row: Record<string, any>) {
     showDate: row.show_date ? String(row.show_date).slice(0, 10) : null,
     screenName: row.screen_name,
     city: row.city || null,
+    state: row.state || null,
     area: row.area || null,
     pincode: row.pincode || null,
     showtimes: Array.isArray(row.showtimes) ? row.showtimes : [],
     format: row.format,
     soundSystem: row.sound_system,
     isVisible: row.is_visible === true,
+    approvalStatus: row.approval_status || 'pending',
     updatedAt: row.updated_at,
     syncedAt: row.showtimes_synced_at || null,
     source: row.showtime_source || null,
@@ -62,23 +64,32 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     if (!deps.pool) return unavailable(res);
     const claims = deps.verifySession(req);
     const isAdmin = claims?.role === 'admin';
-    const includeHidden = isAdmin && String(req.query.includeHidden || '') === '1';
+    const includeHidden = (isAdmin || claims?.role === 'provider') && String(req.query.includeHidden || '') === '1';
     const city = text(req.query.city, 80);
+    const state = text(req.query.state, 40);
     const area = text(req.query.area, 120);
     const pincode = text(req.query.pin, 10);
     const clauses: string[] = [];
     const values: unknown[] = [];
     if (!includeHidden) {
+      clauses.push("approval_status = 'approved'");
       clauses.push('is_visible is true');
       clauses.push("btrim(coalesce(movie_title, '')) <> ''");
       clauses.push("btrim(coalesce(cinema_title, '')) <> ''");
-      clauses.push('show_date is not null');
-      clauses.push('show_date >= current_date');
+      clauses.push('show_date = current_date');
       clauses.push("jsonb_array_length(showtimes) > 0");
+    }
+    if (state && state !== 'All states') {
+      values.push(state);
+      clauses.push(`state = $${values.length}`);
     }
     if (city && city.toLowerCase() !== 'all cities' && city.toLowerCase() !== 'all locations') {
       values.push(city);
       clauses.push(`lower(city) = lower($${values.length})`);
+    }
+    if (includeHidden && claims?.role === 'provider') {
+      values.push(claims.supabaseUserId || claims.userId || '');
+      clauses.push(`cinema_listing_id in (select id from public.listings where owner_id = $${values.length}::uuid)`);
     }
     if (area) {
       values.push(`%${area}%`);
@@ -141,6 +152,11 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     }
     const isVisible = typeof body.isVisible === 'boolean' ? body.isVisible : null;
     try {
+      let existingApproval = 'pending';
+      if (claims.role === 'provider') {
+        const current = await deps.pool.query('select approval_status from public.cinema_screens where id=$1 limit 1', [screenId]);
+        existingApproval = String(current.rows[0]?.approval_status || 'pending');
+      }
       if (claims.role === 'provider') {
         const owner = await deps.pool.query(
           `select 1 from public.live_edit_cinema_screen_owners where screen_id = $1 and owner_user_id = $2
@@ -161,9 +177,10 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
            city = coalesce($4, city),
            area = coalesce($5, area),
            pincode = coalesce($6, pincode),
+           state = coalesce($9, state),
            show_date = $7::date,
            showtimes = $8::jsonb,
-           is_visible = coalesce($9, is_visible),
+           is_visible = case when $10 then coalesce($9, is_visible) else false end,
            showtime_source = 'manual',
            updated_at = now()
          where id = $1
@@ -177,7 +194,8 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
           text(body.pincode, 10),
           nextShowDate,
           JSON.stringify(nextShowtimes),
-          isVisible,
+          text(body.state, 40),
+          claims.role === 'admin' || (existingApproval === 'approved' && isVisible !== false),
         ],
       );
       if (!rows[0]) return res.status(404).json({ ok: false, error: 'SCREEN_NOT_FOUND' });
@@ -185,6 +203,22 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     } catch {
       res.status(500).json({ ok: false, error: 'SHOWTIME_UPDATE_FAILED' });
     }
+  });
+
+  app.patch('/api/admin/movies/theatres/:screenId/approval', async (req, res) => {
+    if (!deps.pool) return unavailable(res);
+    const claims = deps.verifySession(req);
+    if (claims?.role !== 'admin') return res.status(403).json({ ok: false, error: 'ADMIN_REQUIRED' });
+    const status = String(req.body?.status || '');
+    if (!['pending','approved','disabled'].includes(status)) return res.status(400).json({ ok: false, error: 'INVALID_APPROVAL_STATUS' });
+    try {
+      const { rows } = await deps.pool.query(
+        `update public.cinema_screens set approval_status=$2, is_visible=($2='approved'), updated_at=now() where id=$1 returning *`,
+        [String(req.params.screenId || ''), status],
+      );
+      if (!rows[0]) return res.status(404).json({ ok: false, error: 'SCREEN_NOT_FOUND' });
+      res.json({ ok: true, screen: mapRow(rows[0]) });
+    } catch { res.status(500).json({ ok: false, error: 'APPROVAL_UPDATE_FAILED' }); }
   });
 
   app.post('/api/movies/showtimes/sync', async (req, res) => {
@@ -218,15 +252,17 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
         if (!id || !cinemaListingId || !cinemaTitle || !screenName || !times || !movieTitle || !showDate || !/^\d{4}-\d{2}-\d{2}$/.test(showDate)) continue;
         await deps.pool.query(
           `insert into public.cinema_screens
-             (id, cinema_listing_id, cinema_title, screen_name, movie_title, movie_id, city, area, pincode, show_date, showtimes, is_visible, showtime_source, showtimes_synced_at, updated_at)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11::jsonb,coalesce($12,true),'authorized_sync',now(),now())
+             (id, cinema_listing_id, cinema_title, screen_name, movie_title, movie_id, city, state, area, pincode, show_date, showtimes, is_visible, approval_status, showtime_source, showtimes_synced_at, updated_at)
+           values ($1,$2,$3,$4,$5,$6,$7,$13,$8,$9,$10::date,$11::jsonb,coalesce($12,true),'approved','authorized_sync',now(),now())
            on conflict (id) do update set
              movie_title = excluded.movie_title,
              movie_id = excluded.movie_id,
              city = excluded.city,
              area = excluded.area,
              pincode = excluded.pincode,
+             state = excluded.state,
              show_date = excluded.show_date,
+             approval_status = 'approved',
              showtimes = excluded.showtimes,
              is_visible = excluded.is_visible,
              showtime_source = 'authorized_sync',
@@ -236,7 +272,7 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
             id, cinemaListingId, cinemaTitle, screenName,
             movieTitle, text(raw?.movieId, 160),
             text(raw?.city, 80), text(raw?.area, 120), text(raw?.pincode, 10),
-            showDate, JSON.stringify(times),
+            showDate, JSON.stringify(times), text(raw?.state, 40),
             typeof raw?.isVisible === 'boolean' ? raw.isVisible : true,
           ],
         );

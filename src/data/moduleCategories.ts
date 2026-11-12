@@ -1080,6 +1080,18 @@ export const pg29Categories: PGCategoryInfo[] = [
       { en: 'Caregiver attached accommodation', te: 'కేర్‌గివర్‌తో కూడిన వసతి', hi: 'देखभालकर्ता सहित आवास' },
       { en: 'Medical recovery stay rooms', te: 'వైద్య కోలుకొనే గదులు', hi: 'मेडिकल रिकवरी रूम्स' }
     ]
+  },
+  {
+    id: 'pg-property-sale',
+    name: 'PG Properties for Sale',
+    nameTe: 'అమ్మకానికి పీజీ ప్రాపర్టీలు',
+    nameHi: 'बिक्री के लिए पीजी प्रॉपर्टीज़',
+    emoji: '🏷️',
+    subcategories: [
+      { en: 'PG property for sale', te: 'అమ్మకానికి పీజీ ప్రాపర్టీ', hi: 'बिक्री के लिए पीजी प्रॉपर्टी' },
+      { en: 'Hostel building for sale', te: 'అమ్మకానికి హాస్టల్ భవనం', hi: 'बिक्री के लिए हॉस्टल भवन' },
+      { en: 'Co-living property for sale', te: 'అమ్మకానికి కో-లివింగ్ ప్రాపర్టీ', hi: 'बिक्री के लिए को-लिविंग प्रॉपर्टी' },
+    ]
   }
 ];
 

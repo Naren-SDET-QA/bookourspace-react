@@ -1,5 +1,7 @@
 import type express from 'express';
 import type { PoolClient } from 'pg';
+import { moduleGranted } from '../lib/businessAccess';
+import { isMissingAccessSchema, loadMemberAccessScope } from './memberAccess';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { getSharedPostgresPool } from './postgresPool';
 import { logSafeError } from './safeLogging';
@@ -41,6 +43,15 @@ export function registerProviderOperationsApi(app: express.Express, deps: Provid
         const profile = await client.query(`select role, account_status, full_name from public.profiles where id = $1 limit 1`, [actorId]);
         const actor = profile.rows[0];
         if (!actor || actor.account_status !== 'active' || !['provider', 'admin'].includes(String(actor.role))) throw Object.assign(new Error('ACTIVE_PROVIDER_REQUIRED'), { statusCode: 403 });
+
+        // Per-member scopes: a member granted only Stays must not receive
+        // services figures (or the reverse) from this combined overview.
+        let accessScope = null as Awaited<ReturnType<typeof loadMemberAccessScope>>;
+        try { accessScope = await loadMemberAccessScope(client, businessId, actorId); }
+        catch (accessError) { if (!isMissingAccessSchema(accessError)) throw accessError; }
+        const staysAllowed = moduleGranted(accessScope, 'hotel_stay');
+        const servicesAllowed = moduleGranted(accessScope, 'services');
+        if (!staysAllowed && !servicesAllowed) throw Object.assign(new Error('MODULE_ACCESS_DENIED'), { statusCode: 403, accessDenied: true });
 
         const properties = await client.query(`
           select p.id, p.name, p.city, p.property_type, p.is_active,
@@ -104,15 +115,19 @@ export function registerProviderOperationsApi(app: express.Express, deps: Provid
         const occupied = Number(st.occupied_units || 0);
         const revenue = Number(st.revenue || 0);
         const bookingCount = Number(st.booking_count || 0);
-        return {
+        const payload: any = {
           ok: true, source: 'postgres', fetchedAt: new Date().toISOString(), actor: { role: String(actor.role), name: actor.full_name || null },
           stays: { metrics: { properties: Number(st.properties || 0), roomTypes: Number(st.room_types || 0), units, occupiedUnits: occupied, occupancyPct: units ? Math.round((occupied / units) * 1000) / 10 : null, revenue, adr: bookingCount ? Math.round((revenue / bookingCount) * 100) / 100 : null, revpar: units ? Math.round((revenue / units) * 100) / 100 : null }, properties: properties.rows.map(row => ({ id: String(row.id), name: String(row.name), city: String(row.city), propertyType: String(row.property_type), isActive: Boolean(row.is_active), roomTypes: Number(row.room_types || 0), units: Number(row.units || 0) })), bookings: stayBookings.rows.map(row => ({ id: String(row.id), listingTitle: String(row.listing_title || ''), guestName: String(row.customer_name || ''), status: String(row.status || ''), startsOn: row.starts_on ? String(row.starts_on) : null, endsOn: row.ends_on ? String(row.ends_on) : null, amount: Number(row.amount || 0), paymentStatus: row.payment_status ? String(row.payment_status) : null })) },
           services: { metrics: { listings: Number(sm.listings || 0), requested: Number(sm.requested || 0), activeJobs: Number(sm.active_jobs || 0), completed: Number(sm.completed || 0), settledRevenue: Number(sm.settled_revenue || 0), pendingClaims: Number(claims.rows[0]?.pending || 0) }, bookings: serviceBookings.rows.map(row => ({ id: String(row.id), bookingRef: String(row.booking_ref), listingTitle: String(row.listing_title), status: String(row.status), scheduledDate: String(row.scheduled_date), timeSlot: String(row.time_slot), amount: Number(row.amount || 0), paymentStatus: String(row.payment_status) })) },
         };
+        if (!staysAllowed) payload.stays = { metrics: {}, bookings: [], properties: [] };
+        if (!servicesAllowed) payload.services = { metrics: {}, bookings: [] };
+        return payload;
       });
       response.setHeader('Cache-Control', 'no-store');
       response.json(result);
     } catch (error: any) {
+      if (error?.accessDenied) return response.status(403).json({ ok: false, error: 'MODULE_ACCESS_DENIED' });
       if (Number(error?.statusCode) === 403) return response.status(403).json({ ok: false, error: 'ACTIVE_PROVIDER_REQUIRED' });
       if (error?.code === '42P01' || error?.code === '42703') return response.status(503).json({ ok: false, error: 'PROVIDER_PORTAL_SCHEMA_NOT_READY' });
       logSafeError('provider-portal', 'overview', error);

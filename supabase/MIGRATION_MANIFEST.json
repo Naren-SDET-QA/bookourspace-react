@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 98,
+  "migrationCount": 105,
   "migrations": [
     {
       "order": 2,
@@ -601,6 +601,14 @@
     },
     {
       "order": 75,
+      "version": "20261111190000",
+      "name": "universal_delivery_tracking",
+      "file": "supabase/migrations/20261111190000_universal_delivery_tracking.sql",
+      "bytes": 17092,
+      "sha256": "9f1e35d4da409c1fe616f3e2934d576095e0783778f9e5bbf417cd45af5b4181"
+    },
+    {
+      "order": 76,
       "version": "20261111192224",
       "name": "institute_owner_workspace",
       "file": "supabase/migrations/20261111192224_institute_owner_workspace.sql",
@@ -608,7 +616,23 @@
       "sha256": "f1614eab408ab3374e2a30c9de061d31962f3aeb9833271395a9e6a3018217c4"
     },
     {
-      "order": 76,
+      "order": 77,
+      "version": "20261111200000",
+      "name": "dynamic_service_category_builder",
+      "file": "supabase/migrations/20261111200000_dynamic_service_category_builder.sql",
+      "bytes": 85417,
+      "sha256": "5a7aafac7f7a198f55291521f95a6d15ad5bb25d303589a676b93513ec3b429e"
+    },
+    {
+      "order": 78,
+      "version": "20261111210000",
+      "name": "service_document_storage_access",
+      "file": "supabase/migrations/20261111210000_service_document_storage_access.sql",
+      "bytes": 1825,
+      "sha256": "bc14451da077e9f5868f5a42f6a8ac8ce94ef194396c01bb498401754e88434e"
+    },
+    {
+      "order": 79,
       "version": "20261112010000",
       "name": "business_ownership_phase1",
       "file": "supabase/migrations/20261112010000_business_ownership_phase1.sql",
@@ -616,7 +640,7 @@
       "sha256": "242915df355aea28b8be75797f66f5bb4532117fac3e9d5cb54eb37e7ea02cac"
     },
     {
-      "order": 77,
+      "order": 80,
       "version": "20261112020000",
       "name": "business_ownership_phase2_backfill",
       "file": "supabase/migrations/20261112020000_business_ownership_phase2_backfill.sql",
@@ -624,7 +648,7 @@
       "sha256": "875d19b0a6421c526037590cc53cb0da0aca8eee4bd97f580596a12711a63d36"
     },
     {
-      "order": 78,
+      "order": 81,
       "version": "20261112030000",
       "name": "business_ownership_phase3_rls",
       "file": "supabase/migrations/20261112030000_business_ownership_phase3_rls.sql",
@@ -632,7 +656,7 @@
       "sha256": "7dcaa48aa964122a7d72352f9908e6655c037c4cbcd017767f7e57d4c496bee1"
     },
     {
-      "order": 79,
+      "order": 82,
       "version": "20261112040000",
       "name": "business_ownership_phase4_rls",
       "file": "supabase/migrations/20261112040000_business_ownership_phase4_rls.sql",
@@ -640,7 +664,7 @@
       "sha256": "ca1b51eff493674a2c8d5de0bf1148016d23ffbbffe8a621fd89c344945190f2"
     },
     {
-      "order": 80,
+      "order": 83,
       "version": "20261112050000",
       "name": "business_ownership_phase5_transfer",
       "file": "supabase/migrations/20261112050000_business_ownership_phase5_transfer.sql",
@@ -648,7 +672,7 @@
       "sha256": "80d1e8cde339c718118c4c44c122c439d450d7f70c38d54fc5522a4103788147"
     },
     {
-      "order": 81,
+      "order": 84,
       "version": "20261112080846",
       "name": "admin_stay_production_hardening",
       "file": "supabase/migrations/20261112080846_admin_stay_production_hardening.sql",
@@ -656,7 +680,7 @@
       "sha256": "97289022147a64c3e40245a65aab1581afaabac9900ebc5c5ffcc654ebed4bf3"
     },
     {
-      "order": 82,
+      "order": 85,
       "version": "20261112100000",
       "name": "provider_portal_operations",
       "file": "supabase/migrations/20261112100000_provider_portal_operations.sql",
@@ -664,7 +688,7 @@
       "sha256": "f6da7c5ba87f695e526dca92fdd17c15786eaa035b5f8431f4ed5c739a3a613e"
     },
     {
-      "order": 83,
+      "order": 86,
       "version": "20261112130000",
       "name": "institute_management_complete",
       "file": "supabase/migrations/20261112130000_institute_management_complete.sql",
@@ -672,7 +696,7 @@
       "sha256": "f880fa63cdb1d92db1a26eee2fdccc8b93cb7c1b562ef09b58018f11f6f84dcc"
     },
     {
-      "order": 84,
+      "order": 87,
       "version": "20261112140000",
       "name": "institute_business_scope",
       "file": "supabase/migrations/20261112140000_institute_business_scope.sql",
@@ -680,7 +704,7 @@
       "sha256": "17337569fbacfa310d456ac6d79bdfe4524f1fa597c527d131a6409a8b471026"
     },
     {
-      "order": 85,
+      "order": 88,
       "version": "20261112150000",
       "name": "business_legacy_null_fallbacks",
       "file": "supabase/migrations/20261112150000_business_legacy_null_fallbacks.sql",
@@ -688,7 +712,7 @@
       "sha256": "d33ef523bc258de0f3db97c0da54039f915aeaf3e4d5608d63cb034388613fe3"
     },
     {
-      "order": 86,
+      "order": 89,
       "version": "20261112160000",
       "name": "business_legacy_listing_fallbacks",
       "file": "supabase/migrations/20261112160000_business_legacy_listing_fallbacks.sql",
@@ -696,7 +720,7 @@
       "sha256": "38d8ff7ede8c0e8f73afa5d0222685c490ca1f4155d7f5d87cba9fdd192bc9d1"
     },
     {
-      "order": 87,
+      "order": 90,
       "version": "20261112170000",
       "name": "business_anon_listing_policy",
       "file": "supabase/migrations/20261112170000_business_anon_listing_policy.sql",
@@ -704,7 +728,7 @@
       "sha256": "263b101ffa7457ee281d034721a05fdc29f8b3cb1b49c6ec2d6d231ee030af2e"
     },
     {
-      "order": 88,
+      "order": 91,
       "version": "20261112180000",
       "name": "business_admin_insert_policy",
       "file": "supabase/migrations/20261112180000_business_admin_insert_policy.sql",
@@ -712,7 +736,7 @@
       "sha256": "9b241b3c01be848a0a8e9f5ad682dea561d30a0cc6f2e8d2d086f69a1966bb6a"
     },
     {
-      "order": 89,
+      "order": 92,
       "version": "20261112190000",
       "name": "pin_service_booking_guard_search_path",
       "file": "supabase/migrations/20261112190000_pin_service_booking_guard_search_path.sql",
@@ -720,7 +744,7 @@
       "sha256": "12cde02264de7e8fb5012082267c25af5d1081fe0dfbf6b0119ea016640d3018"
     },
     {
-      "order": 90,
+      "order": 93,
       "version": "20261112200000",
       "name": "business_function_privileges",
       "file": "supabase/migrations/20261112200000_business_function_privileges.sql",
@@ -728,7 +752,7 @@
       "sha256": "2a9e0d5cf52da21de0c4e8fce0a347037de19059b7fa6f3bc7e0e456a2fafaf8"
     },
     {
-      "order": 91,
+      "order": 94,
       "version": "20261112210000",
       "name": "business_payment_legacy_fallbacks",
       "file": "supabase/migrations/20261112210000_business_payment_legacy_fallbacks.sql",
@@ -736,7 +760,7 @@
       "sha256": "960fcf9fbf5ada1a07df7dfa7b9c5715952728a255178ecabdf0c0369d4e3413"
     },
     {
-      "order": 92,
+      "order": 95,
       "version": "20261112220000",
       "name": "drop_duplicate_transfer_audit_trigger",
       "file": "supabase/migrations/20261112220000_drop_duplicate_transfer_audit_trigger.sql",
@@ -744,7 +768,7 @@
       "sha256": "5d234b520ebce4fd71b5b355f8424a84d20e2e41ff252adbc723680c35f78e07"
     },
     {
-      "order": 93,
+      "order": 96,
       "version": "20261112230000",
       "name": "strict_listing_business_assignment",
       "file": "supabase/migrations/20261112230000_strict_listing_business_assignment.sql",
@@ -752,7 +776,7 @@
       "sha256": "78538ce65320d46c0a2f048960a28513ee6a049e0c7384681a8d71452ea6cf53"
     },
     {
-      "order": 94,
+      "order": 97,
       "version": "20261112240000",
       "name": "listing_business_function_privileges",
       "file": "supabase/migrations/20261112240000_listing_business_function_privileges.sql",
@@ -760,7 +784,7 @@
       "sha256": "0067a3f8bd013f97e8e6483909507db6d204f720004b8a880c6f82f026ea8ca7"
     },
     {
-      "order": 95,
+      "order": 98,
       "version": "20261112250000",
       "name": "business_module_hotels_alias",
       "file": "supabase/migrations/20261112250000_business_module_hotels_alias.sql",
@@ -768,7 +792,7 @@
       "sha256": "10053e49fca6e6aac7321f3692bf501a513e6df1a0f8f53a1e3c2ad3773aa0a9"
     },
     {
-      "order": 96,
+      "order": 99,
       "version": "20261112260000",
       "name": "admin_stay_rpc_finalize",
       "file": "supabase/migrations/20261112260000_admin_stay_rpc_finalize.sql",
@@ -776,7 +800,7 @@
       "sha256": "97289022147a64c3e40245a65aab1581afaabac9900ebc5c5ffcc654ebed4bf3"
     },
     {
-      "order": 97,
+      "order": 100,
       "version": "20261112270000",
       "name": "institute_member_business_isolation",
       "file": "supabase/migrations/20261112270000_institute_member_business_isolation.sql",
@@ -784,7 +808,7 @@
       "sha256": "84f1be4f5143bcebd81e25016bbd734832db3f3bb9400ee5a741da52fd8c1b85"
     },
     {
-      "order": 98,
+      "order": 101,
       "version": "20261112280000",
       "name": "strict_record_business_assignment",
       "file": "supabase/migrations/20261112280000_strict_record_business_assignment.sql",
@@ -792,12 +816,44 @@
       "sha256": "1e4032d0dd96153672f7233929b511778f3352c46a8f2cdad0cccd9c67229275"
     },
     {
-      "order": 99,
+      "order": 102,
       "version": "20261112290000",
       "name": "record_business_function_privileges",
       "file": "supabase/migrations/20261112290000_record_business_function_privileges.sql",
       "bytes": 143,
       "sha256": "c6b3fa6021066b4a02e8c1634d37c3721a5f54943b6a39473f61bde80c6e5b85"
+    },
+    {
+      "order": 103,
+      "version": "20261112300000",
+      "name": "payment_claim_business_triggers",
+      "file": "supabase/migrations/20261112300000_payment_claim_business_triggers.sql",
+      "bytes": 1624,
+      "sha256": "5939dfcd2f0039422b8f97586dcc9ce34820a2d637446c91b1aa18aadc998ad2"
+    },
+    {
+      "order": 104,
+      "version": "20261112310000",
+      "name": "final_security_hardening",
+      "file": "supabase/migrations/20261112310000_final_security_hardening.sql",
+      "bytes": 76,
+      "sha256": "2a54d1ff5d568cdbd6cdaa41261828d0431a233dee957eaf76dfcb19efd79c43"
+    },
+    {
+      "order": 105,
+      "version": "20261112320000",
+      "name": "service_tracking_function_privileges",
+      "file": "supabase/migrations/20261112320000_service_tracking_function_privileges.sql",
+      "bytes": 676,
+      "sha256": "2a9ed813a1020e70b45984067877cc9b50f15dd34ccc414c913e2e209b09a1a7"
+    },
+    {
+      "order": 106,
+      "version": "20261112330000",
+      "name": "movies_state_approval",
+      "file": "supabase/migrations/20261112330000_movies_state_approval.sql",
+      "bytes": 1108,
+      "sha256": "6c8b554cd283cf79c541cc5ca8384dc9718c04e5df53c19086f9d27e46560531"
     }
   ],
   "review": {

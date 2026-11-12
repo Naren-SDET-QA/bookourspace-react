@@ -279,6 +279,42 @@ body:has([aria-modal='true']) .bos-cookie-banner {
   display: none;
 }
 
+/* OAuth/profile dialog: keep the panel aligned at browser zoom and short
+   mobile heights instead of letting flex auto-margins push it below the fold. */
+.bos-auth-modal {
+  box-sizing: border-box;
+  align-items: center;
+  min-block-size: 100%;
+  padding-block-start: max(1rem, env(safe-area-inset-top));
+  padding-block-end: max(1rem, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+.bos-auth-modal__panel {
+  box-sizing: border-box;
+  min-block-size: 0;
+  max-block-size: min(860px, calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+@media (max-height: 760px) {
+  .bos-auth-modal {
+    align-items: start;
+  }
+  .bos-auth-modal__panel {
+    margin-block-start: 0;
+    margin-block-end: 0;
+  }
+}
+@media (max-width: 420px) {
+  .bos-auth-modal {
+    padding-inline: max(.75rem, env(safe-area-inset-left));
+  }
+  .bos-auth-modal__panel {
+    border-radius: 1.25rem;
+    padding: 1rem;
+  }
+}
+
 @layer base {
   button:not(:disabled):hover,
   [role='button']:hover,

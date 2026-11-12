@@ -115,6 +115,38 @@ export function registerServiceCommerceApi(app: express.Express, dependencies: S
     return session;
   }
 
+  // Provider dashboard: return the authenticated provider's own schedule only.
+  app.get('/api/services/provider/schedule', async (req, res) => {
+    const actor = actorOf(req);
+    if (!actor) return fail(res, 401, 'AUTH_REQUIRED', 'Sign in to manage your schedule.');
+    if (!['provider', 'admin'].includes(String(actor.role))) return fail(res, 403, 'PROVIDER_SESSION_REQUIRED', 'Only a provider can view this schedule.');
+    try {
+      const schedule = await withActor(actor, async (client) => {
+        const result = await client.query(
+          `select working_days, to_char(day_start,'HH24:MI') as day_start,
+                  to_char(day_end,'HH24:MI') as day_end, slot_minutes,
+                  service_areas, travel_radius_km
+             from public.service_provider_schedules
+            where provider_id = auth.uid()
+            limit 1`,
+        );
+        const row = result.rows[0];
+        return row ? {
+          workingDays: (row.working_days || []).map(Number),
+          dayStart: String(row.day_start),
+          dayEnd: String(row.day_end),
+          slotMinutes: Number(row.slot_minutes),
+          serviceAreas: Array.isArray(row.service_areas) ? row.service_areas.map(String) : [],
+          travelRadiusKm: row.travel_radius_km === null ? null : Number(row.travel_radius_km),
+          configured: true,
+        } : null;
+      });
+      res.json({ ok: true, schedule });
+    } catch (error) {
+      mapError(res, error, 'SERVICE_SCHEDULE_LOOKUP_FAILED');
+    }
+  });
+
   function sign(event: { eventId: string; intentId: string; eventType: string; amountPaise: number; providerPaymentId: string }): string {
     return crypto
       .createHmac('sha256', sandboxSecret)

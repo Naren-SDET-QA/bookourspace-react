@@ -14,6 +14,9 @@ export interface BusinessMembership {
   module_enabled: boolean;
   module_approval_status: 'pending' | 'approved' | 'suspended' | 'revoked';
   listing_count: number;
+  /** `null` means the member is unrestricted inside this business. */
+  allowed_modules?: string[] | null;
+  allowed_sections?: Record<string, string[]> | null;
 }
 
 export const BUSINESS_MODULE_LABELS: Record<BusinessModule, string> = {
@@ -56,6 +59,32 @@ export interface BusinessMember {
   full_name?: string | null;
   email?: string | null;
   created_at?: string;
+  /** `null` means the member is unrestricted inside this business. */
+  allowed_modules?: string[] | null;
+  allowed_sections?: Record<string, string[]> | null;
+}
+
+export interface BusinessMemberAccessPayload {
+  allowedModules: string[];
+  allowedSections: Record<string, string[]>;
+}
+
+/** Set a member's module/section scope, or pass `null` to restore full access. */
+export async function setBusinessMemberAccess(
+  businessId: string,
+  userId: string,
+  scope: BusinessMemberAccessPayload | null,
+): Promise<void> {
+  const response = await fetch(
+    `/api/businesses/${encodeURIComponent(businessId)}/members/${encodeURIComponent(userId)}/access`,
+    {
+      method: scope ? 'PUT' : 'DELETE',
+      headers: buildAuthHeaders({ accept: 'application/json' }),
+      body: scope ? JSON.stringify(scope) : undefined,
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP_${response.status}`);
 }
 
 export async function fetchBusinessMembers(businessId: string): Promise<BusinessMember[]> {

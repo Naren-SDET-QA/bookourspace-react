@@ -10,7 +10,7 @@ Applied to local `bookourspace_dev` on PostgreSQL 55440. **No hosted Supabase mi
 | 83 | `20261112040000_business_ownership_phase4_rls.sql` | `ca1b51eff493674a2c8d5de0bf1148016d23ffbbffe8a621fd89c344945190f2` | Invoice, enquiry, contact-settings and payment-claim RLS; authenticated grants for the two previously ungranted tables |
 | 84 | `20261112050000_business_ownership_phase5_transfer.sql` | `80d1e8cde339c718118c4c44c122c439d450d7f70c38d54fc5522a4103788147` | Secure two-step ownership transfer table, RLS and protected audit trigger |
 
-Apply order is phase 1 → phase 2 → phase 3 → phase 4 → phase 5. The Supabase migration manifest and checksum inventory were regenerated locally; current total is **98 migrations plus baseline**.
+Apply order is phase 1 → phase 2 → phase 3 → phase 4 → phase 5. The Supabase migration manifest and checksum inventory were regenerated locally; current total is **105 migrations plus baseline**.
 
 ## Local backfill evidence
 
@@ -51,4 +51,4 @@ Apply order is phase 1 → phase 2 → phase 3 → phase 4 → phase 5. The Supa
 
 ## Port reconciliation
 
-The target checkout had no Phase 1–5 business migrations while the shared local database had five applied rows. The five migrations were ported byte-for-byte, then target-only forward migrations were added for Institute business scope, legacy null-row compatibility, anonymous listing policy separation, Super Admin business inserts, pinned security-definer paths, function privileges and venue-payment compatibility. The migration manifest and checksum inventory now verify **98 migrations plus baseline**.
+The target checkout had no Phase 1–5 business migrations while the shared local database had five applied rows. The five migrations were ported byte-for-byte, then target-only forward migrations were added for Institute business scope, legacy null-row compatibility, anonymous listing policy separation, Super Admin business inserts, pinned security-definer paths, function privileges and venue-payment compatibility. The migration manifest and checksum inventory now verify **105 migrations plus baseline**.
