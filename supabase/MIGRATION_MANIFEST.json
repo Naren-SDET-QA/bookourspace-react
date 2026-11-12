@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 89,
+  "migrationCount": 90,
   "migrations": [
     {
       "order": 2,
@@ -726,6 +726,14 @@
       "file": "supabase/migrations/20261112210000_business_payment_legacy_fallbacks.sql",
       "bytes": 715,
       "sha256": "960fcf9fbf5ada1a07df7dfa7b9c5715952728a255178ecabdf0c0369d4e3413"
+    },
+    {
+      "order": 91,
+      "version": "20261112220000",
+      "name": "drop_duplicate_transfer_audit_trigger",
+      "file": "supabase/migrations/20261112220000_drop_duplicate_transfer_audit_trigger.sql",
+      "bytes": 402,
+      "sha256": "5d234b520ebce4fd71b5b355f8424a84d20e2e41ff252adbc723680c35f78e07"
     }
   ],
   "review": {
