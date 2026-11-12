@@ -328,12 +328,14 @@ select pg_temp.ok_rowcount('an active admin can persist marketplace listing edit
   $q$update public.listings set title = 'Admin-updated fixture listing' where id = 'listing-fixture-001'$q$, 1);
 select public.admin_upsert_stay_inventory(
   'admin-created-stay-001', '11111111-1111-1111-1111-111111111111',
-  '{"title":"Admin-created stay","category_id":"hotels","subcategory":"hotel","price":7500,"price_unit":"per night","status":"pending_approval","payload":{}}'::jsonb,
+  '{"title":"Admin-created stay","category_id":"hotel_stay","subcategory":"hotel","price":7500,"price_unit":"per night","status":"pending_approval","payload":{}}'::jsonb,
   '{"name":"Admin-created stay","property_type":"hotel","city":"Bengaluru","base_price_paise":750000,"tax_percent":12,"is_active":true}'::jsonb,
   '[{"name":"Standard","max_adults":2,"max_children":1,"base_price_paise":750000,"is_active":true,"units":[{"label":"B-301","is_active":true},{"label":"B-302","is_active":true}]}]'::jsonb
 );
 select pg_temp.ok('an active admin can create a stay listing and property atomically',
   exists (select 1 from public.stay_properties where listing_id = 'admin-created-stay-001'));
+select pg_temp.ok('the admin transaction accepts the canonical hotel_stay module id',
+  (select category_id = 'hotel_stay' from public.listings where id = 'admin-created-stay-001'));
 select pg_temp.ok('the newly created stay room type was persisted',
   (select count(*) = 1 from public.stay_room_types rt join public.stay_properties p on p.id = rt.property_id where p.listing_id = 'admin-created-stay-001'));
 select pg_temp.ok('the newly created physical stay units were persisted',

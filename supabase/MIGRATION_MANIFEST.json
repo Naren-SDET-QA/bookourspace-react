@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 90,
+  "migrationCount": 95,
   "migrations": [
     {
       "order": 2,
@@ -52,8 +52,8 @@
       "version": "20261101073937",
       "name": "admin_stay_inventory_safety",
       "file": "supabase/migrations/20261101073937_admin_stay_inventory_safety.sql",
-      "bytes": 21303,
-      "sha256": "9f2884112396739f7bfa16795d8c50c570e3d73eec0f9c9d39e0e3f50e42b819"
+      "bytes": 21423,
+      "sha256": "d482a9e6a3616e2accb1420a3c41fd581fe814f3c3b374f0714f76de4f287dcf"
     },
     {
       "order": 7,
@@ -649,6 +649,14 @@
     },
     {
       "order": 81,
+      "version": "20261112080846",
+      "name": "admin_stay_production_hardening",
+      "file": "supabase/migrations/20261112080846_admin_stay_production_hardening.sql",
+      "bytes": 10831,
+      "sha256": "97289022147a64c3e40245a65aab1581afaabac9900ebc5c5ffcc654ebed4bf3"
+    },
+    {
+      "order": 82,
       "version": "20261112100000",
       "name": "provider_portal_operations",
       "file": "supabase/migrations/20261112100000_provider_portal_operations.sql",
@@ -656,7 +664,7 @@
       "sha256": "f6da7c5ba87f695e526dca92fdd17c15786eaa035b5f8431f4ed5c739a3a613e"
     },
     {
-      "order": 82,
+      "order": 83,
       "version": "20261112130000",
       "name": "institute_management_complete",
       "file": "supabase/migrations/20261112130000_institute_management_complete.sql",
@@ -664,7 +672,7 @@
       "sha256": "f880fa63cdb1d92db1a26eee2fdccc8b93cb7c1b562ef09b58018f11f6f84dcc"
     },
     {
-      "order": 83,
+      "order": 84,
       "version": "20261112140000",
       "name": "institute_business_scope",
       "file": "supabase/migrations/20261112140000_institute_business_scope.sql",
@@ -672,7 +680,7 @@
       "sha256": "17337569fbacfa310d456ac6d79bdfe4524f1fa597c527d131a6409a8b471026"
     },
     {
-      "order": 84,
+      "order": 85,
       "version": "20261112150000",
       "name": "business_legacy_null_fallbacks",
       "file": "supabase/migrations/20261112150000_business_legacy_null_fallbacks.sql",
@@ -680,7 +688,7 @@
       "sha256": "d33ef523bc258de0f3db97c0da54039f915aeaf3e4d5608d63cb034388613fe3"
     },
     {
-      "order": 85,
+      "order": 86,
       "version": "20261112160000",
       "name": "business_legacy_listing_fallbacks",
       "file": "supabase/migrations/20261112160000_business_legacy_listing_fallbacks.sql",
@@ -688,7 +696,7 @@
       "sha256": "38d8ff7ede8c0e8f73afa5d0222685c490ca1f4155d7f5d87cba9fdd192bc9d1"
     },
     {
-      "order": 86,
+      "order": 87,
       "version": "20261112170000",
       "name": "business_anon_listing_policy",
       "file": "supabase/migrations/20261112170000_business_anon_listing_policy.sql",
@@ -696,7 +704,7 @@
       "sha256": "263b101ffa7457ee281d034721a05fdc29f8b3cb1b49c6ec2d6d231ee030af2e"
     },
     {
-      "order": 87,
+      "order": 88,
       "version": "20261112180000",
       "name": "business_admin_insert_policy",
       "file": "supabase/migrations/20261112180000_business_admin_insert_policy.sql",
@@ -704,7 +712,7 @@
       "sha256": "9b241b3c01be848a0a8e9f5ad682dea561d30a0cc6f2e8d2d086f69a1966bb6a"
     },
     {
-      "order": 88,
+      "order": 89,
       "version": "20261112190000",
       "name": "pin_service_booking_guard_search_path",
       "file": "supabase/migrations/20261112190000_pin_service_booking_guard_search_path.sql",
@@ -712,7 +720,7 @@
       "sha256": "12cde02264de7e8fb5012082267c25af5d1081fe0dfbf6b0119ea016640d3018"
     },
     {
-      "order": 89,
+      "order": 90,
       "version": "20261112200000",
       "name": "business_function_privileges",
       "file": "supabase/migrations/20261112200000_business_function_privileges.sql",
@@ -720,7 +728,7 @@
       "sha256": "2a9e0d5cf52da21de0c4e8fce0a347037de19059b7fa6f3bc7e0e456a2fafaf8"
     },
     {
-      "order": 90,
+      "order": 91,
       "version": "20261112210000",
       "name": "business_payment_legacy_fallbacks",
       "file": "supabase/migrations/20261112210000_business_payment_legacy_fallbacks.sql",
@@ -728,18 +736,50 @@
       "sha256": "960fcf9fbf5ada1a07df7dfa7b9c5715952728a255178ecabdf0c0369d4e3413"
     },
     {
-      "order": 91,
+      "order": 92,
       "version": "20261112220000",
       "name": "drop_duplicate_transfer_audit_trigger",
       "file": "supabase/migrations/20261112220000_drop_duplicate_transfer_audit_trigger.sql",
       "bytes": 402,
       "sha256": "5d234b520ebce4fd71b5b355f8424a84d20e2e41ff252adbc723680c35f78e07"
+    },
+    {
+      "order": 93,
+      "version": "20261112230000",
+      "name": "strict_listing_business_assignment",
+      "file": "supabase/migrations/20261112230000_strict_listing_business_assignment.sql",
+      "bytes": 4881,
+      "sha256": "78538ce65320d46c0a2f048960a28513ee6a049e0c7384681a8d71452ea6cf53"
+    },
+    {
+      "order": 94,
+      "version": "20261112240000",
+      "name": "listing_business_function_privileges",
+      "file": "supabase/migrations/20261112240000_listing_business_function_privileges.sql",
+      "bytes": 145,
+      "sha256": "0067a3f8bd013f97e8e6483909507db6d204f720004b8a880c6f82f026ea8ca7"
+    },
+    {
+      "order": 95,
+      "version": "20261112250000",
+      "name": "business_module_hotels_alias",
+      "file": "supabase/migrations/20261112250000_business_module_hotels_alias.sql",
+      "bytes": 1272,
+      "sha256": "10053e49fca6e6aac7321f3692bf501a513e6df1a0f8f53a1e3c2ad3773aa0a9"
+    },
+    {
+      "order": 96,
+      "version": "20261112260000",
+      "name": "admin_stay_rpc_finalize",
+      "file": "supabase/migrations/20261112260000_admin_stay_rpc_finalize.sql",
+      "bytes": 10831,
+      "sha256": "97289022147a64c3e40245a65aab1581afaabac9900ebc5c5ffcc654ebed4bf3"
     }
   ],
   "review": {
-    "at": "2026-11-07T20:41:08.790Z",
-    "note": "Reviewed 20261108150000_superadmin_module_visibility: public reads and RLS preserved; direct anon/authenticated writes revoked; server requires active Super Admin and audits updates; fresh PostgreSQL 17 chain and reapply checks pass.",
-    "migrationCount": 73,
+    "at": "2026-11-12T08:12:27.417Z",
+    "note": "Added Hotels & Stays admin production hardening: canonical category validation, admin query index, and regression coverage; no existing migration bytes changed.",
+    "migrationCount": 93,
     "baselineSha256": "f37bdbcaf1870a05fe8f45acbf2ec17f0cc99162cd7e60270d5f8d5fabe412c2"
   }
 }
