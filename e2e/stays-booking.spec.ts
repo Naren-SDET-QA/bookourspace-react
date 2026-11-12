@@ -221,7 +221,7 @@ test('Host browser — provider opens Stay hosting and sees owned PostgreSQL lis
   try {
     await page.goto(`${harness.uiUrl}/`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /Provider Hub/i }).click();
-    await expect(page.getByText('Provider & Seller Hub')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Approved Live Posts')).toBeVisible({ timeout: 20_000 });
     await page.getByRole('button', { name: /Stay hosting/i }).click();
     const workspace = page.getByRole('region', { name: 'Stay host workspace' });
     await expect(workspace).toBeVisible();

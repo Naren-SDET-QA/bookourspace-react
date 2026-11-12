@@ -186,6 +186,7 @@ const AdminClassBatchReview = lazy(() => import('./components/AdminClassBatchRev
 const PostListingWizard = lazy(() => import('./components/PostListingWizard').then((module) => ({ default: module.PostListingWizard })));
 const ProviderDashboard = lazy(() => import('./components/ProviderDashboard').then((module) => ({ default: module.ProviderDashboard })));
 const ProviderOnboardingForm = lazy(() => import('./components/ProviderOnboardingForm').then((module) => ({ default: module.ProviderOnboardingForm })));
+const ClassBatchManager = lazy(() => import('./components/ClassBatchManager').then((module) => ({ default: module.ClassBatchManager })));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
 const PaymentModal = lazy(() => import('./components/PaymentModal').then((module) => ({ default: module.PaymentModal })));
 const VoiceRegistrationModal = lazy(() => import('./components/VoiceRegistrationModal').then((module) => ({ default: module.VoiceRegistrationModal })));
@@ -3162,6 +3163,15 @@ function MarketplaceAppContent() {
                     : undefined
                 }
               />
+              {/* Module workspaces stay available next to the tabbed provider
+                  dashboard: courses/batches and venues have no tab of their
+                  own. Each gets its own boundary so one failure cannot hide
+                  the other workspace. */}
+              {userRole === 'provider' && (
+                <SelfHealingBoundary moduleId="provider_classes_module" moduleName="Classes Batch Manager">
+                  <ClassBatchManager />
+                </SelfHealingBoundary>
+              )}
             </SelfHealingBoundary>
           </div>
         )}
