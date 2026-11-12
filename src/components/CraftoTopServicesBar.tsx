@@ -130,6 +130,8 @@ interface CraftoTopServicesBarProps {
   onChangeHomeScreenStyle?: (style: HomeScreenLayoutStyle) => void;
   /** Hide the movie/section category pills strip (the Movies screen has its own language pills). */
   hideCategoryRibbon?: boolean;
+  /** When provided, only these sections appear in the quick-jump menu. */
+  authorizedSections?: MarketSectionType[] | null;
 }
 
 export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
@@ -196,6 +198,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   homeScreenStyle = 'bento_landing_hub',
   onChangeHomeScreenStyle,
   hideCategoryRibbon = false,
+  authorizedSections = null,
 }) => {
   const {
     authUser,
@@ -1041,7 +1044,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   { id: 'services', emoji: '🛠️', label: ui.secServices },
                   { id: 'hotel_stay', emoji: '🏨', label: ui.secStay },
                   { id: 'movies', emoji: '🎬', label: ui.secMovies },
-                ].map((sec) => (
+                ].filter((sec) => !authorizedSections || authorizedSections.includes(sec.id as MarketSectionType)).map((sec) => (
                   <button
                     key={sec.id}
                     type="button"

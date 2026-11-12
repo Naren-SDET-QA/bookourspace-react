@@ -137,6 +137,7 @@ function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
 
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
 import { fetchAuthAccessConfig, type AuthAccessConfig } from './lib/authAccessClient';
+import { isCustomerModuleKey, moduleKeyForSection, sectionForModuleKey, type CustomerModuleKey } from './lib/customerModuleMeta';
 import { supabase } from './lib/supabaseClient';
 import { SectionErrorBoundary } from './components/SectionErrorBoundary';
 import { SkipToContent } from './components/SkipToContent';
@@ -489,9 +490,19 @@ function MarketplaceAppContent() {
   const [homeSearchFocused, setHomeSearchFocused] = useState(false);
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
-  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
+  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile, customerModules, customerModulesChecked } = useMarketplace();
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
+
+  // Sections a signed-in customer is allowed to open. Null means "no customer
+  // restriction in effect" (guest, provider, admin, or not yet resolved).
+  const customerAuthorizedSections = useMemo<MarketSectionType[] | null>(() => {
+    if (authUser?.role !== 'customer' || !customerModulesChecked) return null;
+    return customerModules
+      .filter((key): key is CustomerModuleKey => isCustomerModuleKey(key))
+      .map((key) => sectionForModuleKey(key))
+      .filter((section): section is MarketSectionType => Boolean(section));
+  }, [authUser?.role, customerModules, customerModulesChecked]);
 
   // Public sign-in switches are administrator-controlled. Fetch once on boot
   // and refresh whenever an admin changes them in another surface.
@@ -570,33 +581,55 @@ function MarketplaceAppContent() {
         return;
       }
       setIsLoginPageOpen(false);
+      // Customer-specific module access: a signed-in customer may open only the
+      // sections whose module an administrator granted. Providers and admins are
+      // not constrained; guests see whatever the global module flags allow.
+      const customerModulesSet = new Set(customerModules);
+      const customerRestricted = authUser?.role === 'customer' && customerModulesChecked;
+      const canEnterSection = (section: MarketSectionType): boolean => {
+        if (!customerRestricted) return true;
+        const key = moduleKeyForSection(section);
+        return key ? customerModulesSet.has(key) : true;
+      };
+      const blockSection = () => {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+        setActiveView('marketplace');
+        setOpenSection(null);
+        showToast('🔒 This module is not available for your account.');
+      };
       const [, rawStyle = ''] = hash.split('/');
       const routeStyleNumber = rawStyle === '1' || rawStyle === 'style1' ? 1
         : rawStyle === '2' || rawStyle === 'style2' ? 2
           : rawStyle === '3' || rawStyle === 'style3' ? 3
             : 0;
       if (hash === 'pg' || hash.startsWith('pg/')) {
+        if (!canEnterSection('pg_hostels')) { blockSection(); return; }
         setActiveMarketSection('pg_hostels');
         setOpenSection('pg_hostels');
       } else if (hash === 'services' || hash.startsWith('services/')) {
+        if (!canEnterSection('services')) { blockSection(); return; }
         setActiveMarketSection('services');
         setOpenSection('services');
       } else if (hash === 'stays' || hash === 'hotels' || hash.startsWith('stays/') || hash.startsWith('hotels/')) {
+        if (!canEnterSection('hotel_stay')) { blockSection(); return; }
         setActiveMarketSection('hotel_stay');
         setOpenSection('hotel_stay');
       } else if (hash === 'classes' || hash.startsWith('classes/')) {
+        if (!canEnterSection('classes')) { blockSection(); return; }
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, classes: 'style3' }));
         }
         setActiveMarketSection('classes');
         setOpenSection('classes');
       } else if (hash === 'venues' || hash === 'halls' || hash.startsWith('venues/') || hash.startsWith('halls/')) {
+        if (!canEnterSection('venues')) { blockSection(); return; }
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, venues: 'agenda' }));
         }
         setActiveMarketSection('venues');
         setOpenSection(null);
       } else if (hash === 'movies' || hash === 'cinema' || hash.startsWith('movies/') || hash.startsWith('cinema/')) {
+        if (!canEnterSection('movies')) { blockSection(); return; }
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, movies: routeStyleNumber === 1 ? 'experience' : routeStyleNumber === 2 ? 'classic' : 'style3' }));
         }
@@ -637,7 +670,7 @@ function MarketplaceAppContent() {
     applySectionHash();
     window.addEventListener('hashchange', applySectionHash);
     return () => window.removeEventListener('hashchange', applySectionHash);
-  }, [isAdminSession, authUser]);
+  }, [isAdminSession, authUser, customerModules, customerModulesChecked]);
 
   // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
   useEffect(() => {
@@ -2008,7 +2041,12 @@ function MarketplaceAppContent() {
         <SpotlightModuleTabs
           activeMarketSection={activeMarketSection}
           compact
+          authorizedSections={customerAuthorizedSections}
           onSelectMarketSection={(section) => {
+              if (customerAuthorizedSections && !customerAuthorizedSections.includes(section)) {
+                showToast('🔒 This module is not available for your account.');
+                return;
+              }
               moduleHeaderStateRef.current[activeMarketSection] = { category: selectedCategory, subcategory: selectedSubcategory, search: searchQuery };
               const saved = moduleHeaderStateRef.current[section];
               setSelectedCategory(saved?.category ?? 'all');
@@ -2034,7 +2072,12 @@ function MarketplaceAppContent() {
           <Suspense fallback={quickHomeHeader}>
           <CraftoTopServicesBar
             activeMarketSection={activeMarketSection}
+            authorizedSections={customerAuthorizedSections}
             onSelectMarketSection={(sec) => {
+              if (customerAuthorizedSections && !customerAuthorizedSections.includes(sec)) {
+                showToast('🔒 This module is not available for your account.');
+                return;
+              }
               moduleHeaderStateRef.current[activeMarketSection] = {
                 category: selectedCategory,
                 subcategory: selectedSubcategory,
@@ -3811,6 +3854,10 @@ function MarketplaceAppContent() {
                 <CategoryRailStreamExplorer
                   activeMarketSection={activeMarketSection}
                   onSelectMarketSection={(sec) => {
+                    if (customerAuthorizedSections && !customerAuthorizedSections.includes(sec)) {
+                      showToast('🔒 This module is not available for your account.');
+                      return;
+                    }
                     setActiveMarketSection(sec);
                     setSelectedCategory('all');
                     setSelectedSubcategory('all');

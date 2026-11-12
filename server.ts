@@ -30,6 +30,10 @@ import { registerStayAdminApi } from './src/server/stayAdminApi';
 import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
 import { EmailOtpService } from './src/server/emailOtpAuth';
 import { AuthAccessSettingsStore, registerAuthAccessSettingsApi } from './src/server/authAccessSettings';
+import {
+  CustomerModuleAccessRepository,
+  registerCustomerModuleAccessApi,
+} from './src/server/customerModuleAccess';
 import { registerStaySearchApi } from './src/server/staySearchApi';
 import { registerLocationSearchApi } from './src/server/locationSearchApi';
 import { registerStayPayments } from './src/server/stayPayments';
@@ -349,6 +353,7 @@ async function startServer() {
   // development/test. An explicitly configured but unavailable DB fails
   // startup; it never falls back to the JSON compatibility store.
   const providerListingRepository = ProviderListingRepository.fromEnvironment();
+  const customerModuleAccessRepository = CustomerModuleAccessRepository.fromEnvironment();
   // Classes & Training enrollment shares the single local PostgreSQL selector.
   const classEnrollmentRepository = ClassEnrollmentRepository.fromEnvironment();
   if (providerListingRepository) {
@@ -2543,6 +2548,23 @@ Task:
     env: process.env,
     emailOtpConfigured: () => emailOtpService.configured,
     googleConfigured: Boolean(SUPABASE_PROJECT_URL && serverSupabaseConfig.publishableKey),
+  });
+
+  // Customer-specific module access. Admin-only writes; a signed-in customer
+  // reads their effective allow-list and the browser gates section navigation.
+  registerCustomerModuleAccessApi(app, {
+    repository: customerModuleAccessRepository,
+    verifySession: verifySessionTokenFromRequest,
+    resolveAdminActor: async (request) => {
+      const claims = verifySessionTokenFromRequest(request);
+      if (!claims?.userId || !platformSettingsRepository) return null;
+      try {
+        return await platformSettingsRepository.resolveActor(claims.userId);
+      } catch {
+        return null;
+      }
+    },
+    env: process.env,
   });
 
   app.post('/api/auth/email-otp/request', async (req, res) => {

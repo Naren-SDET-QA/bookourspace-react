@@ -113,6 +113,7 @@ import {
   syncServerProviderListing,
 } from '../lib/supabaseClient';
 import { verifyEmailOtpCode } from '../lib/emailOtpClient';
+import { fetchCustomerModules } from '../lib/customerModuleAccessClient';
 
 interface MarketplaceContextType {
   supabaseUser: User | null;
@@ -123,6 +124,11 @@ interface MarketplaceContextType {
   authoritativeSessionChecked: boolean;
   isAccountBlocked: boolean;
   blockedReason: string | null;
+  /** Effective marketplace module keys for a signed-in customer (empty for guests). */
+  customerModules: string[];
+  /** True after the customer module allow-list has been resolved once. */
+  customerModulesChecked: boolean;
+  refreshCustomerModules: () => Promise<void>;
   loginWithGoogle: (params: {
     email: string;
     name?: string;
@@ -266,6 +272,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [authoritativeSessionChecked, setAuthoritativeSessionChecked] = useState(false);
   const [isAccountBlocked, setIsAccountBlocked] = useState<boolean>(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  const [customerModules, setCustomerModules] = useState<string[]>([]);
+  const [customerModulesChecked, setCustomerModulesChecked] = useState<boolean>(false);
   const [userRole, setUserRoleState] = useState<UserRole>('customer');
   // Child components may request a role for navigation, but cannot grant one.
   // Elevated roles are assigned only from a server-verified session/profile.
@@ -276,6 +284,30 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
     if (!isAccountBlocked && authUser?.role === role) setUserRoleState(role);
   };
+  // Resolve the signed-in customer's module allow-list from the server. Guests,
+  // providers and admins get an empty list here (their navigation is not
+  // constrained), so the caller must check `authUser?.role === 'customer'`.
+  const refreshCustomerModules = async () => {
+    const session = supabase ? await supabase.auth.getSession().then((r) => r.data.session) : null;
+    const signedIn = Boolean(authUser || session?.user);
+    if (!signedIn) {
+      setCustomerModules([]);
+      setCustomerModulesChecked(true);
+      return;
+    }
+    const result = await fetchCustomerModules();
+    setCustomerModules(result.ok ? result.modules : []);
+    setCustomerModulesChecked(true);
+  };
+
+  useEffect(() => {
+    if (!authoritativeSessionChecked) return;
+    void refreshCustomerModules();
+    const onUpdated = () => void refreshCustomerModules();
+    window.addEventListener('bos-customer-modules-updated', onUpdated);
+    return () => window.removeEventListener('bos-customer-modules-updated', onUpdated);
+  }, [authoritativeSessionChecked, authUser?.id, authUser?.role]);
+
   const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
   const [supabaseSession, setSupabaseSession] = useState<Session | null>(null);
   const [supabaseProfile, setSupabaseProfile] = useState<SupabaseProfile | null>(null);
@@ -1907,6 +1939,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         authoritativeSessionChecked,
         isAccountBlocked,
         blockedReason,
+        customerModules,
+        customerModulesChecked,
+        refreshCustomerModules,
         loginWithGoogle,
         completeEmailOtpSignIn,
         applyPopupOAuthLogin,
