@@ -1146,15 +1146,24 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
       {/* LOGIN / PROFILE MODAL (OPENS WHEN USER CLICKS PROFILE TAB IN BOTTOM FOOTER) */}
       {isLoginModalVisible && (
-        <div style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom) + 1rem)' }} className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div style={{ maxHeight: 'calc(100dvh - 56px - env(safe-area-inset-bottom) - 2rem)' }} className="bg-[#FFFFFF] dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-700 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+        <div
+          data-testid="bos-google-profile-modal"
+          role="presentation"
+          className="bos-auth-modal fixed inset-0 z-50 grid justify-items-end overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-xs sm:p-6"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bos-google-profile-modal-title"
+            className="bos-auth-modal__panel my-auto ml-auto mr-0 flex w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-3xl border border-[#E2E8F0] bg-[#FFFFFF] p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:p-6"
+          >
             <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-[#4338CA] text-white flex items-center justify-center font-black">
                   <UserCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-[#0F172A] dark:text-white">
+                  <h3 id="bos-google-profile-modal-title" className="text-base font-black text-[#0F172A] dark:text-white">
                     {currentLang === 'te'
                       ? 'బుక్‌అవర్‌స్పేస్ Google OAuth లాగిన్ & ప్రొఫైల్'
                       : 'BookOurSpace Google OAuth Login & Profile'}
@@ -1310,7 +1319,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 <div className="text-[10px] font-black uppercase text-[#64748B] mb-1.5">
                   {currentLang === 'te' ? 'రోల్ మార్చండి (Switch Mode)' : 'Account Role & Portal Routing'}
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-1.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -1363,7 +1372,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
               <ProfileSavedAndWalletPanel currentLang={currentLang} />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={closeLoginModal}

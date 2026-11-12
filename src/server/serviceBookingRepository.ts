@@ -492,7 +492,7 @@ export class ServiceBookingRepository {
           order by case b.status when 'requested' then 0 when 'accepted' then 1 when 'in_progress' then 2 else 3 end,
                    b.scheduled_date desc, b.created_at desc
           limit 500`,
-        [actor.businessId || null],
+        actor.role === 'provider' ? [actor.businessId || null] : [],
       );
       return rows.map(toBooking);
     });
@@ -510,6 +510,9 @@ export class ServiceBookingRepository {
       const { rows } = await client.query('select * from public.service_bookings where id = $1 for update', [bookingId]);
       const booking = rows[0];
       if (!booking) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+      if (actor.role === 'provider' && actor.businessId && String(booking.business_id) !== String(actor.businessId)) {
+        throw new ServiceBookingRepositoryError('BOOKING_FORBIDDEN', 403);
+      }
 
       const isCustomer = booking.customer_id === actor.supabaseUserId;
       const isProvider = booking.provider_id === actor.supabaseUserId;
@@ -664,7 +667,7 @@ export class ServiceBookingRepository {
           where ${scope}
           order by case c.status when 'pending' then 0 else 1 end, c.created_at desc
           limit 500`,
-        [actor.businessId || null],
+        actor.role === 'admin' ? [] : [actor.businessId || null],
       );
       return rows.map(toClaim);
     });

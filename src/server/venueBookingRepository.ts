@@ -44,6 +44,15 @@ export class VenueBookingRepository {
     if (!roles.includes(actor.role)) throw new VenueBookingError('FORBIDDEN_ROLE', 403);
   }
 
+  private async assertListingBusiness(client: any, actor: ProviderListingActor | null, listingId: string) {
+    if (!actor?.businessId) return;
+    const result = await client.query('select business_id from public.listings where id=$1 limit 1', [listingId]);
+    if (!result.rows[0] || String(result.rows[0].business_id) !== String(actor.businessId)) {
+      throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
+    }
+  }
+
+
   private async transaction<T>(actor: VenueActor | null, run: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
@@ -158,6 +167,7 @@ export class VenueBookingRepository {
       cleanAddons[key] = { label, pricePaise: Math.round(amount * 100) };
     }
     return this.transaction(actor, async (client) => {
+      await this.assertListingBusiness(client, actor, listingId);
       const timeZone=String(input.timeZone||'Asia/Kolkata');
       const zone=await client.query('select 1 from pg_timezone_names where name=$1',[timeZone]);
       if(!zone.rowCount) throw new VenueBookingError('INVALID_VENUE_TIME_ZONE',400);
@@ -177,6 +187,7 @@ export class VenueBookingRepository {
   async addBlock(actor: ProviderListingActor | null, listingId: string, startsAt: string, endsAt: string, reason = '') {
     this.assertActor(actor, ['provider','admin']);
     return this.transaction(actor, async (client) => {
+      await this.assertListingBusiness(client, actor, listingId);
       const result = await client.query('select public.venue_owner_add_block($1,$2::timestamptz,$3::timestamptz,$4) as block', [listingId,startsAt,endsAt,reason]);
       return record(result.rows[0]?.block);
     });
@@ -193,6 +204,7 @@ export class VenueBookingRepository {
   async deleteBlock(actor: ProviderListingActor | null, listingId: string, blockId: string) {
     this.assertActor(actor, ['provider','admin']);
     return this.transaction(actor, async (client) => {
+      await this.assertListingBusiness(client, actor, listingId);
       const result = await client.query('delete from public.venue_blocks where listing_id=$1 and id=$2 returning id', [listingId,blockId]);
       return result.rowCount === 1;
     });

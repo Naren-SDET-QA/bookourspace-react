@@ -548,7 +548,7 @@ begin
    where schemaname = 'storage'
      and tablename = 'objects'
      and cmd in ('UPDATE', 'DELETE', 'ALL');
-  if insert_policies is distinct from 3 then
+  if insert_policies is distinct from 4 then
     raise exception 'FAIL storage insert policy count changed';
   end if;
   if not exists (
@@ -559,6 +559,9 @@ begin
        and with_check like '%auth.uid%'
   ) then
     raise exception 'FAIL private profile image upload policy is missing or not owner-scoped';
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and cmd='INSERT' and policyname='Booking parties upload private documents') then
+    raise exception 'FAIL booking-party private document upload policy is missing';
   end if;
   if mutating_policies is distinct from 0 then
     raise exception 'FAIL storage gained update or delete policies';

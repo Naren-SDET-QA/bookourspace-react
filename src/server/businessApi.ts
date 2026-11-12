@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type express from 'express';
 import type { Pool } from 'pg';
+import { sanitizeAccessScope } from '../lib/businessAccess';
 const MODULES = new Set(['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay', 'movies']);
 
 type BusinessActor = { supabaseUserId?: string | null; authProvider?: string; role?: string };
@@ -28,6 +29,28 @@ export function registerBusinessApi(
 ): void {
   const { pool, verifySession } = dependencies;
 
+  // Access scopes live in their own table. Reading them through a separate,
+  // tolerant query keeps the portal usable on environments where the grant
+  // migration has not been applied yet (those members simply stay unrestricted).
+  async function accessRowsFor(userId: string) {
+    try {
+      const { rows } = await pool.query(
+        `select business_id, allowed_modules, allowed_sections from public.business_member_access where user_id = $1`,
+        [userId],
+      );
+      return rows;
+    } catch { return [] as Array<Record<string, any>>; }
+  }
+
+  function withAccess<T extends Record<string, any>>(business: T, accessRows: Array<Record<string, any>>): T & { allowed_modules: string[] | null; allowed_sections: Record<string, string[]> } {
+    const row = accessRows.find((candidate) => String(candidate.business_id) === String(business.id));
+    return {
+      ...business,
+      allowed_modules: Array.isArray(row?.allowed_modules) ? row!.allowed_modules : null,
+      allowed_sections: (row?.allowed_sections as Record<string, string[]>) || {},
+    };
+  }
+
   app.get('/api/businesses', async (request, response) => {
     const actor = actorFrom(request, response, verifySession);
     if (!actor) return;
@@ -43,7 +66,8 @@ export function registerBusinessApi(
           order by b.created_at asc, b.id`,
         [actor.supabaseUserId],
       );
-      response.json({ ok: true, businesses: rows, source: 'postgres' });
+      const accessRows = await accessRowsFor(String(actor.supabaseUserId));
+      response.json({ ok: true, businesses: rows.map((row) => withAccess(row, accessRows)), source: 'postgres' });
     } catch {
       response.status(500).json({ ok: false, error: 'BUSINESS_LIST_UNAVAILABLE' });
     }
@@ -64,7 +88,8 @@ export function registerBusinessApi(
         [actor.supabaseUserId, String(request.params.id || '')],
       );
       if (!rows[0]) return void response.status(404).json({ ok: false, error: 'BUSINESS_NOT_FOUND' });
-      response.json({ ok: true, business: rows[0], source: 'postgres' });
+      const accessRows = await accessRowsFor(String(actor.supabaseUserId));
+      response.json({ ok: true, business: withAccess(rows[0], accessRows), source: 'postgres' });
     } catch {
       response.status(500).json({ ok: false, error: 'BUSINESS_UNAVAILABLE' });
     }
@@ -213,14 +238,101 @@ export function registerBusinessApi(
       );
       const role = access.rows[0]?.role;
       if (!role || !['owner','manager','accountant'].includes(role)) return void response.status(403).json({ ok: false, error: 'MEMBERS_FORBIDDEN' });
+      const businessId = String(request.params.id || '');
       const { rows } = await pool.query(
         `select m.id, m.user_id, m.role, m.status, m.created_at, p.full_name, p.email
            from public.business_members m join public.profiles p on p.id=m.user_id
           where m.business_id=$1 order by case m.role when 'owner' then 0 when 'manager' then 1 else 2 end, m.created_at`,
-        [String(request.params.id || '')],
+        [businessId],
       );
-      response.json({ ok: true, members: rows, source: 'postgres' });
+      let accessRows: Array<Record<string, any>> = [];
+      try {
+        const access = await pool.query(
+          `select user_id, allowed_modules, allowed_sections from public.business_member_access where business_id = $1`,
+          [businessId],
+        );
+        accessRows = access.rows;
+      } catch { accessRows = []; }
+      const members = rows.map((member) => {
+        const scope = accessRows.find((candidate) => String(candidate.user_id) === String(member.user_id));
+        return {
+          ...member,
+          allowed_modules: Array.isArray(scope?.allowed_modules) ? scope!.allowed_modules : null,
+          allowed_sections: (scope?.allowed_sections as Record<string, string[]>) || {},
+        };
+      });
+      response.json({ ok: true, members, source: 'postgres' });
     } catch { response.status(500).json({ ok: false, error: 'MEMBERS_UNAVAILABLE' }); }
+  });
+
+  // Per-member access scopes: an owner or manager may narrow a member to
+  // specific modules and sections. Owners are never restrictable and a manager
+  // cannot restrict another manager.
+  async function memberRole(businessId: string, userId: string): Promise<string | null> {
+    const { rows } = await pool.query(
+      `select role from public.business_members where business_id = $1 and user_id = $2 and status = 'active' limit 1`,
+      [businessId, userId],
+    );
+    return (rows[0]?.role as string) || null;
+  }
+
+  app.put('/api/businesses/:id/members/:userId/access', async (request, response) => {
+    const actor = actorFrom(request, response, verifySession);
+    if (!actor) return;
+    const parsed = sanitizeAccessScope(request.body);
+    if (!parsed.ok) return void response.status(400).json({ ok: false, error: parsed.error });
+    const businessId = String(request.params.id || '');
+    const targetUserId = String(request.params.userId || '');
+    try {
+      const actorRole = await memberRole(businessId, String(actor.supabaseUserId));
+      if (!actorRole || !['owner', 'manager'].includes(actorRole)) return void response.status(403).json({ ok: false, error: 'ACCESS_SCOPE_FORBIDDEN' });
+      const targetRole = await memberRole(businessId, targetUserId);
+      if (!targetRole) return void response.status(404).json({ ok: false, error: 'MEMBER_NOT_FOUND' });
+      if (targetRole === 'owner') return void response.status(403).json({ ok: false, error: 'OWNER_ACCESS_CANNOT_BE_RESTRICTED' });
+      if (actorRole === 'manager' && targetRole === 'manager') return void response.status(403).json({ ok: false, error: 'ONLY_OWNER_CAN_RESTRICT_MANAGER' });
+      await pool.query(
+        `insert into public.business_member_access (business_id, user_id, allowed_modules, allowed_sections, updated_by)
+         values ($1, $2, $3, $4::jsonb, $5)
+         on conflict (business_id, user_id) do update
+            set allowed_modules = excluded.allowed_modules,
+                allowed_sections = excluded.allowed_sections,
+                updated_by = excluded.updated_by,
+                updated_at = now()`,
+        [businessId, targetUserId, parsed.scope.allowedModules, JSON.stringify(parsed.scope.allowedSections), actor.supabaseUserId],
+      );
+      await pool.query(
+        `insert into public.business_audit_events (business_id,actor_user_id,event_type,after_state,reason)
+         values ($1,$2,'business.member_access_changed',$3,$4)`,
+        [businessId, actor.supabaseUserId, JSON.stringify({ userId: targetUserId, ...parsed.scope }), 'Member access scope updated'],
+      );
+      response.json({ ok: true, access: parsed.scope, source: 'postgres' });
+    } catch {
+      response.status(500).json({ ok: false, error: 'ACCESS_SCOPE_UPDATE_FAILED' });
+    }
+  });
+
+  app.delete('/api/businesses/:id/members/:userId/access', async (request, response) => {
+    const actor = actorFrom(request, response, verifySession);
+    if (!actor) return;
+    const businessId = String(request.params.id || '');
+    const targetUserId = String(request.params.userId || '');
+    try {
+      const actorRole = await memberRole(businessId, String(actor.supabaseUserId));
+      if (!actorRole || !['owner', 'manager'].includes(actorRole)) return void response.status(403).json({ ok: false, error: 'ACCESS_SCOPE_FORBIDDEN' });
+      const targetRole = await memberRole(businessId, targetUserId);
+      if (!targetRole) return void response.status(404).json({ ok: false, error: 'MEMBER_NOT_FOUND' });
+      if (targetRole === 'owner') return void response.status(403).json({ ok: false, error: 'OWNER_ACCESS_CANNOT_BE_RESTRICTED' });
+      if (actorRole === 'manager' && targetRole === 'manager') return void response.status(403).json({ ok: false, error: 'ONLY_OWNER_CAN_RESTRICT_MANAGER' });
+      await pool.query(`delete from public.business_member_access where business_id = $1 and user_id = $2`, [businessId, targetUserId]);
+      await pool.query(
+        `insert into public.business_audit_events (business_id,actor_user_id,event_type,after_state,reason)
+         values ($1,$2,'business.member_access_cleared',$3,$4)`,
+        [businessId, actor.supabaseUserId, JSON.stringify({ userId: targetUserId, allowedModules: null }), 'Member access restored to full business access'],
+      );
+      response.json({ ok: true, access: null, source: 'postgres' });
+    } catch {
+      response.status(500).json({ ok: false, error: 'ACCESS_SCOPE_UPDATE_FAILED' });
+    }
   });
 
   app.get('/api/businesses/:id/invitations', async (request, response) => {

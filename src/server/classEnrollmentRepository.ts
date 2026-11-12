@@ -299,7 +299,7 @@ export class ClassEnrollmentRepository {
 
     return this.transaction(identity, async (client) => {
       const listing = await client.query(
-        `select id, owner_id, entity_type, status from public.listings where id = $1 limit 1`,
+        `select id, owner_id, business_id, entity_type, status from public.listings where id = $1 limit 1`,
         [listingId],
       );
       const row = listing.rows[0];
@@ -310,6 +310,9 @@ export class ClassEnrollmentRepository {
           403,
           'A trainer can only create batches for their own course listing.',
         );
+      }
+      if (identity.role !== 'admin' && identity.businessId && String(row.business_id) !== String(identity.businessId)) {
+        throw new ClassEnrollmentError('FORBIDDEN_BUSINESS_CONTEXT', 403);
       }
       if (identity.role !== 'admin' && row.entity_type !== 'course') {
         throw new ClassEnrollmentError('COURSE_LISTING_REQUIRED', 409);
@@ -475,7 +478,7 @@ export class ClassEnrollmentRepository {
           where ${scoped}
           order by e.created_at desc
           limit 300`,
-        [identity.businessId || null],
+        identity.role === 'admin' ? [] : [identity.businessId || null],
       );
       return rows.map(toEnrollment);
     });

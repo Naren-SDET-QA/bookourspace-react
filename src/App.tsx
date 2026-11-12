@@ -102,6 +102,7 @@ const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
   { id: 'user_management', label: 'Users' },
   { id: 'listings_venues', label: 'Listings & Venues' },
   { id: 'stays', label: 'Hotels & Stays' },
+  { id: 'movies_showtimes', label: 'Movies & Showtimes' },
   { id: 'bookings_events', label: 'Bookings' },
   { id: 'payment_management', label: 'Payments' },
   { id: 'content_management', label: 'Content' },
@@ -592,7 +593,7 @@ function MarketplaceAppContent() {
         }
         setActiveMarketSection('movies');
         setOpenSection(null);
-      } else if (hash === 'provider' || hash === 'provider_portal' || hash.startsWith('provider/')) {
+      } else if (hash === 'provider' || hash === 'provider_portal' || hash === 'provider_portal1' || hash.startsWith('provider/')) {
         // A URL hash is unauthenticated input and must never grant a role.
         // Signed-out visitors keep the hash so it applies once the session
         // hydrates; a signed-in non-provider is redirected to the marketplace.
@@ -601,6 +602,12 @@ function MarketplaceAppContent() {
           window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
           setActiveView('marketplace');
           return;
+        }
+        // Older local preview links occasionally appended a trailing `1`.
+        // Normalize that harmless alias so the protected provider route loads
+        // instead of falling through to the marketplace screen.
+        if (hash === 'provider_portal1') {
+          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#provider_portal`);
         }
         setUserRole('provider');
         setActiveView('provider_portal');
@@ -3052,7 +3059,7 @@ function MarketplaceAppContent() {
                 onSwitchToMarketplace={() => {
                   setActiveView('marketplace');
                   setActiveBottomTab('home');
-                  if (window.location.hash.toLowerCase() === '#provider_portal') {
+                  if (['#provider', '#provider_portal', '#provider_portal1'].includes(window.location.hash.toLowerCase())) {
                     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
                   }
                 }}

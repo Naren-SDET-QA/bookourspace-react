@@ -16,12 +16,14 @@ interface ShowtimeScreen {
   showDate: string | null;
   screenName: string;
   city: string | null;
+  state: string | null;
   area: string | null;
   pincode: string | null;
   showtimes: string[];
   format: string;
   soundSystem: string;
   isVisible: boolean;
+  approvalStatus?: 'pending' | 'approved' | 'disabled';
   updatedAt: string;
   source: string | null;
 }
@@ -59,6 +61,8 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
   const [loadedInMs, setLoadedInMs] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [city, setCity] = useState(selectedCity && selectedCity !== 'All Cities' ? selectedCity : ALL);
+  const [state, setState] = useState('All states');
+  const [query, setQuery] = useState('');
   const [area, setArea] = useState('');
   const [pin, setPin] = useState('');
   const [movie, setMovie] = useState<string | null>(null);
@@ -109,12 +113,15 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
     const pinNeedle = pin.trim();
     return screens.filter((screen) => {
       if (!screen.isVisible && !canManage) return false;
+      const needle = query.trim().toLowerCase();
+      if (needle && !`${screen.movieTitle || ''} ${screen.cinemaTitle || ''} ${screen.screenName || ''}`.toLowerCase().includes(needle)) return false;
+      if (state !== 'All states' && screen.state !== state) return false;
       if (city !== ALL && (screen.city || '').toLowerCase() !== city.toLowerCase()) return false;
       if (areaNeedle && !`${screen.area || ''}`.toLowerCase().includes(areaNeedle)) return false;
       if (pinNeedle && !`${screen.pincode || ''}`.startsWith(pinNeedle)) return false;
       return true;
     });
-  }, [screens, city, area, pin, canManage]);
+  }, [screens, query, state, city, area, pin, canManage]);
 
   const movies = useMemo(() => {
     const groups = new Map<string, ShowtimeScreen[]>();
@@ -145,7 +152,23 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
     return Array.from(map.values());
   }, [selectedMovieScreens]);
 
-  const save = async (form: ShowtimeScreen, values: { showtimes: string; movieTitle: string; showDate: string; city: string; area: string; pincode: string; isVisible: boolean }) => {
+  const approve = async (screen: ShowtimeScreen, status: 'approved' | 'disabled') => {
+    setSaving(true); setError('');
+    try {
+      const token = window.localStorage.getItem('bos_session_token_v1');
+      const response = await fetch(`/api/admin/movies/theatres/${encodeURIComponent(screen.id)}/approval`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...(token ? { 'x-bos-session-token': token } : {}) },
+        body: JSON.stringify({ status }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok) { setError(data?.message || 'The theatre visibility was not updated.'); return; }
+      setScreens((current) => current.map((row) => row.id === data.screen.id ? data.screen : row));
+    } catch { setError('The theatre visibility was not updated.'); }
+    finally { setSaving(false); }
+  };
+
+  const save = async (form: ShowtimeScreen, values: { showtimes: string; movieTitle: string; showDate: string; state: string; city: string; area: string; pincode: string; isVisible: boolean }) => {
     setSaving(true);
     setError('');
     try {
@@ -158,6 +181,7 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
           movieTitle: values.movieTitle,
           showDate: values.showDate,
           city: values.city,
+          state: values.state,
           area: values.area,
           pincode: values.pincode,
           showtimes: times,
@@ -212,6 +236,22 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
       <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:px-5">
         <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="Location filters">
           <div className="flex flex-wrap items-end gap-2">
+            <label className="min-w-44 flex-[1.2] text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              Search movie or theatre
+              <span className="mt-1 flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5">
+                <Search className="h-3.5 w-3.5 text-slate-400" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Movie or theatre" className="w-full bg-transparent text-sm font-semibold outline-none" />
+              </span>
+            </label>
+            <label className="min-w-40 flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              State
+              <select value={state} onChange={(event) => setState(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900">
+                <option value="All states">All states</option>
+                <option value="Andhra Pradesh">Andhra Pradesh</option>
+                <option value="Telangana">Telangana</option>
+                <option value="Karnataka">Karnataka</option>
+              </select>
+            </label>
             <label className="min-w-40 flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
               City
               <select value={city} onChange={(event) => setCity(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900">
@@ -230,7 +270,7 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
               <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="500032" className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold" />
             </label>
             {(area || pin || city !== ALL) && (
-              <button type="button" onClick={() => { setCity(ALL); setArea(''); setPin(''); }} className="h-10 rounded-xl border border-slate-200 px-3 text-[11px] font-bold text-slate-600">Reset</button>
+              <button type="button" onClick={() => { setCity(ALL); setArea(''); setPin(''); setQuery(''); }} className="h-10 rounded-xl border border-slate-200 px-3 text-[11px] font-bold text-slate-600">Reset</button>
             )}
           </div>
           <p className="mt-2 flex items-center gap-1.5 text-[10.5px] text-slate-500">
@@ -316,7 +356,13 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
                       </p>
                     </div>
                     {canManage && (
-                      <button type="button" onClick={() => setEditing(theatre.screens[0])} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10.5px] font-bold text-slate-700"><Pencil className="h-3 w-3" /> Manage</button>
+                      <div className="flex flex-wrap gap-1">
+                        {authUser?.role === 'admin' && <>
+                          <button type="button" onClick={() => void approve(theatre.screens[0], 'approved')} className="rounded-lg bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">Approve</button>
+                          <button type="button" onClick={() => void approve(theatre.screens[0], 'disabled')} className="rounded-lg border border-rose-200 px-2 py-1 text-[10px] font-bold text-rose-700">Disable</button>
+                        </>}
+                        <button type="button" onClick={() => setEditing(theatre.screens[0])} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10.5px] font-bold text-slate-700"><Pencil className="h-3 w-3" /> Manage</button>
+                      </div>
                     )}
                   </div>
                   <div className="mt-2 space-y-1.5">
@@ -359,11 +405,12 @@ function EditShowtimeDialog({
   screen: ShowtimeScreen;
   saving: boolean;
   onClose: () => void;
-  onSave: (values: { showtimes: string; movieTitle: string; showDate: string; city: string; area: string; pincode: string; isVisible: boolean }) => void;
+  onSave: (values: { showtimes: string; movieTitle: string; showDate: string; state: string; city: string; area: string; pincode: string; isVisible: boolean }) => void;
 }) {
   const [showtimes, setShowtimes] = useState(screen.showtimes.join(', '));
   const [showDate, setShowDate] = useState(screen.showDate || new Date().toISOString().slice(0, 10));
   const [movieTitle, setMovieTitle] = useState(screen.movieTitle || '');
+  const [state, setState] = useState(screen.state || '');
   const [city, setCity] = useState(screen.city || '');
   const [area, setArea] = useState(screen.area || '');
   const [pincode, setPincode] = useState(screen.pincode || '');
@@ -379,6 +426,7 @@ function EditShowtimeDialog({
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <label className="text-[10px] font-bold uppercase text-slate-500">Movie title (required)<input value={movieTitle} onChange={(event) => setMovieTitle(event.target.value)} required className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">Show date (required)<input type="date" value={showDate} onChange={(event) => setShowDate(event.target.value)} required className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
+          <label className="text-[10px] font-bold uppercase text-slate-500">State<select value={state} onChange={(event) => setState(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold"><option value="">Select state</option><option value="Andhra Pradesh">Andhra Pradesh</option><option value="Telangana">Telangana</option><option value="Karnataka">Karnataka</option></select></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">City<input value={city} onChange={(event) => setCity(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">Area<input value={area} onChange={(event) => setArea(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">PIN code<input value={pincode} onChange={(event) => setPincode(event.target.value.replace(/\D/g, '').slice(0, 6))} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
@@ -387,7 +435,7 @@ function EditShowtimeDialog({
         <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-700"><input type="checkbox" checked={isVisible} onChange={(event) => setIsVisible(event.target.checked)} /> Visible to customers</label>
         <div className="mt-3 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold">Cancel</button>
-          <button type="button" disabled={saving || !movieTitle.trim() || !showDate || !showtimes.trim()} onClick={() => onSave({ showtimes, movieTitle, showDate, city, area, pincode, isVisible })} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save showtimes'}</button>
+          <button type="button" disabled={saving || !movieTitle.trim() || !showDate || !showtimes.trim()} onClick={() => onSave({ showtimes, movieTitle, showDate, state, city, area, pincode, isVisible })} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save showtimes'}</button>
         </div>
       </div>
     </div>
