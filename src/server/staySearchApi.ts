@@ -7,7 +7,10 @@ import {
   parseStaySearchQuery,
   type StaySearchQuery,
 } from './staySearchQuery';
-import { isRenderableListingImageSource } from '../lib/media/signedStorageUrl';
+import {
+  isRenderableListingImageSource,
+  publicProfileImageSource,
+} from '../lib/media/signedStorageUrl';
 
 /**
  * Public Stay discovery API.
@@ -229,7 +232,7 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
             hostLanguages: stringArray(row.language_keys),
             hostId: row.host_id ? String(row.host_id) : '',
             hostName: row.host_name ? String(row.host_name) : '',
-            hostAvatarUrl: row.host_avatar_url ? String(row.host_avatar_url) : '',
+            hostAvatarUrl: publicProfileImageSource(row.host_avatar_url),
             instantBook: row.instant_book === true,
             selfCheckIn: row.self_check_in === true,
             petsAllowed: row.pets_allowed === true,
@@ -355,7 +358,7 @@ export function registerStaySearchApi(app: express.Express, deps: StaySearchApiD
         host: {
           id: String(row.id),
           name: String(row.full_name || 'BookOurSpace host'),
-          avatarUrl: String(row.avatar_url || ''),
+          avatarUrl: publicProfileImageSource(row.avatar_url),
           city: String(row.city || ''),
           verified: row.verified === true,
           languages: Array.isArray(row.host_languages) ? row.host_languages : [],

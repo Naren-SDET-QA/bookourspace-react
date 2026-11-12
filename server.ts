@@ -62,6 +62,7 @@ import { PlatformBuilderRepository, registerPlatformBuilderApi } from './src/ser
 import { VenueBookingRepository } from './src/server/venueBookingRepository';
 import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
 import { registerMediaValidationApi } from './src/server/mediaValidationApi';
+import { registerPrivateMediaSignApi } from './src/server/privateMediaSignApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
 import { registerResendDevelopmentTestApi } from './src/server/resendEmail';
 import { registerEvolutionDevelopmentTestApi } from './src/server/evolutionWhatsApp';
@@ -479,10 +480,18 @@ async function startServer() {
   app.use(apiNoStoreByDefault);
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    if (aiStudioPreview) {
+      // Google AI Studio embeds its cloud preview inside an outer studio iframe.
+      res.setHeader(
+        'Content-Security-Policy',
+        "frame-ancestors 'self' https://aistudio.google.com https://*.scf.usercontent.goog https://*.googleusercontent.com",
+      );
+    } else {
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    }
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
     res.setHeader('X-DNS-Prefetch-Control', 'off');
     if (process.env.NODE_ENV === 'production') {
       const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol;
@@ -2006,6 +2015,12 @@ Task:
     serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     pool: pgRuntimePool || null,
   });
+  registerPrivateMediaSignApi(app, {
+    projectUrl: SUPABASE_PROJECT_URL,
+    serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    verifySession: verifySessionTokenFromRequest,
+    pool: pgRuntimePool || null,
+  });
   registerAccountClosureApi(app, {
     projectUrl: SUPABASE_PROJECT_URL,
     publishableKey: serverSupabaseConfig.publishableKey,
@@ -2740,11 +2755,11 @@ Task:
       return;
     }
 
-    const result = authenticateOrRegisterUser({
+    const result = authenticateOrRegisterSupabaseUser({
       supabaseUserId: identity.id,
       email: identity.email,
       name: identity.name,
-      authProvider: 'email_otp',
+      authProvider: 'email',
       requestedRole: 'customer',
       allowRoleChange: false,
     });
@@ -2769,7 +2784,7 @@ Task:
           supabaseUserId: identity.id,
           email: identity.email,
           name: identity.name || identity.email,
-          authProvider: 'email_otp',
+          authProvider: 'email',
           role: 'customer',
         });
         const profileRole = String(profile?.role || '') as SessionClaims['role'];
@@ -2784,7 +2799,7 @@ Task:
           name: identity.name || profile.full_name || identity.email,
           phone: profile.phone || '',
           role: profileRole,
-          authProvider: 'email_otp',
+          authProvider: 'email',
           issuedAt: Date.now(),
           expiresAt: Date.now() + 12 * 60 * 60_000,
         };
@@ -2799,7 +2814,7 @@ Task:
           email: identity.email,
           phone: claims.phone || '',
           role: profileRole,
-          authProvider: 'email_otp' as const,
+          authProvider: 'email' as const,
           verified: true,
           accountStatus: profile.account_status,
         };
@@ -2815,7 +2830,7 @@ Task:
           supabaseUserId: identity.id,
           email: identity.email,
           name: identity.name || identity.email,
-          authProvider: 'email_otp',
+          authProvider: 'email',
           role: result.user.role,
         });
         if (profile) {
@@ -2825,13 +2840,13 @@ Task:
           if (storedUser) {
             storedUser.role = profileRole;
             storedUser.supabaseUserId = identity.id;
-            storedUser.authProvider = 'email_otp';
+            storedUser.authProvider = 'email';
             if (!saveAuthoritativeStore(store)) {
               res.status(503).json({ ok: false, error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE' });
               return;
             }
             responseUser = storedUser;
-            responseClaims = { ...result.claims, role: profileRole, authProvider: 'email_otp' };
+            responseClaims = { ...result.claims, role: profileRole, authProvider: 'email' };
             responseSessionToken = signSessionToken(responseClaims);
             responseRedirectTarget = resolveRoleRedirectTarget(profileRole);
           }
@@ -2845,7 +2860,7 @@ Task:
 
     res.status(result.isNewUser ? 201 : 200).json({
       ok: true,
-      authProvider: 'email_otp',
+      authProvider: 'email',
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
       user: responseUser,

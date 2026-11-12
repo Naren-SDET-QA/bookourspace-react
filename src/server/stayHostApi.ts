@@ -231,7 +231,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     const media = await client.query(
       `select id, 'storage://' || bucket_id || '/' || object_path as reference, display_order, alt_text, caption
          from public.media_assets where owner_id=$1 and parent_type='provider_listing' and parent_id=$2
-          and module_key='stays' and bucket_id='bos-public-media' and privacy='public' and processing_status='ready'
+          and module_key in ('stays', 'hotel_stay') and bucket_id='bos-public-media' and privacy='public' and processing_status='ready'
         order by display_order, created_at, id limit 20`, [actorId, listingId],
     );
     const payload = stayPayload(listing.payload);
@@ -839,7 +839,7 @@ export function registerStayHostApi(app: express.Express, deps: StayHostApiDeps)
     if (ids.length > 20 || ids.some((id: string) => !UUID.test(id)) || new Set(ids).size !== ids.length) throw Object.assign(new Error('INVALID_MEDIA_ORDER'), { statusCode: 400 });
     const owned = await client.query(
       `select id, 'storage://' || bucket_id || '/' || object_path as reference from public.media_assets
-        where id = any($1::uuid[]) and owner_id=$2 and module_key='stays' and parent_type='provider_listing'
+        where id = any($1::uuid[]) and owner_id=$2 and module_key in ('stays', 'hotel_stay') and parent_type='provider_listing'
           and parent_id=$3 and bucket_id='bos-public-media' and privacy='public' and processing_status='ready'`,
       [ids, actorId, listingId],
     );

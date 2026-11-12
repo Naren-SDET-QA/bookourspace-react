@@ -173,8 +173,8 @@ async function main() {
 
       await client.query(
         `insert into public.listings
-           (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
-         values ($1, $2, $3, 'stay-hotel', $4, 'stay', $5, '/night', 'active', $6::jsonb)
+           (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload, is_verified, verified_by, verified_at)
+         values ($1, $2, $3, 'stay-hotel', $4, 'stay', $5, '/night', 'active', $6::jsonb, true, $7, now())
          on conflict (id) do nothing`,
         [
           listingId,
@@ -191,6 +191,7 @@ async function main() {
             demo: true,
             stayLifecycle: 'approved',
           }),
+          ADMIN_ID,
         ],
       );
 

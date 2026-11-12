@@ -5,11 +5,13 @@ import {
   createSignedStorageUrlResolver,
   firstUsableListingImage,
   isPersistableListingImageSource,
+  isPrivateStorageSource,
   isRenderableListingImageSource,
   isUsableListingImageSource,
   listingImageSources,
   MEDIA_URL_TTL_SECONDS,
   parseStorageObjectReference,
+  publicProfileImageSource,
   storageReferenceForSource,
 } from '../src/lib/media/signedStorageUrl.ts';
 
@@ -227,4 +229,51 @@ test('fixture-only media is excluded and a real photo is promoted', () => {
   );
   assert.equal(firstUsableListingImage(['storage://bos-public-media/mock/missing/cover.png']), undefined);
   assert.equal(firstUsableListingImage(null), undefined);
+});
+
+test('publicProfileImageSource suppresses private buckets while allowing public avatars', () => {
+  assert.equal(isPrivateStorageSource('storage://bos-private-profile-media/owner/avatar.webp'), true);
+  assert.equal(isPrivateStorageSource('storage://bos-private-documents/owner/id.pdf'), true);
+  assert.equal(isPrivateStorageSource('storage://bos-public-media/owner/avatar.webp'), false);
+
+  assert.equal(publicProfileImageSource('storage://bos-private-profile-media/owner/avatar.webp'), '');
+  assert.equal(publicProfileImageSource('storage://bos-private-documents/owner/id.pdf'), '');
+  assert.equal(
+    publicProfileImageSource('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/object/sign/bos-private-profile-media/owner/avatar.webp?token=x'),
+    '',
+  );
+  assert.equal(
+    publicProfileImageSource('storage://bos-public-media/owner/avatar.webp'),
+    'storage://bos-public-media/owner/avatar.webp',
+  );
+  assert.equal(
+    publicProfileImageSource('https://lh3.googleusercontent.com/a/avatar'),
+    'https://lh3.googleusercontent.com/a/avatar',
+  );
+});
+
+test('signed URL resolver invokes private fallback only for private buckets when client signing fails', async () => {
+  let fallbackCalls = 0;
+  const resolver = createSignedStorageUrlResolver(
+    {
+      from: () => ({
+        createSignedUrl: async () => ({ data: null, error: new Error('session missing') }),
+      }),
+    },
+    () => 1_000,
+    async (reference) => {
+      fallbackCalls += 1;
+      return `https://server-signed.test/${encodeURIComponent(reference)}`;
+    },
+  );
+
+  const privateSigned = await resolver('storage://bos-private-profile-media/owner/avatar.webp');
+  assert.match(privateSigned, /^https:\/\/server-signed\.test\//);
+  assert.equal(fallbackCalls, 1);
+
+  await assert.rejects(
+    resolver('storage://bos-public-media/owner/cover.webp'),
+    /MEDIA_SIGNED_URL_UNAVAILABLE/,
+  );
+  assert.equal(fallbackCalls, 1);
 });
