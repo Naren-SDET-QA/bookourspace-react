@@ -16,6 +16,8 @@ import {
   TrendingUp,
   Hotel,
   BedDouble,
+  BriefcaseBusiness,
+  GraduationCap,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { AppLanguage, getSubcategoryDisplayName, getPriceUnitDisplayName } from '../utils/translations';
@@ -25,6 +27,10 @@ import { CraftoPosterGenerator } from './CraftoPosterGenerator';
 import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
 import HostStayWorkspace from './HostStayWorkspace';
 import PgProviderWorkspace from './PgProviderWorkspace';
+import InstituteOwnerDashboard from './InstituteOwnerDashboard';
+import StaysOwnerAdminDashboard from './StaysOwnerAdminDashboard';
+import ServicesProviderDashboard from './ServicesProviderDashboard';
+import type { ProviderPortalModule } from './ProviderPortalShell';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -33,6 +39,7 @@ interface ProviderDashboardProps {
   onSwitchToAdminReview?: () => void;
   onSwitchToMarketplace?: () => void;
   currentLang?: AppLanguage;
+  initialWorkspace?: 'pg' | 'institute';
 }
 
 export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
@@ -42,6 +49,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   onSwitchToAdminReview,
   onSwitchToMarketplace,
   currentLang = 'en',
+  initialWorkspace = 'pg',
 }) => {
   const { listings, enquiries, bookings, postingPlans, deleteListing, toggleFeaturedListing, supabaseProfile } = useMarketplace();
 
@@ -64,11 +72,19 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
-  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory'>('pg_inventory');
+  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'services' | 'pg_inventory' | 'institute'>('pg_inventory');
+
+  const navigatePortalModule = (module: ProviderPortalModule) => {
+    const mapping: Partial<Record<ProviderPortalModule, typeof activeSubTab>> = {
+      pg: 'pg_inventory', stays: 'stays', services: 'services', institute: 'institute', listings: 'listings', reports: 'analytics',
+    };
+    const target = mapping[module];
+    if (target) setActiveSubTab(target);
+  };
 
   useEffect(() => {
-    setActiveSubTab('pg_inventory');
-  }, []);
+    setActiveSubTab(initialWorkspace === 'institute' ? 'institute' : 'pg_inventory');
+  }, [initialWorkspace]);
 
   // D3 Chart Computations for Analytics & Performance Tab
   const d3Analytics = useMemo(() => {
@@ -261,6 +277,19 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveSubTab('institute')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'institute'
+              ? 'border-[#ff385c] text-[#e31c5f]'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+          data-testid="provider-institute-workspace-tab"
+        >
+          <GraduationCap className="w-4 h-4 text-[#ff385c]" />
+          <span>Institute workspace</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('listings')}
           className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
             activeSubTab === 'listings'
@@ -366,6 +395,19 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         >
           <Hotel className="w-4 h-4 text-purple-600" />
           <span>Stay hosting</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('services')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'services'
+              ? 'border-[#527a40] text-[#527a40]'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+          data-testid="provider-services-dashboard-tab"
+        >
+          <BriefcaseBusiness className="w-4 h-4 text-[#527a40]" />
+          <span>Home services</span>
         </button>
       </div>
 
@@ -589,9 +631,13 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
-      {activeSubTab === 'stays' && <HostStayWorkspace />}
+      {activeSubTab === 'stays' && <StaysOwnerAdminDashboard role={supabaseProfile?.role} onNavigate={navigatePortalModule} />}
+
+      {activeSubTab === 'services' && <ServicesProviderDashboard role={supabaseProfile?.role} onNavigate={navigatePortalModule} />}
 
       {activeSubTab === 'pg_inventory' && <PgProviderWorkspace onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
+
+      {activeSubTab === 'institute' && <InstituteOwnerDashboard onSwitchToMarketplace={onSwitchToMarketplace} />}
 
       {/* --- SUBTAB 1: MY LISTINGS --- */}
       {activeSubTab === 'listings' && (

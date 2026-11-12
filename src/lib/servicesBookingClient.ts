@@ -138,6 +138,48 @@ export function fetchServicePaymentClaims(): Promise<{ claims: ServicePaymentCla
   return request('/api/services/payment-claims');
 }
 
+export interface ServiceWorkerRecord {
+  id: string;
+  full_name: string;
+  phone: string;
+  service_categories: string[];
+  service_areas: string[];
+  status: 'pending' | 'approved' | 'suspended' | 'rejected';
+  approved_at: string | null;
+}
+
+export function fetchServiceWorkers(): Promise<{ workers: ServiceWorkerRecord[] }> {
+  return request('/api/services/workers');
+}
+
+export function registerServiceWorker(input: { fullName: string; phone: string; serviceCategories?: string[]; serviceAreas?: string[] }): Promise<{ worker: ServiceWorkerRecord }> {
+  return request('/api/services/workers', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function assignServiceWorker(bookingId: string, input: { workerId: string; startsAt: string; endsAt: string }) {
+  return request<{ booking: { id: string; status: string; worker_id: string; assigned_at: string } }>(`/api/services/bookings/${encodeURIComponent(bookingId)}/assign-worker`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function issueServiceStartOtp(bookingId: string, emailBackup = false) {
+  return request<{ otp: { code: string; expiresAt: string }; emailBackup?: { ok: boolean; error?: string } | null }>(`/api/services/bookings/${encodeURIComponent(bookingId)}/start-otp`, { method: 'POST', body: JSON.stringify({ emailBackup }) });
+}
+
+export function verifyServiceStartOtp(bookingId: string, code: string) {
+  return request<{ result: { verified: boolean; reason?: string; attemptsRemaining?: number } }>(`/api/services/bookings/${encodeURIComponent(bookingId)}/verify-start-otp`, { method: 'POST', body: JSON.stringify({ code }) });
+}
+
+export function recordServiceWorkerLocation(bookingId: string, input: { latitude: number; longitude: number; accuracyM?: number; consentGranted: true }) {
+  return request<{ accepted: boolean; recordedAt: string }>(`/api/services/bookings/${encodeURIComponent(bookingId)}/location`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function fetchServiceBookingLocation(bookingId: string) {
+  return request<{ location: { latitude: number; longitude: number; accuracy_m: number | null; recorded_at: string } | null; stale: boolean }>(`/api/services/bookings/${encodeURIComponent(bookingId)}/location`);
+}
+
+export function stopServiceTracking(bookingId: string, reason = 'job_closed') {
+  return request<{ tracking: { booking_id: string; stopped_at: string } | null }>(`/api/services/bookings/${encodeURIComponent(bookingId)}/tracking/stop`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+
 export function decideServicePaymentClaim(
   claimId: string,
   decision: 'approved' | 'rejected',

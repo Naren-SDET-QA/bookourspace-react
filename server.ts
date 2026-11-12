@@ -31,8 +31,12 @@ import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
+import { registerProviderOperationsApi } from './src/server/providerOperationsApi';
+import { registerServiceDispatchApi } from './src/server/serviceDispatchApi';
 import { ClassEnrollmentRepository } from './src/server/classEnrollmentRepository';
 import { registerClassEnrollmentApi } from './src/server/classEnrollmentApi';
+import { InstituteWorkspaceRepository } from './src/server/instituteWorkspaceRepository';
+import { registerInstituteWorkspaceApi } from './src/server/instituteWorkspaceApi';
 import { PgBookingRepository } from './src/server/pgBookingRepository';
 import { registerPgBookingsApi } from './src/server/pgBookingsApi';
 import { PgPaymentRepository } from './src/server/pgPaymentRepository';
@@ -347,12 +351,20 @@ async function startServer() {
   const providerListingRepository = ProviderListingRepository.fromEnvironment();
   // Classes & Training enrollment shares the single local PostgreSQL selector.
   const classEnrollmentRepository = ClassEnrollmentRepository.fromEnvironment();
+  const instituteWorkspaceRepository = InstituteWorkspaceRepository.fromEnvironment();
   if (providerListingRepository) {
     try {
       await providerListingRepository.verifyConnection();
     } catch {
       await providerListingRepository.close();
       throw new Error('BOS_LISTINGS_DATABASE_UNAVAILABLE');
+    }
+  }
+  if (instituteWorkspaceRepository) {
+    try {
+      await instituteWorkspaceRepository.verifyConnection();
+    } catch {
+      throw new Error('INSTITUTE_WORKSPACE_POSTGRES_UNAVAILABLE');
     }
   }
 
@@ -423,6 +435,7 @@ async function startServer() {
       ['stay_search', pgRuntimePool],
       ['listings', providerListingRepository],
       ['classes', classEnrollmentRepository],
+      ['institute_workspace', instituteWorkspaceRepository],
       ['services', serviceBookingRepository],
       ['pg_bookings', pgBookingRepository],
       ['payments', pgPaymentRepository],
@@ -4745,6 +4758,17 @@ Task:
     });
   }
 
+  // Shared provider portal read model. This endpoint is database-backed and
+  // fails closed when the local migration/database is unavailable.
+  registerProviderOperationsApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+  registerServiceDispatchApi(app, {
+    verifySession: verifySessionTokenFromRequest,
+    env: process.env,
+  });
+
   // Real slot availability, provider schedule/profile and server-verified UPI
   // settlement. Fails closed with 503 when PostgreSQL is not configured.
   registerServiceCommerceApi(app, {
@@ -4759,6 +4783,19 @@ Task:
     registerClassEnrollmentApi(app, {
       repository: classEnrollmentRepository,
       verifySession: verifySessionTokenFromRequest,
+    });
+  }
+
+  // Institute Owner workspace. Membership, branch scope and permissions are
+  // checked by the repository and again by PostgreSQL RLS for every mutation.
+  if (instituteWorkspaceRepository) {
+    registerInstituteWorkspaceApi(app, {
+      repository: instituteWorkspaceRepository,
+      verifySession: verifySessionTokenFromRequest,
+    });
+  } else {
+    app.use('/api/institute', (_request, response) => {
+      response.status(503).json({ ok: false, error: 'DATABASE_REQUIRED_FOR_INSTITUTE_WORKSPACE' });
     });
   }
 
