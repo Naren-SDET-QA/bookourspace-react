@@ -19,6 +19,8 @@
     "test:db:stay-payments": "bash supabase/tests/run_stay_payment_e2e.sh",
     "test:services": "bash supabase/tests/run_services_e2e.sh",
     "test:services:ui": "bash supabase/tests/run_services_ui_e2e.sh",
+    "test:institute:db": "node supabase/tests/institute_management_e2e.mjs",
+    "test:institute:http": "node supabase/tests/institute_management_http_e2e.mjs",
     "test:db:pg": "bash supabase/tests/run_pg_integration.sh",
     "test:db:pg-payments": "bash supabase/tests/run_pg_payment_e2e.sh",
     "test:db:pg-admin": "bash supabase/tests/run_pg_admin_e2e.sh",

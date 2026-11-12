@@ -63,4 +63,16 @@ test('UI covers institute operations without fabricated fallback metrics', () =>
   assert.match(ui, /Create institute profile/);
   assert.match(ui, /Faculty/);
   assert.match(ui, /Branch/);
+  assert.match(ui, /sm:hidden/);
+  assert.match(ui, /overflow-x-auto.*sm:block/);
+});
+
+test('every institute navigation destination has a render branch', () => {
+  const ids = [...ui.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+  for (const id of ids) {
+    assert.match(ui, new RegExp(`section === '${id}'`), `missing render branch for ${id}`);
+  }
+  for (const label of ['Classes / courses', 'Faculty', 'Calendar & holidays', 'Admissions', 'Fees & collection', 'Certificates']) {
+    assert.match(ui, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
 });

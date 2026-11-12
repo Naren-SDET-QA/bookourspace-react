@@ -20,6 +20,7 @@ import { registerMoviesShowtimesApi } from './src/server/moviesShowtimesApi';
 import { PlatformSettingsRepository, registerPlatformSettingsApi } from './src/server/platformSettingsApi';
 import { registerStayApi } from './src/server/stayApi';
 import { registerStayHostApi } from './src/server/stayHostApi';
+import { registerBusinessApi } from './src/server/businessApi';
 import { registerStayAdminApi } from './src/server/stayAdminApi';
 import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
 import { registerStaySearchApi } from './src/server/staySearchApi';
@@ -559,6 +560,7 @@ async function startServer() {
       );
     }
     return (
+      (path === '/api/auth/local-dev/session' && localJsonCompatibilityEnabled) ||
       path === '/api/ai/quick-book' ||
       path === '/api/auth/logout' ||
       /^\/api\/locations\/(nearest|external\/autocomplete|external\/resolve)$/.test(path)
@@ -2674,6 +2676,40 @@ Task:
     pool: pgRuntimePool || undefined,
   });
 
+  // Independent business context for provider-owned APIs. Missing, invalid,
+  // suspended or revoked context is rejected; administrators retain access.
+  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
+    if (String(req.path || '').startsWith('/registrations')) return next();
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return void res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    if (claims.role === 'admin') return next();
+    // Customer routes remain customer-authorized by their own handlers. The
+    // business gate applies to provider-owned data and admin bypasses above.
+    if (claims.role === 'customer') return next();
+    if (!pgRuntimePool) return void res.status(503).json({ ok: false, error: 'BUSINESS_DATABASE_UNAVAILABLE' });
+    const businessId = String(req.header('x-business-id') || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(businessId)) return void res.status(403).json({ ok: false, error: 'BUSINESS_CONTEXT_REQUIRED' });
+    try {
+      const { rows } = await pgRuntimePool.query(
+        `select b.id,b.module_type,b.approval_status,b.is_enabled,m.role,
+                a.enabled as module_enabled,a.approval_status as module_approval_status
+           from public.businesses b
+           join public.business_members m on m.business_id=b.id and m.user_id=$2 and m.status='active'
+           join public.business_module_access a on a.business_id=b.id and a.module_type=b.module_type
+          where b.id=$1 limit 1`,
+        [businessId, claims.supabaseUserId || claims.userId],
+      );
+      const business = rows[0];
+      if (!business || business.approval_status !== 'approved' || business.is_enabled !== true || business.module_enabled !== true || business.module_approval_status !== 'approved') {
+        return void res.status(403).json({ ok: false, error: 'BUSINESS_ACCESS_DENIED' });
+      }
+      res.locals.businessContext = business;
+      next();
+    } catch {
+      res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });
+    }
+  });
+
   // Host-owned stay inventory, blocks, bookings and payout status.
   registerStayHostApi(app, {
     verifySession: verifySessionTokenFromRequest,
@@ -2921,7 +2957,7 @@ Task:
       res.status(404).json({ ok: false, error: 'NOT_FOUND' });
       return;
     }
-    if (!pgRuntimePool) {
+    if (!pgRuntimePool && !localJsonCompatibilityEnabled) {
       res.status(503).json({ ok: false, error: 'DATABASE_UNAVAILABLE' });
       return;
     }
@@ -2929,7 +2965,7 @@ Task:
     const role = requested === 'admin' ? 'admin' : requested === 'provider' ? 'provider' : 'customer';
     const requestedEmail = String(req.body?.email || '').trim().toLowerCase();
     try {
-      const result = requestedEmail
+      const result = pgRuntimePool && requestedEmail
         ? await pgRuntimePool.query(
             `select p.id, p.email, p.full_name, p.role, p.is_super_admin
                from public.profiles p
@@ -2937,7 +2973,8 @@ Task:
               limit 1`,
             [requestedEmail],
           )
-        : await pgRuntimePool.query(
+        : pgRuntimePool
+          ? await pgRuntimePool.query(
             `select p.id, p.email, p.full_name, p.role, p.is_super_admin
                from public.profiles p
               where p.account_status = 'active'
@@ -2957,7 +2994,18 @@ Task:
               order by (p.is_super_admin is true) desc, p.created_at asc
               limit 1`,
             [role],
-          );
+          )
+          : { rows: loadAuthoritativeStore().users
+              .filter((user) => user.accountStatus === 'active' && (requestedEmail ? user.email.toLowerCase() === requestedEmail : user.role === role))
+              .filter((user) => role !== 'provider' || Number(user.listingsCount || 0) > 0)
+              .slice(0, 1)
+              .map((user) => ({
+                id: user.id,
+                email: user.email,
+                full_name: user.name,
+                role: user.role,
+                is_super_admin: user.role === 'admin',
+              })) };
       const profile = result.rows[0];
       if (!profile) {
         res.status(404).json({ ok: false, error: 'LOCAL_DEMO_USER_NOT_FOUND' });
@@ -4756,6 +4804,9 @@ Task:
       verifySession: verifySessionTokenFromRequest,
       env: process.env,
     });
+  }
+  if (pgRuntimePool) {
+    registerBusinessApi(app, { pool: pgRuntimePool, verifySession: verifySessionTokenFromRequest });
   }
 
   // Shared provider portal read model. This endpoint is database-backed and

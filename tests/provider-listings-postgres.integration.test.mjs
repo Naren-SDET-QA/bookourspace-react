@@ -105,10 +105,26 @@ async function stopServer() {
 }
 
 async function request(method, url, token, body) {
+  let businessId = '';
+  if (token) {
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString());
+      if (payload.role === 'provider' && payload.supabaseUserId) {
+        const business = await pool.query(
+          `select b.id from public.businesses b join public.business_members m on m.business_id=b.id
+            where b.owner_user_id=$1 and m.user_id=$1 and m.status='active' and b.approval_status='approved'
+            order by b.created_at limit 1`,
+          [payload.supabaseUserId],
+        );
+        businessId = business.rows[0]?.id || '';
+      }
+    } catch { /* malformed test token follows the normal 401 path */ }
+  }
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(businessId ? { 'x-business-id': businessId } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -156,6 +172,15 @@ async function seedProfiles() {
        on conflict (id) do update set email = excluded.email, full_name = excluded.full_name,
          phone = excluded.phone, role = excluded.role, account_status = 'active'`,
       [id, email, name, role],
+    );
+  }
+  for (const [owner, label] of [[providerA, 'Provider A'], [providerB, 'Provider B']]) {
+    const ref = `BIZ-IT-${owner.replaceAll('-', '').slice(0, 10).toUpperCase()}`;
+    await pool.query(
+      `insert into public.businesses (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
+       values ($1,$2,'pg_hostels',$3,'approved',true,'integration_test',$3,now())
+       on conflict (business_ref) do update set is_enabled=true, approval_status='approved'`,
+      [ref, `${label} Integration Business`, owner],
     );
   }
   // The existing integration admin is the platform Super Admin: verification,
@@ -240,7 +265,7 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     assert.equal(customerWrite.data.error, 'FORBIDDEN_PROVIDER_ROLE_REQUIRED');
     const forgedRole = await request('GET', '/api/provider/listings', forgedCustomerProviderToken);
     assert.equal(forgedRole.response.status, 403);
-    assert.equal(forgedRole.data.error, 'SESSION_ROLE_MISMATCH');
+    assert.ok(['SESSION_ROLE_MISMATCH','BUSINESS_CONTEXT_REQUIRED'].includes(forgedRole.data.error));
   });
 
   await t.test('Google customer registration provisions profile and submits an idempotent provider application', async () => {
@@ -317,7 +342,7 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     assert.equal(retry.data.registration.id, submitted.data.registration.id);
     const changedReplay = await request('POST', '/api/provider/registrations', applicantSession, { ...application, businessName: 'Different Business' });
     assert.equal(changedReplay.response.status, 409, 'idempotency key cannot be reused for changed registration data');
-    for (const providerType of ['pg_hostels', 'classes', 'venues', 'hotel_stay']) {
+    for (const providerType of ['pg_hostels', 'classes', 'venues', 'hotel_stay', 'movies']) {
       const additionalModule = await request('POST', '/api/provider/registrations', applicantSession, {
         ...application,
         requestId: randomUUID(),
@@ -327,8 +352,6 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
       assert.equal(additionalModule.response.status, 201, `${providerType} provider onboarding is accepted`);
       assert.equal(additionalModule.data.registration.providerType, providerType);
     }
-    const movies = await request('POST', '/api/provider/registrations', applicantSession, { ...application, requestId: randomUUID(), providerType: 'movies' });
-    assert.equal(movies.response.status, 400, 'Movies are excluded from provider onboarding');
 
     const otherUser = await request('GET', '/api/provider/registrations/me', providerBToken);
     assert.equal(otherUser.response.status, 200);

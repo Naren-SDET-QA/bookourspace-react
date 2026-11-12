@@ -1,6 +1,8 @@
 import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import SafeImage, { imageCategoryFor } from './components/SafeImage';
+import { BusinessInvitationAccept } from './components/business/BusinessInvitationAccept';
 import SiteChrome from './components/SiteChrome';
 import {
   Sparkles,
@@ -3030,6 +3032,14 @@ function MarketplaceAppContent() {
             <>
           {/* Main Content Area */}
           <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 space-y-5">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeView}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
 
         {/* VIEW 1: PROVIDER PORTAL */}
         {activeView === 'provider_portal' && (
@@ -5836,6 +5846,9 @@ function MarketplaceAppContent() {
           </div>
         )}
 
+            </motion.div>
+          </AnimatePresence>
+
       </main>
 
       {/* SCHEDULED FOOTER ANNOUNCEMENTS */}
@@ -6860,7 +6873,10 @@ function SectionScreenFallback({ label }: { label: string }) {
 export default function App() {
   return (
     <MarketplaceProvider>
-      <MarketplaceAppContent />
+      <MotionConfig reducedMotion="user">
+        <BusinessInvitationAccept />
+        <MarketplaceAppContent />
+      </MotionConfig>
     </MarketplaceProvider>
   );
 }

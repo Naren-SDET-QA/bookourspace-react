@@ -730,14 +730,19 @@ export function getStoredGoogleAuthUser(): AuthoritativeGoogleUser | null {
 }
 
 export function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(extra || {}),
-  };
-  const token = getStoredAuthoritativeSessionToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  const headers: Record<string, string> = {};
+  let contentType = 'application/json';
+  for (const [key, value] of Object.entries(extra || {})) {
+    if (key.toLowerCase() === 'content-type') contentType = value;
+    else headers[key] = value;
   }
+  headers['Content-Type'] = contentType;
+  const token = getStoredAuthoritativeSessionToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const businessId = window.localStorage.getItem('bos_business_id_v1');
+    if (businessId && !headers['x-business-id']) headers['x-business-id'] = businessId;
+  } catch { /* storage is optional */ }
   return headers;
 }
 
@@ -1389,7 +1394,7 @@ export async function fetchOwnProviderRegistration() {
 
 export async function submitServerProviderRegistration(body: {
   requestId: string;
-  providerType: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay';
+  providerType: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies';
   businessName: string;
   contactPhone: string;
   city: string;
