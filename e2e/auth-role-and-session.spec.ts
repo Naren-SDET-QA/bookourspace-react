@@ -5,7 +5,11 @@ const ADMIN_CONSOLE = 'BookOurSpace Super Admin Console';
 
 async function openApp(page: import('@playwright/test').Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('#root > *')).toBeAttached({ timeout: 30_000 });
+  // `#root > *` also matches the Suspense fallback that is mounted beside the
+  // shell while a section loads, so a strict locator sees two elements on a
+  // cold start. Wait for the shell itself, then for the fallback to be gone.
+  await expect(page.locator('#bos-main-content')).toBeAttached({ timeout: 30_000 });
+  await expect(page.getByText('Loading BookOurSpace…')).toHaveCount(0, { timeout: 30_000 });
 }
 
 test.describe('Google-only session and role boundaries', () => {
