@@ -1,6 +1,7 @@
 import type express from 'express';
 import { PgBookingError, PgBookingRepository } from './pgBookingRepository';
 import { safeErrorCode } from './safeLogging';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 export interface PgBookingsApiDependencies {
   repository?: PgBookingRepository | null;
@@ -133,7 +134,7 @@ export function registerPgBookingsApi(app: express.Express, dependencies: PgBook
     if (!repository) return unavailable(request, response);
     const actor = actorOf(request, dependencies.verifySession);
     if (!actor) return response.status(401).json({ ok: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
-    if (actor.authProvider !== 'google') return response.status(403).json({ ok: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
+    if (!hasVerifiedSupabaseIdentity(actor)) return response.status(403).json({ ok: false, error: 'VERIFIED_SUPABASE_IDENTITY_REQUIRED' });
     if (actor.role !== 'customer') return response.status(403).json({ ok: false, error: 'CUSTOMER_ROLE_REQUIRED' });
     try {
       const booking = await repository.createBooking(actor, request.body || {});

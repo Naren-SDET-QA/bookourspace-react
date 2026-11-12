@@ -136,6 +136,7 @@ function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
 
 
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
+import { fetchAuthAccessConfig, type AuthAccessConfig } from './lib/authAccessClient';
 import { supabase } from './lib/supabaseClient';
 import { SectionErrorBoundary } from './components/SectionErrorBoundary';
 import { SkipToContent } from './components/SkipToContent';
@@ -474,6 +475,7 @@ function MarketplaceAppContent() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const shouldLoadAuthModal = useLazyAfterOpen(isAuthModalOpen);
   const [isLoginPageOpen, setIsLoginPageOpen] = useState<boolean>(() => window.location.hash.replace('#', '').toLowerCase() === 'login');
+  const [authAccessConfig, setAuthAccessConfig] = useState<AuthAccessConfig | null>(null);
   const [isProviderOnboardingOpen, setIsProviderOnboardingOpen] = useState(false);
   const [entryExperience, setEntryExperience] = useState<'loading' | 'welcome' | 'ready'>(() => {
     try {
@@ -490,6 +492,34 @@ function MarketplaceAppContent() {
   const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
+
+  // Public sign-in switches are administrator-controlled. Fetch once on boot
+  // and refresh whenever an admin changes them in another surface.
+  useEffect(() => {
+    let mounted = true;
+    const applyConfig = (config: AuthAccessConfig) => {
+      if (!mounted) return;
+      setAuthAccessConfig(config);
+      try {
+        if (config.available && config.guestLoginEnabled) {
+          localStorage.setItem('bos_guest_login_enabled_v1', '1');
+        } else {
+          localStorage.removeItem('bos_guest_login_enabled_v1');
+        }
+      } catch {
+        // Private browsing can disable storage; React still gates the button.
+      }
+    };
+    void fetchAuthAccessConfig().then(applyConfig);
+    const refresh = () => {
+      void fetchAuthAccessConfig({ force: true }).then(applyConfig);
+    };
+    window.addEventListener('bos-auth-access-updated', refresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener('bos-auth-access-updated', refresh);
+    };
+  }, []);
 
   // Role-based routing on Google OAuth sign-in, logout redirect, & protected route enforcement
   useEffect(() => {
@@ -2262,7 +2292,7 @@ function MarketplaceAppContent() {
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
       <BOSGlobeLoadingScreen />
 
-      {entryExperience !== 'ready' && !authUser && (
+      {entryExperience !== 'ready' && !authUser && !isLoginPageOpen && (
         <Suspense fallback={null}>
           <BookOurSpaceEntryExperience
             mode={entryExperience}
@@ -2286,6 +2316,11 @@ function MarketplaceAppContent() {
               }
             }}
             onGoogleSignIn={() => setIsAuthModalOpen(true)}
+            onEmailSignIn={() => {
+              setIsLoginPageOpen(true);
+              void fetchAuthAccessConfig({ force: true }).then(setAuthAccessConfig).catch(() => {});
+            }}
+            guestLoginEnabled={authAccessConfig?.guestLoginEnabled === true}
             onContinueAsGuest={() => {
               try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
               setEntryExperience('ready');
@@ -6731,6 +6766,27 @@ function MarketplaceAppContent() {
             setIsLoginPageOpen(false);
             setIsAuthModalOpen(true);
           }}
+          config={authAccessConfig}
+          onContinueAsGuest={() => {
+            try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
+            setEntryExperience('ready');
+            setIsLoginPageOpen(false);
+            showToast('Browsing as guest. Sign in when you are ready to book or save.');
+          }}
+          onSignedIn={({ isNewUser, redirectTarget }) => {
+            try { localStorage.setItem('bos_entry_choice_v1', 'signed-in'); } catch { /* ignore storage failures */ }
+            setEntryExperience('ready');
+            setIsLoginPageOpen(false);
+            if (window.location.hash.toLowerCase() === '#login') {
+              window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#stays`);
+            }
+            if (redirectTarget) setActiveView(redirectTarget);
+            showToast(
+              isNewUser
+                ? 'Account created and signed in. Welcome to BookOurSpace!'
+                : 'Signed in successfully. Welcome back!'
+            );
+          }}
         />
         </Suspense>
       )}
@@ -6744,6 +6800,11 @@ function MarketplaceAppContent() {
         returnSection={activeMarketSection}
         onAuthSuccess={(msg) => showToast(msg)}
         onNavigateView={(target) => setActiveView(target)}
+        onOpenEmailSignIn={() => {
+          setIsAuthModalOpen(false);
+          setIsLoginPageOpen(true);
+          void fetchAuthAccessConfig({ force: true }).then(setAuthAccessConfig).catch(() => {});
+        }}
       /></Suspense>}
 
       {isProviderOnboardingOpen && <Suspense fallback={null}><ProviderOnboardingForm

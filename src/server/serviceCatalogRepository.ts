@@ -15,6 +15,7 @@ import {
   type ServiceCredentialView,
   type PendingServiceDocumentView,
 } from '../lib/serviceCatalog';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CATEGORY_KEY = /^[a-z][a-z0-9_]{1,40}$/;
@@ -836,8 +837,7 @@ export function registerServiceCatalogApi(app: express.Express, dependencies: Se
   // Provider-facing licence submission.
   const providerActor = (request: express.Request): ProviderListingActor | null => {
     const claims = dependencies.verifySession(request);
-    if (!claims?.supabaseUserId || !UUID.test(String(claims.supabaseUserId))) return null;
-    if (claims.authProvider !== 'google') return null;
+    if (!hasVerifiedSupabaseIdentity(claims)) return null;
     return claims;
   };
 

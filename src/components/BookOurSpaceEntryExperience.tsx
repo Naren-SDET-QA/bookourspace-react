@@ -1,12 +1,14 @@
 import React from 'react';
-import { Compass, ShieldCheck } from 'lucide-react';
+import { Compass, Mail, ShieldCheck } from 'lucide-react';
 import BOSOfficialLogo from './BOSOfficialLogo';
 import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 
 type EntryExperienceProps = {
   mode: 'loading' | 'welcome';
   onGoogleSignIn: () => void;
+  onEmailSignIn?: () => void;
   onContinueAsGuest: () => void;
+  guestLoginEnabled?: boolean;
   onDemoSignIn?: (role: 'guest' | 'host') => void;
 };
 
@@ -32,7 +34,9 @@ const GOOGLE_G = () => (
 export default function BookOurSpaceEntryExperience({
   mode,
   onGoogleSignIn,
+  onEmailSignIn,
   onContinueAsGuest,
+  guestLoginEnabled = false,
   onDemoSignIn,
 }: EntryExperienceProps) {
   const loading = mode === 'loading';
@@ -76,6 +80,21 @@ export default function BookOurSpaceEntryExperience({
             </p>
 
             <div className="bos-entry-actions">
+              {onEmailSignIn && (
+                <button
+                  type="button"
+                  data-testid="entry-email-sign-in"
+                  onClick={(event) => {
+                    event.currentTarget.focus();
+                    onEmailSignIn();
+                  }}
+                  className="bos-entry-email"
+                >
+                  <Mail className="h-5 w-5 shrink-0" aria-hidden="true" />
+                  <span>Continue with email code</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 data-testid="entry-google-sign-in"
@@ -92,19 +111,23 @@ export default function BookOurSpaceEntryExperience({
                 <span>Continue with Google</span>
               </button>
 
-              <div className="bos-entry-divider" role="separator" aria-label="or">
-                <span>OR</span>
-              </div>
+              {guestLoginEnabled && (
+                <>
+                  <div className="bos-entry-divider" role="separator" aria-label="or">
+                    <span>OR</span>
+                  </div>
 
-              <button
-                type="button"
-                data-testid="entry-continue-guest"
-                onClick={onContinueAsGuest}
-                className="bos-entry-guest"
-              >
-                <Compass className="h-5 w-5 shrink-0" aria-hidden="true" />
-                <span>Explore Spaces as Guest</span>
-              </button>
+                  <button
+                    type="button"
+                    data-testid="entry-continue-guest"
+                    onClick={onContinueAsGuest}
+                    className="bos-entry-guest"
+                  >
+                    <Compass className="h-5 w-5 shrink-0" aria-hidden="true" />
+                    <span>Explore Spaces as Guest</span>
+                  </button>
+                </>
+              )}
             </div>
 
             <p className="bos-entry-trust">

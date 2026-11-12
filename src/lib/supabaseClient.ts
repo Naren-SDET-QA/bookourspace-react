@@ -662,7 +662,7 @@ export interface AuthoritativeGoogleUser {
   totalBookings: number;
   totalListings: number;
   walletBalance: number;
-  authProvider: 'google';
+  authProvider: 'google' | 'email';
 }
 
 const SESSION_TOKEN_STORAGE_KEY = 'bos_session_token_v1';
@@ -726,7 +726,12 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
  * and `/api/auth/google/url` popup flow. Enforces Google-only authentication, auto-registration
  * for new users, existing user sign-in, role-based routing, and account blocking checks.
  */
-export async function authenticateWithGoogleServer(params: {
+/**
+ * Exchanges a Supabase-verified access token for the server application
+ * session. The server re-verifies the token with Supabase Auth and accepts
+ * either Google OAuth or a verified email one-time code.
+ */
+export async function authenticateWithSupabaseServer(params: {
   accessToken?: string;
   email?: string;
   name?: string;
@@ -750,12 +755,12 @@ export async function authenticateWithGoogleServer(params: {
     return {
       ok: false,
       httpStatus: 401,
-      error: 'VERIFIED_GOOGLE_SESSION_REQUIRED',
-      message: 'Complete Google sign-in before requesting an application session.',
+      error: 'VERIFIED_SUPABASE_SESSION_REQUIRED',
+      message: 'Complete sign-in before requesting an application session.',
     };
   }
   try {
-    const resp = await fetch('/api/auth/google/authenticate', {
+    const resp = await fetch('/api/auth/supabase/authenticate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -786,9 +791,24 @@ export async function authenticateWithGoogleServer(params: {
       ok: false,
       httpStatus: 500,
       error: 'NETWORK_ERROR',
-      message: err?.message || 'Google authentication failed.',
+      message: err?.message || 'Sign-in verification failed.',
     };
   }
+}
+
+/** Historical name kept for callers that only need Google OAuth. */
+export async function authenticateWithGoogleServer(params: {
+  accessToken?: string;
+  email?: string;
+  name?: string;
+  googleSub?: string;
+  avatarUrl?: string;
+  phone?: string;
+  city?: string;
+  requestedRole?: UserRole;
+  allowRoleChange?: boolean;
+}) {
+  return authenticateWithSupabaseServer(params);
 }
 
 export async function fetchGoogleOAuthConfig(requestedRole: UserRole = 'customer'): Promise<{

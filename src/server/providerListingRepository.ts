@@ -9,6 +9,7 @@ import {
   loadApprovedPublicListingMedia,
 } from './postgresPool';
 import { findEmbeddedDataUrl } from './mediaInputGuard';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 export interface ProviderListingActor {
   userId: string;
@@ -18,7 +19,7 @@ export interface ProviderListingActor {
   phone?: string;
   googleSub?: string;
   avatarUrl?: string;
-  authProvider?: 'google';
+  authProvider?: VerifiedAuthProvider;
   role: 'customer' | 'provider' | 'admin';
   providerId?: string;
 }
@@ -601,8 +602,8 @@ export class ProviderListingRepository {
    * claims from a verified Supabase identity or a server-signed app session.
    */
   async provisionGoogleProfile(actor: ProviderListingActor): Promise<any> {
-    if (actor.authProvider !== 'google' || !actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId)) {
-      throw new ProviderListingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!hasVerifiedSupabaseIdentity(actor)) {
+      throw new ProviderListingRepositoryError('VERIFIED_SUPABASE_IDENTITY_REQUIRED', 401);
     }
     const email = safeText(actor.email).toLowerCase();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -622,8 +623,8 @@ export class ProviderListingRepository {
   }
 
   async profileForIdentity(actor: ProviderListingActor): Promise<any | null> {
-    if (actor.authProvider !== 'google' || !actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId)) {
-      throw new ProviderListingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!hasVerifiedSupabaseIdentity(actor)) {
+      throw new ProviderListingRepositoryError('VERIFIED_SUPABASE_IDENTITY_REQUIRED', 401);
     }
     return this.transaction(actor, async (client) => {
       const { rows } = await client.query(
@@ -640,7 +641,7 @@ export class ProviderListingRepository {
 
   async submitProviderRegistration(actor: ProviderListingActor, input: ProviderRegistrationInput): Promise<{ registration: ProviderRegistrationRecord; idempotent: boolean }> {
     if (actor.role !== 'customer') throw new ProviderListingRepositoryError('PROVIDER_REGISTRATION_CUSTOMER_REQUIRED', 409);
-    if (actor.authProvider !== 'google') throw new ProviderListingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!hasVerifiedSupabaseIdentity(actor)) throw new ProviderListingRepositoryError('VERIFIED_SUPABASE_IDENTITY_REQUIRED', 401);
     const providerType = safeText(input.providerType) as ProviderModule;
     const businessName = safeText(input.businessName);
     const contactPhone = safeText(input.contactPhone);
@@ -714,8 +715,8 @@ export class ProviderListingRepository {
 
   private async provisionGoogleProfileInTransaction(client: PoolClient, actor: ProviderListingActor): Promise<any> {
     const email = safeText(actor.email).toLowerCase();
-    if (!actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId) || actor.authProvider !== 'google' || !email) {
-      throw new ProviderListingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!hasVerifiedSupabaseIdentity(actor) || !email) {
+      throw new ProviderListingRepositoryError('VERIFIED_SUPABASE_IDENTITY_REQUIRED', 401);
     }
     const { rows } = await client.query(
       `select profile_id as id, email, full_name, role, account_status, avatar_url

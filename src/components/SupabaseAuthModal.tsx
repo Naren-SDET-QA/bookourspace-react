@@ -30,6 +30,7 @@ interface SupabaseAuthModalProps {
   currentUser: User | null;
   onAuthSuccess?: (message: string) => void;
   onNavigateView?: (target: 'marketplace' | 'provider_portal' | 'admin_console') => void;
+  onOpenEmailSignIn?: () => void;
   returnSection?: string;
   forceDark?: boolean;
 }
@@ -40,6 +41,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   currentUser,
   onAuthSuccess,
   onNavigateView,
+  onOpenEmailSignIn,
   returnSection = 'pg_hostels',
   forceDark = false,
 }) => {
@@ -592,6 +594,23 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               </svg>
               <span>Continue with Google OAuth Popup</span>
             </button>
+
+            {onOpenEmailSignIn && (
+              <div className="rounded-2xl border border-orange-200 bg-orange-50/70 p-3 dark:border-orange-900/60 dark:bg-orange-950/20">
+                <p className="text-[10px] font-black uppercase tracking-wide text-orange-800 dark:text-orange-200">No Google account?</p>
+                <p className="mt-1 text-[11px] leading-4 text-orange-900/80 dark:text-orange-100/80">
+                  Sign in with a one-time code sent to your email. No password is needed.
+                </p>
+                <button
+                  type="button"
+                  onClick={onOpenEmailSignIn}
+                  className="mt-2 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl bg-[#f97316] px-3 text-xs font-black text-white transition hover:bg-[#ea580c]"
+                >
+                  <Mail className="h-4 w-4" aria-hidden="true" />
+                  Use an email code instead
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleGoogleDirectSubmit} className="space-y-3">
               <p className="text-xs text-slate-500 text-center">Account identity and email are supplied by Google and verified by Supabase Auth. Profile details can be edited after sign-in.</p>

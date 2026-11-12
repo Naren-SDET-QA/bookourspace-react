@@ -27,6 +27,7 @@ ios/DerivedData/
 ios/App/Pods/
 ios/App/App.xcworkspace/xcuserdata/
 live-page-config.json
+.bos-auth-settings.json
 authoritative-marketplace-store.json
 android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json

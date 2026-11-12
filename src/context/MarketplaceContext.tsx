@@ -101,7 +101,7 @@ import {
   subscribeToRlsChanges,
   AuthoritativeGoogleUser,
   setStoredAuthoritativeSession,
-  authenticateWithGoogleServer,
+  authenticateWithSupabaseServer,
   signInWithSupabaseGoogleOAuth,
   fetchGoogleOAuthConfig,
   fetchCurrentAuthSession,
@@ -112,6 +112,7 @@ import {
   clearServerNotifications,
   syncServerProviderListing,
 } from '../lib/supabaseClient';
+import { verifyEmailOtpCode } from '../lib/emailOtpClient';
 
 interface MarketplaceContextType {
   supabaseUser: User | null;
@@ -147,6 +148,16 @@ interface MarketplaceContextType {
     isNewUser?: boolean;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
   }) => Promise<void>;
+  /** Verify an email one-time code, install the Supabase session and mint the
+   *  server application session in one step. */
+  completeEmailOtpSignIn: (email: string, token: string, options?: { verifyWithSupabase?: boolean }) => Promise<{
+    ok: boolean;
+    isNewUser?: boolean;
+    user?: AuthoritativeGoogleUser;
+    redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
+    error?: string;
+    message?: string;
+  }>;
   logoutGoogleSession: () => Promise<void>;
   refreshServerNotifications: () => Promise<void>;
   updateUserProfile: (updates: { fullName?: string; phone?: string; bio?: string }) => Promise<{
@@ -245,7 +256,7 @@ interface MarketplaceContextType {
 }
 
 const MarketplaceContext = createContext<MarketplaceContextType | undefined>(undefined);
-type AuthoritativeSessionSyncResult = Awaited<ReturnType<typeof authenticateWithGoogleServer>>;
+type AuthoritativeSessionSyncResult = Awaited<ReturnType<typeof authenticateWithSupabaseServer>>;
 
 export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Google OAuth User & Role
@@ -475,7 +486,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (inFlight?.accessToken === accessToken) {
       return inFlight.promise;
     }
-    const promise = authenticateWithGoogleServer({
+    const promise = authenticateWithSupabaseServer({
       accessToken: session.access_token,
       email: session.user.email,
       name:
@@ -752,7 +763,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         address: user.city ? `${user.city}, India` : '',
         avatarUrl: user.avatarUrl || '',
         googleSub: user.googleSub,
-        authProvider: 'google',
+        authProvider: user.authProvider || 'google',
       };
       localStorage.setItem('bos_user_profile_v1', JSON.stringify(profilePayload));
       localStorage.setItem('user_role', user.role);
@@ -942,6 +953,84 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       pending: true,
       error: 'GOOGLE_OAUTH_PENDING',
       message: 'Complete Google sign-in to continue. Your account updates after the server verifies it.',
+    };
+  };
+
+  const completeEmailOtpSignIn = async (
+    email: string,
+    token: string,
+    options?: { verifyWithSupabase?: boolean },
+  ) => {
+    if (!supabase) {
+      return {
+        ok: false,
+        error: 'SUPABASE_AUTH_NOT_CONFIGURED',
+        message: 'Email sign-in is unavailable until Supabase Auth is configured.',
+      };
+    }
+    let accessToken: string;
+    if (options?.verifyWithSupabase) {
+      // Fallback path: Supabase's own email provider sends the code, so the
+      // browser verifies it directly and installs the returned session.
+      const verified = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+      if (verified.error || !verified.data.session) {
+        return {
+          ok: false,
+          error: 'EMAIL_OTP_INVALID',
+          message: verified.error?.message || 'That code is invalid or has expired. Request a new code.',
+        };
+      }
+      accessToken = verified.data.session.access_token;
+    } else {
+      const verified = await verifyEmailOtpCode(email, token);
+      if (!verified.ok || !verified.accessToken || !verified.refreshToken) {
+        return {
+          ok: false,
+          error: verified.error || 'EMAIL_OTP_INVALID',
+          message: verified.message || 'That code is invalid or has expired. Request a new code.',
+        };
+      }
+      const installed = await supabase.auth.setSession({
+        access_token: verified.accessToken,
+        refresh_token: verified.refreshToken,
+      });
+      if (installed.error || !installed.data.session) {
+        return {
+          ok: false,
+          error: 'SUPABASE_SESSION_FAILED',
+          message: installed.error?.message || 'The verified session could not be installed. Please try again.',
+        };
+      }
+      accessToken = installed.data.session.access_token;
+    }
+    const result = await authenticateWithSupabaseServer({ accessToken });
+    if (!result.ok || !result.user || !result.sessionToken) {
+      if (result.error === 'ACCOUNT_BLOCKED') {
+        setIsAccountBlocked(true);
+        setBlockedReason(result.message || 'Your account is blocked.');
+      }
+      return {
+        ok: false,
+        error: result.error || 'AUTH_SESSION_FAILED',
+        message: result.message || 'Sign-in could not be completed. Please try again.',
+      };
+    }
+    setIsAccountBlocked(false);
+    setBlockedReason(null);
+    setAuthUser(result.user);
+    setUserRoleState(result.user.role);
+    syncLocalProfileWithGoogleUser(result.user);
+    try {
+      localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+    } catch {
+      // Private browsing can disable storage; the session itself is still valid.
+    }
+    void refreshServerNotifications();
+    return {
+      ok: true,
+      isNewUser: result.isNewUser,
+      user: result.user,
+      redirectTarget: result.redirectTarget,
     };
   };
 
@@ -1819,6 +1908,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         isAccountBlocked,
         blockedReason,
         loginWithGoogle,
+        completeEmailOtpSignIn,
         applyPopupOAuthLogin,
         logoutGoogleSession,
         refreshServerNotifications,

@@ -19,6 +19,7 @@ import {
   type ServiceDocumentInput,
   type ServiceRecurrenceFrequency,
 } from '../lib/serviceCatalog';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 /**
  * Server-authoritative Services booking repository.
@@ -326,11 +327,8 @@ export class ServiceBookingRepository {
   }
 
   private async requireActiveProfile(client: PoolClient, actor: ProviderListingActor): Promise<any> {
-    if (!actor.supabaseUserId || !UUID_PATTERN.test(actor.supabaseUserId)) {
+    if (!hasVerifiedSupabaseIdentity(actor)) {
       throw new ServiceBookingRepositoryError('VERIFIED_AUTH_ID_REQUIRED', 401);
-    }
-    if (actor.authProvider !== 'google') {
-      throw new ServiceBookingRepositoryError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
     }
     const { rows } = await client.query(
       'select id, email, full_name, phone, role, account_status from public.profiles where id = auth.uid() limit 1',

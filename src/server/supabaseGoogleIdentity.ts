@@ -1,3 +1,15 @@
+import type { VerifiedAuthProvider } from './authIdentity';
+
+export interface VerifiedSupabaseIdentity {
+  id: string;
+  email: string;
+  googleSub: string;
+  provider: VerifiedAuthProvider;
+  name?: string;
+  avatarUrl?: string;
+}
+
+/** The historical Google-only verifier keeps its original public shape. */
 export interface VerifiedGoogleIdentity {
   id: string;
   email: string;
@@ -18,20 +30,47 @@ export function canLinkSupabaseAuthIdentity(existingId: string | undefined, inco
   return !existingId || existingId.trim().toLowerCase() === incomingId.trim().toLowerCase();
 }
 
-interface VerifyGoogleIdentityInput {
+interface VerifySupabaseIdentityInput {
   projectUrl: string;
   publishableKey: string;
   accessToken: string;
   fetchImpl?: typeof fetch;
+  /** Providers this call site accepts. Defaults to Google and email OTP. */
+  allowedProviders?: VerifiedAuthProvider[];
 }
 
-/** Verify a Supabase access token with Supabase Auth and require a Google identity. */
-export async function verifySupabaseGoogleIdentity(
-  input: VerifyGoogleIdentityInput
-): Promise<VerifiedGoogleIdentity | null> {
+function projectProviders(user: any): Set<string> {
+  const providers = new Set<string>();
+  const appMetadata = user?.app_metadata;
+  if (typeof appMetadata?.provider === 'string') providers.add(appMetadata.provider);
+  if (Array.isArray(appMetadata?.providers)) {
+    for (const provider of appMetadata.providers) {
+      if (typeof provider === 'string') providers.add(provider);
+    }
+  }
+  if (Array.isArray(user?.identities)) {
+    for (const identity of user.identities) {
+      if (typeof identity?.provider === 'string') providers.add(identity.provider);
+      if (typeof identity?.identity_data?.provider === 'string') providers.add(identity.identity_data.provider);
+    }
+  }
+  return providers;
+}
+
+/**
+ * Verify a Supabase access token with Supabase Auth and return a normalised
+ * identity only when the provider is explicitly allowed.
+ *
+ * The email case requires a confirmed email address. Supabase marks an OTP
+ * sign-in as confirmed, so an unconfirmed address can never become a session.
+ */
+export async function verifySupabaseAppIdentity(
+  input: VerifySupabaseIdentityInput
+): Promise<VerifiedSupabaseIdentity | null> {
   const projectUrl = input.projectUrl.trim().replace(/\/+$/, '');
   const publishableKey = input.publishableKey.trim();
   const accessToken = input.accessToken.trim();
+  const allowed = new Set<VerifiedAuthProvider>(input.allowedProviders || ['google', 'email']);
   if (!projectUrl || !publishableKey || accessToken.length < 20 || accessToken.length > 8192) return null;
 
   let userUrl: URL;
@@ -57,31 +96,65 @@ export async function verifySupabaseGoogleIdentity(
     const id = typeof user?.id === 'string' ? user.id.trim() : '';
     const email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : '';
     const emailVerified = Boolean(user?.email_confirmed_at || user?.email_verified === true);
+    // Anonymous Supabase sessions have no verified email identity and must
+    // never be exchangeable for an application session.
+    if (user?.is_anonymous === true) return null;
+    const isSupabaseAuthUuid = isValidSupabaseAuthUserId(id);
+    if (!isSupabaseAuthUuid || !emailVerified || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+
+    const providers = projectProviders(user);
+    const provider: VerifiedAuthProvider | null = allowed.has('google') && providers.has('google')
+      ? 'google'
+      : allowed.has('email') && providers.has('email')
+        ? 'email'
+        : null;
+    if (!provider) return null;
+
     const googleIdentity = Array.isArray(user?.identities)
       ? user.identities.find((identity: any) => identity?.provider === 'google')
       : null;
-    const googleProvider = user?.app_metadata?.provider === 'google' || Boolean(googleIdentity);
-    const isSupabaseAuthUuid = isValidSupabaseAuthUserId(id);
-    if (!isSupabaseAuthUuid || !emailVerified || !googleProvider || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
-
     const identityData = googleIdentity?.identity_data || {};
     const userMetadata = user?.user_metadata || {};
     const nameValue = identityData.full_name || identityData.name || userMetadata.full_name || userMetadata.name;
     const avatarValue = identityData.avatar_url || identityData.picture || userMetadata.avatar_url || userMetadata.picture;
-    const googleSub = typeof identityData.sub === 'string' && identityData.sub.trim()
+    const googleSub = provider === 'google' && typeof identityData.sub === 'string' && identityData.sub.trim()
       ? identityData.sub.trim()
-      : id;
+      : `email-${id}`;
 
     return {
       id,
       email,
       googleSub,
+      provider,
       ...(typeof nameValue === 'string' && nameValue.trim() ? { name: nameValue.trim() } : {}),
       ...(typeof avatarValue === 'string' && avatarValue.trim() ? { avatarUrl: avatarValue.trim() } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** Verify a Supabase access token with Supabase Auth and require a Google identity. */
+export async function verifySupabaseGoogleIdentity(
+  input: Omit<VerifySupabaseIdentityInput, 'allowedProviders'>
+): Promise<VerifiedGoogleIdentity | null> {
+  const identity = await verifySupabaseAppIdentity({ ...input, allowedProviders: ['google'] });
+  if (!identity || identity.provider !== 'google') return null;
+  return {
+    id: identity.id,
+    email: identity.email,
+    googleSub: identity.googleSub,
+    ...(identity.name ? { name: identity.name } : {}),
+    ...(identity.avatarUrl ? { avatarUrl: identity.avatarUrl } : {}),
+  };
+}
+
+/** Verify a Supabase access token that was produced by an email one-time code. */
+export async function verifySupabaseEmailIdentity(
+  input: Omit<VerifySupabaseIdentityInput, 'allowedProviders'>
+): Promise<VerifiedSupabaseIdentity | null> {
+  const identity = await verifySupabaseAppIdentity({ ...input, allowedProviders: ['email'] });
+  return identity && identity.provider === 'email' ? identity : null;
 }
 
 async function callSupabaseRpc<T>(input: {

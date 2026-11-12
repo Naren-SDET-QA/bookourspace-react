@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import type { ProviderListingActor } from './providerListingRepository';
 import { closeSharedPostgresPool, getSharedPostgresPool } from './postgresPool';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -12,7 +13,7 @@ export class PgPaymentError extends Error {
   }
 }
 
-export type PgPaymentActor = ProviderListingActor & { supabaseUserId: string; authProvider: 'google' };
+export type PgPaymentActor = ProviderListingActor & { supabaseUserId: string; authProvider: VerifiedAuthProvider };
 
 function asJson(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -66,8 +67,8 @@ export class PgPaymentRepository {
   }
 
   private assertIdentity(actor: ProviderListingActor | null, roles: string[]): asserts actor is PgPaymentActor {
-    if (!actor || !actor.supabaseUserId || !UUID.test(actor.supabaseUserId) || actor.authProvider !== 'google') {
-      throw new PgPaymentError('VERIFIED_GOOGLE_IDENTITY_REQUIRED', 401);
+    if (!hasVerifiedSupabaseIdentity(actor)) {
+      throw new PgPaymentError('VERIFIED_SUPABASE_IDENTITY_REQUIRED', 401);
     }
     if (!roles.includes(actor.role)) throw new PgPaymentError('FORBIDDEN_ROLE', 403);
   }

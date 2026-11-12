@@ -56,6 +56,7 @@ const AdminIntegrationsSection = lazy(() => import('./AdminIntegrationsSection')
 const AdminDataManagementSection = lazy(() => import('./AdminDataManagementSection').then((module) => ({ default: module.AdminDataManagementSection })));
 const AdminAnnouncementsSection = lazy(() => import('./AdminAnnouncementsSection').then((module) => ({ default: module.AdminAnnouncementsSection })));
 const AdminPlatformModuleSettings = lazy(() => import('./AdminPlatformModuleSettings').then((module) => ({ default: module.AdminPlatformModuleSettings })));
+const AdminAuthAccessSettings = lazy(() => import('./AdminAuthAccessSettings').then((module) => ({ default: module.AdminAuthAccessSettings })));
 const AdminMarketplaceListings = lazy(() => import('./AdminMarketplaceListings').then((module) => ({ default: module.AdminMarketplaceListings })));
 const AdminStayInventory = lazy(() => import('./AdminStayInventory').then((module) => ({ default: module.AdminStayInventory })));
 const AdminAnalyticsPerformanceModule = lazy(() => import('./AdminAnalyticsAndBilling').then((module) => ({ default: module.AdminAnalyticsPerformanceModule })));
@@ -5493,6 +5494,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
              ===================================================================== */}
           {activeSection === 'app_settings' && (
             <div className="space-y-5">
+              <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading sign-in settings…</p>}>
+                <AdminAuthAccessSettings />
+              </Suspense>
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-4 text-xs">
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600">

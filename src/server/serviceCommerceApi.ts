@@ -5,6 +5,7 @@ import type { ProviderListingActor } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { logSafeError } from './safeLogging';
 import { getSharedPostgresPool } from './postgresPool';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 /**
  * Services commerce: real slot availability, provider schedule/profile and
@@ -112,7 +113,7 @@ export function registerServiceCommerceApi(app: express.Express, dependencies: S
   function actorOf(req: express.Request): ProviderListingActor | null {
     const session = dependencies.verifySession(req);
     if (!session?.supabaseUserId || !UUID.test(String(session.supabaseUserId))) return null;
-    if (session.authProvider !== 'google') return null;
+    if (!hasVerifiedSupabaseIdentity(session)) return null;
     return session;
   }
 

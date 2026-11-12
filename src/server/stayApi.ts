@@ -6,6 +6,7 @@ import { stayListingUnbookableReason, stayPayload } from '../lib/stayListingGate
 import { issueBookingQr } from './bookingQr';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { getSharedPostgresPool } from './postgresPool';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 /**
  * Stay availability, hold, booking and cancellation API.
@@ -108,7 +109,7 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
 
   function actorOf(req: express.Request) {
     const session = deps.verifySession(req);
-    if (!session?.supabaseUserId || session.authProvider !== 'google' || !UUID.test(String(session.supabaseUserId))) return null;
+    if (!hasVerifiedSupabaseIdentity(session)) return null;
     return {
       supabaseUserId: String(session.supabaseUserId),
       role: String(session.role || 'customer'),

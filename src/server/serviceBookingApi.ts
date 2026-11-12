@@ -9,6 +9,7 @@ import {
   ProviderListingRepositoryError,
   type ProviderListingActor,
 } from './providerListingRepository';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 export interface ServiceBookingApiDependencies {
   repository: ServiceBookingRepository;
@@ -39,11 +40,11 @@ function sessionOrReject(
     response.status(403).json({ ok: false, error: 'FORBIDDEN_ROLE' });
     return null;
   }
-  if (actor.authProvider !== 'google' || !actor.supabaseUserId) {
+  if (!hasVerifiedSupabaseIdentity(actor)) {
     response.status(403).json({
       ok: false,
-      error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED',
-      message: 'Sign in with Google to use service bookings backed by PostgreSQL.',
+      error: 'VERIFIED_SUPABASE_IDENTITY_REQUIRED',
+      message: 'Sign in with a verified account to use service bookings backed by PostgreSQL.',
     });
     return null;
   }
