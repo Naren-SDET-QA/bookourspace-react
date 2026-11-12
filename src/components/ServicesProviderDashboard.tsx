@@ -1,0 +1,42 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, BriefcaseBusiness, CheckCircle2, CircleDollarSign, Clock3, Loader2, MapPin, RefreshCw, ShieldCheck, UserRoundCog } from 'lucide-react';
+import ProviderPortalShell, { type ProviderPortalModule } from './ProviderPortalShell';
+import { ServiceOperationsWorkspace } from './ServiceOperationsWorkspace';
+import { fetchProviderPortalOverview, type ProviderPortalOverview } from '../lib/providerOperationsClient';
+
+interface Props { role?: string | null; onNavigate?: (module: ProviderPortalModule) => void; }
+const money = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+const tone: Record<string, string> = { requested: 'bg-blue-50 text-blue-800', accepted: 'bg-amber-50 text-amber-800', in_progress: 'bg-violet-50 text-violet-800', completed: 'bg-emerald-50 text-emerald-800', cancelled: 'bg-rose-50 text-rose-800', rejected: 'bg-slate-100 text-slate-700' };
+const serviceControls: Array<{ label: string; text: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { label: 'Worker assignment', text: 'Manual/automatic assignment must be server-authorized', icon: UserRoundCog },
+  { label: 'GPS consent', text: 'Location is device-permissioned and scoped to an active job', icon: MapPin },
+  { label: 'Start verification', text: 'OTP or customer approval is required before service starts', icon: ShieldCheck },
+  { label: 'Payments', text: 'Payment claims remain pending until reviewed', icon: CheckCircle2 },
+];
+const serviceKpiLabels: Array<{ label: string; key: 'listings' | 'requested' | 'activeJobs'; icon: React.ComponentType<{ className?: string }> }> = [
+  { label: 'Active listings', key: 'listings', icon: BriefcaseBusiness },
+  { label: 'New requests', key: 'requested', icon: Clock3 },
+  { label: 'Active jobs', key: 'activeJobs', icon: MapPin },
+];
+
+export default function ServicesProviderDashboard({ role, onNavigate }: Props) {
+  const [data, setData] = useState<ProviderPortalOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showJobs, setShowJobs] = useState(false);
+  const load = useCallback(async () => { setLoading(true); setError(''); try { setData(await fetchProviderPortalOverview()); } catch (caught) { setError(caught instanceof Error ? caught.message : 'PROVIDER_PORTAL_OVERVIEW_FAILED'); } finally { setLoading(false); } }, []);
+  useEffect(() => { void load(); }, [load]);
+  const metrics = data?.services.metrics;
+  return <ProviderPortalShell activeModule="services" onNavigate={onNavigate} role={role} title="Home & local services" subtitle="Bookings, dispatch, verified payments and provider operations">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.14em] text-[#527a40]">Services operations</p><h2 className="mt-1 text-xl font-black">Dispatch at a glance</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Customer bookings and job state come from the server-authoritative Services lifecycle.</p></div><button type="button" onClick={() => void load()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold dark:border-slate-700 dark:bg-slate-900"><RefreshCw className="h-4 w-4" /> Refresh</button></div>
+      {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" /><div><b>Live services data is unavailable.</b><p className="mt-1 text-xs">{error === 'PROVIDER_PORTAL_SCHEMA_NOT_READY' ? 'The local services migration set has not been applied yet.' : error}</p></div></div>}
+      {loading && !data ? <div className="flex items-center gap-2 rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading authorized service records…</div> : data && <>
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Services KPIs">{serviceKpiLabels.map(({ label, key, icon: Icon }) => <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between"><span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</span><Icon className="h-4 w-4 text-[#527a40]" /></div><p className="mt-3 text-2xl font-black tabular-nums">{metrics?.[key] ?? 0}</p></div>)}<div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between"><span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Settled revenue</span><CircleDollarSign className="h-4 w-4 text-[#527a40]" /></div><p className="mt-3 text-2xl font-black tabular-nums">{money(metrics?.settledRevenue ?? 0)}</p></div></section>
+        <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between gap-3"><div><h3 className="font-black">Job queue</h3><p className="mt-1 text-xs text-slate-500">Requested, assigned and active jobs</p></div><button type="button" onClick={() => setShowJobs(value => !value)} className="min-h-10 rounded-xl bg-[#527a40] px-3 text-xs font-bold text-white">{showJobs ? 'Close job workspace' : 'Open job workspace'}</button></div><div className="mt-4 space-y-2">{data.services.bookings.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">No service bookings found for the current access scope.</div> : data.services.bookings.slice(0, 8).map(job => <article key={job.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/70"><div><p className="font-bold">{job.listingTitle}</p><p className="text-xs text-slate-500">{job.bookingRef} · {job.scheduledDate} · {job.timeSlot}</p></div><div className="flex items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${tone[job.status] || 'bg-slate-100 text-slate-700'}`}>{job.status.replace('_', ' ')}</span><span className="text-sm font-bold">{money(job.amount)}</span></div></article>)}</div></div><div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-black">Controls & safeguards</h3><div className="mt-4 space-y-2">{serviceControls.map(({ label, text, icon: Icon }) => <div key={label} className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700"><Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#527a40]" /><div><p className="text-sm font-bold">{label}</p><p className="mt-0.5 text-xs text-slate-500">{label === 'Payments' ? `${metrics?.pendingClaims ?? 0} payment claim(s) pending review` : text}</p></div></div>)}</div><p className="mt-4 text-[11px] leading-5 text-slate-500">No worker identity, GPS movement or payment settlement is invented when the supporting record is absent.</p></div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-black">Lifecycle coverage</h3><div className="mt-4 grid gap-2 sm:grid-cols-4"><div className="rounded-xl bg-blue-50 p-3 text-xs font-bold text-blue-900">Requested</div><div className="rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-900">Accepted / assigned</div><div className="rounded-xl bg-violet-50 p-3 text-xs font-bold text-violet-900">Travelling / arrived / started</div><div className="rounded-xl bg-emerald-50 p-3 text-xs font-bold text-emerald-900">Completed / settled</div></div><p className="mt-3 text-xs text-slate-500">The existing booking API currently exposes accepted, in-progress and completed actions. Additional dispatch states are prepared in the local migration below and remain unavailable until approved and applied.</p></section>
+        {showJobs && <ServiceOperationsWorkspace role={role === 'admin' ? 'admin' : 'provider'} onClose={() => setShowJobs(false)} />}
+      </>}
+    </div>
+  </ProviderPortalShell>;
+}

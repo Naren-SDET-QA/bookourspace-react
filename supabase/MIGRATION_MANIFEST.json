@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 73,
+  "migrationCount": 75,
   "migrations": [
     {
       "order": 2,
@@ -598,6 +598,22 @@
       "file": "supabase/migrations/20261108150000_superadmin_module_visibility.sql",
       "bytes": 963,
       "sha256": "66dc7a930565aef9e838f2f75cf4e277e75660d360555190621393a01e32c78d"
+    },
+    {
+      "order": 75,
+      "version": "20261111192224",
+      "name": "institute_owner_workspace",
+      "file": "supabase/migrations/20261111192224_institute_owner_workspace.sql",
+      "bytes": 18684,
+      "sha256": "f1614eab408ab3374e2a30c9de061d31962f3aeb9833271395a9e6a3018217c4"
+    },
+    {
+      "order": 76,
+      "version": "20261112100000",
+      "name": "provider_portal_operations",
+      "file": "supabase/migrations/20261112100000_provider_portal_operations.sql",
+      "bytes": 23553,
+      "sha256": "7273acdd19d6b2a97dcfc79bebec307a3a71e3c5562d7dd9d3678eec5817ad20"
     }
   ],
   "review": {

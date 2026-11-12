@@ -28,6 +28,13 @@ export interface LoginOtpEmailDetails {
   expiresInMinutes?: number;
 }
 
+export interface ServiceStartOtpEmailDetails {
+  recipient: string;
+  code: string;
+  bookingId: string;
+  expiresInMinutes?: number;
+}
+
 export interface ResendEmailDispatcher {
   env?: NodeJS.ProcessEnv;
   send?: typeof sendTransactionalEmail;
@@ -94,6 +101,19 @@ export function buildLoginOtpEmail(details: LoginOtpEmailDetails): Transactional
   };
 }
 
+export function buildServiceStartOtpEmail(details: ServiceStartOtpEmailDetails): TransactionalEmailInput {
+  const code = String(details.code || '').trim();
+  const minutes = Math.max(1, Math.min(15, Number(details.expiresInMinutes) || 10));
+  return {
+    to: details.recipient,
+    subject: 'BookOurSpace service start code',
+    text: `Your BookOurSpace service start code is ${code}. It expires in ${minutes} minutes, is single-use, and is not sent by SMS. Booking ID: ${details.bookingId}.`,
+    html: `<p>Your BookOurSpace service start code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:0.3em">${escapeHtml(code)}</p><p>It expires in ${minutes} minutes and can be used only once.</p><p>This is an email backup for the in-app OTP flow; BookOurSpace does not treat Resend as an SMS provider.</p><p>Booking ID: ${escapeHtml(details.bookingId)}</p>`,
+    idempotencyKey: `service-start-otp:${details.bookingId}:${code}`,
+    explicitAuthorization: true,
+  };
+}
+
 export function buildStayBookingConfirmationEmail(details: StayEmailBookingDetails): TransactionalEmailInput {
   const subject = safeSubject(`Stay booking confirmed: ${details.propertyName}`);
   const body = [
@@ -146,6 +166,10 @@ export function buildStayReminderEmail(details: StayEmailReminderDetails): Trans
 
 export function sendLoginOtpEmail(details: LoginOtpEmailDetails, options?: ResendEmailDispatcher) {
   return dispatch(buildLoginOtpEmail(details), options);
+}
+
+export function sendServiceStartOtpEmail(details: ServiceStartOtpEmailDetails, options?: ResendEmailDispatcher) {
+  return dispatch(buildServiceStartOtpEmail(details), options);
 }
 
 export async function sendStayBookingConfirmationEmail(details: StayEmailBookingDetails, options?: ResendEmailDispatcher) {

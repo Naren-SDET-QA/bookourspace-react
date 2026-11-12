@@ -146,6 +146,7 @@ import { LocationSelector, loadPersistedLocation, persistLocation, type Selected
 import { filterListingsByLocation, matchesSelectedLocation } from './lib/locationCityFilter';
 import { isPopularCategoriesVisible } from './lib/homeVisibilitySettings';
 import { applyRemoteMarketplaceVisibility } from './lib/marketplaceVisibility';
+import { fetchInstituteMemberships } from './lib/instituteApi';
 import { firstUsableListingImage, isUsableListingImageSource } from './lib/media/signedStorageUrl';
 const FlipkartBannerSlider = lazy(() => import('./components/FlipkartBannerSlider').then((module) => ({ default: module.FlipkartBannerSlider })));
 const FlipkartFilterSidebar = lazy(() => import('./components/FlipkartFilterSidebar').then((module) => ({ default: module.FlipkartFilterSidebar })));
@@ -486,6 +487,26 @@ function MarketplaceAppContent() {
   const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
+  const [instituteAccessChecked, setInstituteAccessChecked] = useState(false);
+  const [hasInstituteAccess, setHasInstituteAccess] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authUser) { setInstituteAccessChecked(false); setHasInstituteAccess(false); return () => { cancelled = true; }; }
+    if (authUser.role !== 'customer') { setInstituteAccessChecked(true); setHasInstituteAccess(false); return () => { cancelled = true; }; }
+    setInstituteAccessChecked(false);
+    void fetchInstituteMemberships().then((result) => {
+      if (cancelled) return;
+      const hasAccess = Boolean(result.ok && result.data?.memberships?.length);
+      setHasInstituteAccess(hasAccess);
+      setInstituteAccessChecked(true);
+      if (hasAccess && authoritativeSessionChecked) {
+        setUserRole('provider');
+        setActiveView('provider_portal');
+      }
+    });
+    return () => { cancelled = true; };
+  }, [authUser, authoritativeSessionChecked, setUserRole]);
 
   // Role-based routing on Google OAuth sign-in, logout redirect, & protected route enforcement
   useEffect(() => {
@@ -513,10 +534,10 @@ function MarketplaceAppContent() {
     if (!authoritativeSessionChecked) return;
     if (activeView === 'admin_console' && !isAdminSession) {
       setActiveView(authUser?.role === 'provider' ? 'provider_portal' : 'marketplace');
-    } else if (activeView === 'provider_portal' && (!authUser || authUser.role === 'customer')) {
+    } else if (activeView === 'provider_portal' && (!authUser || (authUser.role === 'customer' && (!instituteAccessChecked || !hasInstituteAccess)))) {
       setActiveView('marketplace');
     }
-  }, [authUser, activeView, authoritativeSessionChecked, isAdminSession]);
+  }, [authUser, activeView, authoritativeSessionChecked, isAdminSession, instituteAccessChecked, hasInstituteAccess]);
 
   useEffect(() => {
     if (activeMarketSection === 'hotel_stay' && !isHotelsStayExperienceOpen) {
@@ -573,7 +594,7 @@ function MarketplaceAppContent() {
         // Signed-out visitors keep the hash so it applies once the session
         // hydrates; a signed-in non-provider is redirected to the marketplace.
         if (!authUser) return;
-        if (!['provider', 'admin'].includes(authUser.role)) {
+        if (!['provider', 'admin'].includes(authUser.role) && !(authUser.role === 'customer' && instituteAccessChecked && hasInstituteAccess)) {
           window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
           setActiveView('marketplace');
           return;
@@ -603,7 +624,7 @@ function MarketplaceAppContent() {
     applySectionHash();
     window.addEventListener('hashchange', applySectionHash);
     return () => window.removeEventListener('hashchange', applySectionHash);
-  }, [isAdminSession, authUser]);
+  }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess]);
 
   // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
   useEffect(() => {
@@ -2152,7 +2173,7 @@ function MarketplaceAppContent() {
                 return;
               }
               if (role !== 'customer' &&
-                  (!authUser || (role === 'admin' ? authUser.role !== 'admin' : !['provider', 'admin'].includes(authUser.role)))) {
+                  (!authUser || (role === 'admin' ? authUser.role !== 'admin' : !['provider', 'admin'].includes(authUser.role) && !hasInstituteAccess))) {
                 setActiveView('marketplace');
                 showToast(role === 'admin'
                   ? '🛡️ Protected Route: Only a server-authorized administrator can access the Admin Console.'
@@ -3016,6 +3037,7 @@ function MarketplaceAppContent() {
             <SelfHealingBoundary moduleId="provider_portal_module" moduleName="Provider Portal & Hub Module">
               <ProviderDashboard
                 currentLang={currentLang}
+                initialWorkspace={hasInstituteAccess ? 'institute' : 'pg'}
                 onSwitchToMarketplace={() => {
                   setActiveView('marketplace');
                   setActiveBottomTab('home');
