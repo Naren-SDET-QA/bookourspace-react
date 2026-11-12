@@ -53,8 +53,12 @@ test('visible module imagery is loaded on phone and desktop without demo-host re
     body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#64748b"/></svg>'),
   }));
   const imageRequests: string[] = [];
+  const failedImageRequests: string[] = [];
   page.on('request', (request) => {
     if (request.resourceType() === 'image') imageRequests.push(request.url());
+  });
+  page.on('requestfailed', (request) => {
+    if (request.resourceType() === 'image') failedImageRequests.push(`${request.failure()?.errorText}: ${request.url()}`);
   });
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -64,13 +68,25 @@ test('visible module imagery is loaded on phone and desktop without demo-host re
       const visibleImageState = () => page.locator('img[data-safe-image]').evaluateAll((images) => (images as HTMLImageElement[])
         .filter((image) => {
           const bounds = image.getBoundingClientRect();
-          return bounds.bottom > 0 && bounds.top < window.innerHeight;
+          if (!(bounds.bottom > 0 && bounds.top < window.innerHeight && bounds.right > 0 && bounds.left < window.innerWidth)) return false;
+          // getBoundingClientRect still reports a box for content clipped by a
+          // collapsed or overflow-hidden ancestor, and Chromium does not fetch
+          // lazy images it would not paint. Hit-test the centre so only images
+          // that are actually rendered on screen are required to have loaded.
+          const x = Math.min(window.innerWidth - 1, Math.max(0, bounds.left + bounds.width / 2));
+          const y = Math.min(window.innerHeight - 1, Math.max(0, bounds.top + bounds.height / 2));
+          return document.elementsFromPoint(x, y).some((element) => element === image || element.contains(image));
         })
-        .map((image) => ({ loaded: image.complete && image.naturalWidth > 0, source: image.currentSrc || image.src })));
+        .map((image) => ({
+          loaded: image.complete && image.naturalWidth > 0,
+          source: image.currentSrc || image.src,
+          state: image.dataset.imageState,
+        })));
       await expect.poll(async () => {
         const images = await visibleImageState();
-        return images.length > 0 && images.every((image) => image.loaded);
-      }, { message: `${route} at ${width}px has a visible image that did not load`, timeout: 10_000 }).toBe(true);
+        const pending = images.filter((image) => !image.loaded).map((image) => `${image.state} ${image.source || '<no src>'}`);
+        return { route, width, rendered: images.length, pending, failed: failedImageRequests.slice(-3) };
+      }, { message: `${route} at ${width}px has a visible image that did not load`, timeout: 10_000 }).toEqual({ route, width, rendered: expect.any(Number), pending: [], failed: [] });
       const visibleImages = await visibleImageState();
       expect(visibleImages.length, `${route} rendered no visible image at ${width}px`).toBeGreaterThan(0);
       expect(visibleImages.every((image) => image.loaded), `${route} has a broken visible image at ${width}px`).toBe(true);
