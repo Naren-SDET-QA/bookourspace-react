@@ -5,6 +5,7 @@ import type { ProviderListingActor } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { logSafeError } from './safeLogging';
 import { getSharedPostgresPool } from './postgresPool';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 /**
  * Services commerce: real slot availability, provider schedule/profile and
@@ -40,6 +41,7 @@ function mapError(res: express.Response, error: any, fallback: string) {
   if (message.includes('MERCHANT_VPA_NOT_CONFIGURED')) return fail(res, 503, 'MERCHANT_VPA_NOT_CONFIGURED', 'The receiving UPI ID is not configured.');
   if (message.includes('PAYMENT_CLAIM_PENDING_REVIEW')) return fail(res, 409, 'PAYMENT_CLAIM_PENDING_REVIEW', 'A payment claim is already awaiting administrator review.');
   if (message.includes('PAYMENT_ALREADY_SETTLED')) return fail(res, 409, 'PAYMENT_ALREADY_SETTLED', 'This booking is already paid.');
+  if (message.includes('PAYMENT_DISABLED_FOR_SERVICE')) return fail(res, 409, 'PAYMENT_DISABLED_FOR_SERVICE', 'This service does not collect payment through BookOurSpace.');
   if (message.includes('BOOKING_NOT_PAYABLE')) return fail(res, 409, 'BOOKING_NOT_PAYABLE', 'This booking can no longer be paid online.');
   if (message.includes('PAYMENT_AMOUNT_MISMATCH')) return fail(res, 400, 'PAYMENT_AMOUNT_MISMATCH', 'The provider amount does not match this booking.');
   if (message.includes('PAYMENT_NOT_VERIFIED')) return fail(res, 409, 'PAYMENT_NOT_VERIFIED', 'Only a verified payment can be refunded.');
@@ -111,7 +113,7 @@ export function registerServiceCommerceApi(app: express.Express, dependencies: S
   function actorOf(req: express.Request): ProviderListingActor | null {
     const session = dependencies.verifySession(req);
     if (!session?.supabaseUserId || !UUID.test(String(session.supabaseUserId))) return null;
-    if (!['google', 'email_otp'].includes(String(session.authProvider))) return null;
+    if (!hasVerifiedSupabaseIdentity(session)) return null;
     return session;
   }
 

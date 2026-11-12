@@ -139,7 +139,9 @@ function bookingPayload(overrides = {}) {
     idempotencyKey: randomUUID(),
     listingId,
     scheduledDate: futureDate(7 + slotCounter),
-    timeSlot: `${String(8 + (slotCounter % 12)).padStart(2, '0')}:${String(slotCounter % 60).padStart(2, '0')}`,
+    // Availability is generated on the provider's slot grid (60 minutes by
+    // default), so every booking must use an exact slot key.
+    timeSlot: '09:00',
     _slotSeq: slotCounter,
     serviceAddress: 'Flat 402, Madhapur, Hyderabad',
     customerPhone: '+91 90000 00000',

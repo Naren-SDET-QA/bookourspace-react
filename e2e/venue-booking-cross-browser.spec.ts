@@ -61,13 +61,13 @@ test('cross-browser venue booking surface', async ({ page }) => {
   const venueHeading = page.getByRole('heading', { name: /^All Venues & Halls/ });
   const venueSection = page.locator('section').filter({ has: venueHeading }).last();
   const venueCard = venueSection.locator('article').filter({ hasText: VENUE_TITLE }).last();
-  const view = venueCard.getByRole('button', { name: 'View', exact: true });
+  const view = venueCard.getByRole('button', { name: `View and book ${VENUE_TITLE}` });
   await expect(view).toBeVisible({ timeout: 45_000 });
   await view.click();
   const detail = page.getByRole('dialog', { name: VENUE_TITLE }).last();
   await expect(detail, `venue detail did not open; URL=${page.url()}; errors=${diagnostics.join(' || ') || 'none'}`)
     .toBeVisible({ timeout: 20_000 });
-  await detail.getByRole('button', { name: 'Request Availability' }).click();
+  await detail.getByRole('button', { name: 'Book Hall', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Choose date and time' })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel('Event date')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

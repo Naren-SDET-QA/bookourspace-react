@@ -8,6 +8,7 @@ import { sendStayBookingConfirmationEmail, sendStayReminderEmail } from './resen
 import { sendBookingNotificationEmails } from './bookingNotificationEmails';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { getSharedPostgresPool } from './postgresPool';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 /**
  * Stay availability, hold, booking and cancellation API.
@@ -177,7 +178,7 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
 
   function actorOf(req: express.Request) {
     const session = deps.verifySession(req);
-    if (!session?.supabaseUserId || !['google', 'email_otp'].includes(String(session.authProvider)) || !UUID.test(String(session.supabaseUserId))) return null;
+    if (!hasVerifiedSupabaseIdentity(session)) return null;
     return {
       supabaseUserId: String(session.supabaseUserId),
       role: String(session.role || 'customer'),

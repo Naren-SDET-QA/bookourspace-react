@@ -516,7 +516,7 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" != "1" ]; then
   E2E_RACE_COURSE_ID="class-e2e-race" \
   E2E_RACE_COURSE_TITLE="E2E Race Course" \
   E2E_COURSE_TITLE="E2E Algebra Course" \
-  npx playwright test e2e/classes-training.spec.ts --project=chromium --reporter=list \
+  npx playwright test e2e/classes-training.spec.ts --project=chromium --retries=0 --reporter=list \
     > "$OUT/playwright-chromium.log" 2>&1 \
     || { tail -60 "$SERVER_LOG" >&2; tail -80 "$OUT/playwright-chromium.log"; fail "Chromium Classes journey (see $OUT/playwright-chromium.log)"; }
   grep -E "✓|passed|failed" "$OUT/playwright-chromium.log" | tail -12 | sed 's/^/    /'
@@ -524,7 +524,7 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" != "1" ]; then
   E2E_BASE_URL="$SERVER_URL" \
   E2E_MOVIES_SESSIONS="$SESSIONS" \
   E2E_MOVIES_TITLE="E2E Cinema Feature" \
-  npx playwright test e2e/movies-showtimes.spec.ts --project=chromium --reporter=list \
+  npx playwright test e2e/movies-showtimes.spec.ts --project=chromium --retries=0 --reporter=list \
     > "$OUT/playwright-movies.log" 2>&1 \
     || { tail -80 "$OUT/playwright-movies.log"; fail "Movies browser coverage (see $OUT/playwright-movies.log)"; }
   grep -E "✓|passed|failed" "$OUT/playwright-movies.log" | tail -8 | sed 's/^/    /'
@@ -537,7 +537,7 @@ E2E_BASE_URL="$SERVER_URL" \
 E2E_VENUE_SESSIONS="$SESSIONS" \
 E2E_VENUE_TITLE="$VENUE_TITLE" \
 E2E_VENUE_SANDBOX_SECRET="$VENUE_SANDBOX_SECRET" \
-npx playwright test e2e/venue-booking.spec.ts --project=chromium --grep-invert "persists venue" --reporter=list \
+npx playwright test e2e/venue-booking.spec.ts --project=chromium --retries=0 --grep-invert "persists venue" --reporter=list \
   > "$OUT/playwright-venues.log" 2>&1 \
   || { tail -140 "$OUT/playwright-venues.log"; fail "Chromium Function Halls browser journey (see $OUT/playwright-venues.log)"; }
 grep -E "✓|passed|failed" "$OUT/playwright-venues.log" | tail -16 | sed 's/^/    /'
@@ -565,7 +565,7 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" = "1" ]; then
     if [ "$ENGINE" = "webkit" ] && [ "$WEBKIT" != "1" ]; then continue; fi
     echo "    running $ENGINE mobile/tablet venue surface"
     E2E_BASE_URL="$SERVER_URL" E2E_VENUE_SESSIONS="$SESSIONS" E2E_VENUE_TITLE="$VENUE_TITLE" \
-      npx playwright test e2e/venue-booking-cross-browser.spec.ts --project="$ENGINE" --reporter=list \
+      npx playwright test e2e/venue-booking-cross-browser.spec.ts --project="$ENGINE" --retries=0 --reporter=list \
       > "$OUT/playwright-venue-$ENGINE.log" 2>&1 \
       || { tail -60 "$OUT/playwright-venue-$ENGINE.log"; fail "$ENGINE mobile/tablet venue surface (see $OUT/playwright-venue-$ENGINE.log)"; }
     grep -E "✓|passed|failed" "$OUT/playwright-venue-$ENGINE.log" | tail -4 | sed 's/^/      /'
@@ -584,7 +584,7 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" = "1" ]; then
   E2E_VENUE_TITLE="$VENUE_TITLE" \
   E2E_VENUE_SANDBOX_SECRET="$VENUE_SANDBOX_SECRET" \
   E2E_RESTART_BOOKING_REF="$RESTART_REF" \
-  npx playwright test e2e/venue-booking.spec.ts --project=chromium --grep "persists venue" --reporter=list \
+  npx playwright test e2e/venue-booking.spec.ts --project=chromium --retries=0 --grep "persists venue" --reporter=list \
     > "$OUT/playwright-venue-restart.log" 2>&1 \
     || { tail -60 "$OUT/playwright-venue-restart.log"; fail "venue restart persistence (see $OUT/playwright-venue-restart.log)"; }
   grep -E "✓|passed|failed|skipped" "$OUT/playwright-venue-restart.log" | tail -6 | sed 's/^/    /'

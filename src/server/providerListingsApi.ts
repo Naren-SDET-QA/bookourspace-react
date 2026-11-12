@@ -5,6 +5,7 @@ import {
   ProviderListingRepositoryError,
   type ProviderListingActor,
 } from './providerListingRepository';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 export interface ProviderListingsApiDependencies {
   repository: ProviderListingRepository;
@@ -58,8 +59,8 @@ function googleActorOrReject(
     response.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
     return null;
   }
-  if (!['google', 'email_otp'].includes(String(actor.authProvider)) || !actor.supabaseUserId) {
-    response.status(403).json({ ok: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
+  if (!hasVerifiedSupabaseIdentity(actor)) {
+    response.status(403).json({ ok: false, error: 'VERIFIED_SUPABASE_IDENTITY_REQUIRED' });
     return null;
   }
   return actor;

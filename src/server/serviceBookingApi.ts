@@ -14,6 +14,7 @@ import {
   type BookingNotificationContext,
   type BookingNotificationKind,
 } from './bookingNotificationEmails';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 export interface ServiceBookingApiDependencies {
   repository: ServiceBookingRepository;
@@ -45,11 +46,11 @@ function sessionOrReject(
     response.status(403).json({ ok: false, error: 'FORBIDDEN_ROLE' });
     return null;
   }
-  if (!['google', 'email_otp'].includes(String(actor.authProvider)) || !actor.supabaseUserId) {
+  if (!hasVerifiedSupabaseIdentity(actor)) {
     response.status(403).json({
       ok: false,
-      error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED',
-      message: 'Sign in with Google to use service bookings backed by PostgreSQL.',
+      error: 'VERIFIED_SUPABASE_IDENTITY_REQUIRED',
+      message: 'Sign in with a verified account to use service bookings backed by PostgreSQL.',
     });
     return null;
   }
@@ -160,6 +161,68 @@ export function registerServiceBookingApi(
           .catch((error) => logSafeError('service-bookings', `load ${kind} notification context`, error));
       }
       response.json({ ok: true, ...result, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.get('/api/services/bookings/:id/tracking', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['customer', 'provider', 'admin']);
+    if (!actor) return;
+    try {
+      const snapshot = await repository.deliveryTrackingSnapshot(actor, String(request.params.id || ''));
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, snapshot, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/tracking/location', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider']);
+    if (!actor) return;
+    try {
+      const point = await repository.publishTrackingLocation(actor, String(request.params.id || ''), request.body || {});
+      response.setHeader('cache-control', 'no-store');
+      response.status(201).json({ ok: true, point, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/confirm-delivery', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
+    if (!actor) return;
+    try {
+      const booking = await repository.confirmDelivery(actor, String(request.params.id || ''));
+      response.json({ ok: true, booking, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/otp', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['customer']);
+    if (!actor) return;
+    try {
+      const code = await repository.createDeliveryOtp(actor, String(request.params.id || ''));
+      response.status(201).json({ ok: true, code, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/verify-otp', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
+    if (!actor) return;
+    const code = String(request.body?.code || '').trim();
+    if (!/^\d{6}$/.test(code)) {
+      response.status(400).json({ ok: false, error: 'OTP_INVALID' });
+      return;
+    }
+    try {
+      const verified = await repository.verifyDeliveryOtp(actor, String(request.params.id || ''), code);
+      response.json({ ok: true, verified, source: 'postgres' });
     } catch (error) {
       sendError(response, error);
     }

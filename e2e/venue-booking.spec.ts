@@ -118,7 +118,7 @@ async function openVenue(page: Page) {
   const venueHeading = page.getByRole('heading', { name: /^All Venues & Halls/ });
   const venueSection = page.locator('section').filter({ has: venueHeading }).last();
   const venueCard = venueSection.locator('article').filter({ hasText: VENUE_TITLE }).last();
-  const view = venueCard.getByRole('button', { name: 'View', exact: true });
+  const view = venueCard.getByRole('button', { name: `View and book ${VENUE_TITLE}` });
   await expect(view).toBeVisible({ timeout: 45_000 });
   await view.click();
   await expect(page.getByRole('dialog', { name: VENUE_TITLE }).last()).toBeVisible({ timeout: 20_000 });
@@ -127,7 +127,7 @@ async function openVenue(page: Page) {
 async function openBooking(page: Page) {
   await openVenue(page);
   const detail = page.getByRole('dialog', { name: VENUE_TITLE }).last();
-  await detail.getByRole('button', { name: 'Request Availability' }).click();
+  await detail.getByRole('button', { name: 'Book Hall', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: VENUE_TITLE }).last();
   await expect(dialog.getByRole('heading', { name: 'Choose date and time' })).toBeVisible({ timeout: 20_000 });
   return dialog;
@@ -251,10 +251,10 @@ test.describe.serial('Function Halls authenticated browser journey', () => {
     const customerPage = await customerContext.newPage();
     await signIn(customerPage, 'customer');
     await customerPage.goto('/#venues', { waitUntil: 'domcontentloaded' });
-    await expect(customerPage.getByRole('button', { name: 'View E2E Function Hall' }).last()).toBeVisible({
+    await expect(customerPage.getByRole('button', { name: 'View and book E2E Function Hall' }).last()).toBeVisible({
       timeout: 45_000,
     });
-    await expect(customerPage.getByRole('button', { name: `View ${VENUE_TITLE}` })).toHaveCount(0);
+    await expect(customerPage.getByRole('button', { name: `View and book ${VENUE_TITLE}` })).toHaveCount(0);
     await customerContext.close();
   });
 

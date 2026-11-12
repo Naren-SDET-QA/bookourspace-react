@@ -63,9 +63,15 @@ function mapPostgresPublicListing(entry: any): MarketplaceListing {
     createdAt: String(entry?.createdAt || '').slice(0, 10),
     viewsCount: 0,
     enquiriesCount: 0,
-    customFieldValues: attributes.customFieldValues && typeof attributes.customFieldValues === 'object'
-      ? attributes.customFieldValues
-      : {},
+    customFieldValues: {
+      ...(attributes.customFieldValues && typeof attributes.customFieldValues === 'object'
+        ? attributes.customFieldValues
+        : {}),
+      // The reviewed listing payload carries the marketplace section marker at
+      // its root. Preserve it so dynamic, non-catalog service categories are
+      // recognised by the shared service surfaces.
+      ...(typeof attributes.sectionType === 'string' ? { sectionType: attributes.sectionType } : {}),
+    },
     postingPlanId: '',
     expiresAt: '',
     reported: false,
@@ -95,8 +101,7 @@ import {
   subscribeToRlsChanges,
   AuthoritativeGoogleUser,
   setStoredAuthoritativeSession,
-  authenticateWithGoogleServer,
-  authenticateWithEmailOtpServer,
+  authenticateWithSupabaseServer,
   signInWithSupabaseGoogleOAuth,
   fetchGoogleOAuthConfig,
   fetchCurrentAuthSession,
@@ -107,6 +112,8 @@ import {
   clearServerNotifications,
   syncServerProviderListing,
 } from '../lib/supabaseClient';
+import { verifyEmailOtpCode } from '../lib/emailOtpClient';
+import { fetchCustomerModules } from '../lib/customerModuleAccessClient';
 
 interface MarketplaceContextType {
   supabaseUser: User | null;
@@ -117,6 +124,11 @@ interface MarketplaceContextType {
   authoritativeSessionChecked: boolean;
   isAccountBlocked: boolean;
   blockedReason: string | null;
+  /** Effective marketplace module keys for a signed-in customer (empty for guests). */
+  customerModules: string[];
+  /** True after the customer module allow-list has been resolved once. */
+  customerModulesChecked: boolean;
+  refreshCustomerModules: () => Promise<void>;
   loginWithGoogle: (params: {
     email: string;
     name?: string;
@@ -142,6 +154,16 @@ interface MarketplaceContextType {
     isNewUser?: boolean;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
   }) => Promise<void>;
+  /** Verify an email one-time code, install the Supabase session and mint the
+   *  server application session in one step. */
+  completeEmailOtpSignIn: (email: string, token: string, options?: { verifyWithSupabase?: boolean }) => Promise<{
+    ok: boolean;
+    isNewUser?: boolean;
+    user?: AuthoritativeGoogleUser;
+    redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
+    error?: string;
+    message?: string;
+  }>;
   logoutGoogleSession: () => Promise<void>;
   refreshServerNotifications: () => Promise<void>;
   updateUserProfile: (updates: { fullName?: string; phone?: string; bio?: string }) => Promise<{
@@ -240,7 +262,7 @@ interface MarketplaceContextType {
 }
 
 const MarketplaceContext = createContext<MarketplaceContextType | undefined>(undefined);
-type AuthoritativeSessionSyncResult = Awaited<ReturnType<typeof authenticateWithGoogleServer>>;
+type AuthoritativeSessionSyncResult = Awaited<ReturnType<typeof authenticateWithSupabaseServer>>;
 
 export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Google OAuth User & Role
@@ -250,6 +272,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [authoritativeSessionChecked, setAuthoritativeSessionChecked] = useState(false);
   const [isAccountBlocked, setIsAccountBlocked] = useState<boolean>(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  const [customerModules, setCustomerModules] = useState<string[]>([]);
+  const [customerModulesChecked, setCustomerModulesChecked] = useState<boolean>(false);
   const [userRole, setUserRoleState] = useState<UserRole>('customer');
   // Child components may request a role for navigation, but cannot grant one.
   // Elevated roles are assigned only from a server-verified session/profile.
@@ -260,6 +284,30 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
     if (!isAccountBlocked && authUser?.role === role) setUserRoleState(role);
   };
+  // Resolve the signed-in customer's module allow-list from the server. Guests,
+  // providers and admins get an empty list here (their navigation is not
+  // constrained), so the caller must check `authUser?.role === 'customer'`.
+  const refreshCustomerModules = async () => {
+    const session = supabase ? await supabase.auth.getSession().then((r) => r.data.session) : null;
+    const signedIn = Boolean(authUser || session?.user);
+    if (!signedIn) {
+      setCustomerModules([]);
+      setCustomerModulesChecked(true);
+      return;
+    }
+    const result = await fetchCustomerModules();
+    setCustomerModules(result.ok ? result.modules : []);
+    setCustomerModulesChecked(true);
+  };
+
+  useEffect(() => {
+    if (!authoritativeSessionChecked) return;
+    void refreshCustomerModules();
+    const onUpdated = () => void refreshCustomerModules();
+    window.addEventListener('bos-customer-modules-updated', onUpdated);
+    return () => window.removeEventListener('bos-customer-modules-updated', onUpdated);
+  }, [authoritativeSessionChecked, authUser?.id, authUser?.role]);
+
   const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
   const [supabaseSession, setSupabaseSession] = useState<Session | null>(null);
   const [supabaseProfile, setSupabaseProfile] = useState<SupabaseProfile | null>(null);
@@ -470,23 +518,18 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (inFlight?.accessToken === accessToken) {
       return inFlight.promise;
     }
-    const isEmailOtp = session.user.app_metadata?.provider === 'email'
-      || session.user.identities?.some((identity) => identity.provider === 'email');
-    const authPromise = isEmailOtp
-      ? authenticateWithEmailOtpServer(session.access_token)
-      : authenticateWithGoogleServer({
-        accessToken: session.access_token,
-        email: session.user.email,
-        name:
-          session.user.user_metadata?.full_name ||
-          session.user.user_metadata?.name,
-        googleSub: session.user.user_metadata?.sub || session.user.id,
-        avatarUrl:
-          session.user.user_metadata?.avatar_url ||
-          session.user.user_metadata?.picture,
-        allowRoleChange: false,
-      });
-    const promise = authPromise.then((result) => {
+    const promise = authenticateWithSupabaseServer({
+      accessToken: session.access_token,
+      email: session.user.email,
+      name:
+        session.user.user_metadata?.full_name ||
+        session.user.user_metadata?.name,
+      googleSub: session.user.user_metadata?.sub || session.user.id,
+      avatarUrl:
+        session.user.user_metadata?.avatar_url ||
+        session.user.user_metadata?.picture,
+      allowRoleChange: false,
+    }).then((result) => {
       if (result.ok && result.user) {
         googleSessionSyncCache.current = { accessToken, result };
       }
@@ -752,7 +795,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         address: user.city ? `${user.city}, India` : '',
         avatarUrl: user.avatarUrl || '',
         googleSub: user.googleSub,
-        authProvider: 'google',
+        authProvider: user.authProvider || 'google',
       };
       localStorage.setItem('bos_user_profile_v1', JSON.stringify(profilePayload));
       localStorage.setItem('user_role', user.role);
@@ -942,6 +985,84 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       pending: true,
       error: 'GOOGLE_OAUTH_PENDING',
       message: 'Complete Google sign-in to continue. Your account updates after the server verifies it.',
+    };
+  };
+
+  const completeEmailOtpSignIn = async (
+    email: string,
+    token: string,
+    options?: { verifyWithSupabase?: boolean },
+  ) => {
+    if (!supabase) {
+      return {
+        ok: false,
+        error: 'SUPABASE_AUTH_NOT_CONFIGURED',
+        message: 'Email sign-in is unavailable until Supabase Auth is configured.',
+      };
+    }
+    let accessToken: string;
+    if (options?.verifyWithSupabase) {
+      // Fallback path: Supabase's own email provider sends the code, so the
+      // browser verifies it directly and installs the returned session.
+      const verified = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+      if (verified.error || !verified.data.session) {
+        return {
+          ok: false,
+          error: 'EMAIL_OTP_INVALID',
+          message: verified.error?.message || 'That code is invalid or has expired. Request a new code.',
+        };
+      }
+      accessToken = verified.data.session.access_token;
+    } else {
+      const verified = await verifyEmailOtpCode(email, token);
+      if (!verified.ok || !verified.accessToken || !verified.refreshToken) {
+        return {
+          ok: false,
+          error: verified.error || 'EMAIL_OTP_INVALID',
+          message: verified.message || 'That code is invalid or has expired. Request a new code.',
+        };
+      }
+      const installed = await supabase.auth.setSession({
+        access_token: verified.accessToken,
+        refresh_token: verified.refreshToken,
+      });
+      if (installed.error || !installed.data.session) {
+        return {
+          ok: false,
+          error: 'SUPABASE_SESSION_FAILED',
+          message: installed.error?.message || 'The verified session could not be installed. Please try again.',
+        };
+      }
+      accessToken = installed.data.session.access_token;
+    }
+    const result = await authenticateWithSupabaseServer({ accessToken });
+    if (!result.ok || !result.user || !result.sessionToken) {
+      if (result.error === 'ACCOUNT_BLOCKED') {
+        setIsAccountBlocked(true);
+        setBlockedReason(result.message || 'Your account is blocked.');
+      }
+      return {
+        ok: false,
+        error: result.error || 'AUTH_SESSION_FAILED',
+        message: result.message || 'Sign-in could not be completed. Please try again.',
+      };
+    }
+    setIsAccountBlocked(false);
+    setBlockedReason(null);
+    setAuthUser(result.user);
+    setUserRoleState(result.user.role);
+    syncLocalProfileWithGoogleUser(result.user);
+    try {
+      localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+    } catch {
+      // Private browsing can disable storage; the session itself is still valid.
+    }
+    void refreshServerNotifications();
+    return {
+      ok: true,
+      isNewUser: result.isNewUser,
+      user: result.user,
+      redirectTarget: result.redirectTarget,
     };
   };
 
@@ -1818,7 +1939,11 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         authoritativeSessionChecked,
         isAccountBlocked,
         blockedReason,
+        customerModules,
+        customerModulesChecked,
+        refreshCustomerModules,
         loginWithGoogle,
+        completeEmailOtpSignIn,
         applyPopupOAuthLogin,
         logoutGoogleSession,
         refreshServerNotifications,

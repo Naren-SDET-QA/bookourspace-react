@@ -23,6 +23,8 @@ import {
   ServicesModuleKey,
 } from '../lib/servicesStayRules';
 import type { ModuleFlagRow } from '../server/moduleGate';
+import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
+import { serviceCategoryIconEmoji } from '../lib/serviceCatalog';
 
 interface ServicesDiscoverySectionProps {
   onClose: () => void;
@@ -87,6 +89,7 @@ export function ServicesDiscoverySection({ onClose, onNavigate, onOpenFarmVillag
   const [flags, setFlags] = useState<ModuleFlagRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const { categories: publicServiceCatalog } = usePublicServiceCatalog();
 
   const loadFlags = async () => {
     setLoading(true);
@@ -108,6 +111,10 @@ export function ServicesDiscoverySection({ onClose, onNavigate, onOpenFarmVillag
   }, []);
 
   const activeServiceCategories = useMemo(() => servicesCategories, []);
+  const dynamicServiceCategories = useMemo(
+    () => publicServiceCatalog.filter((category) => !servicesCategories.some((entry) => entry.id === category.id)),
+    [publicServiceCatalog],
+  );
 
   return (
     <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="services-discovery-title">
@@ -176,6 +183,12 @@ export function ServicesDiscoverySection({ onClose, onNavigate, onOpenFarmVillag
                 <button key={category.id} type="button" onClick={() => category.id.startsWith('rural-') ? onOpenFarmVillage(category.id) : onNavigate('services', category.id)} className="flex min-h-24 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-violet-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 dark:border-slate-800 dark:bg-slate-900">
                   <span aria-hidden="true" className="text-2xl">{category.emoji}</span>
                   <span className="min-w-0"><span className="block font-bold leading-snug">{category.name}</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{category.subcategories.length} service types</span></span>
+                </button>
+              ))}
+              {dynamicServiceCategories.map((category) => (
+                <button key={category.id} type="button" onClick={() => onNavigate('services', category.id)} className="flex min-h-24 items-center gap-3 rounded-2xl border border-violet-200 bg-white p-4 text-left shadow-sm transition hover:border-violet-400 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 dark:border-violet-900 dark:bg-slate-900">
+                  <span aria-hidden="true" className="text-2xl">{serviceCategoryIconEmoji(category.config.icon)}</span>
+                  <span className="min-w-0"><span className="block font-bold leading-snug">{category.config.name}</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{category.config.fields.length} booking fields · {category.config.bookingType.replace('_', ' ')}</span></span>
                 </button>
               ))}
             </div>

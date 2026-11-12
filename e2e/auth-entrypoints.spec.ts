@@ -136,6 +136,51 @@ test.describe('signed-out Google sign-in entry points', () => {
   });
 
 
+  test('guest browsing stays hidden when the administrator has not enabled it', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.removeItem('bos_entry_choice_v1');
+      localStorage.removeItem('bos_guest_login_enabled_v1');
+    });
+    await page.route('**/api/auth/config', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        guestLoginEnabled: false,
+        emailOtpEnabled: true,
+        googleLoginEnabled: true,
+        emailOtpConfigured: false,
+        googleConfigured: true,
+      }),
+    }));
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
+    await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
+    await expect(page.getByTestId('entry-continue-guest')).toHaveCount(0);
+    await expect(page.getByTestId('entry-email-sign-in')).toBeVisible();
+  });
+
+  test('the full login page uses email OTP and hides guest when disabled', async ({ page }) => {
+    await page.route('**/api/auth/config', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        guestLoginEnabled: false,
+        emailOtpEnabled: true,
+        googleLoginEnabled: true,
+        emailOtpConfigured: true,
+        googleConfigured: true,
+      }),
+    }));
+    await page.goto('/#login', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('dialog', { name: 'Welcome Back' })).toBeVisible();
+    await expect(page.getByLabel('Email address')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Browse as guest|Explore spaces as guest/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Continue$/ })).toBeVisible();
+  });
+
   test('Google opens the shared auth dialog above welcome and Escape returns with focus', async ({ page }) => {
     await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });

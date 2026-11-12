@@ -92,7 +92,7 @@
           <div id="bos-prelaunch-actions" class="bos-entry-actions" aria-label="Choose how to continue">
             <button id="bos-prelaunch-google" data-testid="entry-google-sign-in" type="button" class="bos-entry-google" aria-describedby="bos-entry-access-note"><span class="bos-entry-google-icon" aria-hidden="true">G</span><span>Continue with Google</span></button>
             <div class="bos-entry-divider" role="separator" aria-label="or"><span>OR</span></div>
-            <button id="bos-prelaunch-guest" data-testid="entry-continue-guest" type="button" class="bos-entry-guest"><span aria-hidden="true">⌖</span><span>Explore Spaces as Guest</span></button>
+            <button id="bos-prelaunch-guest" data-testid="entry-continue-guest" type="button" class="bos-entry-guest" hidden style="display:none"><span aria-hidden="true">⌖</span><span>Explore Spaces as Guest</span></button>
           </div>
           <p class="bos-entry-trust"><span aria-hidden="true">✓</span><span>Google-verified sign-in. Browse first; sign in when you’re ready to book or save favorites.</span></p>
           <p id="bos-prelaunch-status" class="bos-entry-caption" aria-live="polite">Sign in with Google or browse as a guest.</p>
@@ -166,6 +166,12 @@
             });
           });
         });
+        try {
+          if (localStorage.getItem('bos_guest_login_enabled_v1') === '1' && guest) {
+            guest.hidden = false;
+            guest.style.display = '';
+          }
+        } catch (e) {}
         window.__bosEntryActionsReady = true;
         google.addEventListener('click', function () { choose('google'); });
         guest.addEventListener('click', function () { choose('guest'); });

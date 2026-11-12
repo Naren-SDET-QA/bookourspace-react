@@ -66,6 +66,8 @@ interface SpotlightModuleTabsProps {
   onSelectMarketSection: (section: MarketSectionType) => void;
   labels?: Partial<Record<MarketSectionType, string>>;
   compact?: boolean;
+  /** When provided, only these sections are shown (customer module access). */
+  authorizedSections?: MarketSectionType[] | null;
 }
 
 export const SpotlightModuleTabs: React.FC<SpotlightModuleTabsProps> = ({
@@ -73,14 +75,19 @@ export const SpotlightModuleTabs: React.FC<SpotlightModuleTabsProps> = ({
   onSelectMarketSection,
   labels,
   compact = false,
+  authorizedSections = null,
 }) => {
+  const visibleTabs = authorizedSections
+    ? SPOTLIGHT_MODULE_TABS.filter((tab) => authorizedSections.includes(tab.id))
+    : SPOTLIGHT_MODULE_TABS;
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const focusTab = useCallback((index: number) => {
-    const nextIndex = (index + SPOTLIGHT_MODULE_TABS.length) % SPOTLIGHT_MODULE_TABS.length;
-    const nextTab = SPOTLIGHT_MODULE_TABS[nextIndex];
+    if (visibleTabs.length === 0) return;
+    const nextIndex = (index + visibleTabs.length) % visibleTabs.length;
+    const nextTab = visibleTabs[nextIndex];
     tabRefs.current[nextIndex]?.focus();
     onSelectMarketSection(nextTab.id);
-  }, [onSelectMarketSection]);
+  }, [onSelectMarketSection, visibleTabs]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
     if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
@@ -106,7 +113,7 @@ export const SpotlightModuleTabs: React.FC<SpotlightModuleTabsProps> = ({
         ? 'flex gap-1.5 overflow-x-auto no-scrollbar'
         : 'relative grid grid-cols-6 gap-1 sm:gap-2.5 pt-0.5 w-full'}
     >
-      {SPOTLIGHT_MODULE_TABS.map((tab, index) => {
+      {visibleTabs.map((tab, index) => {
         const isActive = activeMarketSection === tab.id;
         const label = labels?.[tab.id] || (compact ? tab.shortLabel : tab.label);
         return (

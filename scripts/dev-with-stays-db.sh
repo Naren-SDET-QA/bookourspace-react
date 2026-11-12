@@ -97,6 +97,9 @@ if [ "$COUNT" = "0" ]; then
 fi
 
 export BOS_LISTINGS_DATABASE_URL="$DB_URL"
+# Local previews intentionally include clearly marked demo fixtures. Production
+# never uses this script; the flag is exported only for this loopback process.
+export VITE_ENABLE_DEMO_DATA="${VITE_ENABLE_DEMO_DATA:-true}"
 # Explicit local preview opt-in. The catalog seeded above is stored with
 # payload.demo=true, and stay search drops demo rows unless this flag is set.
 # Without it the Airbnb-style Stay grid falls back to whatever non-demo rows

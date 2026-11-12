@@ -33,6 +33,8 @@ import { ServiceOperationsWorkspace } from './ServiceOperationsWorkspace';
 import { ServiceCustomerBookings } from './ServiceCustomerBookings';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { getServicesStyle, saveStylePreference, styleFromHash, type ServicesStyle } from '../lib/sectionStyleSettings';
+import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
+import { categoryConfigForListing, serviceCategoryIconEmoji } from '../lib/serviceCatalog';
 
 interface HomeServicesSectionProps {
   listings: MarketplaceListing[];
@@ -68,6 +70,7 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [customerBookingsOpen, setCustomerBookingsOpen] = useState(false);
   const { authUser, supabaseProfile } = useMarketplace();
+  const { categories: serviceCatalog } = usePublicServiceCatalog();
   const viewerRole = ((supabaseProfile?.role || authUser?.role || 'customer') as 'customer' | 'provider' | 'admin');
   const canManageJobs = viewerRole === 'provider' || viewerRole === 'admin';
   const [experienceTab, setExperienceTab] = useState<'old' | 'triangle' | 'noddyy'>(() => {
@@ -121,11 +124,36 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
   }, [onClose, selected, filtersOpen, customerBookingsOpen, workspaceOpen, experienceTab]);
 
   const cards = useMemo(
-    () => listings.filter(isServiceListing).filter((listing) => listing.status === 'active').map(parseServiceListing),
-    [listings],
+    () => listings
+      .filter(isServiceListing)
+      .filter((listing) => listing.status === 'active')
+      .map(parseServiceListing)
+      .map((card) => {
+        const configured = categoryConfigForListing(serviceCatalog, card.categoryId);
+        return configured
+          ? {
+              ...card,
+              categoryName: configured.config.name,
+              categoryEmoji: serviceCategoryIconEmoji(configured.config.icon),
+            }
+          : card;
+      }),
+    [listings, serviceCatalog],
   );
 
-  const categories = useMemo(() => serviceCategoryCounts(cards), [cards]);
+  const categories = useMemo(() => {
+    const known = serviceCategoryCounts(cards);
+    const dynamic = serviceCatalog
+      .filter((category) => !known.some((entry) => entry.id === category.id))
+      .map((category) => ({
+        id: category.id,
+        name: category.config.name,
+        emoji: serviceCategoryIconEmoji(category.config.icon),
+        count: cards.filter((card) => card.categoryId === category.id
+          || category.config.legacyCategoryIds.includes(card.categoryId)).length,
+      }));
+    return [...known, ...dynamic];
+  }, [cards, serviceCatalog]);
   const filtered = useMemo(
     () => filterServiceListings(cards, { query, categoryId, verifiedOnly, maxPrice, quoteOnly }),
     [cards, query, categoryId, verifiedOnly, maxPrice, quoteOnly],
@@ -594,6 +622,7 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       {bookingTarget && (
         <ServiceBookingPanel
           listing={{ id: bookingTarget.id, title: bookingTarget.title, providerName: bookingTarget.providerName }}
+          categoryConfig={categoryConfigForListing(serviceCatalog, bookingTarget.categoryId)}
           onClose={() => setBookingTarget(null)}
         />
       )}

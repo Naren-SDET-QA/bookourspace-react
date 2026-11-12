@@ -116,7 +116,7 @@ try {
     // -------------------------------------------------- signed-out discovery
     const detailsButton = page
       .getByRole('article', { name: `PG listing ${listingTitle}` })
-      .getByRole('button', { name: 'View & book' });
+      .getByRole('button', { name: /^(View & book|View)$/ });
     const listed = await detailsButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the approved PG listing is rendered in the discovery feed`, listed);
     if (!listed) {
@@ -131,7 +131,7 @@ try {
     }
 
     await detailsButton.click();
-    await page.locator('#pg-detail-title').waitFor({ timeout: 15000 });
+    await page.locator('#pg-detail-title, #pg-style3-detail-title').waitFor({ timeout: 15000 });
     const availabilityRegion = page.getByRole('region', { name: 'PG availability and booking' });
     const hasAvailability = await availabilityRegion.waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the PG detail sheet exposes the live availability panel`, hasAvailability);
@@ -171,7 +171,7 @@ try {
 
     const signedInButton = page
       .getByRole('article', { name: `PG listing ${listingTitle}` })
-      .getByRole('button', { name: 'View & book' });
+      .getByRole('button', { name: /^(View & book|View)$/ });
     const signedInListed = await signedInButton.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
     assertCheck(`${viewport.name}: the signed-in customer still sees the listing`, signedInListed);
     if (signedInListed) {

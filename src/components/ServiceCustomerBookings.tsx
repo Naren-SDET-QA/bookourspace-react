@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, CheckCircle2, Loader2, RefreshCw, Star, X, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Loader2, Navigation, RefreshCw, Star, X, XCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   fetchServiceBookings,
@@ -8,6 +8,9 @@ import {
   transitionServiceBooking,
   type ServiceBooking,
 } from '../lib/servicesBookingClient';
+import { DeliveryTrackingPanel } from './tracking/DeliveryTrackingPanel';
+import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
+import { categoryConfigForListing } from '../lib/serviceCatalog';
 import {
   createServicePaymentIntent,
   fetchServicePaymentStatus,
@@ -29,6 +32,8 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
   const [intent, setIntent] = useState<ServicePaymentIntent | null>(null);
   const [intentStatus, setIntentStatus] = useState('');
   const [reviewDraft, setReviewDraft] = useState<Record<string, { rating: number; comment: string }>>({});
+  const [trackingBookingId, setTrackingBookingId] = useState('');
+  const { categories: serviceCatalog } = usePublicServiceCatalog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,7 +147,9 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
         ) : bookings.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500 dark:border-slate-700">No service bookings yet.</p>
         ) : (
-          bookings.map((booking) => (
+          bookings.map((booking) => {
+            const configured = categoryConfigForListing(serviceCatalog, booking.categoryConfigId || booking.categoryId);
+            return (
             <article key={booking.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
@@ -160,15 +167,41 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
               </div>
 
               <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{booking.serviceAddress}</p>
-              <p className="mt-1 text-xs font-semibold">₹{booking.amount.toLocaleString('en-IN')} · {booking.amountBasis}</p>
+              <p className="mt-1 text-xs font-semibold">₹{booking.amount.toLocaleString('en-IN')} · {booking.amountBasis}{booking.quantity > 1 ? ` · quantity ${booking.quantity}` : ''}{` · ${booking.deliveryMode.replace(/_/g, ' ')}`}{booking.recurrenceFrequency !== 'none' ? ` · ${booking.recurrenceFrequency} repeat` : ''}</p>
+              {configured && (
+                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950/40">
+                  <p className="font-black text-slate-700 dark:text-slate-200">{configured.config.name} · v{booking.categoryConfigVersion}</p>
+                  <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                    {Object.entries(booking.fieldValues).map(([key, value]) => (
+                      <p key={key} className="text-slate-600 dark:text-slate-300"><span className="font-bold">{key}:</span> {Array.isArray(value) ? value.join(', ') : String(value)}</p>
+                    ))}
+                  </div>
+                  {booking.documents.length > 0 && (
+                    <div className="mt-1 border-t border-slate-200 pt-1 dark:border-slate-700">
+                      {booking.documents.map((document) => (
+                        <p key={document.id} className="text-slate-600 dark:text-slate-300"><span className="font-bold">{document.documentKey}:</span> {document.status}{document.reviewNote ? ` · ${document.reviewNote}` : ''}</p>
+                      ))}
+                    </div>
+                  )}
+                  {booking.prescriptionStatus !== 'not_required' && <p className={`mt-1 font-bold ${booking.prescriptionStatus === 'verified' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>Prescription: {booking.prescriptionStatus.replace('_', ' ')}</p>}
+                </div>
+              )}
 
               <div className="mt-3 flex flex-wrap gap-2">
+                {['accepted', 'in_progress'].includes(booking.status) && booking.trackingEnabled && (
+                  <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-700 px-4 text-xs font-bold text-white">
+                    <Navigation className="h-3.5 w-3.5" aria-hidden="true" /> Track live
+                  </button>
+                )}
+                {['accepted', 'in_progress'].includes(booking.status) && !booking.trackingEnabled && (
+                  <span className="rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">Live GPS is not enabled for this service.</span>
+                )}
                 {['requested', 'accepted'].includes(booking.status) && (
                   <button type="button" disabled={busyId === booking.id} onClick={() => void cancel(booking)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-rose-300 px-4 text-xs font-bold text-rose-700 disabled:opacity-60 dark:border-rose-900 dark:text-rose-300">
                     <XCircle className="h-3.5 w-3.5" aria-hidden="true" /> Cancel booking
                   </button>
                 )}
-                {['requested', 'accepted'].includes(booking.status) && booking.paymentStatus === 'due' && (
+                {booking.paymentEnabled && ['requested', 'accepted'].includes(booking.status) && booking.paymentStatus === 'due' && (
                   <button type="button" disabled={busyId === booking.id} onClick={() => void pay(booking)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-700 px-4 text-xs font-bold text-white disabled:opacity-60">
                     Pay now by UPI
                   </button>
@@ -201,9 +234,11 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </article>
-          ))
+            );
+          })
         )}
       </main>
+      {trackingBookingId && <DeliveryTrackingPanel bookingId={trackingBookingId} onClose={() => setTrackingBookingId('')} />}
     </div>
   );
 }

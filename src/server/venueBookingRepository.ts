@@ -3,6 +3,7 @@ import type { ProviderListingActor } from './providerListingRepository';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
 import { closeSharedPostgresPool, getSharedPostgresPool } from './postgresPool';
 import type { BookingNotificationContext } from './bookingNotificationEmails';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -13,7 +14,7 @@ export class VenueBookingError extends Error {
   }
 }
 
-export type VenueActor = ProviderListingActor & { supabaseUserId: string; authProvider: 'google' | 'email_otp' };
+export type VenueActor = ProviderListingActor & { supabaseUserId: string; authProvider: VerifiedAuthProvider };
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -38,8 +39,8 @@ export class VenueBookingRepository {
   async close() { await closeSharedPostgresPool(); }
 
   private assertActor(actor: ProviderListingActor | null, roles: string[]): asserts actor is VenueActor {
-    if (!actor || !actor.supabaseUserId || !UUID.test(actor.supabaseUserId) || !['google', 'email_otp'].includes(String(actor.authProvider))) {
-      throw new VenueBookingError('VERIFIED_AUTH_IDENTITY_REQUIRED', 401);
+    if (!hasVerifiedSupabaseIdentity(actor)) {
+      throw new VenueBookingError('VERIFIED_SUPABASE_IDENTITY_REQUIRED', 401);
     }
     if (!roles.includes(actor.role)) throw new VenueBookingError('FORBIDDEN_ROLE', 403);
   }

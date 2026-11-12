@@ -49,7 +49,13 @@ export default defineConfig({
       cookies: [],
       origins: [{
         origin: new URL(externalBaseURL || defaultBaseURL).origin,
-        localStorage: [{ name: 'bos_entry_choice_v1', value: 'guest' }],
+        localStorage: [
+          { name: 'bos_entry_choice_v1', value: 'guest' },
+          // The E2E harness exercises guest journeys; production defaults this
+          // to hidden and only the admin console or BOS_GUEST_LOGIN_ENABLED
+          // turns it on.
+          { name: 'bos_guest_login_enabled_v1', value: '1' },
+        ],
       }],
     },
     headless: true,
@@ -74,6 +80,7 @@ export default defineConfig({
       ...(process.env.BOS_DEV_DB_PORT ? { BOS_DEV_DB_PORT: process.env.BOS_DEV_DB_PORT } : {}),
       ...(process.env.BOS_LISTINGS_DATABASE_URL ? { BOS_LISTINGS_DATABASE_URL: process.env.BOS_LISTINGS_DATABASE_URL } : {}),
       PORT: localWebPort,
+      BOS_GUEST_LOGIN_ENABLED: 'true',
       BOS_DEV_DB_PORT: localDbPort,
       BOS_DEV_DB_DATA_DIR: localDbDataDir,
       BOS_VITE_CACHE_DIR: localViteCacheDir,

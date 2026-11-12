@@ -112,26 +112,8 @@ export async function signUpWithEmailPassword(
 }
 
 export async function signInWithMagicLinkOtp(email: string) {
-  const normalized = email.trim().toLowerCase();
-  if (!supabase) throw new Error('Email OTP sign-in is unavailable until Supabase Auth is configured.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid email address.');
-  const { error } = await supabase.auth.signInWithOtp({
-    email: normalized,
-    options: { shouldCreateUser: true },
-  });
-  if (error) throw error;
-  return { ok: true, email: normalized };
-}
-
-export async function verifyEmailOtp(email: string, token: string) {
-  if (!supabase) throw new Error('Email OTP sign-in is unavailable until Supabase Auth is configured.');
-  const normalized = email.trim().toLowerCase();
-  const code = token.trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid email address.');
-  if (!/^\d{6}$/.test(code)) throw new Error('Enter the six-digit code from your email.');
-  const { data, error } = await supabase.auth.verifyOtp({ email: normalized, token: code, type: 'email' });
-  if (error || !data.session) throw error || new Error('That code is invalid or expired.');
-  return data.session;
+  void email;
+  throw new Error('Email OTP sign-in is disabled. Use Google Sign-In.');
 }
 
 export async function signOutSupabase() {
@@ -664,11 +646,9 @@ export function subscribeToRlsChanges(onRefresh: () => void): () => void {
 // GOOGLE-ONLY OAUTH SESSION & AUTHORITATIVE TOKEN HELPERS
 // ============================================================================
 
-export type AuthoritativeAuthProvider = 'google' | 'email_otp';
-
 export interface AuthoritativeGoogleUser {
   id: string;
-  googleSub?: string;
+  googleSub: string;
   name: string;
   email: string;
   phone: string;
@@ -682,7 +662,7 @@ export interface AuthoritativeGoogleUser {
   totalBookings: number;
   totalListings: number;
   walletBalance: number;
-  authProvider: AuthoritativeAuthProvider;
+  authProvider: 'google' | 'email';
 }
 
 const SESSION_TOKEN_STORAGE_KEY = 'bos_session_token_v1';
@@ -730,28 +710,28 @@ export function getStoredGoogleAuthUser(): AuthoritativeGoogleUser | null {
 }
 
 export function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = {};
-  let contentType = 'application/json';
-  for (const [key, value] of Object.entries(extra || {})) {
-    if (key.toLowerCase() === 'content-type') contentType = value;
-    else headers[key] = value;
-  }
-  headers['Content-Type'] = contentType;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(extra || {}),
+  };
   const token = getStoredAuthoritativeSessionToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  try {
-    const businessId = window.localStorage.getItem('bos_business_id_v1');
-    if (businessId && !headers['x-business-id']) headers['x-business-id'] = businessId;
-  } catch { /* storage is optional */ }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   return headers;
 }
 
 /**
  * Initiates Google OAuth via Supabase (when configured) or via `/api/auth/google/authenticate`
- * and `/api/auth/google/url` popup flow. Enforces verified identity authentication, auto-registration
+ * and `/api/auth/google/url` popup flow. Enforces Google-only authentication, auto-registration
  * for new users, existing user sign-in, role-based routing, and account blocking checks.
  */
-export async function authenticateWithGoogleServer(params: {
+/**
+ * Exchanges a Supabase-verified access token for the server application
+ * session. The server re-verifies the token with Supabase Auth and accepts
+ * either Google OAuth or a verified email one-time code.
+ */
+export async function authenticateWithSupabaseServer(params: {
   accessToken?: string;
   email?: string;
   name?: string;
@@ -775,12 +755,12 @@ export async function authenticateWithGoogleServer(params: {
     return {
       ok: false,
       httpStatus: 401,
-      error: 'VERIFIED_GOOGLE_SESSION_REQUIRED',
-      message: 'Complete Google sign-in before requesting an application session.',
+      error: 'VERIFIED_SUPABASE_SESSION_REQUIRED',
+      message: 'Complete sign-in before requesting an application session.',
     };
   }
   try {
-    const resp = await fetch('/api/auth/google/authenticate', {
+    const resp = await fetch('/api/auth/supabase/authenticate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -811,43 +791,24 @@ export async function authenticateWithGoogleServer(params: {
       ok: false,
       httpStatus: 500,
       error: 'NETWORK_ERROR',
-      message: err?.message || 'Google authentication failed.',
+      message: err?.message || 'Sign-in verification failed.',
     };
   }
 }
 
-export async function authenticateWithEmailOtpServer(accessToken: string): Promise<{
-  ok: boolean;
-  httpStatus: number;
-  isNewUser?: boolean;
-  user?: AuthoritativeGoogleUser;
-  sessionToken?: string;
-  redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
-  error?: string;
-  message?: string;
-}> {
-  if (!accessToken?.trim()) return { ok: false, httpStatus: 401, error: 'VERIFIED_EMAIL_OTP_SESSION_REQUIRED', message: 'Verify the email code before requesting an application session.' };
-  try {
-    const resp = await fetch('/api/auth/email-otp/authenticate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken.trim()}` },
-      body: JSON.stringify({ supabaseProjectId: SUPABASE_PROJECT_ID }),
-    });
-    const data = await resp.json();
-    if (resp.ok && data.ok && data.user && data.sessionToken) setStoredAuthoritativeSession(data.sessionToken, data.user);
-    return {
-      ok: resp.ok && Boolean(data.ok),
-      httpStatus: resp.status,
-      isNewUser: data.isNewUser,
-      user: data.user,
-      sessionToken: data.sessionToken,
-      redirectTarget: data.redirectTarget,
-      error: data.error,
-      message: data.message,
-    };
-  } catch (error: any) {
-    return { ok: false, httpStatus: 500, error: 'NETWORK_ERROR', message: error?.message || 'Email OTP authentication failed.' };
-  }
+/** Historical name kept for callers that only need Google OAuth. */
+export async function authenticateWithGoogleServer(params: {
+  accessToken?: string;
+  email?: string;
+  name?: string;
+  googleSub?: string;
+  avatarUrl?: string;
+  phone?: string;
+  city?: string;
+  requestedRole?: UserRole;
+  allowRoleChange?: boolean;
+}) {
+  return authenticateWithSupabaseServer(params);
 }
 
 export async function fetchGoogleOAuthConfig(requestedRole: UserRole = 'customer'): Promise<{
@@ -1394,7 +1355,7 @@ export async function fetchOwnProviderRegistration() {
 
 export async function submitServerProviderRegistration(body: {
   requestId: string;
-  providerType: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies';
+  providerType: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay';
   businessName: string;
   contactPhone: string;
   city: string;
@@ -1491,7 +1452,10 @@ export async function fetchServerMarketplaceListings(): Promise<{
                   )
                 ))
             : [],
-          customFieldValues: attributes.customFieldValues && typeof attributes.customFieldValues === 'object' ? attributes.customFieldValues : {},
+          customFieldValues: {
+            ...(attributes.customFieldValues && typeof attributes.customFieldValues === 'object' ? attributes.customFieldValues : {}),
+            ...(typeof attributes.sectionType === 'string' ? { sectionType: attributes.sectionType } : {}),
+          },
         } as MarketplaceListing;
       });
     return { source: String(data.source || ''), listings };

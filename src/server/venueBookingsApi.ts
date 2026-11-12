@@ -6,6 +6,7 @@ import {
   type BookingNotificationContext,
   type BookingNotificationEmailDetails,
 } from './bookingNotificationEmails';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 export interface VenueBookingsApiDependencies {
   repository?: VenueBookingRepository | null;
@@ -144,7 +145,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
   app.post('/api/venue-bookings', async(req,res)=>{
     if(!repo)return unavailable(req,res); const actor=actorOf(req,deps.verifySession);
     if(!actor)return res.status(401).json({ok:false,error:'VERIFIED_GOOGLE_IDENTITY_REQUIRED'});
-    if(!['google','email_otp'].includes(String(actor.authProvider))||actor.role!=='customer')return res.status(403).json({ok:false,error:'CUSTOMER_VERIFIED_IDENTITY_REQUIRED'});
+    if(!hasVerifiedSupabaseIdentity(actor)||actor.role!=='customer')return res.status(403).json({ok:false,error:'CUSTOMER_VERIFIED_IDENTITY_REQUIRED'});
     const paymentMode=String(req.body?.paymentMode||'pay_at_venue');
     // The custom HMAC hook below is a test fixture, not a Razorpay or UPI
     // adapter. Keep it unreachable from development and production clients.
@@ -220,7 +221,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
   });
   app.post('/api/venue-bookings/:id/payment-intent', async(req,res)=>{
     if(!repo)return unavailable(req,res); const actor=actorOf(req,deps.verifySession); if(!actor)return res.status(401).json({ok:false,error:'VERIFIED_GOOGLE_IDENTITY_REQUIRED'});
-    if(actor.role!=='customer'||!['google','email_otp'].includes(String(actor.authProvider)))return res.status(403).json({ok:false,error:'CUSTOMER_VERIFIED_IDENTITY_REQUIRED'});
+    if(actor.role!=='customer'||!hasVerifiedSupabaseIdentity(actor))return res.status(403).json({ok:false,error:'CUSTOMER_VERIFIED_IDENTITY_REQUIRED'});
     const provider=String(req.body?.provider||'');
     if(!sandboxOnline||!['sandbox','razorpay','upi_webhook'].includes(provider))return res.status(503).json({ok:false,error:'VERIFIED_ONLINE_PAYMENT_UNAVAILABLE'});
     try{const intent=await repo.insertPaymentIntent(actor,String(req.params.id),provider,null);res.status(201).json({ok:true,intent:{id:intent.id,amountPaise:Number(intent.amount_paise),provider,expiresAt:intent.expires_at},source:'postgres'});}catch(error){sendError(res,error);}

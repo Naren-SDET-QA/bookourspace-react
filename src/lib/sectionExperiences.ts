@@ -177,7 +177,14 @@ export function isPgListing(listing: MarketplaceListing): boolean {
 }
 
 export function isServiceListing(listing: MarketplaceListing): boolean {
-  const section = String(listing.customFieldValues?.sectionType ?? '');
+  // The PostgreSQL public feed keeps the reviewed payload under `attributes`
+  // and also spreads it onto the listing; dynamic category ids are not in the
+  // built-in catalog, so the section marker must be honoured in both places.
+  const section = String(
+    listing.customFieldValues?.sectionType
+      ?? (listing as MarketplaceListing & { sectionType?: unknown }).sectionType
+      ?? '',
+  );
   if (section === 'services') return true;
   return servicesCategories.some((category) => category.id === listing.categoryId);
 }

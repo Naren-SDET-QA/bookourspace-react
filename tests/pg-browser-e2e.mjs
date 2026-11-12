@@ -151,7 +151,11 @@ function pgCardAction(page, listingTitle) {
     .getByRole('article', { name: `PG listing ${listingTitle}` })
     .getByRole('button', { name: 'View & book' });
   const legacy = page.getByRole('button', { name: `View details for ${listingTitle}` });
-  return modern.or(legacy).first();
+  // PG Style 3 uses an article card with a compact "View" action.
+  const style3 = page
+    .getByRole('article', { name: `PG listing ${listingTitle}` })
+    .getByRole('button', { name: 'View', exact: true });
+  return modern.or(legacy).or(style3).first();
 }
 
 async function openLiveListing(page, style) {
@@ -172,33 +176,26 @@ async function openLiveListing(page, style) {
   } catch {
     // A persisted local consent choice may already have dismissed the banner.
   }
-  if (style === 'style1') {
-    await page.locator('#pg-search').fill(listingTitle);
-    await pgCardAction(page, listingTitle).waitFor({ timeout: 10000 });
-    await page.getByRole('button', { name: 'Filters' }).click();
-    await page.getByRole('button', { name: 'Under ₹5,000' }).click();
-    try {
-      await page.getByRole('button', { name: 'Clear all', exact: true }).waitFor({ timeout: 5000 });
-    } catch (error) {
-      const state = await page.evaluate(() => ({
-        pressed: [...document.querySelectorAll('button[aria-pressed="true"]')].map((button) => button.textContent?.trim()),
-        filterButtons: [...document.querySelectorAll('button')].map((button) => button.textContent?.trim()).filter((text) => text && /rent|clear|filter/i.test(text)),
-      }));
-      console.error(`  DIAGNOSTIC ${diagnostics.engineName}/${style} filter state=${JSON.stringify(state)}`);
-      throw error;
-    }
-    await page.getByRole('button', { name: 'Clear all', exact: true }).click();
-    console.log('  INFO  style1 search/filter passed');
-    mark('style1 search/filter complete');
-  } else {
-    // The PostgreSQL fixture has no area attribute; search by its real title
-    // so the Style 2 fixture does not rely on fabricated location metadata.
-    await page.getByPlaceholder('Search Location').fill(listingTitle);
-    await page.getByRole('region', { name: 'pg_hostels section' }).getByRole('button', { name: 'Search', exact: true }).click();
-    await pgCardAction(page, listingTitle).waitFor({ timeout: 10000 });
-    console.log('  INFO  style2 search passed');
-    mark('style2 search complete');
+  // PG is locked to the Style 3 experience in the product. Use its real
+  // search/filter surface for every requested style so this browser journey
+  // follows the mounted UI rather than the old Style 1/2 controls.
+  await page.locator('#pg-search').fill(listingTitle);
+  await pgCardAction(page, listingTitle).waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByRole('button', { name: 'Under ₹5,000' }).click();
+  try {
+    await page.getByRole('button', { name: 'Clear all', exact: true }).waitFor({ timeout: 5000 });
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      pressed: [...document.querySelectorAll('button[aria-pressed="true"]')].map((button) => button.textContent?.trim()),
+      filterButtons: [...document.querySelectorAll('button')].map((button) => button.textContent?.trim()).filter((text) => text && /rent|clear|filter/i.test(text)),
+    }));
+    console.error(`  DIAGNOSTIC ${diagnostics.engineName}/${style} filter state=${JSON.stringify(state)}`);
+    throw error;
   }
+  await page.getByRole('button', { name: 'Clear all', exact: true }).click();
+  console.log(`  INFO  ${style} search/filter passed`);
+  mark(`${style} search/filter complete`);
   await pgCardAction(page, listingTitle).click();
   mark('listing detail opened');
   await page.getByRole('heading', { name: listingTitle }).last().waitFor({ timeout: 10000 });
@@ -225,7 +222,7 @@ async function runResponsiveChecks(engineName, browser) {
     { name: 'tablet', width: 768, height: 1024 },
     { name: 'desktop', width: 1440, height: 900 },
   ]) {
-    for (const style of ['style1', 'style2']) {
+    for (const style of ['style1']) {
       const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 });
       const page = await context.newPage();
       attachBrowserDiagnostics(page, engineName, style);
@@ -287,11 +284,9 @@ async function runOwnerInventoryCheck(browser) {
     results.push(`Chromium owner inventory ${style}: authenticated owner edits PostgreSQL bed pricing/inventory through UI`);
     console.log(`  PASS  ${results.at(-1)}`);
   }
+  // PG is locked to Style 3 by product decision, so one mounted-style journey
+  // covers the supported surface without re-testing a dead route alias.
   await saveInventoryForStyle('style1');
-  await page.getByRole('region', { name: 'pg_hostels section' }).getByRole('button', { name: 'All PGs', exact: true }).click();
-  await page.evaluate(() => { window.location.hash = 'pg/style2'; });
-  await page.getByPlaceholder('Search Location').waitFor({ timeout: 10000 });
-  await saveInventoryForStyle('style2');
   await context.close();
 }
 
@@ -355,10 +350,13 @@ async function runCustomerBookingJourney(browser, style) {
   await page.getByRole('button', { name: 'Pay at the property' }).click();
   await page.getByRole('status').filter({ hasText: /BookOurSpace does not collect or verify this payment/ }).waitFor({ timeout: 10000 });
 
-  const backToResults = page.getByRole('region', { name: 'pg_hostels section' }).getByRole('button', { name: 'All PGs', exact: true });
-  if (await backToResults.count()) await backToResults.click();
+  // The booking sheet can remain above the sticky nav; close it before using
+  // the real bottom-navigation My Bookings destination. Do not depend on the
+  // old "All PGs" control, which is a filter tab rather than a close button.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
   const nav = page.getByRole('navigation', { name: 'Bottom Navigation' });
-  await nav.getByRole('button').nth(2).click();
+  await nav.getByRole('button', { name: 'My Bookings' }).click();
   const myBookings = page.getByRole('region', { name: 'PG bookings' });
   const reservation = myBookings.locator('article').filter({ hasText: listingTitle }).filter({ hasText: moveIn });
   await reservation.waitFor({ timeout: 10000 });
@@ -409,7 +407,12 @@ async function runCustomerBookingJourney(browser, style) {
 }
 
 try {
-  const engineEntries = [['Chromium', chromium], ['Firefox', firefox], ['WebKit', webkit]];
+  const requestedEngines = String(process.env.BOS_PG_BROWSER_ENGINES || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const engineEntries = [['Chromium', chromium], ['Firefox', firefox], ['WebKit', webkit]]
+    .filter(([name]) => requestedEngines.length === 0 || requestedEngines.includes(name.toLowerCase()));
   for (const [engineName, engine] of engineEntries) {
     let browser;
     console.log(`  INFO  starting ${engineName}`);

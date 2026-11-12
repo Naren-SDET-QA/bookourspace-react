@@ -20,6 +20,7 @@ import {
   verifyRazorpayWebhookSignature,
 } from './stayRazorpay';
 import { sendStayPaymentSuccessEmail } from './resendTransactionalEmails';
+import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
 
 // SQL DATE (OID 1082) is a calendar date, not an instant. Letting node-postgres
 // turn it into a JS Date shifts it across timezones and made refund windows
@@ -211,7 +212,7 @@ export function registerStayPayments(app: express.Express, deps: StayPaymentDeps
 
   function actorOf(req: express.Request): Actor | null {
     const session = deps.verifySession(req);
-    if (!session?.supabaseUserId || !['google', 'email_otp'].includes(String(session.authProvider)) || !UUID.test(String(session.supabaseUserId))) return null;
+    if (!hasVerifiedSupabaseIdentity(session)) return null;
     const role = session.role === 'admin' || session.role === 'provider' ? session.role : 'customer';
     return { supabaseUserId: String(session.supabaseUserId), role, email: String(session.email || '').trim().toLowerCase() };
   }

@@ -34,6 +34,7 @@ import {
 } from '../lib/builder/registry';
 import type { NormalizedBlock, NormalizedPageDocument } from '../lib/builder/validate';
 import SafeImage from './SafeImage';
+import { ServiceCategoryBuilder } from './serviceCatalog/ServiceCategoryBuilder';
 import {
   archiveRecord,
   fetchAdminPage,
@@ -72,7 +73,7 @@ interface UniversalLiveBuilderProps {
   onNotify?: (message: string) => void;
 }
 
-type TabId = 'pages' | 'modules' | 'policies' | 'reports' | 'audit';
+type TabId = 'pages' | 'services' | 'modules' | 'policies' | 'reports' | 'audit';
 
 const EMPTY_FIELD: EntityFieldDescriptor = { key: '', label: '', type: 'text', required: false };
 
@@ -666,6 +667,7 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
           <nav className="ml-2 flex gap-1 rounded-lg bg-slate-100 p-1 text-xs">
             {([
               ['pages', 'Pages', Eye],
+              ['services', 'Services', Layers],
               ['modules', 'Modules', Database],
               ['policies', 'Policies', Settings],
               ['reports', 'Reports', BarChart3],
@@ -1130,6 +1132,12 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
                 </div>
               </div>
             )}
+          </div>
+        ) : null}
+
+        {tab === 'services' ? (
+          <div className="flex-1 overflow-y-auto p-4">
+            <ServiceCategoryBuilder onNotify={(message) => notify(message)} />
           </div>
         ) : null}
 

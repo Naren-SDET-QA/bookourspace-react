@@ -56,8 +56,16 @@ export function createMediaUploadHandler(
     const { data: auth, error: authError } = await client.auth.getUser();
     if (authError || !auth.user) throw new Error('MEDIA_UPLOAD_REQUIRES_VERIFIED_SESSION');
     const profileImage = parentType === 'profile_avatar' || parentType === 'profile_cover';
-    const publicMedia = ['image', 'video', 'audio'].includes(details.inspected.kind);
-    const bucket = profileImage ? 'bos-private-profile-media' : publicMedia ? 'bos-public-media' : 'bos-private-documents';
+    // Booking documents (prescriptions, licences, ID proofs) stay private even
+    // when the customer uploads a photo. Public listing media keeps its own
+    // bucket; only the explicit booking_* context switches to private storage.
+    const privateDocument = parentType.startsWith('booking_');
+    const publicMedia = !privateDocument && ['image', 'video', 'audio'].includes(details.inspected.kind);
+    const bucket = profileImage
+      ? 'bos-private-profile-media'
+      : privateDocument
+        ? 'bos-private-documents'
+        : publicMedia ? 'bos-public-media' : 'bos-private-documents';
     const privacy = profileImage || !publicMedia ? 'private' : 'public';
     if (profileImage && (details.inspected.kind !== 'image' || parentId !== auth.user.id)) {
       throw new Error('PROFILE_MEDIA_OWNER_CONTEXT_REQUIRED');

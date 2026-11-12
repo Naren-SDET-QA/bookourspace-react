@@ -6,12 +6,19 @@ import { resolveSupabaseConfig } from './src/lib/supabaseConfig';
 import {
   canLinkSupabaseAuthIdentity,
   isValidSupabaseAuthUserId,
+  verifySupabaseAppIdentity,
   verifySupabaseGoogleIdentity,
   verifySupabaseEmailIdentity,
   verifySupabaseSuperAdmin,
   manageSupabaseUserAccess,
   listSupabaseUserProfiles,
+  type VerifiedSupabaseIdentity,
 } from './src/server/supabaseGoogleIdentity';
+import {
+  hasVerifiedSupabaseIdentity,
+  isVerifiedAuthProvider,
+  type VerifiedAuthProvider,
+} from './src/server/authIdentity';
 import { assertPostgresConnectionTarget, assertProductionPersistenceReady } from './src/server/persistencePolicy';
 import { assertProductionSupabaseEnvironment } from './src/server/supabaseProductionGuard';
 import { closeSharedPostgresPool, initializePostgresRuntime } from './src/server/postgresPool';
@@ -23,6 +30,12 @@ import { registerStayHostApi } from './src/server/stayHostApi';
 import { registerBusinessApi } from './src/server/businessApi';
 import { registerStayAdminApi } from './src/server/stayAdminApi';
 import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
+import { EmailOtpService } from './src/server/emailOtpAuth';
+import { AuthAccessSettingsStore, registerAuthAccessSettingsApi } from './src/server/authAccessSettings';
+import {
+  CustomerModuleAccessRepository,
+  registerCustomerModuleAccessApi,
+} from './src/server/customerModuleAccess';
 import { registerStaySearchApi } from './src/server/staySearchApi';
 import { registerLocationSearchApi } from './src/server/locationSearchApi';
 import { registerStayPayments } from './src/server/stayPayments';
@@ -31,6 +44,7 @@ import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/serve
 import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
+import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
 import { registerProviderOperationsApi } from './src/server/providerOperationsApi';
 import { registerServiceDispatchApi } from './src/server/serviceDispatchApi';
@@ -350,6 +364,7 @@ async function startServer() {
   // development/test. An explicitly configured but unavailable DB fails
   // startup; it never falls back to the JSON compatibility store.
   const providerListingRepository = ProviderListingRepository.fromEnvironment();
+  const customerModuleAccessRepository = CustomerModuleAccessRepository.fromEnvironment();
   // Classes & Training enrollment shares the single local PostgreSQL selector.
   const classEnrollmentRepository = ClassEnrollmentRepository.fromEnvironment();
   const instituteWorkspaceRepository = InstituteWorkspaceRepository.fromEnvironment();
@@ -379,6 +394,18 @@ async function startServer() {
     } catch {
       await serviceBookingRepository.close();
       throw new Error('SERVICE_BOOKINGS_DATABASE_UNAVAILABLE');
+    }
+  }
+
+  // Dynamic service categories share the same canonical database. The
+  // repository is optional locally (public reads then fail closed with 503)
+  // and is re-verified on every administrative request.
+  const serviceCatalogRepository = ServiceCatalogRepository.fromEnvironment();
+  if (serviceCatalogRepository) {
+    try {
+      await serviceCatalogRepository.verifyConnection();
+    } catch {
+      throw new Error('SERVICE_CATALOG_DATABASE_UNAVAILABLE');
     }
   }
 
@@ -1357,7 +1384,7 @@ Task:
 
   interface AuthoritativeUserRecord {
     id: string;
-    /** Supabase Auth UUID from the server-verified Google session, when linked. */
+    /** Supabase Auth UUID from the server-verified sign-in, when linked. */
     supabaseUserId?: string;
     name: string;
     email: string;
@@ -1366,7 +1393,7 @@ Task:
     providerId?: string;
     googleSub?: string;
     avatarUrl?: string;
-    authProvider: 'google' | 'email_otp';
+    authProvider: VerifiedAuthProvider;
     verified: boolean;
     kycDocument: string;
     accountStatus: 'active' | 'suspended' | 'blocked' | 'pending_verification';
@@ -1800,7 +1827,7 @@ Task:
     role: 'customer' | 'provider' | 'admin';
     providerId?: string;
     phone?: string;
-    authProvider?: 'google' | 'email_otp';
+    authProvider?: VerifiedAuthProvider;
     issuedAt: number;
     expiresAt?: number;
   }
@@ -1985,7 +2012,7 @@ Task:
     serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   });
 
-  function authenticateOrRegisterUser(params: {
+  function authenticateOrRegisterSupabaseUser(params: {
     supabaseUserId: string;
     email: string;
     name?: string;
@@ -1995,7 +2022,7 @@ Task:
     requestedRole?: string;
     allowRoleChange?: boolean;
     city?: string;
-    authProvider?: 'google' | 'email_otp';
+    authProvider?: VerifiedAuthProvider;
   }):
     | {
         ok: true;
@@ -2014,6 +2041,7 @@ Task:
       } {
     const cleanEmail = String(params.email || '').trim().toLowerCase();
     const cleanSupabaseUserId = String(params.supabaseUserId || '').trim().toLowerCase();
+    const authProvider: VerifiedAuthProvider = params.authProvider === 'email' ? 'email' : 'google';
     if (!isValidSupabaseAuthUserId(cleanSupabaseUserId)) {
       return {
         ok: false,
@@ -2027,13 +2055,12 @@ Task:
         ok: false,
         status: 400,
         error: 'INVALID_AUTH_EMAIL',
-        message: 'A valid email address is required for sign-in.',
+        message: 'A valid verified account email address is required for sign-in.',
       };
     }
 
     const store = loadAuthoritativeStore();
-    const authProvider = params.authProvider || 'google';
-    const cleanSub = String(params.googleSub || (authProvider === 'google' ? `google-${cleanEmail}` : '')).trim();
+    const cleanSub = String(params.googleSub || `${authProvider}-${cleanEmail}`).trim();
     const nowIso = new Date().toISOString();
 
     // Check if user already exists by googleSub or email
@@ -2180,7 +2207,7 @@ Task:
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
       authProvider,
       verified: true,
-      kycDocument: 'Google OAuth 2.0 Verified',
+      kycDocument: authProvider === 'google' ? 'Google OAuth 2.0 Verified' : 'Email OTP Verified',
       accountStatus: 'active',
       city: (params.city && params.city.trim()) || '',
       joinedAt: nowIso.slice(0, 10),
@@ -2200,8 +2227,8 @@ Task:
     appendAuthoritativeNotification(store, {
       recipientUserId: newUser.id,
       targetRole: assignedRole === 'provider' ? 'providers' : 'customers',
-      title: '🎉 Welcome to BookOurSpace',
-      message: `Account registered automatically via verified ${authProvider === 'google' ? 'Google' : 'email OTP'} for ${newUser.name} (${newUser.email}) as ${assignedRole.toUpperCase()}.`,
+      title: authProvider === 'google' ? '🎉 Welcome to BookOurSpace (Google Verified)' : '🎉 Welcome to BookOurSpace',
+      message: `Account registered automatically via ${authProvider === 'google' ? 'Google OAuth' : 'verified email one-time code'} for ${newUser.name} (${newUser.email}) as ${assignedRole.toUpperCase()}.`,
       type: 'approval',
     });
 
@@ -2300,30 +2327,23 @@ Task:
     res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Completing sign-in</title></head><body><p>Completing secure sign-in…</p><script>window.location.replace(${JSON.stringify(redirectPath)} + window.location.hash)</script></body></html>`);
   });
 
-  // 1C. AUTHORITATIVE GOOGLE OAUTH AUTHENTICATE / AUTO-REGISTER ENDPOINT
-  app.post('/api/auth/google/authenticate', async (req, res) => {
-    const accessToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-    if (!accessToken) {
-      res.status(401).json({ ok: false, error: 'VERIFIED_GOOGLE_SESSION_REQUIRED', message: 'Sign in through the configured Google provider before requesting an application session.' });
-      return;
-    }
-    if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey) {
-      res.status(503).json({ ok: false, error: 'SUPABASE_AUTH_NOT_CONFIGURED', message: 'Google sign-in verification is unavailable until Supabase Auth is configured.' });
-      return;
-    }
-    const identity = await verifySupabaseGoogleIdentity({
-      projectUrl: SUPABASE_PROJECT_URL,
-      publishableKey: serverSupabaseConfig.publishableKey,
-      accessToken,
-    });
-    if (!identity) {
-      res.status(401).json({ ok: false, error: 'INVALID_GOOGLE_SESSION', message: 'Supabase Auth did not verify an active Google identity.' });
-      return;
-    }
+  // 1C. SUPABASE IDENTITY -> APPLICATION SESSION
+  //
+  // Google OAuth and Supabase email one-time codes both produce a verified
+  // Supabase user. This function is the single place that turns such an
+  // identity into a server-signed application session. The route below it
+  // keeps the historical Google-only contract; `/api/auth/supabase/authenticate`
+  // accepts either verified provider.
+  async function issueVerifiedSupabaseSession(
+    res: express.Response,
+    identity: VerifiedSupabaseIdentity,
+  ): Promise<void> {
+    const authProvider = identity.provider;
+    const googleSub = authProvider === 'google' ? identity.googleSub : undefined;
 
     // Production identity is PostgreSQL-only. The legacy JSON store is never
-    // read or written for a production sign-in: the verified Google identity
-    // maps to a durable profile row and the session role comes from that row.
+    // read or written for a production sign-in: the verified identity maps to
+    // a durable profile row and the session role comes from that row.
     if (IS_PRODUCTION_RUNTIME) {
       if (!providerListingRepository) {
         res.status(503).json({ ok: false, error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE' });
@@ -2335,9 +2355,9 @@ Task:
           supabaseUserId: identity.id,
           email: identity.email,
           name: identity.name || identity.email,
-          googleSub: identity.googleSub,
+          ...(googleSub ? { googleSub } : {}),
           avatarUrl: identity.avatarUrl,
-          authProvider: 'google' as const,
+          authProvider,
           role: 'customer' as const,
         };
         const existingProfile = await providerListingRepository.profileForIdentity(identityActor);
@@ -2356,13 +2376,13 @@ Task:
           phone: '',
           role: profileRole,
           ...(providerId ? { providerId } : {}),
-          authProvider: 'google',
+          authProvider,
           issuedAt: Date.now(),
           expiresAt: Date.now() + 12 * 60 * 60_000,
         };
         res.status(existingProfile ? 200 : 201).json({
           ok: true,
-          authProvider: 'google',
+          authProvider,
           supabaseProjectId: SUPABASE_PROJECT_ID,
           isNewUser: !existingProfile,
           user: {
@@ -2373,8 +2393,8 @@ Task:
             phone: '',
             role: profileRole,
             providerId,
-            googleSub: identity.googleSub || '',
-            authProvider: 'google',
+            googleSub: googleSub || '',
+            authProvider,
             verified: true,
             accountStatus: 'active',
             city: '',
@@ -2398,15 +2418,17 @@ Task:
     }
 
     // Identity and email come only from Supabase Auth. New users are customers;
-    // existing server-assigned roles and the server-side admin allowlist remain authoritative.
-    const result = authenticateOrRegisterUser({
+    // existing server-assigned roles and the server-side admin allowlist remain
+    // authoritative.
+    const result = authenticateOrRegisterSupabaseUser({
       supabaseUserId: identity.id,
       email: identity.email,
       name: identity.name,
-      googleSub: identity.googleSub,
+      googleSub,
       avatarUrl: identity.avatarUrl,
       requestedRole: 'customer',
       allowRoleChange: false,
+      authProvider,
     });
 
     if (!result.ok) {
@@ -2425,9 +2447,9 @@ Task:
           supabaseUserId: identity.id,
           email: identity.email,
           name: identity.name,
-          googleSub: identity.googleSub,
+          ...(googleSub ? { googleSub } : {}),
           avatarUrl: identity.avatarUrl,
-          authProvider: 'google',
+          authProvider,
           role: 'customer',
         });
         const profileRole = String(profile.role) as SessionClaims['role'];
@@ -2475,13 +2497,222 @@ Task:
 
     res.status(result.isNewUser ? 201 : 200).json({
       ok: true,
-      authProvider: 'google',
+      authProvider,
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
       user: responseUser,
       sessionToken: responseSessionToken,
       claims: responseClaims,
       redirectTarget: responseRedirectTarget,
+    });
+  }
+
+  // Historical Google-only contract, retained for the existing OAuth flow.
+  app.post('/api/auth/google/authenticate', async (req, res) => {
+    const accessToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!accessToken) {
+      res.status(401).json({ ok: false, error: 'VERIFIED_GOOGLE_SESSION_REQUIRED', message: 'Sign in through the configured Google provider before requesting an application session.' });
+      return;
+    }
+    if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey) {
+      res.status(503).json({ ok: false, error: 'SUPABASE_AUTH_NOT_CONFIGURED', message: 'Google sign-in verification is unavailable until Supabase Auth is configured.' });
+      return;
+    }
+    const identity = await verifySupabaseGoogleIdentity({
+      projectUrl: SUPABASE_PROJECT_URL,
+      publishableKey: serverSupabaseConfig.publishableKey,
+      accessToken,
+    });
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'INVALID_GOOGLE_SESSION', message: 'Supabase Auth did not verify an active Google identity.' });
+      return;
+    }
+    if (!(await signInMethodEnabled('google'))) {
+      res.status(403).json({ ok: false, error: 'GOOGLE_SIGN_IN_DISABLED', message: 'Google sign-in is currently disabled by the administrator.' });
+      return;
+    }
+    await issueVerifiedSupabaseSession(res, { ...identity, provider: 'google' });
+  });
+
+  // Generic verified-Supabase session exchange. Google OAuth and email OTP
+  // both call this after Supabase has proven the address.
+  app.post('/api/auth/supabase/authenticate', async (req, res) => {
+    const accessToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!accessToken) {
+      res.status(401).json({ ok: false, error: 'VERIFIED_SUPABASE_SESSION_REQUIRED', message: 'Complete a verified sign-in before requesting an application session.' });
+      return;
+    }
+    if (!SUPABASE_PROJECT_URL || !serverSupabaseConfig.publishableKey) {
+      res.status(503).json({ ok: false, error: 'SUPABASE_AUTH_NOT_CONFIGURED', message: 'Sign-in verification is unavailable until Supabase Auth is configured.' });
+      return;
+    }
+    const identity = await verifySupabaseAppIdentity({
+      projectUrl: SUPABASE_PROJECT_URL,
+      publishableKey: serverSupabaseConfig.publishableKey,
+      accessToken,
+      allowedProviders: ['google', 'email'],
+    });
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'INVALID_SUPABASE_SESSION', message: 'Supabase Auth did not verify an active signed-in identity.' });
+      return;
+    }
+    if (!(await signInMethodEnabled(identity.provider))) {
+      res.status(403).json({
+        ok: false,
+        error: identity.provider === 'google' ? 'GOOGLE_SIGN_IN_DISABLED' : 'EMAIL_OTP_DISABLED',
+        message: identity.provider === 'google'
+          ? 'Google sign-in is currently disabled by the administrator.'
+          : 'Email sign-in is currently disabled by the administrator.',
+      });
+      return;
+    }
+    await issueVerifiedSupabaseSession(res, identity);
+  });
+
+  // 1C-2. EMAIL ONE-TIME-CODE SIGN-IN
+  //
+  // Supabase generates and verifies the code; Resend delivers it. Neither the
+  // public response nor the browser ever receives the code from this server.
+  const emailOtpService = new EmailOtpService({
+    projectUrl: SUPABASE_PROJECT_URL,
+    publishableKey: serverSupabaseConfig.publishableKey,
+    secretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    resendFrom: process.env.RESEND_FROM_EMAIL || '',
+    resendReplyTo: process.env.RESEND_REPLY_TO || '',
+    resendBaseUrl: process.env.RESEND_API_BASE_URL || '',
+    brandName: 'BookOurSpace',
+    supportEmail: process.env.BOS_SUPPORT_EMAIL || 'support@bookourspace.in',
+  });
+  if (!emailOtpService.configured) {
+    console.warn(
+      `[email-otp] Email sign-in stays disabled until configured: missing ${emailOtpService.missingConfiguration().join(', ')}.`
+    );
+  }
+
+  const authAccessSettings = new AuthAccessSettingsStore({
+    repository: platformSettingsRepository,
+    verifySession: verifySessionTokenFromRequest,
+    resolveAdminActor: async (request) => {
+      const claims = verifySessionTokenFromRequest(request);
+      if (!claims?.userId || !platformSettingsRepository) return null;
+      try {
+        return await platformSettingsRepository.resolveActor(claims.userId);
+      } catch {
+        return null;
+      }
+    },
+    isLocalAdminSession: (claims) => hasCurrentAdminSession(claims as SessionClaims | null),
+    env: process.env,
+    emailOtpConfigured: () => emailOtpService.configured,
+    googleConfigured: Boolean(SUPABASE_PROJECT_URL && serverSupabaseConfig.publishableKey),
+  });
+
+  async function signInMethodEnabled(provider: 'google' | 'email'): Promise<boolean> {
+    try {
+      const settings = await authAccessSettings.load();
+      return provider === 'google' ? settings.googleLoginEnabled : settings.emailOtpEnabled;
+    } catch {
+      // A configuration-read outage must not lock existing users out. The
+      // toggle is a product policy, not an authorization boundary.
+      return true;
+    }
+  }
+
+  registerAuthAccessSettingsApi(app, {
+    repository: platformSettingsRepository,
+    verifySession: verifySessionTokenFromRequest,
+    resolveAdminActor: async (request) => {
+      const claims = verifySessionTokenFromRequest(request);
+      if (!claims?.userId || !platformSettingsRepository) return null;
+      try {
+        return await platformSettingsRepository.resolveActor(claims.userId);
+      } catch {
+        return null;
+      }
+    },
+    isLocalAdminSession: (claims) => hasCurrentAdminSession(claims as SessionClaims | null),
+    env: process.env,
+    emailOtpConfigured: () => emailOtpService.configured,
+    googleConfigured: Boolean(SUPABASE_PROJECT_URL && serverSupabaseConfig.publishableKey),
+  });
+
+  // Customer-specific module access. Admin-only writes; a signed-in customer
+  // reads their effective allow-list and the browser gates section navigation.
+  registerCustomerModuleAccessApi(app, {
+    repository: customerModuleAccessRepository,
+    verifySession: verifySessionTokenFromRequest,
+    resolveAdminActor: async (request) => {
+      const claims = verifySessionTokenFromRequest(request);
+      if (!claims?.userId || !platformSettingsRepository) return null;
+      try {
+        return await platformSettingsRepository.resolveActor(claims.userId);
+      } catch {
+        return null;
+      }
+    },
+    env: process.env,
+  });
+
+  app.post('/api/auth/email-otp/request', async (req, res) => {
+    res.setHeader('cache-control', 'no-store');
+    try {
+      const settings = await authAccessSettings.load();
+      if (!settings.emailOtpEnabled) {
+        res.status(403).json({
+          ok: false,
+          error: 'EMAIL_OTP_DISABLED',
+          message: 'Email sign-in is currently disabled by the administrator.',
+        });
+        return;
+      }
+    } catch {
+      res.status(503).json({ ok: false, error: 'AUTH_CONFIG_UNAVAILABLE' });
+      return;
+    }
+    const result = await emailOtpService.requestCode(req.body?.email, String(req.ip || req.socket.remoteAddress || ''));
+    res.status(result.status).json({
+      ok: result.ok,
+      ...(result.ok
+        ? {
+            cooldownSeconds: result.cooldownSeconds,
+            expiresInSeconds: result.expiresInSeconds,
+          }
+        : { error: result.error, message: result.message, ...(result.retryAfterSeconds ? { retryAfterSeconds: result.retryAfterSeconds } : {}) }),
+    });
+  });
+
+  app.post('/api/auth/email-otp/verify', async (req, res) => {
+    res.setHeader('cache-control', 'no-store');
+    try {
+      const settings = await authAccessSettings.load();
+      if (!settings.emailOtpEnabled) {
+        res.status(403).json({
+          ok: false,
+          error: 'EMAIL_OTP_DISABLED',
+          message: 'Email sign-in is currently disabled by the administrator.',
+        });
+        return;
+      }
+    } catch {
+      res.status(503).json({ ok: false, error: 'AUTH_CONFIG_UNAVAILABLE' });
+      return;
+    }
+    const result = await emailOtpService.verifyCode(
+      req.body?.email,
+      req.body?.token,
+      String(req.ip || req.socket.remoteAddress || ''),
+    );
+    if (!result.ok) {
+      res.status(result.status).json({ ok: false, error: result.error, message: result.message });
+      return;
+    }
+    // The Supabase tokens are returned once; the browser installs them in the
+    // Supabase client, then exchanges them for the server application session.
+    res.status(200).json({
+      ok: true,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
     });
   });
 
@@ -2800,7 +3031,7 @@ Task:
     }
 
     if (IS_PRODUCTION_RUNTIME) {
-      if (!providerListingRepository || !claims.supabaseUserId || !['google', 'email_otp'].includes(String(claims.authProvider))) {
+      if (!providerListingRepository || !hasVerifiedSupabaseIdentity(claims)) {
         res.status(503).json({ ok: false, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -2827,7 +3058,7 @@ Task:
         res.json({
           ok: true,
           authenticated: true,
-          authProvider: 'google',
+          authProvider: claims.authProvider,
           supabaseProjectId: SUPABASE_PROJECT_ID,
           claims: refreshedClaims,
           sessionToken: signSessionToken(refreshedClaims),
@@ -2840,7 +3071,7 @@ Task:
             role,
             providerId,
             googleSub: String((claims as any).googleSub || ''),
-            authProvider: 'google',
+            authProvider: claims.authProvider,
             verified: true,
             accountStatus: 'active',
             status: 'active',
@@ -2882,7 +3113,7 @@ Task:
 
     let effectiveRole = matchedUser ? matchedUser.role : claims.role;
     let refreshedSessionToken: string | undefined;
-    if (providerListingRepository && claims.supabaseUserId && claims.authProvider === 'google') {
+    if (providerListingRepository && hasVerifiedSupabaseIdentity(claims)) {
       try {
         const profile = await providerListingRepository.profileForIdentity(claims);
         if (!profile) {
@@ -2934,7 +3165,7 @@ Task:
         ? claims.providerId || (claims.supabaseUserId ? `prov-${claims.supabaseUserId.slice(0, 8).toLowerCase()}` : undefined)
         : undefined,
       googleSub: String((claims as any).googleSub || ''),
-      authProvider: 'google',
+      authProvider: claims.authProvider || 'google',
       verified: true,
       accountStatus: 'active',
       status: 'active',
@@ -2949,7 +3180,7 @@ Task:
     res.json({
       ok: true,
       authenticated: true,
-      authProvider: 'google',
+      authProvider: claims.authProvider || 'google',
       supabaseProjectId: SUPABASE_PROJECT_ID,
       claims: {
         ...claims,
@@ -3091,7 +3322,7 @@ Task:
     }
 
     if (IS_PRODUCTION_RUNTIME) {
-      if (!providerListingRepository || !claims.supabaseUserId || !['google', 'email_otp'].includes(String(claims.authProvider))) {
+      if (!providerListingRepository || !hasVerifiedSupabaseIdentity(claims)) {
         res.status(503).json({ ok: false, allowed: false, routeTarget, error: 'AUTH_PROFILE_UNAVAILABLE' });
         return;
       }
@@ -3128,7 +3359,7 @@ Task:
             email: profile.email || claims.email || '',
             role,
             accountStatus: 'active',
-            authProvider: 'google',
+            authProvider: claims.authProvider,
           },
         });
         return;
@@ -4001,7 +4232,7 @@ Task:
       res.status(401).json({ ok: false, verified: false, error: 'UNAUTHORIZED_SESSION' });
       return;
     }
-    if (!['google', 'email_otp'].includes(String(claims.authProvider)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(claims.supabaseUserId || ''))) {
+    if (!hasVerifiedSupabaseIdentity(claims)) {
       res.status(401).json({ ok: false, verified: false, error: 'VERIFIED_GOOGLE_IDENTITY_REQUIRED' });
       return;
     }
@@ -4240,7 +4471,7 @@ Task:
           user.supabaseUserId?.toLowerCase() === String(claims.supabaseUserId).toLowerCase() &&
           user.id.toLowerCase() === claims.userId.toLowerCase()
         );
-        if (!currentUser || !['google', 'email_otp'].includes(String(currentUser.authProvider)) || currentUser.accountStatus !== 'active' || currentUser.role !== claims.role) {
+        if (!currentUser || !isVerifiedAuthProvider(currentUser.authProvider) || currentUser.accountStatus !== 'active' || currentUser.role !== claims.role) {
           return response(403, 'ACTIVE_PROFILE_REQUIRED');
         }
         if (currentUser.role !== 'provider' && currentUser.role !== 'admin') return response(403, 'PROVIDER_OR_ADMIN_REQUIRED');
@@ -4471,14 +4702,14 @@ Task:
         users: profiles.map((profile: any) => ({
           id: profile.id,
           supabaseUserId: profile.id,
-          name: profile.full_name || profile.email || 'Google user',
+          name: profile.full_name || profile.email || 'BookOurSpace user',
           email: profile.email,
           phone: profile.phone || '',
           role: profile.role,
           accountStatus: profile.account_status,
           verified: profile.verified === true,
           city: profile.city || '',
-          authProvider: 'google',
+          authProvider: claims.authProvider || 'google',
         })),
         source: 'supabase',
       });
@@ -4831,6 +5062,13 @@ Task:
   registerServiceDispatchApi(app, {
     verifySession: verifySessionTokenFromRequest,
     env: process.env,
+  });
+
+  // Dynamic Super Admin service categories, provider licences and document
+  // review. All write authorization is re-derived from profiles in SQL.
+  registerServiceCatalogApi(app, {
+    repository: serviceCatalogRepository,
+    verifySession: verifySessionTokenFromRequest,
   });
 
   // Real slot availability, provider schedule/profile and server-verified UPI
