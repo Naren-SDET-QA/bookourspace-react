@@ -28,6 +28,19 @@ export interface InstituteWorkspaceData {
   enquiries: Record<string, any>[];
   reviews: Record<string, any>[];
   notifications: Record<string, any>[];
+  classrooms: Record<string, any>[];
+  holidays: Record<string, any>[];
+  leaveRequests: Record<string, any>[];
+  transfers: Record<string, any>[];
+  exams: Record<string, any>[];
+  results: Record<string, any>[];
+  assignments: Record<string, any>[];
+  submissions: Record<string, any>[];
+  certificates: Record<string, any>[];
+  announcements: Record<string, any>[];
+  audit: Record<string, any>[];
+  entitlements: Record<string, any>[];
+  progress: Record<string, any>[];
   analytics: Record<string, number | null>;
 }
 
@@ -46,3 +59,25 @@ export function updateInstituteEnquiry(id: string, enquiryId: string, status: st
 export function markInstituteAttendance(id: string, body: Record<string, unknown>) { return request<{ session: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/attendance`, { method: 'POST', body: JSON.stringify(body) }); }
 export function recordInstituteFeePayment(ledgerId: string, paymentMethod: string, paymentReference: string) { return request<{ fee: Record<string, any> }>(`/api/institute/fees/${encodeURIComponent(ledgerId)}/pay`, { method: 'POST', body: JSON.stringify({ paymentMethod, paymentReference }) }); }
 export function createInstituteFee(id: string, body: Record<string, unknown>) { return request<{ fee: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/fees`, { method: 'POST', body: JSON.stringify(body) }); }
+
+export function saveInstituteClassroom(id: string, classroomId: string | undefined, body: Record<string, unknown>) { return request<{ classroom: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/classrooms${classroomId ? `/${encodeURIComponent(classroomId)}` : ''}`, { method: classroomId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); }
+export function saveInstituteHoliday(id: string, body: Record<string, unknown>) { return request<{ holiday: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/holidays`, { method: 'POST', body: JSON.stringify(body) }); }
+export function deleteInstituteHoliday(id: string, holidayId: string) { return request<{ deleted: boolean }>(`/api/institute/${encodeURIComponent(id)}/holidays/${encodeURIComponent(holidayId)}`, { method: 'DELETE' }); }
+export function enrollInstituteApplicant(id: string, admissionId: string, body: Record<string, unknown>) { return request<{ enrollment: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/admissions/${encodeURIComponent(admissionId)}/enroll`, { method: 'POST', body: JSON.stringify(body) }); }
+export function transferInstituteStudent(id: string, body: Record<string, unknown>) { return request<{ transfer: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/transfers`, { method: 'POST', body: JSON.stringify(body) }); }
+export function reviewInstituteLeave(id: string, leaveId: string, decision: string, note = '') { return request<{ leave: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/leaves/${encodeURIComponent(leaveId)}/review`, { method: 'POST', body: JSON.stringify({ decision, note }) }); }
+export function saveInstituteExam(id: string, examId: string | undefined, body: Record<string, unknown>) { return request<{ exam: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/exams${examId ? `/${encodeURIComponent(examId)}` : ''}`, { method: examId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); }
+export function recordInstituteExamResults(id: string, examId: string, results: Record<string, unknown>[]) { return request<{ saved: number }>(`/api/institute/${encodeURIComponent(id)}/exams/${encodeURIComponent(examId)}/results`, { method: 'POST', body: JSON.stringify({ results }) }); }
+export function publishInstituteExam(id: string, examId: string) { return request<{ exam: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/exams/${encodeURIComponent(examId)}/publish`, { method: 'POST', body: '{}' }); }
+export function saveInstituteAssignment(id: string, assignmentId: string | undefined, body: Record<string, unknown>) { return request<{ assignment: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/assignments${assignmentId ? `/${encodeURIComponent(assignmentId)}` : ''}`, { method: assignmentId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); }
+export function gradeInstituteSubmission(id: string, submissionId: string, body: Record<string, unknown>) { return request<{ submission: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/submissions/${encodeURIComponent(submissionId)}/grade`, { method: 'POST', body: JSON.stringify(body) }); }
+export function issueInstituteCertificate(id: string, body: Record<string, unknown>) { return request<{ certificate: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/certificates`, { method: 'POST', body: JSON.stringify(body) }); }
+export function refundInstituteFee(ledgerId: string, body: Record<string, unknown>) { return request<{ fee: Record<string, any> }>(`/api/institute/fees/${encodeURIComponent(ledgerId)}/refund`, { method: 'POST', body: JSON.stringify(body) }); }
+export function saveInstituteAnnouncement(id: string, body: Record<string, unknown>) { return request<{ announcement: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/announcements`, { method: 'POST', body: JSON.stringify(body) }); }
+export function saveInstituteMember(id: string, body: Record<string, unknown>) { return request<{ member: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/members`, { method: 'POST', body: JSON.stringify(body) }); }
+export function revokeInstituteMember(id: string, memberId: string) { return request<{ member: Record<string, any> }>(`/api/institute/${encodeURIComponent(id)}/members/${encodeURIComponent(memberId)}`, { method: 'DELETE' }); }
+export function fetchInstituteAdminDirectory() { return request<{ institutes: Record<string, any>[] }>('/api/institute/admin/directory'); }
+export function adminInstituteVerification(id: string, body: Record<string, unknown>) { return request<{ institute: Record<string, any> }>(`/api/institute/admin/${encodeURIComponent(id)}/verification`, { method: 'POST', body: JSON.stringify(body) }); }
+export function adminInstituteStatus(id: string, body: Record<string, unknown>) { return request<{ institute: Record<string, any> }>(`/api/institute/admin/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }); }
+export function adminInstituteEntitlement(id: string, body: Record<string, unknown>) { return request<{ entitlement: Record<string, any> }>(`/api/institute/admin/${encodeURIComponent(id)}/entitlement`, { method: 'POST', body: JSON.stringify(body) }); }
+export function fetchInstituteStudentOverview() { return request<{ enrollments: Record<string, any>[]; progress: Record<string, any>[]; leaves: Record<string, any>[]; results: Record<string, any>[]; certificates: Record<string, any>[]; announcements: Record<string, any>[]; fees: Record<string, any>[] }>('/api/institute/student/overview'); }

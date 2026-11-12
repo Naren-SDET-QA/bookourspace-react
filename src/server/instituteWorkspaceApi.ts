@@ -122,4 +122,116 @@ export function registerInstituteWorkspaceApi(app: express.Express, dependencies
     const actor = session(request, response, verifySession); if (!actor) return;
     try { response.status(201).json({ ok: true, fee: await repository.createFeeLedger(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
   });
+
+  // --- Branch infrastructure ---------------------------------------------
+  app.post('/api/institute/:id/classrooms', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, classroom: await repository.saveClassroom(actor, String(request.params.id), undefined, body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.patch('/api/institute/:id/classrooms/:classroomId', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, classroom: await repository.saveClassroom(actor, String(request.params.id), String(request.params.classroomId), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/holidays', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, holiday: await repository.saveHoliday(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.delete('/api/institute/:id/holidays/:holidayId', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, ...(await repository.deleteHoliday(actor, String(request.params.id), String(request.params.holidayId))) }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Admissions -> enrollment -----------------------------------------
+  app.post('/api/institute/:id/admissions/:admissionId/enroll', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, enrollment: await repository.enrollApplicant(actor, String(request.params.id), String(request.params.admissionId), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Student records ---------------------------------------------------
+  app.post('/api/institute/:id/transfers', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, transfer: await repository.transferStudent(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/leaves/:leaveId/review', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, leave: await repository.reviewLeave(actor, String(request.params.id), String(request.params.leaveId), String(body(request).decision || 'approved'), String(body(request).note || '')), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Exams, results, assignments, certificates -------------------------
+  app.post('/api/institute/:id/exams', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, exam: await repository.saveExam(actor, String(request.params.id), undefined, body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.patch('/api/institute/:id/exams/:examId', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, exam: await repository.saveExam(actor, String(request.params.id), String(request.params.examId), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/exams/:examId/results', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, ...(await repository.recordExamResults(actor, String(request.params.id), String(request.params.examId), body(request))), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/exams/:examId/publish', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, exam: await repository.publishExam(actor, String(request.params.id), String(request.params.examId)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/assignments', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, assignment: await repository.saveAssignment(actor, String(request.params.id), undefined, body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.patch('/api/institute/:id/assignments/:assignmentId', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, assignment: await repository.saveAssignment(actor, String(request.params.id), String(request.params.assignmentId), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/submissions/:submissionId/grade', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, submission: await repository.gradeSubmission(actor, String(request.params.id), String(request.params.submissionId), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/certificates', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, certificate: await repository.issueCertificate(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Fees ---------------------------------------------------------------
+  app.post('/api/institute/fees/:ledgerId/refund', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, fee: await repository.refundFee(actor, String(request.params.ledgerId), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Announcements and staff -------------------------------------------
+  app.post('/api/institute/:id/announcements', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, announcement: await repository.saveAnnouncement(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/:id/members', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.status(201).json({ ok: true, member: await repository.saveMember(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.delete('/api/institute/:id/members/:memberId', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, member: await repository.revokeMember(actor, String(request.params.id), String(request.params.memberId)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Super admin -------------------------------------------------------
+  app.get('/api/institute/admin/directory', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.setHeader('Cache-Control', 'private, no-store'); response.json({ ok: true, institutes: await repository.adminDirectory(actor), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/admin/:id/verification', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, institute: await repository.adminReview(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/admin/:id/status', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, institute: await repository.adminSetStatus(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+  app.post('/api/institute/admin/:id/entitlement', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.json({ ok: true, entitlement: await repository.adminSetEntitlement(actor, String(request.params.id), body(request)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
+
+  // --- Student self-service ---------------------------------------------
+  app.get('/api/institute/student/overview', async (request, response) => {
+    const actor = session(request, response, verifySession); if (!actor) return;
+    try { response.setHeader('Cache-Control', 'private, no-store'); response.json({ ok: true, ...(await repository.studentOverview(actor)), source: 'postgres' }); } catch (error) { sendError(response, error); }
+  });
 }

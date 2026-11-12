@@ -285,8 +285,11 @@ export class PgBookingRepository {
                 b.created_at,b.payload,l.owner_id
            from public.bookings b left join public.listings l on l.id=b.listing_id
           where b.payload->>'source'='pg_booking'
-            and (b.user_id=auth.uid() or l.owner_id=auth.uid() or public.is_admin())
+            and (b.user_id=auth.uid()
+                 or (l.owner_id=auth.uid() and ($1::uuid is null or b.business_id=$1::uuid))
+                 or public.is_admin())
           order by b.created_at desc limit 100`,
+        [actor.businessId || null],
       );
       return result.rows.map((row) => ({
         bookingId: row.id, listingId: row.listing_id, listingTitle: row.listing_title, status: row.status,

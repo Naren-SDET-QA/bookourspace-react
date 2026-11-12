@@ -21,9 +21,11 @@ export interface ProviderListingActor {
   authProvider?: 'google' | 'email_otp';
   role: 'customer' | 'provider' | 'admin';
   providerId?: string;
+  /** Server-verified business context; never supplied by the browser. */
+  businessId?: string;
 }
 
-export type ProviderModule = 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay';
+export type ProviderModule = 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies';
 export type ProviderRegistrationStatus = 'pending' | 'approved' | 'rejected';
 
 export interface ProviderRegistrationInput {
@@ -171,7 +173,7 @@ export class ProviderListingRepositoryError extends Error {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const PROVIDER_MODULES = new Set<ProviderModule>(['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay']);
+const PROVIDER_MODULES = new Set<ProviderModule>(['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay', 'movies']);
 const LISTING_STATUS = new Set(['pending_approval', 'active', 'rejected', 'expired', 'archived']);
 const PROVIDER_SETTABLE_STATUS = new Set(['pending_approval', 'archived']);
 
@@ -771,7 +773,23 @@ export class ProviderListingRepository {
         [registrationId, decision, safeText(reviewNote).slice(0, 1000)],
       );
       if (!rows[0]) return null;
-      return { registration: toProviderRegistration(rows[0]), idempotent: false };
+      if (decision === 'approved' && !rows[0].business_id) {
+        const registration = rows[0];
+        const businessRef = `BIZ-REG-${String(registration.id).replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+        const created = await client.query(
+          `insert into public.businesses (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_by,approved_at)
+           values ($1,$2,$3,$4,'approved',true,'provider_registration_approval',$5,$5,now())
+           on conflict (business_ref) do update set updated_at=now()
+           returning id`,
+          [businessRef, safeText(registration.business_name), String(registration.provider_type), String(registration.user_id), actor.supabaseUserId],
+        );
+        if (created.rows[0]?.id) {
+          await client.query('update public.provider_registration_requests set business_id=$1 where id=$2', [created.rows[0].id, registration.id]);
+          await client.query('update public.listings set business_id=$1 where owner_id=$2 and business_id is null and public.business_module_for_listing(category_id,entity_type)=$3', [created.rows[0].id, registration.user_id, registration.provider_type]);
+        }
+      }
+      const refreshed = await client.query('select * from public.provider_registration_requests where id=$1', [registrationId]);
+      return { registration: toProviderRegistration(refreshed.rows[0] || rows[0]), idempotent: false };
     });
   }
 
@@ -781,6 +799,12 @@ export class ProviderListingRepository {
     }
     return this.transaction(actor, async (client) => {
       await this.requireActiveProfile(client, actor);
+      const values: unknown[] = [];
+      let businessClause = '';
+      if (actor.role === 'provider' && actor.businessId) {
+        values.push(actor.businessId);
+        businessClause = ` and l.business_id = $${values.length}`;
+      }
       const { rows } = await client.query(
         `select l.*, p.full_name as provider_name, p.phone as provider_phone,
                 coalesce(media.images, '[]'::jsonb) as public_media_images
@@ -799,16 +823,19 @@ export class ProviderListingRepository {
                 and asset.privacy = 'public'
                 and asset.processing_status = 'ready'
            ) media on true
-          where l.owner_id = auth.uid()
-             or (
-               public.is_admin()
-               and public.live_edit_admin_can_edit(
-                 public.live_edit_listing_module(l.category_id, l.entity_type),
-                 l.category_id,
-                 l.id
-               )
-             )
+          where (
+              l.owner_id = auth.uid()${businessClause}
+              or (
+                public.is_admin()
+                and public.live_edit_admin_can_edit(
+                  public.live_edit_listing_module(l.category_id, l.entity_type),
+                  l.category_id,
+                  l.id
+                )
+              )
+            )
           order by l.updated_at desc, l.id`,
+        values,
       );
       return rows.map(toRecord);
     });
@@ -1094,11 +1121,11 @@ export class ProviderListingRepository {
       };
       const inserted = await client.query(
         `insert into public.listings
-           (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload, is_verified)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+           (id, owner_id, business_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload, is_verified)
+         values ($1, $2, $12, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
          on conflict do nothing
          returning *`,
-        [id, ownerId, title, categoryId, subcategory, entityType, price, priceUnit, insertStatus, JSON.stringify(payload), isVerified],
+        [id, ownerId, title, categoryId, subcategory, entityType, price, priceUnit, insertStatus, JSON.stringify(payload), isVerified, actor.role === 'provider' ? actor.businessId : null],
       );
       if (inserted.rowCount === 1) {
         const row = await this.fetchRecordById(client, id);
@@ -1147,6 +1174,9 @@ export class ProviderListingRepository {
 
       if (actor.role !== 'admin' && String(existing.owner_id) !== actor.supabaseUserId) {
         throw new ProviderListingRepositoryError('FORBIDDEN_NOT_LISTING_OWNER', 403);
+      }
+      if (actor.role === 'provider' && actor.businessId && existing.business_id && String(existing.business_id) !== String(actor.businessId)) {
+        throw new ProviderListingRepositoryError('FORBIDDEN_BUSINESS_CONTEXT', 403);
       }
 
       const superAdmin = actor.role === 'admin' ? await this.isCurrentSuperAdmin(client) : false;
@@ -1362,6 +1392,9 @@ export class ProviderListingRepository {
       if (actor.role === 'provider') {
         if (String(row.owner_id) !== actor.supabaseUserId) {
           throw new ProviderListingRepositoryError('FORBIDDEN_NOT_LISTING_OWNER', 403);
+        }
+        if (actor.businessId && row.business_id && String(row.business_id) !== String(actor.businessId)) {
+          throw new ProviderListingRepositoryError('FORBIDDEN_BUSINESS_CONTEXT', 403);
         }
       } else {
         const superAdmin = await this.isCurrentSuperAdmin(client);

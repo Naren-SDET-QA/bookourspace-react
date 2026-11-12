@@ -3,7 +3,7 @@ import { fetchOwnProviderRegistration, submitServerProviderRegistration } from '
 import type { MarketSectionType } from '../data/servicesStayMoviesData';
 import { ServiceCoveragePicker } from './ServiceCoveragePicker';
 
-type ProviderType = Exclude<MarketSectionType, 'movies'>;
+type ProviderType = MarketSectionType;
 type AuthUser = { name?: string; email?: string; role: string };
 
 const PROVIDER_TYPES: Array<{ id: ProviderType; label: string }> = [
@@ -12,6 +12,7 @@ const PROVIDER_TYPES: Array<{ id: ProviderType; label: string }> = [
   { id: 'venues', label: 'Function Halls & Venues' },
   { id: 'services', label: 'Home & Local Services' },
   { id: 'hotel_stay', label: 'Hotels & Stays' },
+  { id: 'movies', label: 'Movies & Cinema' },
 ];
 
 export function ProviderOnboardingForm({
@@ -23,7 +24,7 @@ export function ProviderOnboardingForm({
   defaultSection: MarketSectionType;
   onClose: () => void;
 }) {
-  const [providerType, setProviderType] = useState<ProviderType>(defaultSection === 'movies' ? 'services' : defaultSection);
+  const [providerType, setProviderType] = useState<ProviderType>(defaultSection);
   const [businessName, setBusinessName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [city, setCity] = useState('');

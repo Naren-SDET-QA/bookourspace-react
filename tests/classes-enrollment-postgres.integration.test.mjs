@@ -122,10 +122,26 @@ async function stopServer() {
 }
 
 async function request(method, url, token, body) {
+  let businessId = '';
+  if (token) {
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString());
+      if (payload.role === 'provider' && payload.supabaseUserId) {
+        const business = await pool.query(
+          `select b.id from public.businesses b join public.business_members m on m.business_id=b.id
+            where b.owner_user_id=$1 and m.user_id=$1 and m.status='active' and b.approval_status='approved'
+            order by b.created_at limit 1`,
+          [payload.supabaseUserId],
+        );
+        businessId = business.rows[0]?.id || '';
+      }
+    } catch { /* normal auth failure */ }
+  }
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(businessId ? { 'x-business-id': businessId } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -165,6 +181,15 @@ async function seedDatabase() {
     `delete from public.listings where id in ($1, $2)`,
     [COURSE_ID, 'class-e2e-other'],
   );
+  for (const [owner, label] of [[provider, 'Class Provider'], [otherProvider, 'Other Class Provider']]) {
+    const ref = `BIZ-CLASS-${owner.replaceAll('-', '').toUpperCase()}`;
+    await pool.query(
+      `insert into public.businesses (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
+       values ($1,$2,'classes',$3,'approved',true,'integration_test',$3,now())
+       on conflict (business_ref) do update set is_enabled=true, approval_status='approved'`,
+      [ref, `${label} Integration Business`, owner],
+    );
+  }
   await pool.query(
     `insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
      values
@@ -378,7 +403,7 @@ dbTest('classes trainer → admin approval → student enrollment → cancellati
   assert.ok(roster.data.enrollments.every((entry) => entry.courseTitle === 'E2E Algebra Course'));
 
   const otherProviderRoster = await request('GET', '/api/provider/classes/enrollments', tokens.otherProvider);
-  assert.equal(otherProviderRoster.status, 200);
+  assert.equal(otherProviderRoster.status, 200, JSON.stringify(otherProviderRoster.data));
   assert.equal(otherProviderRoster.data.enrollments.length, 0, 'another trainer must not see this roster');
 
   // 9b. A trainer cannot attach a batch calendar to another trainer's course.

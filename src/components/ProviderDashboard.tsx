@@ -31,6 +31,8 @@ import InstituteOwnerDashboard from './InstituteOwnerDashboard';
 import StaysOwnerAdminDashboard from './StaysOwnerAdminDashboard';
 import ServicesProviderDashboard from './ServicesProviderDashboard';
 import type { ProviderPortalModule } from './ProviderPortalShell';
+import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
+import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -61,16 +63,53 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   };
 
   // Sort pending_approval listings to the very top so providers see their newly submitted requests immediately
-  const myListings = [...listings].sort((a, b) => {
-    if (a.status === 'pending_approval' && b.status !== 'pending_approval') return -1;
-    if (a.status !== 'pending_approval' && b.status === 'pending_approval') return 1;
-    return 0;
-  });
+  const [businesses, setBusinesses] = useState<BusinessMembership[]>([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  const [businessError, setBusinessError] = useState('');
 
-  const pendingListings = myListings.filter(l => l.status === 'pending_approval');
-  const activeListings = myListings.filter(l => l.status === 'active');
+  useEffect(() => {
+    let active = true;
+    fetchBusinesses()
+      .then((rows) => {
+        if (!active) return;
+        setBusinesses(rows);
+        const preferred = rows.find((row) => row.module_type === 'pg_hostels' && row.approval_status === 'approved') || rows[0];
+        setSelectedBusinessId((current) => current || preferred?.id || '');
+      })
+      .catch((cause) => { if (active) setBusinessError(cause instanceof Error ? cause.message : 'BUSINESS_LIST_UNAVAILABLE'); });
+    return () => { active = false; };
+  }, []);
 
-  const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
+  const selectedBusiness = businesses.find((row) => row.id === selectedBusinessId) || null;
+
+  useEffect(() => {
+    try {
+      if (selectedBusinessId) window.localStorage.setItem('bos_business_id_v1', selectedBusinessId);
+      else window.localStorage.removeItem('bos_business_id_v1');
+    } catch { /* storage is optional */ }
+  }, [selectedBusinessId]);
+
+  const moduleForListing = (listing: { categoryId?: string; entityType?: string }) => {
+    const text = `${listing.categoryId || ''} ${listing.entityType || ''}`.toLowerCase();
+    if (text.includes('pg')) return 'pg_hostels';
+    if (text.includes('class') || text.includes('course')) return 'classes';
+    if (text.includes('venue')) return 'venues';
+    if (text.includes('hotel') || text.includes('stay')) return 'hotel_stay';
+    if (text.includes('movie')) return 'movies';
+    return 'services';
+  };
+
+  const businessListings = [...listings]
+    .filter((listing) => !selectedBusiness || moduleForListing(listing) === selectedBusiness.module_type)
+    .sort((a, b) => {
+      if (a.status === 'pending_approval' && b.status !== 'pending_approval') return -1;
+      if (a.status !== 'pending_approval' && b.status === 'pending_approval') return 1;
+      return 0;
+    });
+
+  const pendingListings = businessListings.filter(l => l.status === 'pending_approval');
+  const activeListings = businessListings.filter(l => l.status === 'active');
+  const totalViews = businessListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
   const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'services' | 'pg_inventory' | 'institute'>('pg_inventory');
 
@@ -216,6 +255,31 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
+      {!businesses.length && !businessError && <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />}
+      {businesses.length > 0 && (
+        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-900 dark:bg-violet-950/20">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">Business</span>
+            {businesses.length > 1 ? (
+              <select value={selectedBusinessId} onChange={(event) => setSelectedBusinessId(event.target.value)} aria-label="Select business" className="min-h-9 max-w-full rounded-xl border border-violet-200 bg-white px-2 text-xs font-bold text-slate-800 dark:border-violet-800 dark:bg-slate-900 dark:text-slate-100">
+                {businesses.map((business) => <option key={business.id} value={business.id}>{business.name} · {BUSINESS_MODULE_LABELS[business.module_type]}</option>)}
+              </select>
+            ) : (
+              <span className="truncate text-xs font-black text-slate-800 dark:text-slate-100">{selectedBusiness?.name} · {selectedBusiness ? BUSINESS_MODULE_LABELS[selectedBusiness.module_type] : ''}</span>
+            )}
+            {selectedBusiness && <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${selectedBusiness.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{selectedBusiness.approval_status}</span>}
+          </div>
+          <span className="text-[10px] font-semibold text-violet-700/80 dark:text-violet-300/80">{selectedBusiness?.role || 'Provider account'}</span>
+        </section>
+      )}
+      {businessError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">Business context unavailable: {businessError}. Showing the legacy provider view.</p>}
+      {selectedBusiness && selectedBusiness.approval_status !== 'approved' && (
+        <section role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+          <h3 className="text-sm font-black text-amber-900 dark:text-amber-100">Business access is {selectedBusiness.approval_status}</h3>
+          <p className="mt-1 text-xs font-semibold text-amber-800 dark:text-amber-200">Protected listings, bookings, payments and reports stay closed until a Super Admin approves or re-enables this business.</p>
+        </section>
+      )}
+
       {/* KPI Numbers */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -298,9 +362,9 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           }`}
         >
           {loc(
-            `My Provider Listings (${myListings.length})`,
-            `నా ప్రొవైడర్ లిస్టింగ్‌లు (${myListings.length})`,
-            `मेरी प्रोवाइडर लिस्टिंग (${myListings.length})`
+            `My Provider Listings (${businessListings.length})`,
+            `నా ప్రొవైడర్ లిస్టింగ్‌లు (${businessListings.length})`,
+            `मेरी प्रोवाइडर लिस्टिंग (${businessListings.length})`
           )}
         </button>
 
@@ -635,14 +699,14 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {activeSubTab === 'services' && <ServicesProviderDashboard role={supabaseProfile?.role} onNavigate={navigatePortalModule} />}
 
-      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
+      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace businessId={selectedBusinessId || undefined} businessRole={selectedBusiness?.role} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
 
       {activeSubTab === 'institute' && <InstituteOwnerDashboard onSwitchToMarketplace={onSwitchToMarketplace} />}
 
       {/* --- SUBTAB 1: MY LISTINGS --- */}
       {activeSubTab === 'listings' && (
         <div className="space-y-3">
-          {myListings.map(listing => (
+          {businessListings.map(listing => (
             <div
               key={listing.id}
               className={`bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
@@ -966,10 +1030,10 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         <div className="space-y-6 animate-in fade-in duration-200">
           <CraftoPosterGenerator
             currentLang={currentLang === 'te' ? 'te' : 'en'}
-            userName={supabaseProfile?.full_name || myListings[0]?.providerName || 'NARENDRA'}
-            userPhone={supabaseProfile?.phone || myListings[0]?.providerPhone || '98480 12345'}
+            userName={supabaseProfile?.full_name || businessListings[0]?.providerName || 'NARENDRA'}
+            userPhone={supabaseProfile?.phone || businessListings[0]?.providerPhone || '98480 12345'}
             userAvatar={
-              myListings[0]?.providerAvatar ||
+              businessListings[0]?.providerAvatar ||
               supabaseProfile?.avatar_url ||
               '/assets/optimized/profile-avatar-256.webp'
             }

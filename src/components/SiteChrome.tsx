@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowUp, HelpCircle, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import {
   parsePrivacyConsent,
@@ -102,52 +103,74 @@ export default function SiteChrome({ onOpenHelp }: { onOpenHelp: () => void }) {
         <span style={{ width: `${progress}%` }} />
       </div>
 
-      {showTop && (
-        <button
-          type="button"
-          className="bos-back-to-top"
-          data-bos-chrome="back-to-top"
-          onClick={scrollToTop}
-          aria-label="Back to top"
-        >
-          <ArrowUp className="h-4 w-4" aria-hidden="true" />
-        </button>
-      )}
+      <AnimatePresence initial={false}>
+        {showTop && (
+          <motion.button
+            key="back-to-top"
+            type="button"
+            className="bos-back-to-top"
+            data-bos-chrome="back-to-top"
+            onClick={scrollToTop}
+            aria-label="Back to top"
+            initial={{ opacity: 0, y: 10, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.9 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            whileTap={{ scale: 0.94 }}
+          >
+            <ArrowUp className="h-4 w-4" aria-hidden="true" />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
-      <button
+      <motion.button
         type="button"
         className="bos-help-fab"
         data-bos-chrome="help"
         onClick={onOpenHelp}
         aria-label="Help and frequently asked questions"
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.96 }}
       >
         <HelpCircle className="h-5 w-5" aria-hidden="true" />
         <span className="hidden sm:inline">Help</span>
-      </button>
+      </motion.button>
 
-      {bannerOpen && (
-        <div className="bos-cookie-banner" data-bos-chrome="cookie" role="dialog" aria-label="Privacy choices">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-black text-slate-900 dark:text-white">Privacy on BookOurSpace</p>
-              <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                Essential cookies keep sign-in, bookings and payments working. Optional campaign tags (UTM) stay on this device only if you allow them. Nothing is sold to advertisers.
-              </p>
+      <AnimatePresence initial={false}>
+        {bannerOpen && (
+          <motion.div
+            key="privacy-banner"
+            className="bos-cookie-banner"
+            data-bos-chrome="cookie"
+            role="dialog"
+            aria-label="Privacy choices"
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 18 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-slate-900 dark:text-white">Privacy on BookOurSpace</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                  Essential cookies keep sign-in, bookings and payments working. Optional campaign tags (UTM) stay on this device only if you allow them. Nothing is sold to advertisers.
+                </p>
+              </div>
+              <button type="button" className="rounded-full p-1 text-slate-500" onClick={() => choosePrivacy('essential')} aria-label="Dismiss privacy notice">
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
             </div>
-            <button type="button" className="rounded-full p-1 text-slate-500" onClick={() => choosePrivacy('essential')} aria-label="Dismiss privacy notice">
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={() => choosePrivacy('essential')} className="min-h-10 rounded-xl border border-slate-300 px-3 text-xs font-bold dark:border-slate-600">
-              Essential only
-            </button>
-            <button type="button" onClick={() => choosePrivacy('analytics')} className="min-h-10 rounded-xl bg-indigo-700 px-3 text-xs font-black text-white">
-              Allow campaign tags
-            </button>
-          </div>
-        </div>
-      )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={() => choosePrivacy('essential')} className="min-h-10 rounded-xl border border-slate-300 px-3 text-xs font-bold dark:border-slate-600">
+                Essential only
+              </button>
+              <button type="button" onClick={() => choosePrivacy('analytics')} className="min-h-10 rounded-xl bg-indigo-700 px-3 text-xs font-black text-white">
+                Allow campaign tags
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
