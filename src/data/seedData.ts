@@ -25,7 +25,6 @@ const baseSeedListings: MarketplaceListing[] = [
       pincode: '500081'
     },
     images: [
-      'storage://bos-public-media/887f5e06-e06d-4bee-a5a2-081f6cbd32ec/services/provider_listing/1739b44f-3a47-4d0f-a1fd-0e42a2088747/original-ec263ce3fce94b09.jpg',
       'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=800&q=80',
       'https://images.unsplash.com/photo-1527515637462-cff94eecc1ac?auto=format&fit=crop&w=800&q=80'
     ],

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { buildAuthHeaders } from '../../lib/supabaseClient';
 import { BookingQrCameraScanner } from './BookingQrCameraScanner';
+import SafeImage from '../SafeImage';
 import {
   ACCESSIBILITY_OPTIONS,
   AMENITY_OPTIONS,
@@ -862,6 +863,13 @@ export function StayHostWorkspace({
                           <ul className="mt-2 grid grid-cols-3 gap-2">
                             {detail.media.map((asset) => (
                               <li key={asset.id} className="rounded-lg border border-[#ebebeb] p-2 text-[11px] dark:border-slate-800">
+                                <SafeImage
+                                  category="stays"
+                                  src={asset.reference}
+                                  alt={asset.alt_text || 'Stay photo'}
+                                  className="mb-1.5 h-20 w-full rounded object-cover"
+                                  sizes="180px"
+                                />
                                 <span className="block truncate font-mono">{asset.reference.split('/').pop()}</span>
                                 <span className="block truncate text-[#717171] dark:text-slate-400">{asset.alt_text || 'No alt text'}</span>
                               </li>

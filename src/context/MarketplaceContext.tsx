@@ -327,6 +327,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     result: AuthoritativeSessionSyncResult;
   } | null>(null);
   const demoListingIdsRef = useRef<Set<string>>(new Set());
+  const demoSeedHydratedRef = useRef(false);
 
   // Browser storage and fixture data are not authoritative inventory. Preserve
   // existing local values, but show them only in explicit local demo mode.
@@ -414,7 +415,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const stored = localStorage.getItem(key);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed)) return parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
         localStorage.setItem(key, JSON.stringify(seed));
       } catch {
@@ -425,9 +426,13 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     void import('../data/seedData').then((seed) => {
       if (!active) return;
       demoListingIdsRef.current = new Set(seed.initialListings.map((listing) => listing.id));
-      setListings((current) => current.length > 20
-        ? current
-        : loadStoredOrSeed('marketplace_listings_v18', seed.initialListings).map(ensureListingPriceBreakdown));
+      demoSeedHydratedRef.current = true;
+      setListings((current) => {
+        const seeded = loadStoredOrSeed('marketplace_listings_v18', seed.initialListings).map(ensureListingPriceBreakdown);
+        if (!current.length) return seeded;
+        const existingIds = new Set(current.map((listing) => listing.id));
+        return [...current, ...seeded.filter((listing) => !existingIds.has(listing.id))];
+      });
       setEnquiries((current) => current.length ? current : loadStoredOrSeed('marketplace_enquiries', seed.initialEnquiries));
       setBookings((current) => current.length ? current : loadStoredOrSeed('marketplace_bookings', seed.initialBookings));
       setReviews((current) => current.length ? current : loadStoredOrSeed('marketplace_reviews', seed.initialReviews));
@@ -1195,7 +1200,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Sync to local storage
   useEffect(() => {
-    if (!DEMO_DATA_ENABLED) return;
+    if (!DEMO_DATA_ENABLED || !demoSeedHydratedRef.current) return;
     try {
       localStorage.setItem('marketplace_listings_v18', JSON.stringify(listings));
     } catch {}
@@ -1214,28 +1219,28 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [postingPlans]);
 
   useEffect(() => {
-    if (!DEMO_DATA_ENABLED) return;
+    if (!DEMO_DATA_ENABLED || !demoSeedHydratedRef.current) return;
     try {
       localStorage.setItem('marketplace_enquiries', JSON.stringify(enquiries));
     } catch {}
   }, [enquiries]);
 
   useEffect(() => {
-    if (!DEMO_DATA_ENABLED) return;
+    if (!DEMO_DATA_ENABLED || !demoSeedHydratedRef.current) return;
     try {
       localStorage.setItem('marketplace_bookings', JSON.stringify(bookings));
     } catch {}
   }, [bookings]);
 
   useEffect(() => {
-    if (!DEMO_DATA_ENABLED) return;
+    if (!DEMO_DATA_ENABLED || !demoSeedHydratedRef.current) return;
     try {
       localStorage.setItem('marketplace_reviews', JSON.stringify(reviews));
     } catch {}
   }, [reviews]);
 
   useEffect(() => {
-    if (!DEMO_DATA_ENABLED) return;
+    if (!DEMO_DATA_ENABLED || !demoSeedHydratedRef.current) return;
     try {
       localStorage.setItem('marketplace_transactions', JSON.stringify(transactions));
     } catch {}

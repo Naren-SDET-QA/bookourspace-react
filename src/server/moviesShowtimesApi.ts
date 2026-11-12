@@ -30,7 +30,82 @@ function showtimes(value: unknown): string[] | null {
   return times;
 }
 
-function mapRow(row: Record<string, any>) {
+export type MovieSchemaCapabilities = { approvalStatus: boolean; state: boolean };
+
+const CAPABILITY_CACHE = new WeakMap<Pool, Promise<MovieSchemaCapabilities>>();
+
+/**
+ * The Movies state/approval columns arrive with
+ * 20261112330000_movies_state_approval.sql. Until that migration is applied the
+ * read path must not filter on columns that do not exist, or a public showtimes
+ * request fails with 42703.
+ */
+export function movieSchemaCapabilities(pool: Pool): Promise<MovieSchemaCapabilities> {
+  const cached = CAPABILITY_CACHE.get(pool);
+  if (cached) return cached;
+  const pending = pool
+    .query(
+      `select
+          bool_or(column_name = 'approval_status') as approval_status,
+          bool_or(column_name = 'state') as state
+         from information_schema.columns
+        where table_schema = 'public' and table_name = 'cinema_screens'
+          and column_name in ('approval_status', 'state')`,
+    )
+    .then(({ rows }) => ({
+      approvalStatus: rows[0]?.approval_status === true,
+      state: rows[0]?.state === true,
+    }))
+    .catch(() => ({ approvalStatus: false, state: false }));
+  CAPABILITY_CACHE.set(pool, pending);
+  return pending;
+}
+
+export function buildShowtimeFilters(
+  capabilities: MovieSchemaCapabilities,
+  options: {
+    includeHidden: boolean;
+    state?: string | null;
+    city?: string | null;
+    area?: string | null;
+    pincode?: string | null;
+    providerUserId?: string | null;
+  },
+): { clauses: string[]; values: unknown[] } {
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+  if (!options.includeHidden) {
+    if (capabilities.approvalStatus) clauses.push("approval_status = 'approved'");
+    clauses.push('is_visible is true');
+    clauses.push("btrim(coalesce(movie_title, '')) <> ''");
+    clauses.push("btrim(coalesce(cinema_title, '')) <> ''");
+    clauses.push('show_date = current_date');
+    clauses.push('jsonb_array_length(showtimes) > 0');
+  }
+  if (capabilities.state && options.state && options.state !== 'All states') {
+    values.push(options.state);
+    clauses.push(`state = $${values.length}`);
+  }
+  if (options.city && options.city.toLowerCase() !== 'all cities' && options.city.toLowerCase() !== 'all locations') {
+    values.push(options.city);
+    clauses.push(`lower(city) = lower($${values.length})`);
+  }
+  if (options.includeHidden && options.providerUserId) {
+    values.push(options.providerUserId);
+    clauses.push(`cinema_listing_id in (select id from public.listings where owner_id = $${values.length}::uuid)`);
+  }
+  if (options.area) {
+    values.push(`%${options.area}%`);
+    clauses.push(`area ilike $${values.length}`);
+  }
+  if (options.pincode) {
+    values.push(options.pincode);
+    clauses.push(`pincode = $${values.length}`);
+  }
+  return { clauses, values };
+}
+
+function mapRow(row: Record<string, any>, capabilities: MovieSchemaCapabilities = { approvalStatus: true, state: true }) {
   return {
     id: String(row.id),
     screenId: String(row.id),
@@ -42,14 +117,14 @@ function mapRow(row: Record<string, any>) {
     showDate: row.show_date ? String(row.show_date).slice(0, 10) : null,
     screenName: row.screen_name,
     city: row.city || null,
-    state: row.state || null,
+    state: capabilities.state ? row.state || null : null,
     area: row.area || null,
     pincode: row.pincode || null,
     showtimes: Array.isArray(row.showtimes) ? row.showtimes : [],
     format: row.format,
     soundSystem: row.sound_system,
     isVisible: row.is_visible === true,
-    approvalStatus: row.approval_status || 'pending',
+    approvalStatus: row.approval_status || (capabilities.approvalStatus ? 'pending' : 'approved'),
     updatedAt: row.updated_at,
     syncedAt: row.showtimes_synced_at || null,
     source: row.showtime_source || null,
@@ -65,40 +140,17 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     const claims = deps.verifySession(req);
     const isAdmin = claims?.role === 'admin';
     const includeHidden = (isAdmin || claims?.role === 'provider') && String(req.query.includeHidden || '') === '1';
-    const city = text(req.query.city, 80);
-    const state = text(req.query.state, 40);
-    const area = text(req.query.area, 120);
-    const pincode = text(req.query.pin, 10);
-    const clauses: string[] = [];
-    const values: unknown[] = [];
-    if (!includeHidden) {
-      clauses.push("approval_status = 'approved'");
-      clauses.push('is_visible is true');
-      clauses.push("btrim(coalesce(movie_title, '')) <> ''");
-      clauses.push("btrim(coalesce(cinema_title, '')) <> ''");
-      clauses.push('show_date = current_date');
-      clauses.push("jsonb_array_length(showtimes) > 0");
-    }
-    if (state && state !== 'All states') {
-      values.push(state);
-      clauses.push(`state = $${values.length}`);
-    }
-    if (city && city.toLowerCase() !== 'all cities' && city.toLowerCase() !== 'all locations') {
-      values.push(city);
-      clauses.push(`lower(city) = lower($${values.length})`);
-    }
-    if (includeHidden && claims?.role === 'provider') {
-      values.push(claims.supabaseUserId || claims.userId || '');
-      clauses.push(`cinema_listing_id in (select id from public.listings where owner_id = $${values.length}::uuid)`);
-    }
-    if (area) {
-      values.push(`%${area}%`);
-      clauses.push(`area ilike $${values.length}`);
-    }
-    if (pincode) {
-      values.push(pincode);
-      clauses.push(`pincode = $${values.length}`);
-    }
+    const capabilities = await movieSchemaCapabilities(deps.pool);
+    const { clauses, values } = buildShowtimeFilters(capabilities, {
+      includeHidden,
+      state: text(req.query.state, 40),
+      city: text(req.query.city, 80),
+      area: text(req.query.area, 120),
+      pincode: text(req.query.pin, 10),
+      providerUserId: includeHidden && claims?.role === 'provider'
+        ? claims.supabaseUserId || claims.userId || ''
+        : null,
+    });
     try {
       const { rows } = await deps.pool.query(
         `select * from public.cinema_screens
@@ -106,7 +158,7 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
           order by movie_title nulls last, cinema_title asc, screen_name asc, id asc`,
         values,
       );
-      const screens = rows.map(mapRow);
+      const screens = rows.map((row) => mapRow(row, capabilities));
       const movies = Array.from(new Set(screens.map((screen) => screen.movieTitle).filter(Boolean) as string[]));
       const lastUpdated = rows.reduce<string | null>((latest, row) => {
         const value = row.updated_at ? new Date(row.updated_at).toISOString() : null;
@@ -125,6 +177,14 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     if (!claims) return res.status(401).json({ ok: false, error: 'AUTH_REQUIRED' });
     if (claims.role !== 'admin' && claims.role !== 'provider') {
       return res.status(403).json({ ok: false, error: 'ADMIN_OR_THEATRE_OWNER_REQUIRED' });
+    }
+    const writeCapabilities = await movieSchemaCapabilities(deps.pool);
+    if (!writeCapabilities.approvalStatus || !writeCapabilities.state) {
+      return res.status(503).json({
+        ok: false,
+        error: 'MOVIES_APPROVAL_MIGRATION_REQUIRED',
+        message: 'The Movies state and approval migration must be applied before showtimes can be edited.',
+      });
     }
     const screenId = String(req.params.screenId || '').trim();
     if (!screenId) return res.status(400).json({ ok: false, error: 'SCREEN_ID_REQUIRED' });
@@ -209,6 +269,14 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     if (!deps.pool) return unavailable(res);
     const claims = deps.verifySession(req);
     if (claims?.role !== 'admin') return res.status(403).json({ ok: false, error: 'ADMIN_REQUIRED' });
+    const approvalCapabilities = await movieSchemaCapabilities(deps.pool);
+    if (!approvalCapabilities.approvalStatus) {
+      return res.status(503).json({
+        ok: false,
+        error: 'MOVIES_APPROVAL_MIGRATION_REQUIRED',
+        message: 'The Movies state and approval migration must be applied before approvals can be recorded.',
+      });
+    }
     const status = String(req.body?.status || '');
     if (!['pending','approved','disabled'].includes(status)) return res.status(400).json({ ok: false, error: 'INVALID_APPROVAL_STATUS' });
     try {
@@ -225,6 +293,14 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     if (!deps.pool) return unavailable(res);
     const claims = deps.verifySession(req);
     if (claims?.role !== 'admin') return res.status(403).json({ ok: false, error: 'ADMIN_REQUIRED' });
+    const syncCapabilities = await movieSchemaCapabilities(deps.pool);
+    if (!syncCapabilities.approvalStatus || !syncCapabilities.state) {
+      return res.status(503).json({
+        ok: false,
+        error: 'MOVIES_APPROVAL_MIGRATION_REQUIRED',
+        message: 'The Movies state and approval migration must be applied before showtimes can be synced.',
+      });
+    }
     const expected = String(deps.env.BOS_MOVIES_SYNC_TOKEN || '').trim();
     if (expected.length < 16) {
       return res.status(503).json({

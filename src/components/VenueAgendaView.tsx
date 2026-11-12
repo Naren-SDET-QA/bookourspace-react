@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowRight, MapPin, Star } from 'lucide-react';
 import type { MarketplaceListing } from '../types/marketplace';
 import SafeImage from './SafeImage';
+import { listingImageSources } from '../lib/media/signedStorageUrl';
 
 /**
  * Agenda-style Venues discovery. This is intentionally a different design from
@@ -27,7 +28,7 @@ export function VenueAgendaView({
       </div>
       <ol className="space-y-2.5">
         {listings.map((listing, index) => {
-          const photo = (listing as any).images?.[0] || (listing as any).imageUrl || (listing as any).photo;
+          const photo = listingImageSources((listing as any).images, listing, (listing as any).imageUrl, (listing as any).photo)[0] || '';
           const price = Number((listing as any).priceFromPaise ?? (listing as any).pricePaise ?? 0);
           const rating = Number((listing as any).rating ?? 0);
           const area = [(listing as any).area, (listing as any).city].filter(Boolean).join(', ');

@@ -308,3 +308,56 @@ test('a stale responsive variant falls back to the persisted original photo afte
   expect(await reloadedImage.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
   expect(await reloadedImage.evaluate((element: HTMLImageElement) => element.currentSrc)).toMatch(/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
 });
+
+test('SafeImage recovers from repeated failing signed URLs without stalling in loading', async ({ page }) => {
+  let signAttempts = 0;
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/object/sign/**', async (route) => {
+    if (route.request().method() === 'POST') {
+      signAttempts += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ signedURL: '/object/sign/bos-public-media/owner/listing/missing-file.webp?token=same' }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'text/plain', body: 'missing' });
+  });
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/rest/v1/media_assets**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/marketplace/listings', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      source: 'postgresql',
+      listings: [{
+        id: 'venue-broken-signed-1',
+        title: 'Broken signed venue recovery check',
+        categoryId: 'venue-marriage',
+        subcategory: 'Function Hall',
+        entityType: 'venue',
+        price: 15000,
+        priceUnit: 'event',
+        providerName: 'Verified venue owner',
+        createdAt: '2026-11-10',
+        attributes: {
+          images: ['storage://bos-public-media/owner/listing/missing-file.webp'],
+          location: { city: 'Hyderabad', area: 'Madhapur' },
+        },
+      }],
+    }),
+  }));
+  await page.addInitScript(() => {
+    window.localStorage.setItem('bos_section_style_prefs_v1', JSON.stringify({ venues: 'agenda' }));
+  });
+  await page.goto('/#venues', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: /All Venues & Halls/ })).toBeVisible({ timeout: 30_000 });
+  const img = page.locator('article img[data-safe-image]').first();
+  await expect(img).toBeVisible();
+  await img.scrollIntoViewIfNeeded();
+  await expect(img).toHaveAttribute('src', /\/assets\/fallbacks\/venues\.webp$/);
+  await expect(img).toHaveAttribute('data-image-state', 'loaded');
+  expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+  expect(signAttempts).toBeGreaterThan(0);
+});

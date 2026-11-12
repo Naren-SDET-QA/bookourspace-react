@@ -647,6 +647,14 @@ pq -d "$DB" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/tests/account_closure_tes
   || fail "account closure SQL tests (see $OUT/account-closure.out)"
 grep "NOTICE:  PASS" "$OUT/account-closure.out" | sed 's/^/    /'
 
+echo "=== 5k. audit blocker repairs (provider portal, payment claim, customer modules) ==="
+pq -d "$DB" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/supabase/tests/audit_blocker_repairs_test.sql" > "$OUT/audit-blocker-repairs.out" 2>&1 \
+  || fail "audit blocker repair SQL tests (see $OUT/audit-blocker-repairs.out)"
+sed -E 's/^psql:[^ ]* NOTICE:  //;s/^NOTICE:  //' "$OUT/audit-blocker-repairs.out" | grep -E "^(PASS|FAIL)" | sed 's/^/    /'
+AUDIT_REPAIR_PASS=$(grep -c "NOTICE:  PASS" "$OUT/audit-blocker-repairs.out" || true)
+AUDIT_REPAIR_FAIL=$(grep -c "NOTICE:  FAIL" "$OUT/audit-blocker-repairs.out" || true)
+echo "    PASS=$AUDIT_REPAIR_PASS FAIL=$AUDIT_REPAIR_FAIL"
+
 echo "=== 6. concurrency: two guests, two units, identical dates ==="
 pq -d "$DB" -q -c "update platform_module_flags set allow_online_booking = true where module_key='hotels';" >/dev/null
 (
@@ -714,6 +722,8 @@ echo "=== 7. verdict ==="
 [ "$BOOTSTRAP_SQL_FAIL" = "0" ] || fail "$BOOTSTRAP_SQL_FAIL Super Admin bootstrap assertion(s) failed"
 [ "$MEDIA_FINALIZATION_PASS" = "20" ] || fail "media finalization suite ran only $MEDIA_FINALIZATION_PASS passing assertion(s)"
 [ "$MEDIA_FINALIZATION_FAIL" = "0" ] || fail "$MEDIA_FINALIZATION_FAIL media finalization assertion(s) failed"
+[ "$AUDIT_REPAIR_PASS" -ge 5 ] || fail "audit blocker repair suite ran only $AUDIT_REPAIR_PASS passing assertion(s)"
+[ "$AUDIT_REPAIR_FAIL" = "0" ] || fail "$AUDIT_REPAIR_FAIL audit blocker repair assertion(s) failed"
 [ "$CLASS_SQL_FAIL" = "0" ] || fail "$CLASS_SQL_FAIL class enrollment assertion(s) failed"
 [ "$CLASS_SQL_ERRORS" = "0" ] || fail "$CLASS_SQL_ERRORS class enrollment SQL error(s) occurred"
 [ "$CLASS_SQL_PASS" -ge 12 ] || fail "class enrollment SQL suite ran only $CLASS_SQL_PASS passing assertion(s)"

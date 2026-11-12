@@ -94,16 +94,25 @@ export default function SafeImage({
   const [signedSrcSet, setSignedSrcSet] = useState('');
   const refreshAttempted = useRef(false);
   const srcSetRetryAttempted = useRef(false);
+  const signedSourceRef = useRef('');
   const sourceKeyRef = useRef(resetKey);
   sourceKeyRef.current = resetKey;
 
+  const applySignedSource = (source: string) => {
+    // A new Storage URL has not decoded yet; do not inherit the interim
+    // fallback's loaded state.
+    if (source && source !== signedSourceRef.current) setLoaded(false);
+    signedSourceRef.current = source;
+    setSignedSource(source);
+  };
+
   useEffect(() => {
     if (!isSupabaseStorageSource(cleanSource)) {
-      setSignedSource('');
+      applySignedSource('');
       setSignedSrcSet('');
       return;
     }
-    setSignedSource('');
+    applySignedSource('');
     setSignedSrcSet('');
     if (!isPublicImageStorageSource(cleanSource) && !isProfileImageStorageSource(cleanSource)) {
       setFallbackStage(1);
@@ -113,7 +122,7 @@ export default function SafeImage({
     void resolveResponsiveMediaSource(cleanSource)
       .then((resolved) => {
         if (!disposed && sourceKeyRef.current === resetKey) {
-          setSignedSource(resolved.src);
+          applySignedSource(resolved.src);
           setSignedSrcSet(resolved.srcSet || '');
         }
       })
@@ -126,13 +135,17 @@ export default function SafeImage({
     previousResetKey.current = resetKey;
     setFallbackStage(cleanSource ? 0 : 1);
     setLoaded(false);
-    setSignedSource('');
+    applySignedSource('');
     setSignedSrcSet('');
     refreshAttempted.current = false;
     srcSetRetryAttempted.current = false;
   }, [cleanSource, localFallback, resetKey]);
 
   const storageSource = isSupabaseStorageSource(cleanSource);
+  // Until a Storage URL is signed we show the module illustration so the slot
+  // never collapses, but it is not the requested image: keep reporting
+  // `loading` instead of letting the placeholder claim to be loaded.
+  const awaitingStorageSignature = storageSource && fallbackStage === 0 && !signedSource;
   const resolvedSource = unavailableDemoSource
     ? localFallback
     : fallbackStage === 0
@@ -160,7 +173,7 @@ export default function SafeImage({
       decoding={decoding}
       data-safe-image="true"
       data-image-source-status={unavailableDemoSource ? 'unavailable-demo-fallback' : storageSource ? 'authorized-media' : 'external-or-local'}
-      data-image-state={loaded ? 'loaded' : 'loading'}
+      data-image-state={awaitingStorageSignature ? 'loading' : loaded ? 'loaded' : 'loading'}
       className={`${className} ${loaded ? '' : 'animate-pulse bg-gradient-to-br from-indigo-100 via-white to-amber-100'}`.trim()}
       onLoad={(event) => {
         setLoaded(true);
@@ -176,18 +189,24 @@ export default function SafeImage({
           setSignedSrcSet('');
           return;
         }
+        // One bounded re-sign for a Storage URL. If the refresh reproduces the
+        // same URL, retrying cannot succeed; go straight to the local fallback
+        // instead of leaving a permanently "loading" broken image.
         if (storageSource && (isPublicImageStorageSource(cleanSource) || isProfileImageStorageSource(cleanSource)) && !refreshAttempted.current) {
           refreshAttempted.current = true;
           void resolveResponsiveMediaSource(cleanSource, true)
             .then((resolved) => {
-              if (sourceKeyRef.current === resetKey) {
-                setSignedSource(resolved.src);
-                // Stay on the known-good original after recovery. Reinstalling
-                // the same responsive candidates would immediately re-select
-                // a stale or missing variant and repeat the failure.
-                setSignedSrcSet('');
-                setFallbackStage(0);
+              if (sourceKeyRef.current !== resetKey) return;
+              if (!resolved.src || resolved.src === signedSourceRef.current) {
+                setFallbackStage(1);
+                return;
               }
+              applySignedSource(resolved.src);
+              // Stay on the known-good original after recovery. Reinstalling
+              // the same responsive candidates would immediately re-select
+              // a stale or missing variant and repeat the failure.
+              setSignedSrcSet('');
+              setFallbackStage(0);
             })
             .catch(() => { if (sourceKeyRef.current === resetKey) setFallbackStage(1); });
           return;

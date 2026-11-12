@@ -4,6 +4,16 @@ import type { MarketSectionType } from '../data/servicesStayMoviesData';
 import { ServiceCoveragePicker } from './ServiceCoveragePicker';
 
 type ProviderType = MarketSectionType;
+
+// Provider registration is a five-module application. Movies is a discovery-only
+// directory with no provider onboarding, so a movies context registers under the
+// services application (the same mapping used when a rejected registration is
+// restored) instead of widening the API contract.
+type RegistrationProviderType = 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay';
+
+function toRegistrationProviderType(value: ProviderType): RegistrationProviderType {
+  return value === 'movies' ? 'services' : value;
+}
 type AuthUser = { name?: string; email?: string; role: string };
 
 const PROVIDER_TYPES: Array<{ id: ProviderType; label: string }> = [
@@ -78,7 +88,7 @@ export function ProviderOnboardingForm({
     try {
       const result = await submitServerProviderRegistration({
         requestId,
-        providerType,
+        providerType: toRegistrationProviderType(providerType),
         businessName: businessName.trim(),
         contactPhone: contactPhone.trim(),
         city: selectedCity,

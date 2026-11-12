@@ -47,6 +47,10 @@ create index if not exists idx_customer_module_access_module
 
 alter table public.customer_module_access enable row level security;
 revoke all on table public.customer_module_access from public, anon;
+-- Explicit grants so the RLS policies below are the real boundary. Without the
+-- SELECT grant the customer/admin read policies are inert for the
+-- `authenticated` role and only owner-role server connections can read.
+grant select, insert, update, delete on table public.customer_module_access to authenticated;
 
 drop policy if exists "Customers read their own module access" on public.customer_module_access;
 create policy "Customers read their own module access"
@@ -77,6 +81,9 @@ create index if not exists idx_customer_module_access_audit_user
 
 alter table public.customer_module_access_audit enable row level security;
 revoke all on table public.customer_module_access_audit from public, anon;
+-- Read-only for authenticated; the admin-only policy below hides other users'
+-- rows. Writes come from the SECURITY DEFINER audit trigger.
+grant select on table public.customer_module_access_audit to authenticated;
 
 drop policy if exists "Admins read module access audit" on public.customer_module_access_audit;
 create policy "Admins read module access audit"
