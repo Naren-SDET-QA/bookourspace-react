@@ -226,6 +226,11 @@ export const SwipeableBookingCard: React.FC<SwipeableBookingCardProps> = ({
             <div className="text-[11px] font-bold text-[#4338CA] dark:text-indigo-400">
               ₹{booking.totalAmount.toLocaleString('en-IN')} • {booking.customerName}
             </div>
+            {booking.status === 'cancelled' && booking.refundStatus === 'initiated' && (
+              <div className="text-[10px] font-black text-amber-700 dark:text-amber-300">
+                ↩️ ₹{(booking.refundAmount || 0).toLocaleString('en-IN')} refund initiated · awaiting provider reconciliation
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
