@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 /**
  * Movies browser coverage against the real React app, the real Express server
  * and a disposable PostgreSQL database created by
- * supabase/tests/run_classes_ui_e2e.sh.
+ * supabase/tests/run_movies_ui_e2e.sh.
  *
  * Movies V1 is discovery + showtimes only (docs/movies-showtimes-only.md):
  * booking, seat selection, payments, tickets and refunds are not product

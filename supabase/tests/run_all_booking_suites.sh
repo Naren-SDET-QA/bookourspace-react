@@ -39,6 +39,7 @@ run_suite live_edit_security  bash supabase/tests/run_live_edit_security.sh
 run_suite pg_integration      bash supabase/tests/run_pg_integration.sh
 run_suite pg_payments         bash supabase/tests/run_pg_payment_e2e.sh
 run_suite classes             bash supabase/tests/run_classes_ui_e2e.sh
+run_suite movies_browser      bash supabase/tests/run_movies_ui_e2e.sh
 run_suite venues              env BOS_RUN_VENUE_ONLY=1 bash supabase/tests/run_classes_ui_e2e.sh
 run_suite services_api        bash supabase/tests/run_services_e2e.sh
 run_suite services_browser    bash supabase/tests/run_services_ui_e2e.sh
