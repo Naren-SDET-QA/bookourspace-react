@@ -79,7 +79,14 @@ function buildValidationQrSvg(seedText: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 102 102" width="96" height="96" style="border:2px solid #cbd5e1;border-radius:10px;background:#fff;padding:2px;">${rects}</svg>`;
 }
 
-export function buildGSTInvoiceHTML(payload: GSTInvoicePayload): string {
+export function buildGSTInvoiceHTML(input: GSTInvoicePayload): string {
+  // Receipts are inserted into a print document, outside React's text escaping.
+  const escapeText = (value: string) => value.replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]!);
+  const payload = Object.fromEntries(Object.entries(input).map(([key, value]) => [
+    key, typeof value === 'string' ? escapeText(value) : value,
+  ])) as unknown as GSTInvoicePayload;
   const cgstRate = payload.cgstRate ?? 9;
   const sgstRate = payload.sgstRate ?? 9;
   const baseAmount = Math.round(payload.baseAmount);

@@ -376,6 +376,14 @@ body:has([aria-modal='true']) .bos-cookie-banner {
   scrollbar-width: none;
 }
 
+/* Category feeds stay still so search, filters, and booking actions remain the focus. */
+.category-page-static,
+.category-page-static * {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
 @keyframes bosLeftRightBadge {
   0%,
   100% {

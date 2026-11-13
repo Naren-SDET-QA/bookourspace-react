@@ -178,6 +178,7 @@ export interface ChatMessage {
 
 export interface Booking {
   id: string;
+  authoritativeBookingId?: string;
   listingId: string;
   listingTitle: string;
   providerId: string;
@@ -193,6 +194,11 @@ export interface Booking {
   durationDays?: number;
   timeSlot: string;
   totalAmount: number;
+  paymentStatus?: 'pay_later' | 'pending_verification' | 'verified' | 'refunded' | 'failed';
+  refundAmount?: number;
+  refundStatus?: 'none' | 'initiated' | 'completed';
+  cancelledAt?: string;
+  cancellationReason?: string;
   invoiceNumber?: string;
   status: 'confirmed' | 'pending' | 'completed' | 'cancelled';
   notes?: string;
