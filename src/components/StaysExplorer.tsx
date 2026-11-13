@@ -608,4 +608,3 @@ const StayCard: React.FC<{
     </article>
   );
 };
-

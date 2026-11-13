@@ -150,4 +150,3 @@ export function buildStayPriceBreakdown(
     total: baseAmount + cleaningFee + serviceFee + taxes,
   };
 }
-

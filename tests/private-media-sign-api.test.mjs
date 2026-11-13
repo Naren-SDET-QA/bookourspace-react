@@ -66,4 +66,3 @@ test('private-media signing issues a short-lived signed URL for the verified own
   assert.equal(calls[0].init.headers.apikey, 'sb_secret_local_test_key');
   assert.equal(calls[0].init.headers.Authorization, undefined);
 });
-

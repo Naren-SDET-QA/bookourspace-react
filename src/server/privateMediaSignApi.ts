@@ -119,4 +119,3 @@ export function registerPrivateMediaSignApi(app: Express, config: PrivateMediaSi
     }
   });
 }
-
