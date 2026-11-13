@@ -126,12 +126,16 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const displayDescription = getListingDescription(listing, currentLang);
   const displayProviderName = getProviderDisplayName(listing.providerNameTe || listing.providerName, currentLang, distKm);
   const displayPriceUnit = getPriceUnitDisplayName(listing.priceUnitTe || listing.priceUnit, currentLang);
+  // Public listings never carry provider contact data. Only offer call/WhatsApp
+  // actions when a real number is available to this customer.
+  const providerPhoneDigits = (listing.providerPhone || '').replace(/\D/g, '');
+  const hasProviderContact = providerPhoneDigits.length >= 10;
   const displaySubcategory = getSubcategoryDisplayName(listing.subcategory, currentLang);
 
   const handleShare = async () => {
     const shareUrl = window.location.href;
     const shareTitle = `${displayTitle} - ${displayProviderName}`;
-    const shareText = `${displayTitle}\n👤 ${t.verifiedPro}: ${displayProviderName}\n📍 ${listing.location.area} (${distKm} km)\n💰 ${t.pricing}: ₹${listing.price.toLocaleString('en-IN')}${displayPriceUnit}\n⭐ ${listing.providerRating} (${listing.reviewCount} ${t.reviews})\n📞 ${listing.providerPhone}\n\nక్రాఫ్టో (Crafto) లో చూడండి:`;
+    const shareText = `${displayTitle}\n👤 ${t.verifiedPro}: ${displayProviderName}\n📍 ${listing.location.area} (${distKm} km)\n💰 ${t.pricing}: ₹${listing.price.toLocaleString('en-IN')}${displayPriceUnit}\n⭐ ${listing.providerRating} (${listing.reviewCount} ${t.reviews})${hasProviderContact ? `\n📞 ${listing.providerPhone}` : ''}\n\nక్రాఫ్టో (Crafto) లో చూడండి:`;
 
     if (navigator.share) {
       try {
@@ -158,6 +162,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   };
 
   const handleDirectCall = () => {
+    if (!hasProviderContact) return;
     window.location.href = `tel:${listing.providerPhone}`;
   };
 
@@ -809,29 +814,39 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                   {t.verifiedPro} · {listing.enquiriesCount} {t.enquiries}
                 </div>
                 <div className="text-xs font-bold text-purple-900 dark:text-purple-300 tabular-nums mt-0.5">
-                  📞 {listing.providerPhone} · {listing.providerEmail}
+                  {hasProviderContact
+                    ? `📞 ${listing.providerPhone}${listing.providerEmail ? ` · ${listing.providerEmail}` : ''}`
+                    : (currentLang === 'te' ? 'సంప్రదింపు వివరాలు బుకింగ్ తర్వాత అందుతాయి' : 'Contact details are shared after booking')}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleDirectCall}
-                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 hover:bg-slate-50 transition-colors shadow-xs"
-              >
-                <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{t.callNow}</span>
-              </button>
+              {hasProviderContact ? (
+                <>
+                  <button
+                    onClick={handleDirectCall}
+                    className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 hover:bg-slate-50 transition-colors shadow-xs"
+                  >
+                    <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>{t.callNow}</span>
+                  </button>
 
-              <a
-                href={`https://wa.me/91${listing.providerPhone}?text=${encodeURIComponent(`నమస్కారం ${displayProviderName}, BookOurSpace లో మీ సర్వీస్ "${displayTitle}" చూశాను.`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
-                <span>WhatsApp</span>
-              </a>
+                  <a
+                    href={`https://wa.me/91${providerPhoneDigits}?text=${encodeURIComponent(`నమస్కారం ${displayProviderName}, BookOurSpace లో మీ సర్వీస్ "${displayTitle}" చూశాను.`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>WhatsApp</span>
+                  </a>
+                </>
+              ) : (
+                <span className="px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-bold">
+                  {currentLang === 'te' ? 'సంప్రదింపు అందుబాటులో లేదు' : 'Contact unavailable'}
+                </span>
+              )}
             </div>
           </div>
 

@@ -417,17 +417,26 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
 
   const selectedSlotObj = slotOptions.find(s => s.id === selectedSlotType) || slotOptions[0];
 
-  // Dynamic UPI Details generated directly from provider & service price
-  const cleanPhone = listing.providerPhone?.replace(/\D/g, '') || '9849012345';
+  // Dynamic UPI details are derived from the provider's real contact number.
+  // Public listings intentionally omit contact data, so a missing number must
+  // fail closed instead of fabricating a payee VPA the customer could pay.
+  const cleanPhone = (listing.providerPhone || '').replace(/\D/g, '');
+  const hasProviderPaymentContact = cleanPhone.length >= 10;
   const cleanProviderName = listing.providerName || 'Service Specialist';
-  const providerVpa = `${cleanPhone}@upi`;
+  const providerVpa = hasProviderPaymentContact ? `${cleanPhone}@upi` : '';
   const upiTxnNote = `BookOurSpace: ${listing.title.slice(0, 24)}`;
   
   // Standard UPI URI specification: upi://pay?pa=...&pn=...&am=...&cu=INR&tn=...
-  const upiUri = `upi://pay?pa=${encodeURIComponent(providerVpa)}&pn=${encodeURIComponent(cleanProviderName)}&am=${totalBookingAmount}&cu=INR&tn=${encodeURIComponent(upiTxnNote)}`;
+  const upiUri = providerVpa
+    ? `upi://pay?pa=${encodeURIComponent(providerVpa)}&pn=${encodeURIComponent(cleanProviderName)}&am=${totalBookingAmount}&cu=INR&tn=${encodeURIComponent(upiTxnNote)}`
+    : '';
   const bookingPassBarcodeId = generateBosBarcodeId('TKT', `${listing.id}-${customerPhone.slice(-4)}`, listing.categoryId);
 
   const handleVerifyQrPayment = async () => {
+    if (!providerVpa) {
+      setBookingConflictError('Provider payment details are unavailable for this listing. Do not send funds; choose Pay After Service.');
+      return;
+    }
     if (!PAYMENT_VERIFICATION_AVAILABLE) {
       setBookingConflictError('Online payment verification is unavailable. Do not send funds; choose Pay After Service if offered.');
       return;
@@ -485,6 +494,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   };
 
   const handleCopyUpi = () => {
+    if (!providerVpa) return;
     try {
       if (navigator?.clipboard?.writeText) {
         navigator.clipboard.writeText(providerVpa);
@@ -900,13 +910,19 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   <span>📄 Download Formal GST PDF Receipt</span>
                 </button>
 
-                <a
-                  href={`tel:${listing.providerPhone}`}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95"
-                >
-                  <PhoneCall className="w-4 h-4" />
-                  <span>{currentLang === 'te' ? `కాల్ చేయండి (${listing.providerPhone})` : `Call Provider`}</span>
-                </a>
+                {cleanPhone.length >= 10 ? (
+                  <a
+                    href={`tel:${listing.providerPhone}`}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95"
+                  >
+                    <PhoneCall className="w-4 h-4" />
+                    <span>{currentLang === 'te' ? `కాల్ చేయండి (${listing.providerPhone})` : `Call Provider`}</span>
+                  </a>
+                ) : (
+                  <span className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs flex items-center justify-center gap-2">
+                    {currentLang === 'te' ? 'సంప్రదింపు వివరాలు బుకింగ్ తర్వాత అందుతాయి' : 'Contact details are shared after booking'}
+                  </span>
+                )}
 
                 <button
                   type="button"
@@ -1631,15 +1647,19 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                           </div>
 
                           <div className="pt-1 flex items-center justify-between text-[11px] font-mono text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-700">
-                            <span className="truncate">{providerVpa}</span>
-                            <button
-                              type="button"
-                              onClick={handleCopyUpi}
-                              className="text-purple-600 dark:text-purple-400 hover:text-purple-800 font-bold flex items-center gap-0.5 ml-2 shrink-0 cursor-pointer text-[10px]"
-                            >
-                              {copiedUpi ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                              <span>{copiedUpi ? (currentLang === 'te' ? 'కాపీ అయింది!' : 'Copied!') : (currentLang === 'te' ? 'కాపీ' : 'Copy')}</span>
-                            </button>
+                            <span className="truncate">
+                              {providerVpa || (currentLang === 'te' ? 'ఆన్‌లైన్ చెల్లింపు అందుబాటులో లేదు' : 'Online payment unavailable for this listing')}
+                            </span>
+                            {providerVpa && (
+                              <button
+                                type="button"
+                                onClick={handleCopyUpi}
+                                className="text-purple-600 dark:text-purple-400 hover:text-purple-800 font-bold flex items-center gap-0.5 ml-2 shrink-0 cursor-pointer text-[10px]"
+                              >
+                                {copiedUpi ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedUpi ? (currentLang === 'te' ? 'కాపీ అయింది!' : 'Copied!') : (currentLang === 'te' ? 'కాపీ' : 'Copy')}</span>
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -1667,14 +1687,20 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                           className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
                         />
                         <div className="pt-1 flex items-center gap-2">
-                          <a
-                            href={upiUri}
-                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95 text-center cursor-pointer"
-                          >
-                            <Smartphone className="w-3.5 h-3.5" />
-                            <span>{currentLang === 'te' ? 'యూపీఐ యాప్‌లో తెరవండి' : 'Open in UPI App'}</span>
-                            <ExternalLink className="w-3 h-3 opacity-80" />
-                          </a>
+                          {providerVpa ? (
+                            <a
+                              href={upiUri}
+                              className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95 text-center cursor-pointer"
+                            >
+                              <Smartphone className="w-3.5 h-3.5" />
+                              <span>{currentLang === 'te' ? 'యూపీఐ యాప్‌లో తెరవండి' : 'Open in UPI App'}</span>
+                              <ExternalLink className="w-3 h-3 opacity-80" />
+                            </a>
+                          ) : (
+                            <span className="flex-1 py-2 px-3 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs flex items-center justify-center gap-1.5 text-center">
+                              {currentLang === 'te' ? 'ఆన్‌లైన్ చెల్లింపు అందుబాటులో లేదు' : 'Online payment unavailable'}
+                            </span>
+                          )}
 
                           <button
                             type="button"
