@@ -25,7 +25,7 @@ import { chromium } from 'playwright';
 import express from 'express';
 import path from 'node:path';
 
-const [, , baseUrl, distDirectory, listingTitle, customerUuid, sessionSecret, providerUuid] = process.argv;
+const [, , baseUrl, distDirectory, listingTitle, customerUuid, sessionSecret, providerUuid, adminUuid] = process.argv;
 if (!distDirectory || !listingTitle || !customerUuid || !sessionSecret) {
   throw new Error('api base url, dist directory, listing title, customer uuid and session secret are required');
 }
@@ -469,6 +469,182 @@ try {
       }
 
       assertCheck('owner: no uncaught page error in the provider portal', ownerErrors.length === 0, ownerErrors.join(' | '));
+
+      // ---- owner declares an offline collection (money action, owner side)
+      if (checkInBookingId) {
+        const checkedInArticle = ownerPage.locator('article').filter({ hasText: listingTitle }).filter({ hasText: today });
+        await checkedInArticle.getByRole('button', { name: 'Payment details' }).click().catch(() => {});
+        const claimPanel = checkedInArticle.getByLabel('Declare an offline collection');
+        const claimPanelVisible = await claimPanel.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+        assertCheck('owner: the reservation exposes the offline collection form', claimPanelVisible);
+        if (claimPanelVisible) {
+          await claimPanel.getByLabel('Method').selectOption('cash').catch(() => {});
+          await claimPanel.getByLabel(/Reference/).fill(`E2E-CASH-${Date.now()}`);
+          await claimPanel.getByRole('button', { name: /Declare .* collected/ }).click();
+          const claimNotice = claimPanel.getByRole('status');
+          const claimed = await claimNotice.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+          assertCheck('owner: declaring the cash collection is confirmed in the UI', claimed);
+          const claims = await fetch(`${baseUrl}/api/pg/bookings/${encodeURIComponent(checkInBookingId)}/claims`, { headers: providerAuth });
+          const claimsBody = await claims.json().catch(() => ({}));
+          const pendingClaim = (claimsBody.claims || []).find((claim) => claim.status === 'pending');
+          assertCheck(
+            'owner: the collection claim is persisted as pending in PostgreSQL',
+            Boolean(pendingClaim),
+            JSON.stringify(claimsBody).slice(0, 240),
+          );
+        }
+      }
+    }
+
+
+    // ------------------------------------------------- admin money decisions
+    if (adminUuid && checkInBookingId) {
+      const adminToken = signSession({
+        userId: `LEGACY-admin-${adminUuid}`,
+        supabaseUserId: adminUuid,
+        email: 'admin.pg@example.test',
+        name: 'PG Admin',
+        role: 'admin',
+        // Money operations (claim decisions, refunds) require the super-admin
+        // scope on the verified session, not just the admin role.
+        scope: 'super_admin',
+      });
+      const adminAuth = { Authorization: `Bearer ${adminToken}` };
+
+      // A dispute the administrator has to act on.
+      const dispute = await fetch(`${baseUrl}/api/pg/bookings/${encodeURIComponent(checkInBookingId)}/disputes`, {
+        method: 'POST',
+        headers: { ...customerAuth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: 'payment_not_received',
+          reason: 'The owner recorded the cash collection but my receipt is missing.',
+          amountInDisputePaise: 900000,
+        }),
+      });
+      assertCheck('admin: a customer dispute exists for the administrator to resolve', dispute.status === 201, `${dispute.status} ${(await dispute.text()).slice(0, 200)}`);
+
+      const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+      const adminPage = await adminContext.newPage();
+      const adminErrors = [];
+      adminPage.on('pageerror', (error) => adminErrors.push(error.message));
+      await adminPage.route(
+        (url) => url.pathname.startsWith('/api/'),
+        async (route) => {
+          const target = new URL(route.request().url());
+          const upstream = await route.fetch({ url: `${baseUrl}${target.pathname}${target.search}` });
+          await route.fulfill({ response: upstream });
+        },
+      );
+      await adminPage.route(
+        (url) => url.origin !== uiUrl && !url.pathname.startsWith('/api/'),
+        (route) => route.abort('blockedbyclient'),
+      );
+      await adminPage.addInitScript((token) => {
+        localStorage.setItem('bos_entry_choice_v1', 'guest');
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
+        localStorage.setItem('bos_session_token_v1', token);
+      }, adminToken);
+
+      const adminHydrated = adminPage
+        .waitForResponse((response) => response.url().endsWith('/api/auth/me'), { timeout: 20000 })
+        .catch(() => null);
+      await adminPage.goto(`${uiUrl}/#admin`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await dismissPrivacyChoices(adminPage);
+      await adminHydrated;
+      await adminPage.evaluate(() => {
+        if (!window.location.hash.includes('admin')) window.location.hash = '#admin';
+      });
+
+      // The sidebar entry carries a reservation-count badge, so it is matched by
+      // prefix rather than an exact accessible name.
+      const pgTab = adminPage.getByRole('button', { name: /PGs & Hostels/ }).first();
+      const pgTabVisible = await pgTab.waitFor({ timeout: 30000 }).then(() => true).catch(() => false);
+      if (!pgTabVisible) {
+        const body = await adminPage.locator('body').innerText().catch(() => '');
+        const buttons = await adminPage.getByRole('button').allTextContents().catch(() => []);
+        console.error(`      admin body: ${body.replace(/\s+/g, ' ').slice(0, 900)}`);
+        console.error(`      admin buttons: ${buttons.slice(0, 25).join(' | ')}`);
+      }
+      assertCheck('admin: the PG & Hostel operations section is reachable', pgTabVisible);
+      if (pgTabVisible) {
+        await pgTab.click();
+        const actionDialog = adminPage.getByLabel('Administrator action');
+
+        // ---- approve the owner's collection claim
+        const claimRow = adminPage.getByRole('row').filter({ hasText: checkInBookingId });
+        const approveClaim = claimRow.getByRole('button', { name: 'Approve claim' });
+        const approveClaimVisible = await approveClaim.waitFor({ timeout: 30000 }).then(() => true).catch(() => false);
+        assertCheck('admin: the pending collection claim shows Approve claim', approveClaimVisible);
+        if (approveClaimVisible) {
+          await approveClaim.click();
+          await actionDialog.getByLabel(/Note/).fill('Cash collection verified against the receipt.');
+          await actionDialog.getByRole('button', { name: 'Confirm' }).click();
+          const approved = await adminPage.getByRole('status').filter({ hasText: /Collection claim approved/i }).waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+          const claimAlert = await adminPage.getByRole('alert').allTextContents().catch(() => []);
+          assertCheck('admin: approving the claim is confirmed in the UI', approved, claimAlert.join(' | ').slice(0, 200));
+          const claims = await fetch(`${baseUrl}/api/pg/bookings/${encodeURIComponent(checkInBookingId)}/claims`, { headers: adminAuth });
+          const claimsBody = await claims.json().catch(() => ({}));
+          assertCheck(
+            'admin: the approved claim is persisted in PostgreSQL',
+            (claimsBody.claims || []).some((claim) => claim.status === 'approved'),
+            JSON.stringify(claimsBody).slice(0, 240),
+          );
+        }
+
+        // ---- resolve the customer dispute
+        const disputeRow = adminPage.getByRole('row').filter({ hasText: checkInBookingId });
+        const resolveDispute = disputeRow.getByRole('button', { name: 'Resolve dispute' });
+        const resolveVisible = await resolveDispute.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+        assertCheck('admin: the open dispute shows Resolve dispute', resolveVisible);
+        if (resolveVisible) {
+          await resolveDispute.click();
+          await actionDialog.getByLabel(/Reason/).fill('Receipt reissued to the customer after verification.');
+          await actionDialog.getByRole('button', { name: 'Confirm' }).click();
+          const resolved = await adminPage.getByRole('status').filter({ hasText: /Dispute resolved/i }).waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+          assertCheck('admin: resolving the dispute is confirmed in the UI', resolved);
+          const adminBookings = await fetch(`${baseUrl}/api/admin/pg/bookings?limit=100`, { headers: adminAuth });
+          const adminBody = await adminBookings.json().catch(() => ({}));
+          const disputed = (adminBody.bookings || []).find((booking) => booking.bookingId === checkInBookingId);
+          assertCheck(
+            'admin: the resolved dispute is persisted in PostgreSQL',
+            disputed?.disputeStatus === 'resolved',
+            JSON.stringify(disputed || {}).slice(0, 240),
+          );
+        }
+
+        // ---- approve a refund on a provider-verified payment
+        const adminBookings = await fetch(`${baseUrl}/api/admin/pg/bookings?limit=100`, { headers: adminAuth });
+        const adminBody = await adminBookings.json().catch(() => ({}));
+        const verified = (adminBody.bookings || []).find((booking) => booking.paymentStatus === 'verified');
+        if (!verified) {
+          assertCheck('admin: a verified payment exists to refund', false, 'no verified booking was available');
+        } else {
+          const refundRow = adminPage.getByRole('row').filter({ hasText: verified.bookingId });
+          const approveRefund = refundRow.getByRole('button', { name: 'Approve refund' });
+          const refundVisible = await approveRefund.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+          assertCheck('admin: a verified payment shows Approve refund', refundVisible);
+          if (refundVisible) {
+            await approveRefund.click();
+            await actionDialog.getByLabel(/Amount/).fill(String(verified.totalPaise));
+            await actionDialog.getByLabel(/Reason/).fill('Provider could not honour the stay; refund approved.');
+            await actionDialog.getByRole('button', { name: 'Confirm' }).click();
+            const refunded = await adminPage.getByRole('status').filter({ hasText: /Refund approved/i }).waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+            assertCheck('admin: approving the refund is confirmed in the UI', refunded);
+            const after = await fetch(`${baseUrl}/api/admin/pg/bookings?limit=100`, { headers: adminAuth });
+            const afterBody = await after.json().catch(() => ({}));
+            const refundedBooking = (afterBody.bookings || []).find((booking) => booking.bookingId === verified.bookingId);
+            assertCheck(
+              'admin: the refund decision is persisted in PostgreSQL',
+              Boolean(refundedBooking) && ['refund_expected', 'refunded'].includes(String(refundedBooking.paymentStatus)) || Number(refundedBooking?.refundPaise || 0) > 0,
+              JSON.stringify(refundedBooking || {}).slice(0, 240),
+            );
+          }
+        }
+
+        assertCheck('admin: no uncaught page error in the admin console', adminErrors.length === 0, adminErrors.join(' | '));
+      }
+      await adminPage.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
+      await adminContext.close();
     }
 
     await ownerPage.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});

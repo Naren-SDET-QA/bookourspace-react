@@ -390,6 +390,32 @@ STORE_HASH_AFTER=$(shasum -a 256 "$STORE" | awk '{print $1}')
 [ "$STORE_HASH_BEFORE" = "$STORE_HASH_AFTER" ] || fail "JSON authoritative store was modified by the PG payment routes"
 echo "    JSON store untouched (sha256 unchanged)"
 
+# Created after the phase-1 intent assertions: a provider-verified payment for the
+# browser suite to refund. Admin refunds need payment_status='verified' plus a
+# verified intent, and phase 1 has already refunded its own settled booking.
+pq -d "$DB" -q -v ON_ERROR_STOP=1 <<SQL || fail "browser refund fixture"
+
+-- A provider-verified payment. Admin refunds require payment_status='verified'
+-- plus a verified intent, and phase 1 already consumed its settled booking.
+insert into public.bookings (id,user_id,listing_id,listing_title,provider_id,customer_name,customer_phone,
+  scheduled_date,scheduled_time,amount,status,payment_status,payment_mode,idempotency_key,
+  room_type_id,units,total_paise,check_in,check_out,payload)
+values ('pg-owner-e2e-refund','$UUID_C','$BROWSER_LISTING','Browser Journey PG','$UUID_PROVIDER',
+  'Browser Customer','9000000003', (current_date + 1)::text,'move-in',9000,'confirmed','verified','upi',
+  'owner-e2e-refund','$BROWSER_ROOM',1,900000,current_date + 1,current_date + 31,
+  jsonb_build_object('source','pg_booking','listingId','$BROWSER_LISTING','moveIn',(current_date + 1)::text,
+    'moveOut',(current_date + 31)::text,'months',1,'beds',1,'occupants',1,'rentPaise',750000,
+    'depositPaise',150000,'totalDuePaise',900000))
+on conflict (id) do update set payment_status='verified', payment_mode='upi', total_paise=900000;
+
+insert into public.payment_intents (id,user_id,purpose,listing_id,room_type_id,booking_id,amount_paise,
+  merchant_vpa,upi_uri,payment_mode,provider,status,expires_at,idempotency_key)
+values ('pi-owner-e2e-refund','$UUID_C','stay_booking','$BROWSER_LISTING','$BROWSER_ROOM',
+  'pg-owner-e2e-refund',900000,'bos@upi','upi://pay?pa=bos@upi&am=9000.00','upi','upi_sandbox','verified',
+  now() + interval '1 day','pi-owner-e2e-refund-key')
+on conflict (id) do update set status='verified', amount_paise=900000;
+SQL
+
 echo "=== 10. browser journey (Playwright, Chromium) ==="
 VITE_SUPABASE_URL="http://127.0.0.1:1" VITE_SUPABASE_PROJECT_ID="local" VITE_SUPABASE_DEVELOPMENT_PROJECT_ID="local" \
 VITE_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-or-anon-key" VITE_SUPABASE_ANON_KEY="your-supabase-publishable-or-anon-key" VITE_ENABLE_DEMO_DATA=false \
@@ -397,7 +423,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-or-anon-key" VITE_SUPAB
   > "$OUT/browser-build.out" 2>&1 || { tail -25 "$OUT/browser-build.out" >&2; fail "browser build"; }
 [ -f "$TMP_ROOT/dist/index.html" ] || fail "browser bundle missing"
 node "$REPO_ROOT/tests/pg-browser-journey.e2e.mjs" \
-  "http://127.0.0.1:$APIPORT" "$TMP_ROOT/dist" 'Browser Journey PG' "$UUID_C" "$SESSION_SECRET" "$UUID_PROVIDER" \
+  "http://127.0.0.1:$APIPORT" "$TMP_ROOT/dist" 'Browser Journey PG' "$UUID_C" "$SESSION_SECRET" "$UUID_PROVIDER" "$UUID_ADMIN" \
   | tee "$OUT/browser.out"
 BROWSER_EXIT=${PIPESTATUS[0]}
 if [ "$BROWSER_EXIT" != "0" ]; then

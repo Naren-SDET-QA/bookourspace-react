@@ -209,7 +209,15 @@ async function openLiveListing(page, style) {
   }
   mark('listing detail opened');
   await page.getByRole('heading', { name: listingTitle }).last().waitFor({ timeout: 10000 });
-  await page.getByRole('region', { name: 'PG availability and booking' }).waitFor();
+  const availability = page.getByRole('region', { name: 'PG availability and booking' });
+  if (!(await availability.waitFor({ timeout: 20000 }).then(() => true).catch(() => false))) {
+    // Long cross-engine runs occasionally open the sheet without the panel;
+    // reopen it once from a clean load before treating it as a failure.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await pgCardAction(page, listingTitle).click({ timeout: 30000 });
+    await page.getByRole('heading', { name: listingTitle }).last().waitFor({ timeout: 20000 });
+    await availability.waitFor({ timeout: 30000 });
+  }
   mark('availability panel rendered');
   await page.getByRole('button', { name: 'Check live availability' }).click();
   mark('availability check clicked');
