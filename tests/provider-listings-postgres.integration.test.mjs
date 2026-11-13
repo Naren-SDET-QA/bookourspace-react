@@ -9,6 +9,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import pg from 'pg';
 import { filterServiceListings, parseServiceListing } from '../src/lib/sectionExperiences.ts';
+import { inferLiveEditModule } from '../src/lib/liveEdit/moduleInference.ts';
 
 const { Pool } = pg;
 const databaseAvailable = Boolean(process.env.BOS_LISTINGS_DATABASE_URL);
@@ -27,6 +28,10 @@ let storePath;
 let serverUrl;
 let authTestServer;
 let serverAuthConfig = {};
+/** `${ownerUserId}:${module}` -> seeded business id; one business per module. */
+const businessIds = new Map();
+const FIXTURE_MODULES = ['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay'];
+const DEFAULT_FIXTURE_MODULE = 'pg_hostels';
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -104,22 +109,55 @@ async function stopServer() {
   await new Promise((resolve) => processToStop.once('exit', resolve));
 }
 
-async function request(method, url, token, body) {
-  let businessId = '';
-  if (token) {
-    try {
-      const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString());
-      if (payload.role === 'provider' && payload.supabaseUserId) {
-        const business = await pool.query(
-          `select b.id from public.businesses b join public.business_members m on m.business_id=b.id
-            where b.owner_user_id=$1 and m.user_id=$1 and m.status='active' and b.approval_status='approved'
-            order by b.created_at limit 1`,
-          [payload.supabaseUserId],
-        );
-        businessId = business.rows[0]?.id || '';
-      }
-    } catch { /* malformed test token follows the normal 401 path */ }
+/**
+ * The shared listing surface is scoped by the caller's selected business, and a
+ * business is approved for exactly one module. Pick the fixture business whose
+ * module owns the listing being addressed (or the one being written), so each
+ * request carries the same `x-business-id` the portal would send.
+ */
+async function businessIdFor(token, url, body) {
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString());
+  } catch {
+    return '';
   }
+  if (payload.role !== 'provider' || !payload.supabaseUserId) return '';
+  const owner = payload.supabaseUserId;
+  let module = null;
+  const addressedListing = String(url).match(/\/listings\/([^/?#]+)/)?.[1];
+  if (addressedListing) {
+    const { rows } = await pool.query('select category_id, entity_type, subcategory, title from public.listings where id = $1', [addressedListing]);
+    if (rows[0]) {
+      module = inferLiveEditModule({
+        categoryId: rows[0].category_id,
+        entityType: rows[0].entity_type,
+        subcategory: rows[0].subcategory,
+        title: rows[0].title,
+      });
+    }
+  } else if (body?.categoryId) {
+    module = inferLiveEditModule({
+      categoryId: body.categoryId,
+      entityType: body.entityType,
+      subcategory: body.subcategory,
+      title: body.title,
+    });
+  }
+  const seeded = businessIds.get(`${owner}:${module}`)
+    || businessIds.get(`${owner}:${DEFAULT_FIXTURE_MODULE}`);
+  if (seeded) return seeded;
+  const business = await pool.query(
+    `select b.id from public.businesses b join public.business_members m on m.business_id=b.id
+      where b.owner_user_id=$1 and m.user_id=$1 and m.status='active' and b.approval_status='approved'
+      order by b.created_at limit 1`,
+    [owner],
+  );
+  return business.rows[0]?.id || '';
+}
+
+async function request(method, url, token, body) {
+  const businessId = token ? await businessIdFor(token, url, body) : '';
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
@@ -176,12 +214,17 @@ async function seedProfiles() {
   }
   for (const [owner, label] of [[providerA, 'Provider A'], [providerB, 'Provider B']]) {
     const ref = `BIZ-IT-${owner.replaceAll('-', '').slice(0, 10).toUpperCase()}`;
-    await pool.query(
-      `insert into public.businesses (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
-       values ($1,$2,'pg_hostels',$3,'approved',true,'integration_test',$3,now())
-       on conflict (business_ref) do update set is_enabled=true, approval_status='approved'`,
-      [ref, `${label} Integration Business`, owner],
-    );
+    for (const module of FIXTURE_MODULES) {
+      const moduleRef = module === DEFAULT_FIXTURE_MODULE ? ref : `${ref}-${module.toUpperCase()}`;
+      const seeded = await pool.query(
+        `insert into public.businesses (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
+         values ($1,$2,$3,$4,'approved',true,'integration_test',$4,now())
+         on conflict (business_ref) do update set module_type=excluded.module_type, is_enabled=true, approval_status='approved'
+         returning id`,
+        [moduleRef, `${label} ${module} Business`, module, owner],
+      );
+      businessIds.set(`${owner}:${module}`, seeded.rows[0].id);
+    }
   }
   // The existing integration admin is the platform Super Admin: verification,
   // featured and moderation fields now require a fresh Super Admin check.
@@ -223,6 +266,10 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
   );
   // Simulate a missing Auth trigger profile. The verified app session must
   // provision it transactionally on the onboarding request.
+  // Registration on an earlier run can leave a business owned by the applicant;
+  // clear it first so the profile reset is not blocked by the owner foreign key.
+  await pool.query('delete from public.listings where owner_id = $1', [applicant]);
+  await pool.query('delete from public.businesses where owner_user_id = $1', [applicant]);
   await pool.query('delete from public.profiles where id = $1', [applicant]);
   const authPort = await freePort();
   authTestServer = http.createServer((req, res) => {
@@ -295,7 +342,9 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
       status: 'approved',
     };
     const rollbackIdentity = 'e6a699bb-347f-45aa-9a71-03436237bcfa';
-    await pool.query(`insert into auth.users (id,email,raw_user_meta_data) values ($1,'rollback-provider@example.test','{}'::jsonb)`, [rollbackIdentity]);
+    await pool.query(`insert into auth.users (id,email,raw_user_meta_data) values ($1,'rollback-provider@example.test','{}'::jsonb) on conflict (id) do nothing`, [rollbackIdentity]);
+    await pool.query('delete from public.listings where owner_id = $1', [rollbackIdentity]);
+    await pool.query('delete from public.businesses where owner_user_id = $1', [rollbackIdentity]);
     await pool.query('delete from public.profiles where id=$1', [rollbackIdentity]);
     await pool.query(`create or replace function public.bos_test_fail_provider_registration()
       returns trigger language plpgsql as $$ begin

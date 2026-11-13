@@ -210,6 +210,9 @@ export async function startStaysHarness(options: {
   razorpayKeyId?: string;
   razorpayKeySecret?: string;
   razorpayWebhookSecret?: string;
+  // Test-only: lets an owner approve manual UPI settlement. Production refuses
+  // SIMULATED_SETTLEMENT_FORBIDDEN regardless of this flag. Default unset.
+  allowOwnerManualSettlement?: boolean;
 } = {}): Promise<StaysHarness> {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'bos-stays-browser-'));
   const markerPath = path.join(tempRoot, '.bos-stays-browser-owned');
@@ -262,6 +265,7 @@ export async function startStaysHarness(options: {
           // stay hidden and unbookable by default, exactly as in production.
           BOS_STAY_INCLUDE_DEMO: '0',
           BOS_STAY_ALLOW_DEMO_BOOKING: '0',
+          BOS_ALLOW_OWNER_MANUAL_SETTLEMENT: options.allowOwnerManualSettlement ? '1' : '',
           // Payments stay disabled: only signed sandbox settlement can settle money.
           BOS_PAYMENT_SANDBOX: options.paymentSandboxSecret ? '1' : '0',
           BOS_PAYMENT_SANDBOX_SECRET: options.paymentSandboxSecret || '',
@@ -344,6 +348,21 @@ export async function startStaysHarness(options: {
           where id = $1`,
         [user.authId, user.role === 'provider' ? 'customer' : user.role, user.name, user.phone],
       );
+    }
+
+    // Customers may only enter a marketplace module an administrator granted
+    // (App.tsx applySectionHash fails closed on an empty allow-list, which would
+    // bounce every deep link out of the section). Seed the real grant rows the
+    // product reads so browser journeys exercise the granted path rather than
+    // an empty allow-list.
+    for (const user of users) {
+      for (const moduleKey of ['services', 'hotels', 'pg', 'function_hall', 'classes', 'movies']) {
+        await pool.query(
+          `insert into public.customer_module_access (user_id, module_key, granted_by)
+           values ($1, $2, $3) on conflict (user_id, module_key) do nothing`,
+          [user.authId, moduleKey, USERS.admin.authId],
+        );
+      }
     }
 
     await pool.query(

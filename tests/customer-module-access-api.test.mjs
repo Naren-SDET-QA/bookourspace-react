@@ -80,6 +80,10 @@ before(async () => {
       PORT: String(port),
       BOS_SERVER_HMAC_SECRET: SECRET,
       BOS_TEST_AUTHORITATIVE_STORE_PATH: `${process.cwd()}/.tmp-customer-module-access-store.json`,
+      // Database-free contract: never let an ambient Postgres URL switch the
+      // module-access store to the database compatibility reader.
+      BOS_LISTINGS_DATABASE_URL: '',
+      BOS_PG_URL: '',
       VITE_SUPABASE_URL: 'http://127.0.0.1:1',
       VITE_SUPABASE_PROJECT_ID: 'local',
       VITE_SUPABASE_DEVELOPMENT_PROJECT_ID: 'local',

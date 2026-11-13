@@ -193,6 +193,10 @@ before(async () => {
       PORT: String(port),
       BOS_SERVER_HMAC_SECRET: SECRET,
       BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,
+      // Database-free contract: the public inventory must come from the seeded
+      // local store, not from an ambient Postgres cinema schema.
+      BOS_LISTINGS_DATABASE_URL: '',
+      BOS_PG_URL: '',
       VITE_SUPABASE_URL: 'http://127.0.0.1:1',
       VITE_SUPABASE_PROJECT_ID: 'local',
       VITE_SUPABASE_DEVELOPMENT_PROJECT_ID: 'local',

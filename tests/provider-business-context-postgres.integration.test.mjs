@@ -49,10 +49,13 @@ const managerId = '8c1f5b10-1111-4111-8111-000000000009';
 const managerTwoId = '8c1f5b10-1111-4111-8111-00000000000a';
 const customerId = '8c1f5b10-1111-4111-8111-00000000000b';
 const legacyServicesId = '8c1f5b10-1111-4111-8111-00000000000c';
+const revokedServicesId = '8c1f5b10-1111-4111-8111-00000000000d';
+const suspendedServicesId = '8c1f5b10-1111-4111-8111-00000000000e';
 
 const seededUserIds = [
   ownerId, memberId, multiId, adminId, servicesOwnerId, servicesStaffId,
   venuesOwnerId, superAdminId, managerId, managerTwoId, customerId, legacyServicesId,
+  revokedServicesId, suspendedServicesId,
 ];
 
 const businessRefs = {
@@ -60,9 +63,14 @@ const businessRefs = {
   pg: 'BIZ-CTX-PG-HOSTELS',
   services: 'BIZ-CTX-PG-SERVICES',
   venues: 'BIZ-CTX-PG-VENUES',
+  history: 'BIZ-CTX-SVC-HISTORY',
 };
 
-const listingIds = ['lst-ctx-class-ok', 'lst-ctx-legacy-pg', 'lst-ctx-admin-shared', 'lst-ctx-pg-mismatch', 'lst-ctx-legacy-svc'];
+const listingIds = [
+  'lst-ctx-class-ok', 'lst-ctx-legacy-pg', 'lst-ctx-admin-shared', 'lst-ctx-pg-mismatch',
+  'lst-ctx-legacy-svc', 'lst-ctx-svc-existing-booking', 'lst-ctx-svc-transferred-booking',
+  'lst-ctx-svc-unassigned-booking',
+];
 
 let pool;
 let child;
@@ -199,10 +207,15 @@ async function asAuthenticated(userId, run) {
 const permissionDenied = (error) => String(error?.code || '') === '42501';
 
 async function seedDatabase() {
-  pool = new Pool({ connectionString, max: 4 });
+  if (!pool) pool = new Pool({ connectionString, max: 4 });
+  await pool.query('delete from public.service_bookings where provider_id = any($1::uuid[])', [seededUserIds]);
+  await pool.query('delete from public.service_provider_schedules where provider_id = any($1::uuid[])', [seededUserIds]);
   await pool.query('delete from public.listings where id = any($1::text[])', [listingIds]);
   await pool.query('delete from public.businesses where business_ref = any($1::text[])', [Object.values(businessRefs)]);
   await pool.query("delete from public.businesses where backfill_source = 'services_provider_backfill_v1'");
+  // The listing trigger auto-creates BIZ-AUTO-* businesses for seeded owners;
+  // they must go before profiles or the owner foreign key blocks the delete.
+  await pool.query('delete from public.businesses where owner_user_id = any($1::uuid[])', [seededUserIds]);
   await pool.query('delete from public.profiles where id = any($1::uuid[])', [seededUserIds]);
   await pool.query('delete from auth.users where id = any($1::uuid[])', [seededUserIds]);
 
@@ -219,8 +232,11 @@ async function seedDatabase() {
        ($9, 'ctx-manager@example.test', '{}'::jsonb),
        ($10, 'ctx-manager-two@example.test', '{}'::jsonb),
        ($11, 'ctx-customer@example.test', '{}'::jsonb),
-       ($12, 'ctx-legacy-services@example.test', '{}'::jsonb)
+       ($12, 'ctx-legacy-services@example.test', '{}'::jsonb),
+       ($13, 'ctx-revoked-services@example.test', '{}'::jsonb),
+       ($14, 'ctx-suspended-services@example.test', '{}'::jsonb)
      on conflict (id) do nothing`,
+
     seededUserIds,
   );
   await pool.query(
@@ -236,7 +252,9 @@ async function seedDatabase() {
        ($9, 'ctx-manager@example.test', 'Context Manager', 'provider', 'active'),
        ($10, 'ctx-manager-two@example.test', 'Context Manager Two', 'provider', 'active'),
        ($11, 'ctx-customer@example.test', 'Context Customer', 'customer', 'active'),
-       ($12, 'ctx-legacy-services@example.test', 'Legacy Services Provider', 'provider', 'active')
+       ($12, 'ctx-legacy-services@example.test', 'Legacy Services Provider', 'provider', 'active'),
+       ($13, 'ctx-revoked-services@example.test', 'Revoked Services Provider', 'provider', 'active'),
+       ($14, 'ctx-suspended-services@example.test', 'Suspended Services Provider', 'provider', 'active')
      on conflict (id) do update set role = excluded.role, email = excluded.email, account_status = 'active'`,
     seededUserIds,
   );
@@ -277,17 +295,27 @@ async function seedDatabase() {
      returning id`,
     [businessRefs.venues, venuesOwnerId],
   );
+  const history = await pool.query(
+    `insert into public.businesses
+       (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
+     values ($1,'Historical Services Business','services',$2,'approved',true,'integration_test',$2,now())
+     on conflict (business_ref) do update set is_enabled=true, approval_status='approved', module_type='services'
+     returning id`,
+    [businessRefs.history, venuesOwnerId],
+  );
   classesBusinessId = classes.rows[0].id;
   pgBusinessId = pgHostel.rows[0].id;
   servicesBusinessId = services.rows[0].id;
   venuesBusinessId = venues.rows[0].id;
+  const historyBusinessId = history.rows[0].id;
 
   await pool.query(
     `insert into public.business_module_access (business_id, module_type, enabled, approval_status, approved_at)
      values ($1,'classes',true,'approved',now()), ($2,'pg_hostels',true,'approved',now()),
-            ($3,'services',true,'approved',now()), ($4,'venues',true,'approved',now())
+            ($3,'services',true,'approved',now()), ($4,'venues',true,'approved',now()),
+            ($5,'services',true,'approved',now())
      on conflict (business_id, module_type) do update set enabled=true, approval_status='approved'`,
-    [classesBusinessId, pgBusinessId, servicesBusinessId, venuesBusinessId],
+    [classesBusinessId, pgBusinessId, servicesBusinessId, venuesBusinessId, historyBusinessId],
   );
   await pool.query(
     `insert into public.business_members (business_id, user_id, role, status, accepted_at) values
@@ -299,9 +327,12 @@ async function seedDatabase() {
        ($6,$8,'staff','active',now()),
        ($9,$10,'owner','active',now()),
        ($1,$11,'manager','active',now()),
-       ($1,$12,'manager','active',now())
-     on conflict (business_id, user_id) do update set role=excluded.role, status='active', accepted_at=now()`,
-    [classesBusinessId, ownerId, memberId, multiId, pgBusinessId, servicesBusinessId, servicesOwnerId, servicesStaffId, venuesBusinessId, venuesOwnerId, managerId, managerTwoId],
+       ($1,$12,'manager','active',now()),
+       ($13,$14,'owner','active',now()),
+       ($13,$15,'owner','revoked',now()),
+       ($13,$16,'owner','suspended',now())
+     on conflict (business_id, user_id) do update set role=excluded.role, status=excluded.status, accepted_at=now()`,
+    [classesBusinessId, ownerId, memberId, multiId, pgBusinessId, servicesBusinessId, servicesOwnerId, servicesStaffId, venuesBusinessId, venuesOwnerId, managerId, managerTwoId, historyBusinessId, venuesOwnerId, revokedServicesId, suspendedServicesId],
   );
   await pool.query(
     `insert into public.business_member_access (business_id,user_id,allowed_modules,allowed_sections) values
@@ -321,18 +352,23 @@ async function seedDatabase() {
   );
   await pool.query(
     `insert into public.service_provider_schedules (provider_id, working_days, day_start, day_end)
-     values ($1, '{1,2,3,4,5,6}', '09:00', '19:00')
-     on conflict (provider_id) do update set working_days = excluded.working_days`,
-    [legacyServicesId],
+     values ($1, '{1,2,3,4,5,6}', '09:00', '19:00'),
+            ($2, '{1,2,3,4,5,6}', '09:00', '19:00'),
+            ($3, '{1,2,3,4,5,6}', '09:00', '19:00')
+     on conflict (provider_id) do update set working_days = excluded.working_days, business_id = null`,
+    [legacyServicesId, revokedServicesId, suspendedServicesId],
   );
 }
 
 after(async () => {
   await stopServer();
   if (pool) {
+    await pool.query('delete from public.service_bookings where provider_id = any($1::uuid[])', [seededUserIds]).catch(() => {});
+    await pool.query('delete from public.service_provider_schedules where provider_id = any($1::uuid[])', [seededUserIds]).catch(() => {});
     await pool.query('delete from public.listings where id = any($1::text[])', [listingIds]).catch(() => {});
     await pool.query('delete from public.businesses where business_ref = any($1::text[])', [Object.values(businessRefs)]).catch(() => {});
     await pool.query("delete from public.businesses where backfill_source = 'services_provider_backfill_v1'").catch(() => {});
+    await pool.query('delete from public.businesses where owner_user_id = any($1::uuid[])', [seededUserIds]).catch(() => {});
     await pool.query('delete from public.profiles where id = any($1::uuid[])', [seededUserIds]).catch(() => {});
     await pool.query('delete from auth.users where id = any($1::uuid[])', [seededUserIds]).catch(() => {});
     await pool.end().catch(() => {});
@@ -340,7 +376,115 @@ after(async () => {
   if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
 });
 
+dbTest('legacy services backfill is fail-closed, audited and idempotent', async () => {
+  tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bos-provider-context-'));
+  storePath = path.join(tempDir, 'authoritative-store.json');
+  await seedDatabase();
+
+  const backfillSql = await fs.readFile(
+    path.join(process.cwd(), 'supabase/migrations/20261113040000_legacy_services_provider_backfill.sql'),
+    'utf8',
+  );
+
+  // Seed the historical rows before the first run. The listing trigger would
+  // otherwise auto-create a business and hide the no-business backfill case.
+  const setup = await pool.connect();
+  try {
+    await setup.query('set session_replication_role = replica');
+    await setup.query(
+      `insert into public.listings
+         (id, owner_id, business_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
+       values
+         ($1, $4, $5, 'Existing booking listing', 'cat-4', 'AC Repair', 'service', 1500, 'per visit', 'active', '{}'::jsonb),
+         ($2, $4, $5, 'Transferred booking listing', 'cat-4', 'AC Repair', 'service', 1500, 'per visit', 'active', '{}'::jsonb),
+         ($3, $4, $5, 'Unassigned booking listing', 'cat-4', 'AC Repair', 'service', 1500, 'per visit', 'active', '{}'::jsonb)`,
+      [listingIds[5], listingIds[6], listingIds[7], legacyServicesId, classesBusinessId],
+    );
+    // Simulate a listing transferred away from the tenant that owns the
+    // historical booking.
+    await setup.query(
+      'update public.listings set business_id = $1 where id = $2',
+      [pgBusinessId, listingIds[6]],
+    );
+    await setup.query(
+      `insert into public.service_bookings
+         (booking_ref, idempotency_key, listing_id, customer_id, provider_id, category_id, subcategory,
+          scheduled_date, time_slot, service_address, customer_phone, status, payment_mode, amount, business_id)
+       values
+         ('BOS-CTX-EXISTING', '00000000-0000-4000-8000-000000000001', $1, $4, $5, 'cat-4', 'AC Repair',
+          '2030-01-10', '10:00', 'Flat 1, Test Road', '+91 90000 00000', 'cancelled', 'pay_after_service', 1500, $6),
+         ('BOS-CTX-TRANSFERRED', '00000000-0000-4000-8000-000000000002', $2, $4, $5, 'cat-4', 'AC Repair',
+          '2030-01-11', '10:00', 'Flat 2, Test Road', '+91 90000 00000', 'cancelled', 'pay_after_service', 1500, $6),
+         ('BOS-CTX-UNASSIGNED', '00000000-0000-4000-8000-000000000003', $3, $4, $5, 'cat-4', 'AC Repair',
+          '2030-01-12', '10:00', 'Flat 3, Test Road', '+91 90000 00000', 'cancelled', 'pay_after_service', 1500, null)`,
+      [listingIds[5], listingIds[6], listingIds[7], customerId, legacyServicesId, classesBusinessId],
+    );
+  } finally {
+    await setup.query('set session_replication_role = origin').catch(() => {});
+    setup.release();
+  }
+
+  await pool.query(backfillSql);
+
+  const excluded = await pool.query(
+    `select id from public.businesses where owner_user_id = any($1::uuid[]) and module_type = 'services'`,
+    [[revokedServicesId, suspendedServicesId]],
+  );
+  assert.equal(excluded.rowCount, 0, 'revoked and suspended providers must not be re-approved');
+
+  const legacyBusiness = await pool.query(
+    `select id from public.businesses where owner_user_id = $1 and module_type = 'services'`,
+    [legacyServicesId],
+  );
+  assert.equal(legacyBusiness.rowCount, 1, 'the eligible legacy provider must receive one business');
+  const legacyBusinessId = legacyBusiness.rows[0].id;
+
+  const linked = await pool.query(
+    `select booking_ref, id, listing_id, business_id from public.service_bookings
+      where booking_ref = any($1::text[]) order by booking_ref`,
+    [['BOS-CTX-EXISTING', 'BOS-CTX-TRANSFERRED', 'BOS-CTX-UNASSIGNED']],
+  );
+  assert.equal(linked.rows.length, 3);
+  assert.equal(String(linked.rows.find((row) => row.booking_ref === 'BOS-CTX-EXISTING')?.business_id), String(classesBusinessId));
+  assert.equal(String(linked.rows.find((row) => row.booking_ref === 'BOS-CTX-TRANSFERRED')?.business_id), String(classesBusinessId));
+  assert.equal(linked.rows.find((row) => row.booking_ref === 'BOS-CTX-UNASSIGNED')?.business_id, null);
+  const transferredListing = await pool.query(
+    'select business_id from public.listings where id = $1',
+    [listingIds[6]],
+  );
+  assert.equal(String(transferredListing.rows[0]?.business_id), String(pgBusinessId));
+
+  const auditBefore = await pool.query(
+    `select event_type, count(*)::int as count from public.business_audit_events
+      where business_id = $1 group by event_type order by event_type`,
+    [legacyBusinessId],
+  );
+  assert.ok(auditBefore.rows.some((row) => row.event_type === 'business.backfilled'));
+  assert.ok(auditBefore.rows.some((row) => row.event_type === 'services.backfill.schedule_linked'));
+  assert.ok(!auditBefore.rows.some((row) => row.event_type === 'services.backfill.booking_linked'));
+
+  // A rerun must not create a duplicate, reactivate an excluded provider, move a
+  // booking, or duplicate audit rows.
+  await pool.query(backfillSql);
+  const counts = await pool.query(
+    `select
+       (select count(*)::int from public.businesses where owner_user_id = $1 and module_type = 'services') as businesses,
+       (select count(*)::int from public.business_audit_events where business_id = $2 and event_type = 'services.backfill.schedule_linked') as schedule_audits,
+       (select business_id from public.service_bookings where booking_ref = 'BOS-CTX-UNASSIGNED') as unassigned_booking_business`,
+    [legacyServicesId, legacyBusinessId],
+  );
+  assert.equal(counts.rows[0].businesses, 1);
+  assert.equal(counts.rows[0].schedule_audits, 1, 'idempotent rerun must not duplicate row audits');
+  assert.equal(counts.rows[0].unassigned_booking_business, null, 'a non-candidate listing must not relink bookings');
+  const excludedAfter = await pool.query(
+    `select id from public.businesses where owner_user_id = any($1::uuid[]) and module_type = 'services'`,
+    [[revokedServicesId, suspendedServicesId]],
+  );
+  assert.equal(excludedAfter.rowCount, 0);
+});
+
 dbTest('provider module authorization, services gate and business RLS', async () => {
+
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bos-provider-context-'));
   storePath = path.join(tempDir, 'authoritative-store.json');
   await seedDatabase();
@@ -575,6 +719,102 @@ dbTest('provider module authorization, services gate and business RLS', async ()
     [classesBusinessId],
   ));
   assert.equal(superAdminModule.rowCount, 1, 'Super Admin can update module access');
+
+  // 7b. Business creation is the authorization boundary: the owner-membership
+  // trigger is SECURITY DEFINER and would otherwise create access for any
+  // business row that passed INSERT RLS.
+  await assert.rejects(
+    asAuthenticated(adminId, (client) => client.query(
+      `insert into public.businesses
+         (business_ref,name,module_type,owner_user_id,approval_status,is_enabled)
+       values ('BIZ-TEST-ADMIN-APPROVED','Admin approved attempt','services',$1,'approved',true)`,
+      [adminId],
+    )),
+    permissionDenied,
+    'ordinary admin cannot create an approved business',
+  );
+  await assert.rejects(
+    asAuthenticated(adminId, (client) => client.query(
+      `insert into public.businesses
+         (business_ref,name,module_type,owner_user_id,approval_status,is_enabled)
+       values ('BIZ-TEST-ADMIN-PENDING','Admin pending attempt','services',$1,'pending',true)`,
+      [adminId],
+    )),
+    permissionDenied,
+    'ordinary admin cannot use the provider owner creation path',
+  );
+  await assert.rejects(
+    asAuthenticated(ownerId, (client) => client.query(
+      `insert into public.businesses
+         (business_ref,name,module_type,owner_user_id,approval_status,is_enabled)
+       values ('BIZ-TEST-OWNER-APPROVED','Owner approved attempt','services',$1,'approved',true)`,
+      [ownerId],
+    )),
+    permissionDenied,
+    'a provider cannot self-create an approved business',
+  );
+
+  const ownerPending = await asAuthenticated(ownerId, async (client) => {
+    const business = await client.query(
+      `insert into public.businesses
+         (business_ref,name,module_type,owner_user_id,approval_status,is_enabled)
+       values ('BIZ-TEST-OWNER-PENDING','Owner pending business','services',$1,'pending',true)
+       returning id`,
+      [ownerId],
+    );
+    const member = await client.query(
+      'select role, status from public.business_members where business_id = $1 and user_id = $2',
+      [business.rows[0].id, ownerId],
+    );
+    const module = await client.query(
+      "select enabled, approval_status from public.business_module_access where business_id = $1 and module_type = 'services'",
+      [business.rows[0].id],
+    );
+    return { member: member.rows[0], module: module.rows[0] };
+  });
+  assert.equal(ownerPending.member?.role, 'owner');
+  assert.equal(ownerPending.member?.status, 'active');
+  assert.equal(ownerPending.module?.enabled, false);
+  assert.equal(ownerPending.module?.approval_status, 'pending');
+
+  const superCreated = await asAuthenticated(superAdminId, async (client) => {
+    const business = await client.query(
+      `insert into public.businesses
+         (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,approved_by,approved_at)
+       values ('BIZ-TEST-SUPER-APPROVED','Super approved business','services',$1,'approved',true,$1,now())
+       returning id`,
+      [superAdminId],
+    );
+    const member = await client.query(
+      'select role, status from public.business_members where business_id = $1 and user_id = $2',
+      [business.rows[0].id, superAdminId],
+    );
+    const module = await client.query(
+      "select enabled, approval_status from public.business_module_access where business_id = $1 and module_type = 'services'",
+      [business.rows[0].id],
+    );
+    return { member: member.rows[0], module: module.rows[0] };
+  });
+  assert.equal(superCreated.member?.role, 'owner');
+  assert.equal(superCreated.member?.status, 'active');
+  assert.equal(superCreated.module?.enabled, true);
+  assert.equal(superCreated.module?.approval_status, 'approved');
+
+  await assert.rejects(
+    asAuthenticated(adminId, (client) => client.query(
+      `insert into public.business_members (business_id,user_id,role,status)
+       values ($1,$2,'owner','active')`,
+      [venuesBusinessId, adminId],
+    )),
+    permissionDenied,
+    'ordinary admin cannot assign an owner membership',
+  );
+  const superOwnerMembership = await asAuthenticated(superAdminId, (client) => client.query(
+    `insert into public.business_members (business_id,user_id,role,status)
+     values ($1,$2,'owner','active') returning id`,
+    [venuesBusinessId, customerId],
+  ));
+  assert.equal(superOwnerMembership.rowCount, 1, 'Super Admin can assign an owner membership');
 
   // 8. Member scopes are server-mediated: direct PostgREST writes are denied.
   await assert.rejects(

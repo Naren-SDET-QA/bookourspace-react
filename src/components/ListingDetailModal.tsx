@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { MarketplaceListing, Review } from '../types/marketplace';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { VerifiedPhoneReveal } from './VerifiedPhoneReveal';
 import { playAlertChime } from '../utils/audio';
 import { 
   AppLanguage, 
@@ -130,12 +131,13 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   // actions when a real number is available to this customer.
   const providerPhoneDigits = (listing.providerPhone || '').replace(/\D/g, '');
   const hasProviderContact = providerPhoneDigits.length >= 10;
+  const [phoneRevealed, setPhoneRevealed] = useState(false);
   const displaySubcategory = getSubcategoryDisplayName(listing.subcategory, currentLang);
 
   const handleShare = async () => {
     const shareUrl = window.location.href;
     const shareTitle = `${displayTitle} - ${displayProviderName}`;
-    const shareText = `${displayTitle}\n👤 ${t.verifiedPro}: ${displayProviderName}\n📍 ${listing.location.area} (${distKm} km)\n💰 ${t.pricing}: ₹${listing.price.toLocaleString('en-IN')}${displayPriceUnit}\n⭐ ${listing.providerRating} (${listing.reviewCount} ${t.reviews})${hasProviderContact ? `\n📞 ${listing.providerPhone}` : ''}\n\nక్రాఫ్టో (Crafto) లో చూడండి:`;
+    const shareText = `${displayTitle}\n👤 ${t.verifiedPro}: ${displayProviderName}\n📍 ${listing.location.area} (${distKm} km)\n💰 ${t.pricing}: ₹${listing.price.toLocaleString('en-IN')}${displayPriceUnit}\n⭐ ${listing.providerRating} (${listing.reviewCount} ${t.reviews})\n\nక్రాఫ్టో (Crafto) లో చూడండి:`;
 
     if (navigator.share) {
       try {
@@ -815,14 +817,20 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                 </div>
                 <div className="text-xs font-bold text-purple-900 dark:text-purple-300 tabular-nums mt-0.5">
                   {hasProviderContact
-                    ? `📞 ${listing.providerPhone}${listing.providerEmail ? ` · ${listing.providerEmail}` : ''}`
+                    ? (listing.providerEmail ? listing.providerEmail : '')
                     : (currentLang === 'te' ? 'సంప్రదింపు వివరాలు బుకింగ్ తర్వాత అందుతాయి' : 'Contact details are shared after booking')}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {hasProviderContact ? (
+              {hasProviderContact && !phoneRevealed ? (
+                <VerifiedPhoneReveal
+                  phone={listing.providerPhone}
+                  currentLang={currentLang}
+                  onRevealed={() => setPhoneRevealed(true)}
+                />
+              ) : hasProviderContact ? (
                 <>
                   <button
                     onClick={handleDirectCall}

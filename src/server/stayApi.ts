@@ -424,21 +424,32 @@ export function registerStayApi(app: express.Express, deps: StayApiDeps): void {
           [token, bookingId, actor.supabaseUserId],
         );
         if (Number(confirmed.rows[0]?.result) !== 1) return { error: 'HOLD_EXPIRED' as const };
-        const after = await client.query(
-          `select a.booking_id, a.total_paise, b.customer_name, b.check_in::text as check_in,
-                  b.check_out::text as check_out, b.payment_status,
-                  p.name as property_name, rt.name as room_type_name, gc.guest_email,
-                  owner.email as owner_email, owner.full_name as owner_name
-             from public.stay_allocations a
-             join public.bookings b on b.id = a.booking_id
-             join public.stay_properties p on p.listing_id = b.listing_id
-             left join public.profiles owner on owner.id = p.owner_user_id
-             left join public.stay_room_types rt on rt.id = b.room_type_id
-             left join public.stay_booking_guest_contacts gc on gc.booking_id = b.id and gc.guest_user_id = b.user_id
-            where a.hold_token = $1`,
-          [token],
-        );
-        const booking = after.rows[0];
+        // Email details are best effort: a lookup failure must never roll back a
+        // booking the RPC has already confirmed. service_role can read the stay
+        // tables but not profiles, so the owner contact stays empty here and the
+        // host notification is skipped rather than failing the confirmation.
+        let booking: any = null;
+        try {
+          await client.query('SAVEPOINT stay_confirm_email_details');
+          const after = await client.query(
+            `select a.booking_id, a.total_paise, b.customer_name, b.check_in::text as check_in,
+                    b.check_out::text as check_out, b.payment_status,
+                    p.name as property_name, rt.name as room_type_name, gc.guest_email,
+                    null::text as owner_email, null::text as owner_name
+               from public.stay_allocations a
+               join public.bookings b on b.id = a.booking_id
+               join public.stay_properties p on p.listing_id = b.listing_id
+               left join public.stay_room_types rt on rt.id = b.room_type_id
+               left join public.stay_booking_guest_contacts gc on gc.booking_id = b.id and gc.guest_user_id = b.user_id
+              where a.hold_token = $1`,
+            [token],
+          );
+          booking = after.rows[0] || null;
+          await client.query('RELEASE SAVEPOINT stay_confirm_email_details');
+        } catch {
+          await client.query('ROLLBACK TO SAVEPOINT stay_confirm_email_details');
+          booking = null;
+        }
         return {
           bookingId: booking?.booking_id || bookingId,
           totalPaise: Number(booking?.total_paise || 0),

@@ -81,6 +81,10 @@ export default defineConfig({
       ...(process.env.BOS_LISTINGS_DATABASE_URL ? { BOS_LISTINGS_DATABASE_URL: process.env.BOS_LISTINGS_DATABASE_URL } : {}),
       PORT: localWebPort,
       BOS_GUEST_LOGIN_ENABLED: 'true',
+      // Tests must not inherit the local preview's demo opt-ins from
+      // scripts/dev-with-stays-db.sh: demo rows stay hidden and unbookable.
+      BOS_STAY_INCLUDE_DEMO: '0',
+      BOS_STAY_ALLOW_DEMO_BOOKING: '0',
       BOS_DEV_DB_PORT: localDbPort,
       BOS_DEV_DB_DATA_DIR: localDbDataDir,
       BOS_VITE_CACHE_DIR: localViteCacheDir,

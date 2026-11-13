@@ -210,6 +210,10 @@ before(async () => {
       PORT: String(apiPort),
       BOS_SERVER_HMAC_SECRET: SESSION_SECRET,
       BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,
+      // Database-free contract: an ambient Postgres URL would make the server
+      // look up profiles instead of the local authoritative store.
+      BOS_LISTINGS_DATABASE_URL: '',
+      BOS_PG_URL: '',
       BOS_AUTH_SETTINGS_FILE: path.join(tempDir, 'auth-access.json'),
       BOS_GUEST_LOGIN_ENABLED: '0',
       BOS_EMAIL_OTP_ENABLED: '1',

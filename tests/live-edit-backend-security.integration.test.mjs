@@ -35,6 +35,14 @@ let child;
 let serverUrl;
 let tempDir;
 let storePath;
+let BUSINESS_A_PG;
+let BUSINESS_A_VENUES;
+let BUSINESS_A_MOVIES;
+let BUSINESS_B_PG;
+let BUSINESS_B_MOVIES;
+let BUSINESS_SUSPENDED_PG;
+let BUSINESS_SUSPENDED_MOVIES;
+let BUSINESS_CUSTOMER_PG;
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -125,11 +133,30 @@ async function stopServer() {
   await new Promise((resolve) => processToStop.once('exit', resolve));
 }
 
-async function request(method, url, sessionToken, body) {
+/**
+ * The shared listing surface serves every provider module, so a provider that
+ * owns more than one approved business must select one per request. Requests
+ * default to the module the route itself belongs to (PG listings for the
+ * shared listing surface) and pass an explicit business for cinema work.
+ */
+function defaultBusinessId(sessionToken, url) {
+  const cinema = String(url || '').startsWith('/api/movies/');
+  if (sessionToken === tokens.providerA) return cinema ? BUSINESS_A_MOVIES : BUSINESS_A_PG;
+  if (sessionToken === tokens.providerB) return cinema ? BUSINESS_B_MOVIES : BUSINESS_B_PG;
+  if (sessionToken === tokens.suspendedProvider) {
+    return cinema ? BUSINESS_SUSPENDED_MOVIES : BUSINESS_SUSPENDED_PG;
+  }
+  if (sessionToken === tokens.forgedProvider) return BUSINESS_CUSTOMER_PG;
+  return null;
+}
+
+async function request(method, url, sessionToken, body, businessId) {
+  const selectedBusinessId = businessId || defaultBusinessId(sessionToken, url);
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
       ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(selectedBusinessId ? { 'x-business-id': selectedBusinessId } : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -143,8 +170,14 @@ async function request(method, url, sessionToken, body) {
   return { status: response.status, data };
 }
 
-function patchListing(sessionToken, id, body) {
-  return request('PATCH', `/api/provider/listings/${encodeURIComponent(id)}`, sessionToken, body);
+function patchListing(sessionToken, id, body, businessId) {
+  return request(
+    'PATCH',
+    `/api/provider/listings/${encodeURIComponent(id)}`,
+    sessionToken,
+    body,
+    businessId,
+  );
 }
 
 function reviewListing(sessionToken, id, decision) {
@@ -249,6 +282,60 @@ async function seed() {
     );
   }
 
+  // Approved businesses, module access and owner memberships the provider
+  // request gate requires. The Live Edit routes are only reachable with a real
+  // business context, exactly as in production.
+  const businessSpecs = [
+    ['live-edit-a-pg', 'Live Edit Provider A PG', 'pg_hostels', A],
+    ['live-edit-a-venues', 'Live Edit Provider A Venues', 'venues', A],
+    ['live-edit-a-movies', 'Live Edit Provider A Movies', 'movies', A],
+    ['live-edit-b-pg', 'Live Edit Provider B PG', 'pg_hostels', B],
+    ['live-edit-b-movies', 'Live Edit Provider B Movies', 'movies', B],
+    ['live-edit-suspended-pg', 'Live Edit Suspended PG', 'pg_hostels', SUSPENDED_PROVIDER],
+    ['live-edit-suspended-movies', 'Live Edit Suspended Movies', 'movies', SUSPENDED_PROVIDER],
+    ['live-edit-customer-pg', 'Live Edit Forged Provider PG', 'pg_hostels', CUSTOMER],
+  ];
+  const businessIds = new Map();
+  for (const [ref, name, moduleType, ownerId] of businessSpecs) {
+    const { rows: businessRows } = await sql(
+      `insert into public.businesses
+         (business_ref, name, module_type, owner_user_id, approval_status, is_enabled,
+          backfill_source, created_by, approved_at)
+       values ($1, $2, $3, $4, 'approved', true, 'integration_test', $4, now())
+       on conflict (business_ref) do update set
+         name = excluded.name, module_type = excluded.module_type,
+         owner_user_id = excluded.owner_user_id, approval_status = 'approved',
+         is_enabled = true
+       returning id`,
+      [ref, name, moduleType, ownerId],
+    );
+    const businessId = businessRows[0].id;
+    businessIds.set(ref, businessId);
+    await sql(
+      `insert into public.business_module_access
+         (business_id, module_type, enabled, approval_status, approved_at)
+       values ($1, $2, true, 'approved', now())
+       on conflict (business_id, module_type) do update set
+         enabled = true, approval_status = 'approved'`,
+      [businessId, moduleType],
+    );
+    await sql(
+      `insert into public.business_members (business_id, user_id, role, status, accepted_at)
+       values ($1, $2, 'owner', 'active', now())
+       on conflict (business_id, user_id) do update set
+         role = 'owner', status = 'active', accepted_at = now()`,
+      [businessId, ownerId],
+    );
+  }
+  BUSINESS_A_PG = businessIds.get('live-edit-a-pg');
+  BUSINESS_A_VENUES = businessIds.get('live-edit-a-venues');
+  BUSINESS_A_MOVIES = businessIds.get('live-edit-a-movies');
+  BUSINESS_B_PG = businessIds.get('live-edit-b-pg');
+  BUSINESS_B_MOVIES = businessIds.get('live-edit-b-movies');
+  BUSINESS_SUSPENDED_PG = businessIds.get('live-edit-suspended-pg');
+  BUSINESS_SUSPENDED_MOVIES = businessIds.get('live-edit-suspended-movies');
+  BUSINESS_CUSTOMER_PG = businessIds.get('live-edit-customer-pg');
+
   const payloadA = {
     description: 'A verified PG in Madhapur with food and Wi-Fi.',
     images: ['https://images.example.com/pg-a.jpg'],
@@ -263,20 +350,20 @@ async function seed() {
     customFieldValues: { genderPolicy: 'Men Only', bedsAvailable: 2, totalCapacity: 45 },
   };
   const rows = [
-    [LISTING_A, A, 'Live Edit PG A', 'pg-luxury', 'Luxury PG', 'property', 8500, '/month', 'pending_approval', payloadA],
-    [LISTING_B, B, 'Live Edit PG B', 'pg-luxury', 'Luxury PG', 'property', 9100, '/month', 'pending_approval', payloadA],
-    [LISTING_VENUE, A, 'Live Edit Venue A', 'venue-marriage', 'Marriage hall', 'venue', 85000, '/day', 'pending_approval', payloadA],
-    [LISTING_SUSPENDED, SUSPENDED_PROVIDER, 'Suspended listing', 'pg-budget', 'Budget PG', 'property', 5000, '/month', 'pending_approval', payloadA],
-    [LISTING_AUDIT_FAIL, A, 'Audit failure listing', 'pg-luxury', 'Luxury PG', 'property', 8600, '/month', 'pending_approval', payloadA],
+    [LISTING_A, A, BUSINESS_A_PG, 'Live Edit PG A', 'pg-luxury', 'Luxury PG', 'property', 8500, '/month', 'pending_approval', payloadA],
+    [LISTING_B, B, BUSINESS_B_PG, 'Live Edit PG B', 'pg-luxury', 'Luxury PG', 'property', 9100, '/month', 'pending_approval', payloadA],
+    [LISTING_VENUE, A, BUSINESS_A_VENUES, 'Live Edit Venue A', 'venue-marriage', 'Marriage hall', 'venue', 85000, '/day', 'pending_approval', payloadA],
+    [LISTING_SUSPENDED, SUSPENDED_PROVIDER, BUSINESS_SUSPENDED_PG, 'Suspended listing', 'pg-budget', 'Budget PG', 'property', 5000, '/month', 'pending_approval', payloadA],
+    [LISTING_AUDIT_FAIL, A, BUSINESS_A_PG, 'Audit failure listing', 'pg-luxury', 'Luxury PG', 'property', 8600, '/month', 'pending_approval', payloadA],
   ];
   for (const row of rows) {
     await sql(
       `insert into public.listings
-         (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit,
+         (id, owner_id, business_id, title, category_id, subcategory, entity_type, price, price_unit,
           status, payload, provider_availability_status, is_verified)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'not_reported', false)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'not_reported', false)
        on conflict (id) do update set
-         owner_id = excluded.owner_id, title = excluded.title,
+         owner_id = excluded.owner_id, business_id = excluded.business_id, title = excluded.title,
          category_id = excluded.category_id, subcategory = excluded.subcategory,
          entity_type = excluded.entity_type, price = excluded.price,
          price_unit = excluded.price_unit, status = excluded.status,
@@ -470,14 +557,14 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
     assert.equal(response.status, 403);
     assert.equal(response.data.error, 'ACTIVE_PROFILE_REQUIRED');
 
-    const rowCount = await asActor(SUSPENDED_PROVIDER, async (client) => {
-      const result = await client.query('update public.listings set title = $2 where id = $1', [
-        LISTING_SUSPENDED,
-        'Suspended SQL edit',
-      ]);
-      return result.rowCount;
-    });
-    assert.equal(rowCount, 0);
+    // The database guard refuses the write for an inactive profile on purpose;
+    // either the trigger error or an RLS-filtered zero-row update is a denial.
+    await expectSqlFailure(
+      SUSPENDED_PROVIDER,
+      'update public.listings set title = $2 where id = $1',
+      [LISTING_SUSPENDED, 'Suspended SQL edit'],
+      /LIVE_EDIT_ACTIVE_PROFILE_REQUIRED|row-level security|violates row-level/i,
+    );
 
     const movie = await request('PUT', '/api/movies/screens', tokens.suspendedProvider, {
       screenId: SCREEN_A,
@@ -707,13 +794,13 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
 
     const venueInvalid = await patchListing(tokens.providerA, LISTING_VENUE, {
       payload: { customFieldValues: { capacity: 'many' } },
-    });
+    }, BUSINESS_A_VENUES);
     assert.equal(venueInvalid.status, 400, JSON.stringify(venueInvalid.data));
     assert.equal(venueInvalid.data.error, 'INVALID_LISTING_DETAILS');
 
     const venueValid = await patchListing(tokens.providerA, LISTING_VENUE, {
       payload: { customFieldValues: { capacity: 900 } },
-    });
+    }, BUSINESS_A_VENUES);
     assert.equal(venueValid.status, 200, JSON.stringify(venueValid.data));
     assert.equal((await listingRow(LISTING_VENUE)).payload.customFieldValues.capacity, 900);
   });

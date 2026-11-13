@@ -37,7 +37,7 @@ test('a hash deep link cannot manufacture an admin role', async () => {
   assert.ok(adminStart > 0, 'the admin hash branch must exist');
   // Slice to the branch boundary instead of a fixed character window so a
   // descriptive comment can never hide (or accidentally satisfy) the guard.
-  const adminEnd = source.indexOf("} else if (!hash.startsWith('venue-'))", adminStart);
+  const adminEnd = source.indexOf("} else if (!hash.startsWith('venue-') && hashChanged)", adminStart);
   assert.ok(adminEnd > adminStart, 'the admin hash branch must end before the fallback branch');
   const adminHashBlock = source.slice(adminStart, adminEnd);
 

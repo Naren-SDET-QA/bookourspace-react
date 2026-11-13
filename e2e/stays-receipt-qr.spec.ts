@@ -210,14 +210,27 @@ test('receipt is unpaid-safe, itemized, downloadable as a real PDF, and exposes 
     expect(bytes.length).toBeGreaterThan(5_000);
     expect(download.suggestedFilename()).toContain(bookingId);
 
-    const popupPromise = page.waitForEvent('popup', { timeout: 10_000 });
+    // Print opens the PDF blob with window.open(..., 'noopener,noreferrer'). Those
+    // flags sever the opener link, so Playwright never reports a popup event. Spy on
+    // window.open in the page instead: it proves the print action produced a blob URL
+    // with the hardened features, without weakening the production security setting.
+    await page.evaluate(() => {
+      const w = window as unknown as { __printOpenCalls: unknown[][] };
+      w.__printOpenCalls = [];
+      const original = window.open.bind(window);
+      window.open = ((...args: Parameters<typeof window.open>) => {
+        w.__printOpenCalls.push(args as unknown[]);
+        return original(...args);
+      }) as typeof window.open;
+    });
     await receiptDialog.getByRole('button', { name: /^Print$/ }).click();
-    const printWindow = await popupPromise;
-    // Chromium's built-in PDF viewer may keep the popup at about:blank while
-    // the blob is handed to the print preview; the popup itself is the proof
-    // that the print action was triggered. The PDF bytes are asserted above.
-    expect(printWindow).toBeTruthy();
-    await printWindow.close();
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { __printOpenCalls: unknown[][] }).__printOpenCalls.length)).toBe(1);
+    const printCall = await page.evaluate(() =>
+      (window as unknown as { __printOpenCalls: unknown[][] }).__printOpenCalls[0]);
+    expect(printCall[0]).toMatch(/^blob:/);
+    expect(printCall[1]).toBe('_blank');
+    expect(printCall[2]).toBe('noopener,noreferrer');
 
     await receiptDialog.getByRole('button', { name: 'Close receipt', exact: true }).click();
     const qrButton = row.getByRole('button', { name: /Booking QR/i });

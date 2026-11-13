@@ -1576,11 +1576,14 @@ export class ProviderListingRepository {
   }
 
   /**
-   * Public discovery reads. The table's select policy is public, so this runs
-   * as anon and does not require an authenticated session.
+   * Public discovery reads. The persistent screen-visibility guard hides every
+   * cinema row from client roles, so discovery uses the server connection role
+   * just like the movies discovery API; the response is still anonymous and
+   * only contains screen/showtime fields.
    */
   async listPublicCinemaScreens(): Promise<CinemaScreenRecord[]> {
     return this.transaction(null, async (client) => {
+      await client.query('RESET ROLE');
       const { rows } = await client.query(
         `select * from public.cinema_screens
           order by cinema_title asc, screen_name asc, id asc`,
@@ -1592,6 +1595,12 @@ export class ProviderListingRepository {
   async findPublicCinemaScreen(screenIdOrListing: string): Promise<CinemaScreenRecord | null> {
     if (!screenIdOrListing) return null;
     return this.transaction(null, async (client) => {
+      // Cinema screens carry a restrictive SELECT policy that hides even the
+      // owner's row from client roles. This identity lookup therefore runs as
+      // the server connection role (the same path the movies inventory API
+      // uses); ownership/assignment is still enforced before any write or
+      // response by live_edit_cinema_actor_can_edit().
+      await client.query('RESET ROLE');
       const { rows } = await client.query(
         `select * from public.cinema_screens
           where id = $1 or cinema_listing_id = $1
@@ -1620,6 +1629,12 @@ export class ProviderListingRepository {
           'This cinema screen is not owned by your account or covered by an assignment.',
         );
       }
+
+      // The restrictive SELECT policy on cinema_screens also blocks the owner
+      // row, so the write runs as the server connection role. The write trigger
+      // re-checks live_edit_cinema_actor_can_edit() under the signed actor
+      // claims, so authorization is unchanged.
+      await client.query('RESET ROLE');
 
       const existing = await client.query(
         `select * from public.cinema_screens where id = $1 for update`,
@@ -1737,6 +1752,9 @@ export class ProviderListingRepository {
       if (!(await this.isCurrentSuperAdmin(client))) {
         throw new ProviderListingRepositoryError('SUPER_ADMIN_REQUIRED', 403);
       }
+      // Same restrictive SELECT policy as above; the ownership audit and row
+      // guard still verify the signed Super Admin actor.
+      await client.query('RESET ROLE');
       const screen = await client.query(
         `select id, cinema_listing_id from public.cinema_screens where id = $1 for update`,
         [screenId],

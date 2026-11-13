@@ -222,7 +222,16 @@ test('Host browser — provider opens Stay hosting and sees owned PostgreSQL lis
     await page.goto(`${harness.uiUrl}/`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /Provider Hub/i }).click();
     await expect(page.getByText('Approved Live Posts')).toBeVisible({ timeout: 20_000 });
-    await page.getByRole('button', { name: /Stay hosting/i }).click();
+    // On a mobile viewport the portal navigation sits in a drawer. The PG owner
+    // console embedded in the same hub exposes its own "Open navigation"
+    // button, so scope to the provider portal header.
+    const portalHeader = page.locator('header').filter({ hasText: 'Provider workspace' });
+    await portalHeader.getByRole('button', { name: 'Open navigation' }).click();
+    await page.getByRole('navigation', { name: 'Provider portal navigation' }).getByRole('button', { name: 'Stays', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Stays owner workspace' })).toBeVisible();
+    // The host inventory workspace is collapsed by default inside the owner
+    // dashboard; open it the way a host does before asserting on its contents.
+    await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
     const workspace = page.getByRole('region', { name: 'Stay host workspace' });
     await expect(workspace).toBeVisible();
     await expect(workspace).toContainText(STAY.title, { timeout: 20_000 });

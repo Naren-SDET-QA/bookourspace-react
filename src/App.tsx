@@ -412,7 +412,26 @@ function MarketplaceAppContent() {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     }
   };
+  // Section screens are deep-linkable; keep the URL hash in sync when a module
+  // tab is selected so dependency-driven route re-runs reopen the same screen
+  // instead of clearing it or restoring a previously visited section.
+  const syncSectionHash = (section: MarketSectionType) => {
+    if (typeof window === 'undefined') return;
+    const hashForSection: Record<MarketSectionType, string> = {
+      pg_hostels: '#pg',
+      classes: '#classes',
+      venues: '#venues',
+      services: '#services',
+      hotel_stay: '#stays',
+      movies: '#movies',
+    };
+    const nextHash = hashForSection[section];
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${nextHash}`);
+    }
+  };
   const previousMarketSectionRef = useRef<MarketSectionType>('pg_hostels');
+  const lastAppliedSectionHashRef = useRef<string | null>(null);
 
   // View Mode: 'grid' vs 'map' (Toggle between Flipkart Product Grid and Live Map Hero)
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
@@ -599,6 +618,11 @@ function MarketplaceAppContent() {
   useEffect(() => {
     const applySectionHash = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
+      // This effect re-runs when auth/session/module state hydrates. Only an
+      // actual hash change may close a section the user just opened from the
+      // header; otherwise every hydration would bounce PGs back to the landing.
+      const hashChanged = lastAppliedSectionHashRef.current !== hash;
+      lastAppliedSectionHashRef.current = hash;
       if (hash === 'login') {
         setIsLoginPageOpen(true);
         return;
@@ -692,7 +716,7 @@ function MarketplaceAppContent() {
         setUserRole('admin');
         setActiveView('admin_console');
         setOpenSection(null);
-      } else if (!hash.startsWith('venue-')) {
+      } else if (!hash.startsWith('venue-') && hashChanged) {
         setOpenSection(null);
       }
     };
@@ -2090,6 +2114,7 @@ function MarketplaceAppContent() {
               if (section === 'pg_hostels') returnSectionAfterPGRef.current = activeMarketSection;
               if (section === 'hotel_stay') returnSectionAfterStayRef.current = activeMarketSection;
               if (section === 'services') returnSectionAfterServicesRef.current = activeMarketSection;
+              syncSectionHash(section);
               setActiveMarketSection(section);
           }}
         />
@@ -2147,6 +2172,7 @@ function MarketplaceAppContent() {
               } else {
                 setIsClassesTimingsOpen(false);
               }
+              syncSectionHash(sec);
               setActiveMarketSection(sec);
               showToast(
                 sec === 'pg_hostels'

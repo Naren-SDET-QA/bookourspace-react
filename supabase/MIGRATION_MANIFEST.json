@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 113,
+  "migrationCount": 114,
   "migrations": [
     {
       "order": 2,
@@ -916,14 +916,22 @@
       "version": "20261113040000",
       "name": "legacy_services_provider_backfill",
       "file": "supabase/migrations/20261113040000_legacy_services_provider_backfill.sql",
-      "bytes": 5281,
-      "sha256": "015992098d7bf7f33cec4935af4f3e04a13e269071e2e8b1aa109b16e93ce543"
+      "bytes": 11080,
+      "sha256": "6c26b32d88c39c359638de7795af9c0fa465c46ebb7c834d014ddc164c9130af"
+    },
+    {
+      "order": 115,
+      "version": "20261113050000",
+      "name": "business_creation_super_admin_boundary",
+      "file": "supabase/migrations/20261113050000_business_creation_super_admin_boundary.sql",
+      "bytes": 3181,
+      "sha256": "e61692978adba47482434e8abb508d75d49cda9a0a03c850efd55d3c79449707"
     }
   ],
   "review": {
-    "at": "2026-11-13T09:31:36.341Z",
-    "note": "Merged movie visibility audit migrations",
-    "migrationCount": 113,
+    "at": "2026-11-13T11:09:19.878Z",
+    "note": "P0 security remediation: fail-closed legacy services backfill plus Super Admin business-creation and owner-membership RLS boundary; PostgreSQL harness, tsc and unit tests reviewed.",
+    "migrationCount": 114,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }
