@@ -73,6 +73,7 @@ Android/iOS source is included. Release signing keys, `android/local.properties`
 ## Included
 
 - Complete `src/`, `server.ts`, `public/`
+- Is this repository complete? See [`docs/repository-consolidation-audit.md`](docs/repository-consolidation-audit.md) for the clone/branch audit behind `main`
 - Style 1/2/3 and dynamic Classes detail
 - `tests/`, `e2e/`, Playwright config
 - Android and iOS Capacitor projects (source only)

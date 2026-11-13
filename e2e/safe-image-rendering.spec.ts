@@ -53,8 +53,12 @@ test('visible module imagery is loaded on phone and desktop without demo-host re
     body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#64748b"/></svg>'),
   }));
   const imageRequests: string[] = [];
+  const failedImageRequests: string[] = [];
   page.on('request', (request) => {
     if (request.resourceType() === 'image') imageRequests.push(request.url());
+  });
+  page.on('requestfailed', (request) => {
+    if (request.resourceType() === 'image') failedImageRequests.push(`${request.failure()?.errorText}: ${request.url()}`);
   });
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -64,13 +68,25 @@ test('visible module imagery is loaded on phone and desktop without demo-host re
       const visibleImageState = () => page.locator('img[data-safe-image]').evaluateAll((images) => (images as HTMLImageElement[])
         .filter((image) => {
           const bounds = image.getBoundingClientRect();
-          return bounds.bottom > 0 && bounds.top < window.innerHeight;
+          if (!(bounds.bottom > 0 && bounds.top < window.innerHeight && bounds.right > 0 && bounds.left < window.innerWidth)) return false;
+          // getBoundingClientRect still reports a box for content clipped by a
+          // collapsed or overflow-hidden ancestor, and Chromium does not fetch
+          // lazy images it would not paint. Hit-test the centre so only images
+          // that are actually rendered on screen are required to have loaded.
+          const x = Math.min(window.innerWidth - 1, Math.max(0, bounds.left + bounds.width / 2));
+          const y = Math.min(window.innerHeight - 1, Math.max(0, bounds.top + bounds.height / 2));
+          return document.elementsFromPoint(x, y).some((element) => element === image || element.contains(image));
         })
-        .map((image) => ({ loaded: image.complete && image.naturalWidth > 0, source: image.currentSrc || image.src })));
+        .map((image) => ({
+          loaded: image.complete && image.naturalWidth > 0,
+          source: image.currentSrc || image.src,
+          state: image.dataset.imageState,
+        })));
       await expect.poll(async () => {
         const images = await visibleImageState();
-        return images.length > 0 && images.every((image) => image.loaded);
-      }, { message: `${route} at ${width}px has a visible image that did not load`, timeout: 10_000 }).toBe(true);
+        const pending = images.filter((image) => !image.loaded).map((image) => `${image.state} ${image.source || '<no src>'}`);
+        return { route, width, rendered: images.length, pending, failed: failedImageRequests.slice(-3) };
+      }, { message: `${route} at ${width}px has a visible image that did not load`, timeout: 10_000 }).toEqual({ route, width, rendered: expect.any(Number), pending: [], failed: [] });
       const visibleImages = await visibleImageState();
       expect(visibleImages.length, `${route} rendered no visible image at ${width}px`).toBeGreaterThan(0);
       expect(visibleImages.every((image) => image.loaded), `${route} has a broken visible image at ${width}px`).toBe(true);
@@ -307,4 +323,57 @@ test('a stale responsive variant falls back to the persisted original photo afte
   await expect.poll(() => originalSignRequests, { timeout: 10_000 }).toBeGreaterThan(originalSignRequestsBeforeReload);
   expect(await reloadedImage.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
   expect(await reloadedImage.evaluate((element: HTMLImageElement) => element.currentSrc)).toMatch(/WhatsApp_Image_2026-10-17_at_7\.17\.13_PM_64b54ca7\.jpeg$/);
+});
+
+test('SafeImage recovers from repeated failing signed URLs without stalling in loading', async ({ page }) => {
+  let signAttempts = 0;
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/storage/v1/object/sign/**', async (route) => {
+    if (route.request().method() === 'POST') {
+      signAttempts += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ signedURL: '/object/sign/bos-public-media/owner/listing/missing-file.webp?token=same' }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'text/plain', body: 'missing' });
+  });
+  await page.route('https://obkfgxjzlscungkhbyvq.supabase.co/rest/v1/media_assets**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/marketplace/listings', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      source: 'postgresql',
+      listings: [{
+        id: 'venue-broken-signed-1',
+        title: 'Broken signed venue recovery check',
+        categoryId: 'venue-marriage',
+        subcategory: 'Function Hall',
+        entityType: 'venue',
+        price: 15000,
+        priceUnit: 'event',
+        providerName: 'Verified venue owner',
+        createdAt: '2026-11-10',
+        attributes: {
+          images: ['storage://bos-public-media/owner/listing/missing-file.webp'],
+          location: { city: 'Hyderabad', area: 'Madhapur' },
+        },
+      }],
+    }),
+  }));
+  await page.addInitScript(() => {
+    window.localStorage.setItem('bos_section_style_prefs_v1', JSON.stringify({ venues: 'agenda' }));
+  });
+  await page.goto('/#venues', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: /All Venues & Halls/ })).toBeVisible({ timeout: 30_000 });
+  const img = page.locator('article img[data-safe-image]').first();
+  await expect(img).toBeVisible();
+  await img.scrollIntoViewIfNeeded();
+  await expect(img).toHaveAttribute('src', /\/assets\/fallbacks\/venues\.webp$/);
+  await expect(img).toHaveAttribute('data-image-state', 'loaded');
+  expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+  expect(signAttempts).toBeGreaterThan(0);
 });

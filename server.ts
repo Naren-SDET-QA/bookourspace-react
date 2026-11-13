@@ -62,6 +62,7 @@ import { PlatformBuilderRepository, registerPlatformBuilderApi } from './src/ser
 import { VenueBookingRepository } from './src/server/venueBookingRepository';
 import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
 import { registerMediaValidationApi } from './src/server/mediaValidationApi';
+import { registerPrivateMediaSignApi } from './src/server/privateMediaSignApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
 import { registerResendDevelopmentTestApi } from './src/server/resendEmail';
 import { registerEvolutionDevelopmentTestApi } from './src/server/evolutionWhatsApp';
@@ -479,10 +480,18 @@ async function startServer() {
   app.use(apiNoStoreByDefault);
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    if (aiStudioPreview) {
+      // Google AI Studio embeds its cloud preview inside an outer studio iframe.
+      res.setHeader(
+        'Content-Security-Policy',
+        "frame-ancestors 'self' https://aistudio.google.com https://*.scf.usercontent.goog https://*.googleusercontent.com",
+      );
+    } else {
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    }
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
     res.setHeader('X-DNS-Prefetch-Control', 'off');
     if (process.env.NODE_ENV === 'production') {
       const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol;
@@ -851,8 +860,18 @@ async function startServer() {
   });
 
   // 5. GET & POST Automated Billing Engine Endpoints
-  app.get('/api/billing/records', (_req, res) => {
+  app.get('/api/billing/records', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed session is required.' });
+      return;
+    }
+    if (claims.role !== 'admin' || !hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY', message: 'Billing records require a verified Admin session.' });
+      return;
+    }
     const store = loadServerStore();
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json({
       ok: true,
       records: store.billingRecords,
@@ -860,6 +879,15 @@ async function startServer() {
   });
 
   app.post('/api/billing/run-cycle', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed session is required.' });
+      return;
+    }
+    if (claims.role !== 'admin' || !hasCurrentAdminSession(claims)) {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY', message: 'Running a billing cycle requires a verified Admin session.' });
+      return;
+    }
     const {
       cycleName = 'End-of-Cycle Automated Run',
       commissionPercent = 10,
@@ -2006,6 +2034,12 @@ Task:
     serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     pool: pgRuntimePool || null,
   });
+  registerPrivateMediaSignApi(app, {
+    projectUrl: SUPABASE_PROJECT_URL,
+    serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    verifySession: verifySessionTokenFromRequest,
+    pool: pgRuntimePool || null,
+  });
   registerAccountClosureApi(app, {
     projectUrl: SUPABASE_PROJECT_URL,
     publishableKey: serverSupabaseConfig.publishableKey,
@@ -2740,11 +2774,11 @@ Task:
       return;
     }
 
-    const result = authenticateOrRegisterUser({
+    const result = authenticateOrRegisterSupabaseUser({
       supabaseUserId: identity.id,
       email: identity.email,
       name: identity.name,
-      authProvider: 'email_otp',
+      authProvider: 'email',
       requestedRole: 'customer',
       allowRoleChange: false,
     });
@@ -2769,7 +2803,7 @@ Task:
           supabaseUserId: identity.id,
           email: identity.email,
           name: identity.name || identity.email,
-          authProvider: 'email_otp',
+          authProvider: 'email',
           role: 'customer',
         });
         const profileRole = String(profile?.role || '') as SessionClaims['role'];
@@ -2784,7 +2818,7 @@ Task:
           name: identity.name || profile.full_name || identity.email,
           phone: profile.phone || '',
           role: profileRole,
-          authProvider: 'email_otp',
+          authProvider: 'email',
           issuedAt: Date.now(),
           expiresAt: Date.now() + 12 * 60 * 60_000,
         };
@@ -2799,7 +2833,7 @@ Task:
           email: identity.email,
           phone: claims.phone || '',
           role: profileRole,
-          authProvider: 'email_otp' as const,
+          authProvider: 'email' as const,
           verified: true,
           accountStatus: profile.account_status,
         };
@@ -2815,7 +2849,7 @@ Task:
           supabaseUserId: identity.id,
           email: identity.email,
           name: identity.name || identity.email,
-          authProvider: 'email_otp',
+          authProvider: 'email',
           role: result.user.role,
         });
         if (profile) {
@@ -2825,13 +2859,13 @@ Task:
           if (storedUser) {
             storedUser.role = profileRole;
             storedUser.supabaseUserId = identity.id;
-            storedUser.authProvider = 'email_otp';
+            storedUser.authProvider = 'email';
             if (!saveAuthoritativeStore(store)) {
               res.status(503).json({ ok: false, error: 'ACCOUNT_PERSISTENCE_UNAVAILABLE' });
               return;
             }
             responseUser = storedUser;
-            responseClaims = { ...result.claims, role: profileRole, authProvider: 'email_otp' };
+            responseClaims = { ...result.claims, role: profileRole, authProvider: 'email' };
             responseSessionToken = signSessionToken(responseClaims);
             responseRedirectTarget = resolveRoleRedirectTarget(profileRole);
           }
@@ -2845,7 +2879,7 @@ Task:
 
     res.status(result.isNewUser ? 201 : 200).json({
       ok: true,
-      authProvider: 'email_otp',
+      authProvider: 'email',
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
       user: responseUser,
@@ -6176,6 +6210,14 @@ Task:
   // 15D. CUSTOMER CINEMA SUPPORT & DISPUTE TICKETS
   app.post('/api/movies/support', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed customer session is required to open a support ticket.' });
+      return;
+    }
+    if (claims.role !== 'customer') {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_CUSTOMER_ONLY', message: 'Only a customer may open a cinema support ticket.' });
+      return;
+    }
     const {
       bookingId,
       passCode,
@@ -6184,8 +6226,6 @@ Task:
       subject,
       message,
       description,
-      customerName,
-      customerPhone,
     } = req.body || {};
 
     const finalSubject = String(subject || issueCategory || category || 'Cinema Support Request').trim();
@@ -6215,9 +6255,9 @@ Task:
       subject: finalSubject,
       message: finalMessage,
       description: finalMessage,
-      customerUserId: claims?.userId || 'guest',
-      customerName: String(customerName || claims?.name || 'Movie Customer'),
-      customerPhone: String(customerPhone || claims?.phone || '+91 98480 12345'),
+      customerUserId: claims.userId,
+      customerName: String(claims.name || 'Movie Customer'),
+      customerPhone: String(claims.phone || ''),
       status: 'open',
       resolutionNote: '',
       createdAt: nowIso,
@@ -6242,7 +6282,11 @@ Task:
 
   app.patch('/api/movies/support/:ticketId', (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (claims && claims.role === 'customer') {
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed provider or admin session is required.' });
+      return;
+    }
+    if (claims.role !== 'provider' && claims.role !== 'admin') {
       res.status(403).json({
         ok: false,
         error: 'FORBIDDEN_PROVIDER_OR_ADMIN_ONLY',
@@ -6270,8 +6314,8 @@ Task:
       id: `MOV-AUD-${Date.now().toString().slice(-5)}`,
       timestamp: target.updatedAt,
       createdAt: target.updatedAt,
-      actor: claims?.name || claims?.userId || 'Cinema Admin',
-      role: claims?.role || 'admin',
+      actor: claims.name || claims.userId,
+      role: claims.role,
       action: 'RESOLVED_SUPPORT_TICKET',
       targetId: ticketId,
       details: `Ticket ${ticketId} marked ${status}: ${resolutionNote}`,

@@ -16,7 +16,11 @@ async function delayAppBootstrap(page: import('@playwright/test').Page, ms = 120
 
 async function openApp(page: import('@playwright/test').Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('#root > *')).toBeAttached({ timeout: 30_000 });
+  // `#root > *` also matches the Suspense fallback mounted beside the shell
+  // while a section loads, so a strict locator sees two elements on a cold
+  // start. Wait for the shell itself, then for the fallback to be gone.
+  await expect(page.locator('#bos-main-content')).toBeAttached({ timeout: 30_000 });
+  await expect(page.getByText('Loading BookOurSpace…')).toHaveCount(0, { timeout: 30_000 });
 }
 
 test.describe('signed-out Google sign-in entry points', () => {

@@ -1,5 +1,9 @@
 # `dev` branch consolidation audit
 
+> Historical (base `9fd81e6`, 71 migrations). Current state after the November
+> 2026 repairs is audited in
+> [`repository-consolidation-audit.md`](repository-consolidation-audit.md).
+
 Base: `9fd81e66f3d637980388a7bd316549d6832cf67d` (latest `feat/module-flags-and-stay-inventory`).
 
 ## Branches / worktrees audited
