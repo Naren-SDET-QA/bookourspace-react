@@ -475,15 +475,11 @@ test('provider listing approval still requires an administrator', { skip: 'Admin
   // disposable PostgreSQL ownership/RBAC suite, not by this JSON-mode test.
 });
 
-test('movie UI returns on failed verification before requesting ticket creation', () => {
-  const source = fs.readFileSync(path.join(process.cwd(), 'src/components/DistrictMoviesSection.tsx'), 'utf8');
-  const verifyAt = source.indexOf('if (!verifyRes.ok || !verifyRes.verified || !verifyRes.paymentVerificationToken)');
-  const atomicAt = source.indexOf('createAuthoritativeBookingAtomic({', verifyAt);
-  assert.notEqual(verifyAt, -1);
-  assert.notEqual(atomicAt, -1);
-  assert.ok(verifyAt < atomicAt);
-  assert.match(source.slice(verifyAt, atomicAt), /return;/);
-  assert.match(source, /Movie checkout is unavailable until provider settlement verification is configured/);
+test('the Movies UI cannot request ticket creation or payment verification', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/components/MoviesShowtimes.tsx'), 'utf8');
+  assert.doesNotMatch(source, /createAuthoritativeBookingAtomic|createServerPaymentIntent|verifyServerUpiPayment/);
+  assert.doesNotMatch(source, /\/api\/movies\/bookings|\/api\/seats|paymentVerificationToken/);
+  assert.match(source, /No online booking for Movies/);
 });
 
 test('the public settlement endpoint cannot mint proof and the UI exposes provider unavailability', async () => {

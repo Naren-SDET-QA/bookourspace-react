@@ -57,7 +57,7 @@ No fake payment success or generated inventory exists on these paths.
 
 ## Hidden booking surfaces (preserved)
 
-- `MoviesAppExperience.tsx` and `DistrictMoviesSection.tsx` remain on disk but are no longer mounted for Movies.
+- `MoviesAppExperience.tsx`, `DistrictMoviesSection.tsx` and their data module `src/data/moviesAppData.ts` were removed; only the showtimes UI and its API remain.
 - Legacy booking/seat/payment/ticket/refund APIs remain for audit/rollback but no Movies UI calls them.
 - The Movies admin style row was removed; the global listing grid is never rendered for Movies.
 

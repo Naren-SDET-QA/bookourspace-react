@@ -182,7 +182,7 @@ export const MODULE_REGISTRY: readonly ModuleContract[] = [
     version: '1.0.0',
     label: 'Movies & Cinemas',
     route: '#movies',
-    entryPoints: ['DistrictMoviesSection'],
+    entryPoints: ['MoviesShowtimes'],
     screens: ['movies'],
     dataServices: ['marketplace listings (existing store)'],
     dependsOn: ['platform_module_flags', 'listings'],
