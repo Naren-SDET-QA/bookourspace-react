@@ -12,8 +12,7 @@ test('marketplace hero uses live counts and real media only', () => {
   assert.match(hero, /Real listing media/);
   assert.doesNotMatch(hero, /unsplash|priceTag|\$\d|₹\d/);
 });
-test('Bento hub mounts the live-data hero without changing module navigation', () => {
-  assert.match(hub, /<MarketplaceHero/);
-  assert.match(hub, /onExplore=\{\(\) => onSelectCategoryAndAdvance\('pg_hostels', 'all'\)\}/);
+test('Bento hub keeps the current home layout without remounting the retired hero', () => {
+  assert.doesNotMatch(hub, /<MarketplaceHero/);
   assert.match(hub, /onSelectCategoryAndAdvance/);
 });
