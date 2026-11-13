@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 109,
+  "migrationCount": 111,
   "migrations": [
     {
       "order": 2,
@@ -886,6 +886,28 @@
       "file": "supabase/migrations/20261113020000_payment_claim_business_trigger.sql",
       "bytes": 3071,
       "sha256": "9d2b5599288875f312224df870eb7d157237028687c49e029b8e3e375bfd3814"
+    },
+    {
+      "order": 111,
+      "version": "20261113030000",
+      "name": "business_rls_super_admin",
+      "file": "supabase/migrations/20261113030000_business_rls_super_admin.sql",
+      "bytes": 3697,
+      "sha256": "44338287ccf03d9107b63accff1e9389e7a770ffce0bcf3eeaa0352798a973d4"
+    },
+    {
+      "order": 112,
+      "version": "20261113040000",
+      "name": "legacy_services_provider_backfill",
+      "file": "supabase/migrations/20261113040000_legacy_services_provider_backfill.sql",
+      "bytes": 5281,
+      "sha256": "015992098d7bf7f33cec4935af4f3e04a13e269071e2e8b1aa109b16e93ce543"
     }
-  ]
+  ],
+  "review": {
+    "at": "2026-11-13T09:00:47.623Z",
+    "note": "Reviewed legacy services-provider backfill and RLS hardening",
+    "migrationCount": 111,
+    "baselineSha256": "f37bdbcaf1870a05fe8f45acbf2ec17f0cc99162cd7e60270d5f8d5fabe412c2"
+  }
 }

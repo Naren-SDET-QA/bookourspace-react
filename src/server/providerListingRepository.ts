@@ -1022,6 +1022,31 @@ export class ProviderListingRepository {
     });
   }
 
+  /**
+   * The shared `/api/provider/listings` surface cannot decide a module from its
+   * path, so a provider's listing must belong to the module its selected
+   * business is approved for. Runs inside the write transaction; administrators
+   * are exempt because they manage every module.
+   */
+  private async assertBusinessModuleForListing(
+    client: PoolClient,
+    actor: ProviderListingActor,
+    listingModule: string | null | undefined,
+  ): Promise<void> {
+    if (actor.role !== 'provider' || !actor.businessId) return;
+    const { rows } = await client.query(
+      'select module_type from public.businesses where id = $1 limit 1',
+      [actor.businessId],
+    );
+    if (!rows[0] || String(rows[0].module_type) !== String(listingModule || '')) {
+      throw new ProviderListingRepositoryError(
+        'BUSINESS_MODULE_MISMATCH',
+        403,
+        'The selected business is not approved for this listing module.',
+      );
+    }
+  }
+
   async create(actor: ProviderListingActor, input: ProviderListingInput): Promise<{ listing: ProviderListingRecord; created: boolean; idempotent?: boolean }> {
     rejectEmbeddedMediaData(input.payload);
     if (!['provider', 'admin'].includes(actor.role)) {
@@ -1073,6 +1098,7 @@ export class ProviderListingRepository {
       } catch (error) {
         this.mapValidationFailure(error);
       }
+      await this.assertBusinessModuleForListing(client, actor, validatedCreate.module);
       if (actor.role === 'admin' && !superAdmin) {
         await this.assertNewListingAssignment(
           client,
@@ -1233,6 +1259,8 @@ export class ProviderListingRepository {
       } catch (error) {
         this.mapValidationFailure(error);
       }
+
+      await this.assertBusinessModuleForListing(client, actor, validated.module);
 
       if (actor.role === 'admin') {
         const categoryValue = updates.categoryId ?? updates.category_id;

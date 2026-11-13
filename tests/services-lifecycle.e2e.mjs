@@ -23,6 +23,7 @@ const customer = 'b1c2d3e4-2222-4333-8444-555566667777';
 const otherCustomer = 'b1c2d3e4-3333-4444-8555-666677778888';
 const admin = 'b1c2d3e4-4444-4555-8666-777788889999';
 const listingId = 'svc-lifecycle-listing-1';
+const serviceBusinessRef = 'BIZ-E2E-SVC-LIFECYCLE';
 const PRICE = 1500;
 
 let pool;
@@ -150,14 +151,31 @@ before(async () => {
       [id, role, name, email],
     );
   }
+  // Customer module access is an allow-list: no rows means no modules.
+  await pool.query(
+    `insert into public.customer_module_access (user_id, module_key)
+     select id, 'services' from public.profiles where id = any($1::uuid[])
+     on conflict (user_id, module_key) do nothing`,
+    [[customer, otherCustomer]],
+  );
   await pool.query('delete from public.service_bookings where provider_id = $1', [provider]);
   await pool.query('delete from public.service_provider_schedules where provider_id = $1', [provider]);
+  // Provider routes now require an approved services business context.
+  const serviceBusiness = await pool.query(
+    `insert into public.businesses
+       (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
+     values ($1, 'Lifecycle Services Business', 'services', $2, 'approved', true, 'e2e_fixture', $2, now())
+     on conflict (business_ref) do update
+       set module_type = 'services', approval_status = 'approved', is_enabled = true
+     returning id`,
+    [serviceBusinessRef, provider],
+  );
   await pool.query(
-    `insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
-     values ($1, $2, 'Lifecycle AC Repair', 'cat-4', 'AC Repair', 'service', $3, 'per visit', 'active', '{"sectionType":"services"}'::jsonb)
-     on conflict (id) do update set status = 'active', price = excluded.price,
+    `insert into public.listings (id, owner_id, business_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
+     values ($1, $2, $3, 'Lifecycle AC Repair', 'cat-4', 'AC Repair', 'service', $4, 'per visit', 'active', '{"sectionType":"services"}'::jsonb)
+     on conflict (id) do update set status = 'active', price = excluded.price, business_id = excluded.business_id,
        category_id = excluded.category_id, subcategory = excluded.subcategory, payload = excluded.payload`,
-    [listingId, provider, PRICE],
+    [listingId, provider, serviceBusiness.rows[0].id, PRICE],
   );
   await startServer(await freePort());
 });

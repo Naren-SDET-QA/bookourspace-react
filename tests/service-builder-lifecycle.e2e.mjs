@@ -208,6 +208,25 @@ async function seedUsers() {
 }
 
 async function seedListingsAndCredentials() {
+  // Customer module access is an allow-list: no rows means no modules.
+  await pool.query(
+    `insert into public.customer_module_access (user_id, module_key)
+     select id, 'services' from public.profiles where id = any($1::uuid[])
+     on conflict (user_id, module_key) do nothing`,
+    [[customer, otherCustomer]],
+  );
+  // Every provider now operates inside an approved services business.
+  for (const providerId of [humanProvider, medicineProvider, unlicensedProvider, waterProvider, customProvider, groceriesProvider]) {
+    const businessRef = `BIZ-E2E-SVC-${providerId.slice(-4).toUpperCase()}`;
+    await pool.query(
+      `insert into public.businesses
+         (business_ref,name,module_type,owner_user_id,approval_status,is_enabled,backfill_source,created_by,approved_at)
+       values ($1, 'E2E Services Business', 'services', $2, 'approved', true, 'e2e_fixture', $2, now())
+       on conflict (business_ref) do update
+         set module_type = 'services', approval_status = 'approved', is_enabled = true`,
+      [businessRef, providerId],
+    );
+  }
   await pool.query(
     `delete from public.service_bookings
       where customer_id = $1 or provider_id = any($2::uuid[])`,

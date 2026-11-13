@@ -49,9 +49,13 @@ test('business API derives ownership from the session, never the request body', 
 
 test('provider APIs require server-verified business context', () => {
   const server = read('server.ts');
+  const access = read('src/lib/businessAccess.ts');
   assert.match(server, /app\.use\(\['\/api\/provider'/);
-  assert.match(server, /BUSINESS_CONTEXT_REQUIRED/);
-  assert.match(server, /BUSINESS_ACCESS_DENIED/);
+  assert.match(server, /selectBusinessContext\(/);
+  assert.match(access, /BUSINESS_CONTEXT_REQUIRED/);
+  assert.match(access, /BUSINESS_ACCESS_DENIED/);
+  assert.match(access, /BUSINESS_MODULE_MISMATCH/);
+  assert.match(access, /BUSINESS_MODULE_FORBIDDEN/);
   assert.match(server, /x-business-id/);
   assert.match(server, /res\.locals\.businessContext/);
 });

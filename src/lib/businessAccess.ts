@@ -82,6 +82,111 @@ export function moduleGranted(scope: AccessScope | null, moduleKey: string): boo
 }
 
 /**
+ * Provider API prefixes that unambiguously belong to one marketplace module.
+ * Module-specific paths are mapped even when they live under the broad
+ * `/api/provider` prefix, because a business is approved for exactly one
+ * module. Genuinely shared surfaces (`/api/provider/listings`,
+ * `/api/provider/registrations`, `/api/provider-portal`) stay absent and are
+ * scoped by their handlers instead.
+ */
+export const PROVIDER_ROUTE_MODULES: ReadonlyArray<{ prefix: string; module: AccessModule }> = [
+  { prefix: '/api/stays/host', module: 'hotel_stay' },
+  { prefix: '/api/stays/bookings', module: 'hotel_stay' },
+  { prefix: '/api/movies/screens', module: 'movies' },
+  { prefix: '/api/venue-bookings', module: 'venues' },
+  { prefix: '/api/pg/bookings', module: 'pg_hostels' },
+  { prefix: '/api/provider/pg', module: 'pg_hostels' },
+  { prefix: '/api/provider/venues', module: 'venues' },
+  { prefix: '/api/provider/venue-bookings', module: 'venues' },
+  { prefix: '/api/provider/classes', module: 'classes' },
+  { prefix: '/api/services/provider', module: 'services' },
+  { prefix: '/api/services/workers', module: 'services' },
+  { prefix: '/api/services/bookings', module: 'services' },
+  { prefix: '/api/services/earnings', module: 'services' },
+  { prefix: '/api/services/payment-claims', module: 'services' },
+];
+
+/** Module a provider route belongs to, or `null` when the route is ambiguous. */
+export function providerModuleForPath(rawPath: string): AccessModule | null {
+  const pathOnly = String(rawPath || '').split(/[?#]/)[0];
+  const normalized = `/${pathOnly.replace(/^\/+/, '')}`;
+  const entry = PROVIDER_ROUTE_MODULES.find(
+    (candidate) => normalized === candidate.prefix || normalized.startsWith(`${candidate.prefix}/`),
+  );
+  return entry ? entry.module : null;
+}
+
+const BUSINESS_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type BusinessContextSelection =
+  | { ok: true; businessId: string; derived: boolean }
+  | { ok: false; status: 403; error: 'BUSINESS_CONTEXT_REQUIRED' };
+
+/**
+ * Resolve the business for a provider request. An explicit UUID header wins; a
+ * single active membership is derived server-side; anything else fails closed
+ * so a multi-business user must choose deliberately.
+ */
+export function selectBusinessContext(
+  requestedBusinessId: string | null | undefined,
+  activeBusinessIds: readonly string[],
+): BusinessContextSelection {
+  const requested = String(requestedBusinessId || '').trim();
+  if (BUSINESS_ID_PATTERN.test(requested)) return { ok: true, businessId: requested, derived: false };
+  if (activeBusinessIds.length === 1) return { ok: true, businessId: String(activeBusinessIds[0]), derived: true };
+  return { ok: false, status: 403, error: 'BUSINESS_CONTEXT_REQUIRED' };
+}
+
+export interface ProviderBusinessContextRow {
+  module_type?: string | null;
+  approval_status?: string | null;
+  is_enabled?: boolean | null;
+  module_enabled?: boolean | null;
+  module_approval_status?: string | null;
+  role?: string | null;
+  member_modules?: string[] | null;
+}
+
+export type BusinessContextDecision =
+  | { ok: true }
+  | { ok: false; status: 403; error: 'BUSINESS_ACCESS_DENIED' | 'BUSINESS_MODULE_MISMATCH' | 'BUSINESS_MODULE_FORBIDDEN' };
+
+/**
+ * Authorize a provider request against the resolved business. Administrators
+ * bypass the gate; every other role must hold an active, approved business and
+ * may only use the module the route serves, within their member grant.
+ */
+export function evaluateProviderBusinessContext(input: {
+  role?: string | null;
+  path: string;
+  business: ProviderBusinessContextRow | null | undefined;
+}): BusinessContextDecision {
+  const deny = (
+    error: 'BUSINESS_ACCESS_DENIED' | 'BUSINESS_MODULE_MISMATCH' | 'BUSINESS_MODULE_FORBIDDEN',
+  ): BusinessContextDecision => ({ ok: false, status: 403, error });
+  if (String(input.role || '') === 'admin') return { ok: true };
+  const business = input.business;
+  if (!business) return deny('BUSINESS_ACCESS_DENIED');
+  if (
+    business.approval_status !== 'approved'
+    || business.is_enabled !== true
+    || business.module_enabled !== true
+    || business.module_approval_status !== 'approved'
+  ) {
+    return deny('BUSINESS_ACCESS_DENIED');
+  }
+  const moduleType = String(business.module_type || '');
+  const expectedModule = providerModuleForPath(input.path);
+  if (expectedModule && moduleType !== expectedModule) return deny('BUSINESS_MODULE_MISMATCH');
+  const memberRole = String(business.role || '');
+  if (memberRole !== 'owner') {
+    const scope = accessScopeFrom({ allowed_modules: business.member_modules ?? null });
+    if (!moduleGranted(scope, moduleType)) return deny('BUSINESS_MODULE_FORBIDDEN');
+  }
+  return { ok: true };
+}
+
+/**
  * Sections a member may use inside a module, or `null` for "every section".
  * The caller filters its own navigation with this list, so unknown keys the
  * portal does not render are simply ignored.

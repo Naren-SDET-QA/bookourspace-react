@@ -91,3 +91,12 @@ test('the grant migration protects owners and scopes RLS', () => {
   assert.match(migration, /create policy "Members read their own access scope"/);
   assert.match(migration, /allowed_modules <@ array\['pg_hostels','classes','venues','services','hotel_stay','movies'\]/);
 });
+
+test('direct member-scope writes are revoked and Super Admin policies are used', () => {
+  const hardening = read('supabase/migrations/20261113030000_business_rls_super_admin.sql');
+  assert.match(hardening, /create or replace function public\.is_super_admin\(\)/);
+  assert.match(hardening, /revoke insert, update, delete on public\.business_member_access from authenticated/);
+  assert.match(hardening, /using \(public\.is_super_admin\(\)\) with check \(public\.is_super_admin\(\)\)/);
+  assert.match(hardening, /not public\.is_super_admin\(\)/);
+  assert.doesNotMatch(hardening, /is_admin\(\)\) with check \(public\.is_admin\(\)\)/);
+});

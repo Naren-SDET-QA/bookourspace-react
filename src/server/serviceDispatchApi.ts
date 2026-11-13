@@ -38,6 +38,8 @@ export function registerServiceDispatchApi(app: express.Express, deps: ServiceDi
     return { workers: rows.rows };
   }));
   app.post('/api/services/workers', handle(async (client, actorId, request) => {
+    const profile = await client.query(`select role, account_status from public.profiles where id=$1`, [actorId]);
+    if (profile.rows[0]?.account_status !== 'active' || !['provider','admin'].includes(String(profile.rows[0]?.role))) throw Object.assign(new Error('ACTIVE_PROVIDER_REQUIRED'), { statusCode: 403 });
     const name = text(request.body?.fullName, 120); const phone = text(request.body?.phone, 24); if (name.length < 2 || phone.length < 7) throw Object.assign(new Error('WORKER_NAME_AND_PHONE_REQUIRED'), { statusCode: 400 });
     const row = await client.query(`insert into public.service_workers(provider_id,full_name,phone,service_categories,service_areas) values($1,$2,$3,$4,$5) returning id,full_name,phone,status,created_at`, [actorId, name, phone, Array.isArray(request.body?.serviceCategories) ? request.body.serviceCategories.slice(0,20) : [], Array.isArray(request.body?.serviceAreas) ? request.body.serviceAreas.slice(0,20) : []]);
     return { worker: row.rows[0] };

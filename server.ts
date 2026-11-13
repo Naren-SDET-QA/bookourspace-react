@@ -43,6 +43,10 @@ import { ProviderListingRepository, type CinemaScreenRecord } from './src/server
 import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/server/liveEditValidation';
 import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
+import {
+  evaluateProviderBusinessContext,
+  selectBusinessContext,
+} from './src/lib/businessAccess';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
 import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
@@ -2943,7 +2947,7 @@ Task:
 
   // Independent business context for provider-owned APIs. Missing, invalid,
   // suspended or revoked context is rejected; administrators retain access.
-  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/provider-portal', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
+  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/services/provider', '/api/services/workers', '/api/provider-portal', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
     if (String(req.path || '').startsWith('/registrations')) return next();
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) return void res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
@@ -2952,7 +2956,9 @@ Task:
     // business gate applies to provider-owned data and admin bypasses above.
     if (claims.role === 'customer') return next();
     if (!pgRuntimePool) return void res.status(503).json({ ok: false, error: 'BUSINESS_DATABASE_UNAVAILABLE' });
-    let businessId = String(req.header('x-business-id') || '').trim();
+    const actorId = claims.supabaseUserId || claims.userId;
+    const requestedBusinessId = String(req.header('x-business-id') || '').trim();
+    let businessId = requestedBusinessId;
     if (!/^[0-9a-f-]{36}$/i.test(businessId)) {
       // A single-business owner does not need to choose: derive the only active
       // membership server-side. Multi-business owners must send a selection.
@@ -2961,26 +2967,36 @@ Task:
            join public.business_members m on m.business_id=b.id and m.user_id=$1 and m.status='active'
           where b.approval_status='approved' and b.is_enabled=true
           order by b.created_at limit 2`,
-        [claims.supabaseUserId || claims.userId],
+        [actorId],
       );
-      if (candidates.rowCount === 1) businessId = String(candidates.rows[0].id);
-      else return void res.status(403).json({ ok: false, error: 'BUSINESS_CONTEXT_REQUIRED' });
+      const selection = selectBusinessContext(
+        requestedBusinessId,
+        candidates.rows.map((row: Record<string, unknown>) => String(row.id)),
+      );
+      if (!selection.ok) return void res.status(selection.status).json({ ok: false, error: selection.error });
+      businessId = selection.businessId;
     }
     req.headers['x-business-id'] = businessId;
     try {
       const { rows } = await pgRuntimePool.query(
         `select b.id,b.module_type,b.approval_status,b.is_enabled,m.role,
-                a.enabled as module_enabled,a.approval_status as module_approval_status
+                a.enabled as module_enabled,a.approval_status as module_approval_status,
+                ma.allowed_modules as member_modules
            from public.businesses b
            join public.business_members m on m.business_id=b.id and m.user_id=$2 and m.status='active'
            join public.business_module_access a on a.business_id=b.id and a.module_type=b.module_type
+           left join public.business_member_access ma on ma.business_id=b.id and ma.user_id=m.user_id
           where b.id=$1 limit 1`,
-        [businessId, claims.supabaseUserId || claims.userId],
+        [businessId, actorId],
       );
       const business = rows[0];
-      if (!business || business.approval_status !== 'approved' || business.is_enabled !== true || business.module_enabled !== true || business.module_approval_status !== 'approved') {
-        return void res.status(403).json({ ok: false, error: 'BUSINESS_ACCESS_DENIED' });
-      }
+      const decision = evaluateProviderBusinessContext({
+        role: claims.role,
+        path: req.originalUrl,
+        business,
+      });
+      if (!decision.ok) return void res.status(decision.status).json({ ok: false, error: decision.error });
+      if (!business) return void res.status(403).json({ ok: false, error: 'BUSINESS_ACCESS_DENIED' });
       res.locals.businessContext = business;
       next();
     } catch {
