@@ -287,13 +287,18 @@ values
    '[{"name":"E2E Prime","rows":["A","B","C"],"price":250}]'::jsonb,
    '[{"id":"prime","name":"E2E Prime","priceMultiplier":1.0,"rows":["A","B","C"],"seatsPerRow":8}]'::jsonb,
    '["A1","A8"]'::jsonb, '["11:15 AM","03:30 PM"]'::jsonb, 'E2E Cinema Feature',
-   current_date + 2, 'Hyderabad', '500032', true, true, 120, 80, 28, 18, true, 1, now()),
+   current_date, 'Hyderabad', '500032', true, true, 120, 80, 28, 18, true, 1, now()),
   ('scr-e2e-hidden', 'movie-hyd-1', 'E2E Multiplex Gachibowli', 'Gachibowli', 'Screen 2 · Hidden',
    '4K Laser', 'Dolby Atmos', 80,
    '[]'::jsonb, '[]'::jsonb, '["A1"]'::jsonb, '["09:00 PM"]'::jsonb, 'E2E Hidden Feature',
-   current_date + 2, 'Hyderabad', '500032', false, true, 120, 80, 28, 18, true, 1, now())
+   current_date, 'Hyderabad', '500032', false, true, 120, 80, 28, 18, true, 1, now())
 on conflict (id) do update set show_date = excluded.show_date, movie_title = excluded.movie_title,
   showtimes = excluded.showtimes, is_visible = excluded.is_visible, updated_at = now();
+-- Public showtimes require an approved screen for today's date; the insert above
+-- must not leave the seeded rows pending or two days out.
+update public.cinema_screens
+   set approval_status = 'approved', state = 'Telangana', show_date = current_date, updated_at = now()
+ where id in ('scr-e2e-1', 'scr-e2e-hidden');
 
 insert into public.venue_booking_settings(listing_id,owner_user_id,time_zone,booking_enabled,requires_owner_approval,capacity,
   hourly_rate_paise,half_day_rate_paise,full_day_rate_paise,per_guest_rate_paise,included_guests,deposit_paise,tax_percent,
