@@ -255,6 +255,7 @@ const LiveAdminPageEditor = lazy(() => import('./components/LiveAdminPageEditor'
 const UniversalLiveBuilder = lazy(() => import('./components/UniversalLiveBuilder').then((module) => ({ default: module.UniversalLiveBuilder })));
 const QuickBookChatAssistant = lazy(() => import('./components/QuickBookChatAssistant').then((module) => ({ default: module.QuickBookChatAssistant })));
 import { SpotlightModuleTabs } from './components/SpotlightModuleTabs';
+import { MarketplaceHero } from './components/MarketplaceHero';
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
@@ -2586,6 +2587,27 @@ function MarketplaceAppContent() {
         <>
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
           {sharedMarketplaceHeader}
+
+          {!activeSectionExperience && (
+            <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
+              <MarketplaceHero
+                currentLang={currentLang}
+                selectedLocationLabel={selectedLocationLabel}
+                listingCount={listings.filter((listing) => listing.status === 'active').length}
+                verifiedListingCount={listings.filter((listing) => listing.status === 'active' && listing.isVerified).length}
+                heroImage={listings.find((listing) => listing.status === 'active' && listing.images?.[0])?.images?.[0]}
+                onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
+                onExplore={() => {
+                  setActiveMarketSection('pg_hostels');
+                  setSelectedCategory('all');
+                  setSelectedSubcategory('all');
+                  setIsBentoLandingActive(false);
+                  setOpenSection('pg_hostels');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              />
+            </div>
+          )}
 
           {/* HOME-SCREEN CHROME (announcements, spotlight carousel) — hidden while a section screen is open */}
           {!activeSectionExperience && (
