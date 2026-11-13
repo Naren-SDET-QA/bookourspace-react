@@ -199,7 +199,14 @@ async function openLiveListing(page, style) {
     console.log('  INFO  style2 search passed');
     mark('style2 search complete');
   }
-  await pgCardAction(page, listingTitle).click();
+  // A long run can leave an engine slow to paint the feed; retry once on a
+  // reloaded page instead of failing the run on a single slow render.
+  try {
+    await pgCardAction(page, listingTitle).click({ timeout: 20000 });
+  } catch {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await pgCardAction(page, listingTitle).click({ timeout: 30000 });
+  }
   mark('listing detail opened');
   await page.getByRole('heading', { name: listingTitle }).last().waitFor({ timeout: 10000 });
   await page.getByRole('region', { name: 'PG availability and booking' }).waitFor();

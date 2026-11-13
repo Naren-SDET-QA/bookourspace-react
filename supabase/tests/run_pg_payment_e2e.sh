@@ -286,6 +286,21 @@ on conflict (id) do nothing;
 insert into public.stay_room_types (id, property_id, name, max_adults, max_children, base_price_paise, monthly_rent_paise, security_deposit_paise, is_active)
 values ('$BROWSER_ROOM', '$BROWSER_PROPERTY', 'Double sharing bed', 2, 0, 0, 750000, 1500000, true)
 on conflict (id) do nothing;
+-- A guest already staying in the listing. pg_create_booking rejects move-in in
+-- the past and requires months >= 1, so no API-created reservation can reach its
+-- move-out day; this row lets the owner check-out button be exercised for real.
+insert into public.bookings (id,user_id,listing_id,listing_title,provider_id,customer_name,customer_phone,
+  scheduled_date,scheduled_time,amount,status,payment_status,payment_mode,idempotency_key,
+  room_type_id,units,total_paise,check_in,check_out,payload)
+values ('pg-owner-e2e-checkout','$UUID_C','$BROWSER_LISTING','Browser Journey PG','$UUID_PROVIDER',
+  'Browser Customer','9000000003', (current_date - 3)::text,'move-in',9000,'checked_in','pay_later','pay_later',
+  'owner-e2e-checkout','$BROWSER_ROOM',1,900000,current_date - 3,current_date - 1,
+  jsonb_build_object('source','pg_booking','listingId','$BROWSER_LISTING','moveIn',(current_date - 3)::text,
+    'moveOut',(current_date - 1)::text,'months',1,'beds',1,'occupants',1,'rentPaise',750000,
+    'depositPaise',150000,'totalDuePaise',900000))
+on conflict (id) do update set status='checked_in', check_in=current_date - 3, check_out=current_date - 1,
+  payment_status='pay_later', payment_mode='pay_later';
+
 
 insert into public.stay_units (room_type_id, label, is_active)
 select '$BROWSER_ROOM', 'B' || unit_number, true
@@ -382,7 +397,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-or-anon-key" VITE_SUPAB
   > "$OUT/browser-build.out" 2>&1 || { tail -25 "$OUT/browser-build.out" >&2; fail "browser build"; }
 [ -f "$TMP_ROOT/dist/index.html" ] || fail "browser bundle missing"
 node "$REPO_ROOT/tests/pg-browser-journey.e2e.mjs" \
-  "http://127.0.0.1:$APIPORT" "$TMP_ROOT/dist" 'Browser Journey PG' "$UUID_C" "$SESSION_SECRET" \
+  "http://127.0.0.1:$APIPORT" "$TMP_ROOT/dist" 'Browser Journey PG' "$UUID_C" "$SESSION_SECRET" "$UUID_PROVIDER" \
   | tee "$OUT/browser.out"
 BROWSER_EXIT=${PIPESTATUS[0]}
 if [ "$BROWSER_EXIT" != "0" ]; then
