@@ -38,7 +38,7 @@ export async function fetchCustomerModules(): Promise<{
 }> {
   try {
     const response = await fetch('/api/customer/modules', {
-      headers: { accept: 'application/json' },
+      headers: buildAuthHeaders({ accept: 'application/json' }),
       cache: 'no-store',
     });
     const data = await readJson(response);
@@ -60,7 +60,7 @@ export async function verifyCustomerModule(moduleKey: string): Promise<{ ok: boo
   try {
     const response = await fetch('/api/customer/modules/verify', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      headers: buildAuthHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
       body: JSON.stringify({ moduleKey }),
     });
     const data = await readJson(response);

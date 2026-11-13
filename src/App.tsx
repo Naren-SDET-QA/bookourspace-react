@@ -3898,7 +3898,27 @@ function MarketplaceAppContent() {
                       showToast('🔒 This module is not available for your account.');
                       return;
                     }
+                    setIsBentoLandingActive(false);
+                    if (sec === 'services') {
+                      returnSectionAfterServicesRef.current = activeMarketSection === 'services'
+                        ? 'pg_hostels'
+                        : activeMarketSection;
+                    }
+                    if (sec === 'pg_hostels') {
+                      returnSectionAfterPGRef.current = activeMarketSection === 'pg_hostels'
+                        ? 'pg_hostels'
+                        : activeMarketSection;
+                    }
+                    if (sec === 'hotel_stay') {
+                      returnSectionAfterStayRef.current = activeMarketSection === 'hotel_stay'
+                        ? 'pg_hostels'
+                        : activeMarketSection;
+                    }
                     setActiveMarketSection(sec);
+                    // The rail is a marketplace shell, not a module screen. Open
+                    // the selected module in the same page flow as the common
+                    // header; venues and movies stay in the marketplace grid.
+                    setOpenSection(sec === 'venues' || sec === 'movies' ? null : sec);
                     setSelectedCategory('all');
                     setSelectedSubcategory('all');
                   }}
