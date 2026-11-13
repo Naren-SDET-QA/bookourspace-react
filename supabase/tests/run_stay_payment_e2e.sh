@@ -93,6 +93,7 @@ start_server() {
   BOS_PAYMENT_SANDBOX_SECRET="$SANDBOX_SECRET" \
   BOS_UPI_MERCHANT_VPA="bookourspace@okhdfcbank" \
   BOS_UPI_MERCHANT_NAME="BookOurSpace" \
+  BOS_ALLOW_OWNER_MANUAL_SETTLEMENT=1 \
   RAZORPAY_KEY_ID="rzp_test_stay_e2e" \
   RAZORPAY_KEY_SECRET="rzp_test_stay_e2e_secret" \
   RAZORPAY_WEBHOOK_SECRET="rzp_test_stay_e2e_webhook" \
@@ -347,7 +348,17 @@ STORE_HASH_AFTER=$(shasum -a 256 "$STORE" | awk '{print $1}')
 [ "$STORE_HASH_BEFORE" = "$STORE_HASH_AFTER" ] || fail "JSON authoritative store was modified by payment routes"
 echo "    JSON store untouched (sha256 unchanged)"
 
-echo "=== 10. verdict ==="
+echo "=== 10. browser host money actions (Playwright, Chromium) ==="
+npx vite build --outDir "$TMP_ROOT/dist" --emptyOutDir \
+  > "$OUT/browser-build.out" 2>&1 || { tail -25 "$OUT/browser-build.out" >&2; fail "browser build"; }
+[ -f "$TMP_ROOT/dist/index.html" ] || fail "browser bundle missing"
+node "$REPO_ROOT/tests/stay-browser-journey.e2e.mjs" \
+  "http://127.0.0.1:$APIPORT" "$TMP_ROOT/dist" "$UUID_PROVIDER" "$UUID_A" "$SESSION_SECRET" \
+  | tee "$OUT/browser.out"
+BROWSER_EXIT=${PIPESTATUS[0]}
+[ "$BROWSER_EXIT" = "0" ] || fail "Stay browser host journey failed"
+
+echo "=== 10b. verdict ==="
 echo "    PASS checkout=server_priced settlement=signed_provider_event refund=sandbox_signed"
 echo "    PASS pay_after_service=unpaid inventory=exclusion_guarded restart=persisted rls=isolated"
 echo "    logs: $OUT"
