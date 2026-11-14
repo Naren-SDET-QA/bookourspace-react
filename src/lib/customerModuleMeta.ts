@@ -6,6 +6,8 @@
  * never drift between enforcement and visibility.
  */
 
+import { ACCESS_ACTIONS, type AccessAction } from './businessAccess';
+
 export const CUSTOMER_MODULE_KEYS = [
   'pg',
   'hotels',
@@ -70,3 +72,35 @@ export function sectionForModuleKey(key: CustomerModuleKey): CustomerModuleSecti
 export const CUSTOMER_VISIBLE_MODULE_KEYS: CustomerModuleKey[] = CUSTOMER_MODULE_KEYS.filter(
   (key) => CUSTOMER_MODULE_META[key].section !== null,
 );
+
+/** Actions a customer grant can carry. Mirrors the shared action vocabulary. */
+export const CUSTOMER_ACCESS_ACTIONS = ACCESS_ACTIONS;
+
+export type CustomerAccessAction = AccessAction;
+
+/**
+ * Sections a customer grant can name inside each module.
+ *
+ * A customer module currently renders exactly one marketplace screen, so this
+ * catalog is deliberately one entry per module. It is still a catalog (rather
+ * than a literal) so a module that later grows a second screen can be granted
+ * independently, and so an unknown section key is refused instead of silently
+ * widening access to the whole module.
+ */
+export const CUSTOMER_MODULE_SECTIONS: Record<
+  CustomerModuleKey,
+  ReadonlyArray<{ key: string; label: string }>
+> = CUSTOMER_MODULE_KEYS.reduce(
+  (catalog, key) => {
+    const meta = CUSTOMER_MODULE_META[key];
+    catalog[key] = meta.section ? [{ key: meta.section, label: meta.label }] : [];
+    return catalog;
+  },
+  {} as Record<CustomerModuleKey, ReadonlyArray<{ key: string; label: string }>>,
+);
+
+/** Every section key that can be granted for a customer module. */
+export function customerSectionKeysFor(moduleKey: string): string[] | null {
+  const entries = CUSTOMER_MODULE_SECTIONS[moduleKey as CustomerModuleKey];
+  return entries ? entries.map((entry) => entry.key) : null;
+}

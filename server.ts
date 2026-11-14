@@ -49,6 +49,11 @@ import {
   selectBusinessContext,
   strictPermissionDefaults,
 } from './src/lib/businessAccess';
+import {
+  evaluateCustomerPermission,
+  permissionForCustomerRoute,
+  strictCustomerDefaults,
+} from './src/server/customerPermissions';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
 import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
@@ -3013,6 +3018,44 @@ Task:
       next();
     } catch {
       res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });
+    }
+  });
+
+  // Customer module, section and action enforcement.
+  //
+  // The booking endpoints below are shared by customers and providers, so this
+  // gate applies to customer sessions only and leaves every other role to the
+  // business gate above. Guests keep the existing public checkout paths because
+  // they hold no grants. Grant columns are read through to_jsonb so shipping
+  // before the section/action migration cannot 500 these routes.
+  app.use(['/api/stays/bookings', '/api/stays/holds', '/api/stays/requests', '/api/stays/wishlists', '/api/pg/bookings', '/api/venue-bookings', '/api/services/bookings', '/api/classes/enrollments'], async (req, res, next) => {
+    const permission = permissionForCustomerRoute(req.method, req.originalUrl);
+    if (!permission) return next();
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || claims.role !== 'customer') return next();
+    if (!pgRuntimePool) return void res.status(503).json({ ok: false, error: 'CUSTOMER_PERMISSIONS_UNAVAILABLE' });
+    const actorId = claims.supabaseUserId || claims.userId;
+    try {
+      const { rows } = await pgRuntimePool.query(
+        `select module_key,
+                to_jsonb(cma) -> 'allowed_sections' as allowed_sections,
+                to_jsonb(cma) -> 'allowed_actions' as allowed_actions
+           from public.customer_module_access cma
+          where user_id = $1
+            and (expires_at is null or expires_at > now())`,
+        [actorId],
+      );
+      const decision = evaluateCustomerPermission({
+        role: claims.role,
+        grants: rows as Array<{ module_key: string; allowed_sections?: unknown; allowed_actions?: unknown }>,
+        permission,
+        strictDefaults: strictCustomerDefaults(process.env),
+      });
+      if (!decision.ok) return void res.status(decision.status).json({ ok: false, error: decision.error });
+      res.locals.customerPermission = permission;
+      next();
+    } catch {
+      res.status(500).json({ ok: false, error: 'CUSTOMER_PERMISSIONS_UNAVAILABLE' });
     }
   });
 

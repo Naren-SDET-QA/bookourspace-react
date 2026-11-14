@@ -113,7 +113,7 @@ import {
   syncServerProviderListing,
 } from '../lib/supabaseClient';
 import { verifyEmailOtpCode } from '../lib/emailOtpClient';
-import { fetchCustomerModules } from '../lib/customerModuleAccessClient';
+import { fetchCustomerModules, type CustomerModuleGrant } from '../lib/customerModuleAccessClient';
 
 interface MarketplaceContextType {
   supabaseUser: User | null;
@@ -126,6 +126,8 @@ interface MarketplaceContextType {
   blockedReason: string | null;
   /** Effective marketplace module keys for a signed-in customer (empty for guests). */
   customerModules: string[];
+  /** Section and action detail behind `customerModules` (empty for guests). */
+  customerModuleGrants: CustomerModuleGrant[];
   /** True after the customer module allow-list has been resolved once. */
   customerModulesChecked: boolean;
   refreshCustomerModules: () => Promise<void>;
@@ -273,6 +275,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [isAccountBlocked, setIsAccountBlocked] = useState<boolean>(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const [customerModules, setCustomerModules] = useState<string[]>([]);
+  const [customerModuleGrants, setCustomerModuleGrants] = useState<CustomerModuleGrant[]>([]);
   const [customerModulesChecked, setCustomerModulesChecked] = useState<boolean>(false);
   const [userRole, setUserRoleState] = useState<UserRole>('customer');
   // Child components may request a role for navigation, but cannot grant one.
@@ -292,11 +295,13 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const signedIn = Boolean(authUser || session?.user);
     if (!signedIn) {
       setCustomerModules([]);
+      setCustomerModuleGrants([]);
       setCustomerModulesChecked(true);
       return;
     }
     const result = await fetchCustomerModules();
     setCustomerModules(result.ok ? result.modules : []);
+    setCustomerModuleGrants(result.ok ? result.grants : []);
     setCustomerModulesChecked(true);
   };
 
@@ -1945,6 +1950,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         isAccountBlocked,
         blockedReason,
         customerModules,
+        customerModuleGrants,
         customerModulesChecked,
         refreshCustomerModules,
         loginWithGoogle,

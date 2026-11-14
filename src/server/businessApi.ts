@@ -248,7 +248,10 @@ export function registerBusinessApi(
       let accessRows: Array<Record<string, any>> = [];
       try {
         const access = await pool.query(
-          `select user_id, allowed_modules, allowed_sections from public.business_member_access where business_id = $1`,
+          // to_jsonb keeps this working before the action-grant migration lands.
+          `select user_id, allowed_modules, allowed_sections,
+                  to_jsonb(ma) -> 'allowed_actions' as allowed_actions
+             from public.business_member_access ma where business_id = $1`,
           [businessId],
         );
         accessRows = access.rows;
@@ -259,6 +262,7 @@ export function registerBusinessApi(
           ...member,
           allowed_modules: Array.isArray(scope?.allowed_modules) ? scope!.allowed_modules : null,
           allowed_sections: (scope?.allowed_sections as Record<string, string[]>) || {},
+          allowed_actions: (scope?.allowed_actions as Record<string, string[]>) || {},
         };
       });
       response.json({ ok: true, members, source: 'postgres' });
@@ -290,16 +294,40 @@ export function registerBusinessApi(
       if (!targetRole) return void response.status(404).json({ ok: false, error: 'MEMBER_NOT_FOUND' });
       if (targetRole === 'owner') return void response.status(403).json({ ok: false, error: 'OWNER_ACCESS_CANNOT_BE_RESTRICTED' });
       if (actorRole === 'manager' && targetRole === 'manager') return void response.status(403).json({ ok: false, error: 'ONLY_OWNER_CAN_RESTRICT_MANAGER' });
-      await pool.query(
-        `insert into public.business_member_access (business_id, user_id, allowed_modules, allowed_sections, updated_by)
-         values ($1, $2, $3, $4::jsonb, $5)
-         on conflict (business_id, user_id) do update
-            set allowed_modules = excluded.allowed_modules,
-                allowed_sections = excluded.allowed_sections,
-                updated_by = excluded.updated_by,
-                updated_at = now()`,
-        [businessId, targetUserId, parsed.scope.allowedModules, JSON.stringify(parsed.scope.allowedSections), actor.supabaseUserId],
-      );
+      const writeScope = async (withActions: boolean) => {
+        if (!withActions) {
+          await pool.query(
+            `insert into public.business_member_access (business_id, user_id, allowed_modules, allowed_sections, updated_by)
+             values ($1, $2, $3, $4::jsonb, $5)
+             on conflict (business_id, user_id) do update
+                set allowed_modules = excluded.allowed_modules,
+                    allowed_sections = excluded.allowed_sections,
+                    updated_by = excluded.updated_by,
+                    updated_at = now()`,
+            [businessId, targetUserId, parsed.scope.allowedModules, JSON.stringify(parsed.scope.allowedSections), actor.supabaseUserId],
+          );
+          return;
+        }
+        await pool.query(
+          `insert into public.business_member_access (business_id, user_id, allowed_modules, allowed_sections, allowed_actions, updated_by)
+           values ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+           on conflict (business_id, user_id) do update
+              set allowed_modules = excluded.allowed_modules,
+                  allowed_sections = excluded.allowed_sections,
+                  allowed_actions = excluded.allowed_actions,
+                  updated_by = excluded.updated_by,
+                  updated_at = now()`,
+          [businessId, targetUserId, parsed.scope.allowedModules, JSON.stringify(parsed.scope.allowedSections), JSON.stringify(parsed.scope.allowedActions), actor.supabaseUserId],
+        );
+      };
+      try {
+        await writeScope(true);
+      } catch (error) {
+        // The action column arrives with a later migration; fall back rather
+        // than failing an ordinary section-only grant edit.
+        if ((error as { code?: string } | null)?.code !== '42703') throw error;
+        await writeScope(false);
+      }
       await pool.query(
         `insert into public.business_audit_events (business_id,actor_user_id,event_type,after_state,reason)
          values ($1,$2,'business.member_access_changed',$3,$4)`,

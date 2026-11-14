@@ -140,6 +140,7 @@ function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
 import { fetchAuthAccessConfig, type AuthAccessConfig } from './lib/authAccessClient';
 import { isCustomerModuleKey, moduleKeyForSection, sectionForModuleKey, type CustomerModuleKey } from './lib/customerModuleMeta';
+import { accessScopeFrom, actionGranted, permissionGranted, type AccessScope } from './lib/businessAccess';
 import { supabase } from './lib/supabaseClient';
 import { SectionErrorBoundary } from './components/SectionErrorBoundary';
 import { SkipToContent } from './components/SkipToContent';
@@ -512,7 +513,7 @@ function MarketplaceAppContent() {
   const [homeSearchFocused, setHomeSearchFocused] = useState(false);
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
-  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile, customerModules, customerModulesChecked } = useMarketplace();
+  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile, customerModules, customerModuleGrants, customerModulesChecked } = useMarketplace();
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
   const [instituteAccessChecked, setInstituteAccessChecked] = useState(false);
@@ -536,15 +537,37 @@ function MarketplaceAppContent() {
     return () => { cancelled = true; };
   }, [authUser, authoritativeSessionChecked, setUserRole]);
 
+  // Section and action detail behind the customer allow-list. Null means the
+  // account holds no grant rows, which keeps the legacy unrestricted contract
+  // (the same rule the server applies in src/server/customerPermissions.ts).
+  const customerAccessScope = useMemo<AccessScope | null>(() => {
+    if (authUser?.role !== 'customer' || !customerModulesChecked) return null;
+    if (customerModuleGrants.length === 0) return null;
+    return accessScopeFrom({
+      allowed_modules: customerModuleGrants.map((grant) => grant.moduleKey),
+      allowed_sections: Object.fromEntries(
+        customerModuleGrants
+          .filter((grant) => (grant.sections || []).length > 0)
+          .map((grant) => [grant.moduleKey, grant.sections as string[]]),
+      ),
+      allowed_actions: Object.fromEntries(
+        customerModuleGrants
+          .filter((grant) => (grant.actions || []).length > 0)
+          .map((grant) => [grant.moduleKey, grant.actions as string[]]),
+      ),
+    });
+  }, [authUser?.role, customerModuleGrants, customerModulesChecked]);
+
   // Sections a signed-in customer is allowed to open. Null means "no customer
   // restriction in effect" (guest, provider, admin, or not yet resolved).
   const customerAuthorizedSections = useMemo<MarketSectionType[] | null>(() => {
     if (authUser?.role !== 'customer' || !customerModulesChecked) return null;
     return customerModules
       .filter((key): key is CustomerModuleKey => isCustomerModuleKey(key))
+      .filter((key) => actionGranted(customerAccessScope, key, 'view'))
       .map((key) => sectionForModuleKey(key))
       .filter((section): section is MarketSectionType => Boolean(section));
-  }, [authUser?.role, customerModules, customerModulesChecked]);
+  }, [authUser?.role, customerModules, customerAccessScope, customerModulesChecked]);
 
   // Public sign-in switches are administrator-controlled. Fetch once on boot
   // and refresh whenever an admin changes them in another surface.
@@ -631,12 +654,18 @@ function MarketplaceAppContent() {
       // Customer-specific module access: a signed-in customer may open only the
       // sections whose module an administrator granted. Providers and admins are
       // not constrained; guests see whatever the global module flags allow.
-      const customerModulesSet = new Set(customerModules);
       const customerRestricted = authUser?.role === 'customer' && customerModulesChecked;
       const canEnterSection = (section: MarketSectionType): boolean => {
         if (!customerRestricted) return true;
         const key = moduleKeyForSection(section);
-        return key ? customerModulesSet.has(key) : true;
+        if (!key) return true;
+        // Module, section and action in one check, so a grant that allows the
+        // module but not `view` (or names one section only) still blocks entry.
+        return permissionGranted(customerAccessScope, {
+          moduleKey: key,
+          action: 'view',
+          sectionKey: section,
+        });
       };
       const blockSection = () => {
         window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
@@ -723,7 +752,7 @@ function MarketplaceAppContent() {
     applySectionHash();
     window.addEventListener('hashchange', applySectionHash);
     return () => window.removeEventListener('hashchange', applySectionHash);
-  }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess, customerModules, customerModulesChecked]);
+  }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess, customerAccessScope, customerModulesChecked]);
 
   // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
   useEffect(() => {
