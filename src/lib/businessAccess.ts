@@ -1,14 +1,26 @@
 /**
- * Per-member module and section access policy.
+ * Per-member module, section and action access policy.
  *
  * One source of truth shared by the API (which validates grants) and the
- * provider portal (which hides what a member may not use). Importing this file
- * must stay free of React and database code so the server can use it too.
+ * provider/customer portals (which hide what a member may not use). Importing
+ * this file must stay free of React and database code so the server can use it
+ * too.
  *
- * Semantics:
- *   * no grant row for a member     -> unrestricted access to the business
- *   * grant row                     -> only `allowedModules` are usable
- *   * allowedSections[moduleKey]    -> `null`/missing/empty means every section
+ * Semantics (all three levels are deny-by-default once a grant row exists):
+ *   * no grant row for a member       -> unrestricted access (legacy contract)
+ *   * grant row                       -> only `allowedModules` are usable
+ *   * allowedSections[moduleKey]      -> `null`/missing/empty means every section
+ *   * allowedActions[moduleKey]       -> `null`/missing/empty means every action
+ *   * `manage` implies every other action; any granted action implies `view`
+ *
+ * Section keys below are taken from the real workspace unions so a grant can
+ * never name a section the product does not render:
+ *   pg_hostels  -> PgProviderWorkspace `OwnerSection`
+ *   classes     -> InstituteOwnerDashboard `Section`
+ *   hotel_stay  -> StaysOwnerAdminDashboard `StayOwnerSection`
+ *   services    -> ServicesProviderDashboard section keys
+ *   venues      -> VenueOwnerWorkspace panels (listings/bookings/blocks)
+ *   movies      -> /api/movies/* provider endpoints (screens/showtimes/support)
  */
 
 export const ACCESS_MODULES = ['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay', 'movies'] as const;
@@ -23,16 +35,64 @@ export const ACCESS_MODULE_LABELS: Record<AccessModule, string> = {
   movies: 'Movies',
 };
 
-/** Sections that can be granted individually inside a section-aware module. */
-export const MODULE_SECTION_KEYS: Partial<Record<AccessModule, ReadonlyArray<{ key: string; label: string }>>> = {
-  hotel_stay: [
-    { key: 'overview', label: 'Overview' },
+/** Every section that can be granted individually inside each module. */
+export const MODULE_SECTION_KEYS: Record<AccessModule, ReadonlyArray<{ key: string; label: string }>> = {
+  pg_hostels: [
+    { key: 'dashboard', label: 'Dashboard' },
     { key: 'properties', label: 'Properties' },
-    { key: 'rooms', label: 'Rooms & rates' },
+    { key: 'rooms', label: 'Rooms & beds' },
+    { key: 'tenants', label: 'Tenants' },
+    { key: 'bookings', label: 'Bookings' },
+    { key: 'dues', label: 'Dues' },
+    { key: 'collections', label: 'Collections' },
+    { key: 'expenses', label: 'Expenses' },
+    { key: 'disputes', label: 'Disputes' },
+    { key: 'leads', label: 'Leads' },
+    { key: 'complaints', label: 'Complaints' },
+    { key: 'requests', label: 'Service requests' },
+    { key: 'food_menu', label: 'Food menu' },
+    { key: 'notices', label: 'Notices' },
+    { key: 'reviews', label: 'Reviews' },
+    { key: 'community', label: 'Community' },
+    { key: 'staff', label: 'Staff' },
+    { key: 'listings', label: 'Listings' },
+    { key: 'reports', label: 'Reports' },
+    { key: 'plan_billing', label: 'Plan & billing' },
+    { key: 'settings', label: 'Settings' },
+  ],
+  classes: [
+    { key: 'overview', label: 'Overview' },
+    { key: 'profile', label: 'Profile' },
+    { key: 'branches', label: 'Branches' },
+    { key: 'classrooms', label: 'Classrooms' },
+    { key: 'courses', label: 'Courses' },
+    { key: 'batches', label: 'Batches' },
     { key: 'calendar', label: 'Calendar' },
-    { key: 'reservations', label: 'Reservations' },
-    { key: 'payments', label: 'Payments' },
-    { key: 'sell_pg', label: 'Sell PG' },
+    { key: 'faculty', label: 'Faculty' },
+    { key: 'admissions', label: 'Admissions' },
+    { key: 'students', label: 'Student management' },
+    { key: 'leave', label: 'Leave' },
+    { key: 'attendance', label: 'Attendance' },
+    { key: 'fees', label: 'Fees' },
+    { key: 'exams', label: 'Exams' },
+    { key: 'certificates', label: 'Certificates' },
+    { key: 'announcements', label: 'Announcements' },
+    { key: 'enquiries', label: 'Enquiries' },
+    { key: 'reviews', label: 'Reviews' },
+    { key: 'analytics', label: 'Analytics' },
+    { key: 'notifications', label: 'Notifications' },
+    { key: 'staff', label: 'Staff management' },
+    { key: 'audit', label: 'Audit log' },
+    { key: 'admin', label: 'Administration' },
+    { key: 'reports', label: 'Reports' },
+    { key: 'settings', label: 'Settings' },
+  ],
+  venues: [
+    { key: 'overview', label: 'Overview' },
+    { key: 'listings', label: 'Halls & listings' },
+    { key: 'calendar', label: 'Availability' },
+    { key: 'bookings', label: 'Bookings' },
+    { key: 'disputes', label: 'Disputes' },
     { key: 'reports', label: 'Reports' },
     { key: 'settings', label: 'Settings' },
   ],
@@ -45,22 +105,69 @@ export const MODULE_SECTION_KEYS: Partial<Record<AccessModule, ReadonlyArray<{ k
     { key: 'reports', label: 'Reports' },
     { key: 'settings', label: 'Settings' },
   ],
+  hotel_stay: [
+    { key: 'overview', label: 'Overview' },
+    { key: 'properties', label: 'Properties' },
+    { key: 'rooms', label: 'Rooms & rates' },
+    { key: 'calendar', label: 'Calendar' },
+    { key: 'reservations', label: 'Reservations' },
+    { key: 'payments', label: 'Payments' },
+    { key: 'sell_pg', label: 'Sell PG' },
+    { key: 'reports', label: 'Reports' },
+    { key: 'settings', label: 'Settings' },
+  ],
+  movies: [
+    { key: 'overview', label: 'Overview' },
+    { key: 'screens', label: 'Screens & seat layout' },
+    { key: 'showtimes', label: 'Showtimes' },
+    { key: 'bookings', label: 'Bookings' },
+    { key: 'support', label: 'Support tickets' },
+    { key: 'reports', label: 'Reports' },
+    { key: 'settings', label: 'Settings' },
+  ],
+};
+
+/** Actions that can be granted inside a module or a single section. */
+export const ACCESS_ACTIONS = ['view', 'create', 'edit', 'delete', 'approve', 'manage'] as const;
+export type AccessAction = (typeof ACCESS_ACTIONS)[number];
+
+export const ACCESS_ACTION_LABELS: Record<AccessAction, string> = {
+  view: 'View',
+  create: 'Create',
+  edit: 'Edit',
+  delete: 'Delete',
+  approve: 'Approve',
+  manage: 'Manage (implies every action)',
+};
+
+/** Actions that inherently include another action. Never widen beyond this map. */
+const IMPLIED_ACTIONS: Record<AccessAction, ReadonlyArray<AccessAction>> = {
+  view: [],
+  create: ['view'],
+  edit: ['view'],
+  delete: ['view'],
+  approve: ['view'],
+  manage: ['view', 'create', 'edit', 'delete', 'approve'],
 };
 
 export type AccessSections = Record<string, string[]>;
+export type AccessActions = Record<string, string[]>;
 
 export interface AccessScope {
   allowedModules: string[];
   allowedSections: AccessSections;
+  allowedActions: AccessActions;
 }
 
 export interface AccessScopeSource {
   /** Absent/undefined means the member has no restriction row. */
   allowed_modules?: string[] | null;
   allowed_sections?: AccessSections | null;
+  /** Absent/undefined/{} means every action is allowed inside granted modules. */
+  allowed_actions?: AccessActions | null;
 }
 
-function sectionKeysFor(moduleKey: string): string[] | null {
+export function sectionKeysFor(moduleKey: string): string[] | null {
   const entries = MODULE_SECTION_KEYS[moduleKey as AccessModule];
   return entries ? entries.map((entry) => entry.key) : null;
 }
@@ -68,17 +175,60 @@ function sectionKeysFor(moduleKey: string): string[] | null {
 /** Read a member's stored scope, or `null` when the member is unrestricted. */
 export function accessScopeFrom(source: AccessScopeSource | null | undefined): AccessScope | null {
   if (!source || !Array.isArray(source.allowed_modules)) return null;
-  const allowedSections: AccessSections = {};
-  const raw = source.allowed_sections && typeof source.allowed_sections === 'object' ? source.allowed_sections : {};
-  for (const [moduleKey, sections] of Object.entries(raw)) {
-    if (Array.isArray(sections) && sections.length > 0) allowedSections[moduleKey] = sections.map(String);
-  }
-  return { allowedModules: source.allowed_modules.map(String), allowedSections };
+  const collect = (raw: unknown): Record<string, string[]> => {
+    const collected: Record<string, string[]> = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return collected;
+    for (const [moduleKey, values] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(values) && values.length > 0) collected[moduleKey] = values.map(String);
+    }
+    return collected;
+  };
+  return {
+    allowedModules: source.allowed_modules.map(String),
+    allowedSections: collect(source.allowed_sections),
+    allowedActions: collect(source.allowed_actions),
+  };
 }
 
 export function moduleGranted(scope: AccessScope | null, moduleKey: string): boolean {
   if (!scope) return true;
   return scope.allowedModules.includes(moduleKey);
+}
+
+/**
+ * True when a single section inside a granted module is usable.
+ * An absent/empty grant means every section, matching stored legacy rows.
+ */
+export function sectionGranted(scope: AccessScope | null, moduleKey: string, sectionKey?: string | null): boolean {
+  if (!moduleGranted(scope, moduleKey)) return false;
+  if (!scope || !sectionKey) return true;
+  const granted = grantedSections(scope, moduleKey);
+  return granted === null || granted.includes(sectionKey);
+}
+
+/**
+ * True when one action is granted inside a module. An absent/empty grant means
+ * every action, so existing rows keep working unchanged. `manage` implies the
+ * rest and any action implies `view`.
+ */
+export function actionGranted(scope: AccessScope | null, moduleKey: string, action: AccessAction): boolean {
+  if (!moduleGranted(scope, moduleKey)) return false;
+  if (!scope) return true;
+  const granted = scope.allowedActions[moduleKey];
+  if (!granted || granted.length === 0) return true;
+  if (granted.includes(action)) return true;
+  return granted.some((candidate) =>
+    (IMPLIED_ACTIONS[candidate as AccessAction] || []).includes(action),
+  );
+}
+
+/** Combined module + section + action check, the one server routes should call. */
+export function permissionGranted(
+  scope: AccessScope | null,
+  request: { moduleKey: string; action: AccessAction; sectionKey?: string | null },
+): boolean {
+  return sectionGranted(scope, request.moduleKey, request.sectionKey)
+    && actionGranted(scope, request.moduleKey, request.action);
 }
 
 /**
@@ -199,7 +349,7 @@ export function grantedSections(scope: AccessScope | null, moduleKey: string): s
 
 export type SanitizeResult =
   | { ok: true; scope: AccessScope }
-  | { ok: false; error: 'INVALID_MODULES' | 'INVALID_SECTIONS' | 'NO_MODULES' };
+  | { ok: false; error: 'INVALID_MODULES' | 'INVALID_SECTIONS' | 'INVALID_ACTIONS' | 'NO_MODULES' };
 
 /**
  * Validate an untrusted grant payload. Unknown modules and unknown section
@@ -207,7 +357,7 @@ export type SanitizeResult =
  * quietly widen access.
  */
 export function sanitizeAccessScope(input: unknown): SanitizeResult {
-  const body = (input || {}) as { allowedModules?: unknown; allowedSections?: unknown };
+  const body = (input || {}) as { allowedModules?: unknown; allowedSections?: unknown; allowedActions?: unknown };
   const modules = Array.isArray(body.allowedModules) ? body.allowedModules.map(String) : null;
   if (!modules) return { ok: false, error: 'INVALID_MODULES' };
   if (modules.length === 0) return { ok: false, error: 'NO_MODULES' };
@@ -230,7 +380,22 @@ export function sanitizeAccessScope(input: unknown): SanitizeResult {
     // An empty list means "every section", which is stored by omitting the key.
     if (keys.length > 0 && keys.length < known.length) allowedSections[moduleKey] = keys;
   }
-  return { ok: true, scope: { allowedModules: uniqueModules, allowedSections } };
+  const rawActions = body.allowedActions;
+  if (rawActions != null && (typeof rawActions !== 'object' || Array.isArray(rawActions))) return { ok: false, error: 'INVALID_ACTIONS' };
+  const allowedActions: AccessActions = {};
+  for (const [moduleKey, actions] of Object.entries((rawActions || {}) as Record<string, unknown>)) {
+    // An action grant for a module the member cannot open would be inert; skip it
+    // the same way an unknown-module section grant is skipped.
+    if (!uniqueModules.includes(moduleKey)) continue;
+    if (!Array.isArray(actions)) return { ok: false, error: 'INVALID_ACTIONS' };
+    const keys = Array.from(new Set(actions.map(String)));
+    for (const key of keys) {
+      if (!(ACCESS_ACTIONS as readonly string[]).includes(key)) return { ok: false, error: 'INVALID_ACTIONS' };
+    }
+    // An empty list means "every action", which is stored by omitting the key.
+    if (keys.length > 0 && keys.length < ACCESS_ACTIONS.length) allowedActions[moduleKey] = keys;
+  }
+  return { ok: true, scope: { allowedModules: uniqueModules, allowedSections, allowedActions } };
 }
 
 /** Short human summary used in the staff panel and access chips. */
@@ -240,7 +405,11 @@ export function describeAccessScope(scope: AccessScope | null): string {
     .map((moduleKey) => {
       const label = ACCESS_MODULE_LABELS[moduleKey as AccessModule] || moduleKey;
       const sections = scope.allowedSections[moduleKey];
-      return sections && sections.length > 0 ? `${label} (${sections.length} sections)` : label;
+      const actions = scope.allowedActions[moduleKey];
+      const bits: string[] = [];
+      if (sections && sections.length > 0) bits.push(`${sections.length} sections`);
+      if (actions && actions.length > 0) bits.push(`${actions.length} actions`);
+      return bits.length > 0 ? `${label} (${bits.join(', ')})` : label;
     })
     .join(', ') || 'No modules';
 }
