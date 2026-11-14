@@ -13,6 +13,7 @@ import {
   XCircle,
   Image as ImageIcon,
   TrendingUp,
+  CalendarCheck2,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { AppLanguage, getSubcategoryDisplayName, getPriceUnitDisplayName } from '../utils/translations';
@@ -24,7 +25,7 @@ import PgProviderWorkspace, { BusinessContextBar } from './PgProviderWorkspace';
 import InstituteOwnerDashboard from './InstituteOwnerDashboard';
 import StaysOwnerAdminDashboard, { stayOwnerSections, type StayOwnerSection } from './StaysOwnerAdminDashboard';
 import ServicesProviderDashboard, { serviceSections, type ServiceView } from './ServicesProviderDashboard';
-import ProviderPortalShell, { type ProviderPortalModule } from './ProviderPortalShell';
+import ProviderPortalShell, { ProviderStatCard, type ProviderPortalModule } from './ProviderPortalShell';
 import { accessScopeFrom, grantedSections, moduleGranted } from '../lib/businessAccess';
 import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
 import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
@@ -260,6 +261,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       role={supabaseProfile?.role}
       title="Provider workspace"
       subtitle={selectedBusiness ? `${selectedBusiness.name} · ${BUSINESS_MODULE_LABELS[selectedBusiness.module_type]}` : 'Business operations'}
+      onOpenMarketplace={onSwitchToMarketplace}
     >
     <div className="min-w-0 space-y-6 pb-24">
       {/* Pending Admin Approval Alert Banner (Display only for Admin) */}
@@ -330,42 +332,12 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       )}
 
       {/* KPI Numbers */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {loc('Approved Live Posts', 'ఆమోదించబడిన పోస్ట్‌లు', 'स्वीकृत लाइव पोस्ट')}
-          </span>
-          <div className="text-2xl font-black text-emerald-600 mt-1 tabular-nums">
-            {activeListings.length}
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {loc('Pending Admin Review', 'అడ్మిన్ పరిశీలనలో ఉన్నవి', 'एडमिन समीक्षा लंबित')}
-          </span>
-          <div className="text-2xl font-black text-amber-500 mt-1 tabular-nums">
-            {pendingListings.length}
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {loc('Total Views', 'మొత్తం వీక్షణలు', 'कुल व्यूज')}
-          </span>
-          <div className="text-2xl font-black text-purple-700 dark:text-purple-300 mt-1 tabular-nums">
-            {totalViews.toLocaleString()}
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {loc('Confirmed Bookings', 'నిర్ధారించబడిన బుకింగ్‌లు', 'पुष्ट बुकिंग')}
-          </span>
-          <div className="text-2xl font-black text-indigo-600 mt-1 tabular-nums">
-            {bookings.length}
-          </div>
-        </div>
+      {/* Stat strip: the four headline numbers, directly under the breadcrumb. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Provider statistics">
+        <ProviderStatCard icon={CheckCircle2} tone="teal" label={loc('Approved Live Posts', 'ఆమోదించబడిన పోస్ట్‌లు', 'स्वीकृत लाइव पोस्ट')} value={activeListings.length} />
+        <ProviderStatCard icon={Clock} tone="amber" label={loc('Pending review', 'అడ్మిన్ పరిశీలనలో ఉన్నవి', 'एडमिन समीक्षा लंबित')} value={pendingListings.length} />
+        <ProviderStatCard icon={Eye} tone="violet" label={loc('Total Views', 'మొత్తం వీక్షణలు', 'कुल व्यूज')} value={totalViews.toLocaleString()} />
+        <ProviderStatCard icon={CalendarCheck2} tone="sky" label={loc('Confirmed Bookings', 'నిర్ధారించబడిన బుకింగ్‌లు', 'पुष्ट बुकिंग')} value={bookings.length} />
       </div>
 
       <div className="flex justify-end">

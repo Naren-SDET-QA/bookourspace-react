@@ -2641,7 +2641,9 @@ function MarketplaceAppContent() {
       ) : (
         <>
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
-          {sharedMarketplaceHeader}
+          {/* The provider portal brings its own top bar; the marketplace one would
+              stack a second, unrelated header above it. */}
+          {activeView !== 'provider_portal' && sharedMarketplaceHeader}
 
           {/* The marketplace hero belongs to the marketplace view only. Rendering it
               above every view pushed the provider portal off screen, so the portal
