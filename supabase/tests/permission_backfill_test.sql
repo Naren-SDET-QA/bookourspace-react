@@ -23,7 +23,9 @@ INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
   ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb3', 'backfill-staff@example.test', '{}'::jsonb),
   ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb4', 'backfill-suspended@example.test', '{}'::jsonb),
   ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb5', 'backfill-customer-new@example.test', '{}'::jsonb),
-  ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb6', 'backfill-customer-existing@example.test', '{}'::jsonb)
+  ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb6', 'backfill-customer-existing@example.test', '{}'::jsonb),
+  ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb7', 'backfill-invited@example.test', '{}'::jsonb),
+  ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb8', 'backfill-revoked@example.test', '{}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 RESET ROLE;
@@ -34,7 +36,9 @@ UPDATE public.profiles
    'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1',
    'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb2',
    'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb3',
-   'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb4'
+   'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb4',
+   'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb7',
+   'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb8'
  );
 UPDATE public.profiles
    SET role = 'customer', account_status = 'active'
@@ -47,16 +51,25 @@ INSERT INTO public.platform_module_flags (module_key, is_enabled)
 VALUES ('pg', true), ('classes', true)
 ON CONFLICT (module_key) DO UPDATE SET is_enabled = true;
 
+-- Two businesses with different modules, so a member of both must end up with
+-- one grant per business carrying that business's own module.
 INSERT INTO public.businesses (id, business_ref, name, module_type, owner_user_id, approval_status)
-VALUES ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'BACKFILL-0001', 'Backfill SQL Business',
-        'pg_hostels', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1', 'approved')
+VALUES
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'BACKFILL-0001', 'Backfill SQL Business',
+   'pg_hostels', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1', 'approved'),
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc2', 'BACKFILL-0002', 'Backfill SQL Stays',
+   'hotel_stay', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1', 'approved')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_members (business_id, user_id, role, status, accepted_at) VALUES
   ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1', 'owner', 'active', now()),
   ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb2', 'manager', 'active', now()),
   ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb3', 'staff', 'active', now()),
-  ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb4', 'staff', 'suspended', now())
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb4', 'staff', 'suspended', now()),
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb7', 'staff', 'invited', null),
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc1', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb8', 'staff', 'revoked', now()),
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc2', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1', 'owner', 'active', now()),
+  ('c7c1c1c1-1111-4111-8111-ccccccccccc2', 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb3', 'staff', 'active', now())
 ON CONFLICT (business_id, user_id) DO UPDATE SET role = excluded.role, status = excluded.status;
 
 -- One customer already holds a grant; the other holds none.
@@ -66,9 +79,11 @@ INSERT INTO public.customer_module_access (user_id, module_key)
 VALUES ('b7b1b1b1-1111-4111-8111-bbbbbbbbbbb6', 'pg');
 
 DELETE FROM public.business_member_access
- WHERE business_id = 'c7c1c1c1-1111-4111-8111-ccccccccccc1';
+ WHERE business_id IN ('c7c1c1c1-1111-4111-8111-ccccccccccc1',
+                       'c7c1c1c1-1111-4111-8111-ccccccccccc2');
 DELETE FROM public.business_audit_events
- WHERE business_id = 'c7c1c1c1-1111-4111-8111-ccccccccccc1'
+ WHERE business_id IN ('c7c1c1c1-1111-4111-8111-ccccccccccc1',
+                       'c7c1c1c1-1111-4111-8111-ccccccccccc2')
    AND event_type = 'business.member_access_backfilled';
 
 -- ===========================================================================
@@ -79,17 +94,23 @@ DECLARE
   summary jsonb;
   manager_row record;
   staff_row record;
+  stays_row record;
+  multi_business_rows integer;
   owner_rows integer;
   suspended_rows integer;
+  invited_rows integer;
+  revoked_rows integer;
   audit_rows integer;
+  stays_audit_rows integer;
 BEGIN
   summary := public.backfill_strict_permission_grants(false);
 
-  IF (summary ->> 'membersCreated')::int <> 2 THEN
-    RAISE EXCEPTION 'FAIL expected 2 member grants, created %', summary ->> 'membersCreated';
+  -- manager C1 + staff C1 + staff C2 = 3 rows
+  IF (summary ->> 'membersCreated')::int <> 3 THEN
+    RAISE EXCEPTION 'FAIL expected 3 member grants, created %', summary ->> 'membersCreated';
   END IF;
-  IF (summary ->> 'businessesAudited')::int <> 1 THEN
-    RAISE EXCEPTION 'FAIL expected 1 audited business, saw %', summary ->> 'businessesAudited';
+  IF (summary ->> 'businessesAudited')::int <> 2 THEN
+    RAISE EXCEPTION 'FAIL expected 2 audited businesses, saw %', summary ->> 'businessesAudited';
   END IF;
   IF (summary ->> 'customersCreated')::int <> 0 THEN
     RAISE EXCEPTION 'FAIL customers were granted without opting in';
@@ -120,6 +141,40 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS staff, not only managers, keep their access';
 
+  -- A member of two businesses receives one independent grant per business,
+  -- each scoped to that business's own module.
+  SELECT count(*) INTO multi_business_rows
+    FROM public.business_member_access
+   WHERE user_id = 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb3';
+  IF multi_business_rows <> 2 THEN
+    RAISE EXCEPTION 'FAIL a multi-business member has % grant row(s), expected 2', multi_business_rows;
+  END IF;
+
+  SELECT allowed_modules INTO stays_row
+    FROM public.business_member_access
+   WHERE business_id = 'c7c1c1c1-1111-4111-8111-ccccccccccc2'
+     AND user_id = 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb3';
+  IF stays_row IS NULL OR stays_row.allowed_modules <> ARRAY['hotel_stay'] THEN
+    RAISE EXCEPTION 'FAIL the stays grant does not carry the stays module';
+  END IF;
+  RAISE NOTICE 'PASS a multi-business member gets one grant per business and module';
+
+  SELECT count(*) INTO invited_rows
+    FROM public.business_member_access
+   WHERE user_id = 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb7';
+  IF invited_rows <> 0 THEN
+    RAISE EXCEPTION 'FAIL an invited member received a grant';
+  END IF;
+  RAISE NOTICE 'PASS invited members are left alone';
+
+  SELECT count(*) INTO revoked_rows
+    FROM public.business_member_access
+   WHERE user_id = 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb8';
+  IF revoked_rows <> 0 THEN
+    RAISE EXCEPTION 'FAIL a revoked member received a grant';
+  END IF;
+  RAISE NOTICE 'PASS revoked members are left alone';
+
   SELECT count(*) INTO owner_rows
     FROM public.business_member_access
    WHERE user_id = 'b7b1b1b1-1111-4111-8111-bbbbbbbbbbb1';
@@ -144,7 +199,16 @@ BEGIN
   IF audit_rows <> 1 THEN
     RAISE EXCEPTION 'FAIL expected one audit event with rowsCreated=2, saw %', audit_rows;
   END IF;
-  RAISE NOTICE 'PASS the change is audited per business';
+
+  SELECT count(*) INTO stays_audit_rows
+    FROM public.business_audit_events
+   WHERE business_id = 'c7c1c1c1-1111-4111-8111-ccccccccccc2'
+     AND event_type = 'business.member_access_backfilled'
+     AND (after_state ->> 'rowsCreated')::int = 1;
+  IF stays_audit_rows <> 1 THEN
+    RAISE EXCEPTION 'FAIL expected one audit event with rowsCreated=1 for the second business, saw %', stays_audit_rows;
+  END IF;
+  RAISE NOTICE 'PASS the change is audited per business with its own count';
 END
 $$;
 
@@ -213,6 +277,9 @@ DECLARE
   existing_customer_grants integer;
   enabled_modules integer;
   unprovisioned_customers integer;
+  summary_again jsonb;
+  grants_before integer;
+  grants_after integer;
 BEGIN
   -- The baseline seeds several modules as enabled, so derive the expectation
   -- instead of assuming the two this suite touches.
@@ -255,6 +322,18 @@ BEGIN
     RAISE EXCEPTION 'FAIL an existing customer grant was duplicated (% rows)', existing_customer_grants;
   END IF;
   RAISE NOTICE 'PASS the opt-in covers only modules an admin enabled and never duplicates';
+
+  -- Repeating the opt-in must not add a second row for anyone.
+  SELECT count(*) INTO grants_before FROM public.customer_module_access;
+  summary_again := public.backfill_strict_permission_grants(true);
+  SELECT count(*) INTO grants_after FROM public.customer_module_access;
+  IF (summary_again ->> 'customersCreated')::int <> 0 THEN
+    RAISE EXCEPTION 'FAIL a repeated opt-in reported % new grant(s)', summary_again ->> 'customersCreated';
+  END IF;
+  IF grants_after <> grants_before THEN
+    RAISE EXCEPTION 'FAIL a repeated opt-in changed the grant count: % -> %', grants_before, grants_after;
+  END IF;
+  RAISE NOTICE 'PASS a repeated opt-in run is a no-op';
 END
 $$;
 
