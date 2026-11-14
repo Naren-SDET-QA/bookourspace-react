@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 114,
+  "migrationCount": 115,
   "migrations": [
     {
       "order": 2,
@@ -926,12 +926,20 @@
       "file": "supabase/migrations/20261113050000_business_creation_super_admin_boundary.sql",
       "bytes": 3181,
       "sha256": "e61692978adba47482434e8abb508d75d49cda9a0a03c850efd55d3c79449707"
+    },
+    {
+      "order": 116,
+      "version": "20261114090000",
+      "name": "module_section_action_grants",
+      "file": "supabase/migrations/20261114090000_module_section_action_grants.sql",
+      "bytes": 9852,
+      "sha256": "b5c789b4a2117754e138550b5de3eff310dc4191018f1cc104b61f939996e604"
     }
   ],
   "review": {
-    "at": "2026-11-13T11:09:19.878Z",
-    "note": "P0 security remediation: fail-closed legacy services backfill plus Super Admin business-creation and owner-membership RLS boundary; PostgreSQL harness, tsc and unit tests reviewed.",
-    "migrationCount": 114,
+    "at": "2026-11-14T05:17:52.384Z",
+    "note": "Phase 2 permission grants: additive customer section/action columns, member action grants, widened audit trigger and two read RPCs. Not applied to any hosted database.",
+    "migrationCount": 115,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }
