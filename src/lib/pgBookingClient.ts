@@ -1,4 +1,5 @@
 import { buildAuthHeaders, getStoredGoogleAuthUser, setStoredAuthoritativeSession } from './supabaseClient';
+import { providerContextHeaders } from './providerBusinessContext';
 
 export interface PgRoomType {
   roomTypeId: string;
@@ -102,14 +103,16 @@ export function fetchPgCapabilities(): Promise<PgPaymentCapabilities & { ok: boo
   return request<PgPaymentCapabilities & { ok: boolean }>('/api/pg/payment-capabilities');
 }
 
-export function fetchPgInventory(listingId: string, moveIn: string, months: number) {
+export function fetchPgInventory(listingId: string, moveIn: string, months: number, businessId?: string) {
   return request<{
     ok: boolean;
     listingId: string;
     moveIn: string;
     moveOut: string;
     roomTypes: PgRoomType[];
-  }>(`/api/pg/listings/${encodeURIComponent(listingId)}/inventory?moveIn=${encodeURIComponent(moveIn)}&months=${months}`);
+  }>(`/api/pg/listings/${encodeURIComponent(listingId)}/inventory?moveIn=${encodeURIComponent(moveIn)}&months=${months}`, {
+    headers: providerContextHeaders(businessId),
+  });
 }
 
 export function createPgBooking(input: {
@@ -127,8 +130,8 @@ export function createPgBooking(input: {
   });
 }
 
-export function fetchPgBookings(): Promise<{ ok: boolean; bookings: PgBooking[] }> {
-  return request('/api/pg/bookings');
+export function fetchPgBookings(businessId?: string): Promise<{ ok: boolean; bookings: PgBooking[] }> {
+  return request('/api/pg/bookings', { headers: providerContextHeaders(businessId) });
 }
 
 export function fetchPgPaymentState(bookingId: string): Promise<PgPaymentState & { ok: boolean }> {

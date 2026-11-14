@@ -20,7 +20,7 @@ import { transliterateLatinToScript } from '../utils/i18nEngine';
 import { UniversalBarcode, StandaloneBarcodeVerifierHub, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
 import { CraftoPosterGenerator } from './CraftoPosterGenerator';
 import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
-import PgProviderWorkspace from './PgProviderWorkspace';
+import PgProviderWorkspace, { BusinessContextBar } from './PgProviderWorkspace';
 import InstituteOwnerDashboard from './InstituteOwnerDashboard';
 import StaysOwnerAdminDashboard, { stayOwnerSections, type StayOwnerSection } from './StaysOwnerAdminDashboard';
 import ServicesProviderDashboard, { serviceSections, type ServiceView } from './ServicesProviderDashboard';
@@ -314,14 +314,9 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-900 dark:bg-violet-950/20">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">Business</span>
-            {businesses.length > 1 ? (
-              <select value={selectedBusinessId} onChange={(event) => setSelectedBusinessId(event.target.value)} aria-label="Select business" className="min-h-9 max-w-full rounded-xl border border-violet-200 bg-white px-2 text-xs font-bold text-slate-800 dark:border-violet-800 dark:bg-slate-900 dark:text-slate-100">
-                {businesses.map((business) => <option key={business.id} value={business.id}>{business.name} · {BUSINESS_MODULE_LABELS[business.module_type]}</option>)}
-              </select>
-            ) : (
-              <span className="truncate text-xs font-black text-slate-800 dark:text-slate-100">{selectedBusiness?.name} · {selectedBusiness ? BUSINESS_MODULE_LABELS[selectedBusiness.module_type] : ''}</span>
-            )}
-            {selectedBusiness && <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${selectedBusiness.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{selectedBusiness.approval_status}</span>}
+            {/* The business selector lives above the KPI cards so the active
+                business is visible before any dashboard metric. */}
+            <BusinessContextBar memberships={businesses} activeBusinessId={selectedBusinessId} onSelect={setSelectedBusinessId} />
           </div>
           <span className="text-[10px] font-semibold text-violet-700/80 dark:text-violet-300/80">{selectedBusiness?.role || 'Provider account'}</span>
         </section>
@@ -627,7 +622,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {activeSubTab === 'services' && <ServicesProviderDashboard role={supabaseProfile?.role} section={activeServiceSection} onSectionChange={setServiceSection} />}
 
-      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace businessId={selectedBusinessId || undefined} businessRole={selectedBusiness?.role} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
+      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace businessId={selectedBusinessId || undefined} businessRole={selectedBusiness?.role} businesses={businesses} onSelectBusiness={setSelectedBusinessId} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
 
       {activeSubTab === 'team' && <BusinessStaffPanel businessId={selectedBusinessId || undefined} canInvite={['owner', 'manager'].includes(String(selectedBusiness?.role || ''))} />}
 

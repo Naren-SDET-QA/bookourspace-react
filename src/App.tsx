@@ -2643,7 +2643,10 @@ function MarketplaceAppContent() {
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
           {sharedMarketplaceHeader}
 
-          {!activeSectionExperience && (
+          {/* The marketplace hero belongs to the marketplace view only. Rendering it
+              above every view pushed the provider portal off screen, so the portal
+              kept showing the marketplace while it loaded underneath. */}
+          {activeView === 'marketplace' && !activeSectionExperience && (
             <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
               <MarketplaceHero
                 currentLang={currentLang}
@@ -2665,7 +2668,7 @@ function MarketplaceAppContent() {
           )}
 
           {/* HOME-SCREEN CHROME (announcements, spotlight carousel) — hidden while a section screen is open */}
-          {!activeSectionExperience && (
+          {activeView === 'marketplace' && !activeSectionExperience && (
             <>
           {/* SCHEDULED BELOW-HEADER ANNOUNCEMENTS FROM SUPER ADMIN */}
           <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-2.5 space-y-2.5">

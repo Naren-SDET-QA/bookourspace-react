@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowRight, BarChart3, BedDouble, Bell, Building2, CalendarCheck2,
   CheckCircle2, ChevronDown, ClipboardList, CreditCard, Download, FileText, History,
@@ -7,7 +7,21 @@ import {
   Utensils, Wallet, WalletCards, X, Zap,
 } from 'lucide-react';
 import { buildAuthHeaders, fetchCurrentAuthSession } from '../lib/supabaseClient';
-import { fetchPgBookings, fetchPgInventory, type PgBooking, type PgRoomType } from '../lib/pgBookingClient';
+import { fetchPgBookings, fetchPgInventory, PgBookingClientError, type PgBooking, type PgRoomType } from '../lib/pgBookingClient';
+import { fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
+import {
+  businessApprovalLabel,
+  businessLabel,
+  createLatestRequestGuard,
+  isBusinessOperational,
+  needsBusinessChoice,
+  noticeForProviderError,
+  preferredBusinessId,
+  providerContextHeaders,
+  ProviderContextError,
+  resolveBusinessSelection,
+  type ProviderContextNotice,
+} from '../lib/providerBusinessContext';
 import { PgBookingPanel, PgMyBookingsPanel } from './PgBookingPanel';
 import PgOwnerSimpleDashboard from './PgOwnerSimpleDashboard';
 import { BusinessStaffPanel } from './pg/BusinessStaffPanel';
@@ -41,10 +55,18 @@ function titleCase(value: string): string { return value.replaceAll('_', ' ').re
 function isPgListing(listing: ProviderPgListing): boolean { const categoryId = String(listing.categoryId || listing.category_id || '').toLowerCase(); return categoryId.startsWith('pg-') || categoryId === 'cat-26' || String(listing.entityType || '').toLowerCase().includes('pg'); }
 
 async function loadProviderPgListings(businessId?: string): Promise<ProviderPgListing[]> {
-  const response = await fetch('/api/provider/listings', { headers: { ...buildAuthHeaders(), Accept: 'application/json', ...(businessId ? { 'x-business-id': businessId } : {}) } });
+  // The selected business is always sent explicitly; the server re-checks that
+  // membership independently and never trusts this value.
+  const response = await fetch('/api/provider/listings', { headers: providerContextHeaders(businessId, buildAuthHeaders()), cache: 'no-store' });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.ok || !Array.isArray(data.listings)) throw new Error(data?.error || `HTTP_${response.status}`);
+  if (!response.ok || !data?.ok || !Array.isArray(data.listings)) throw new ProviderContextError(String(data?.error || `HTTP_${response.status}`));
   return data.listings.filter(isPgListing);
+}
+
+function businessCodeOf(cause: unknown): string | null {
+  if (cause instanceof ProviderContextError) return cause.code;
+  if (cause instanceof PgBookingClientError) return cause.code;
+  return null;
 }
 
 function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
@@ -52,11 +74,36 @@ function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; 
   return <button type="button" onClick={onClick} className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3.5 text-left text-sm font-bold transition-colors ${active ? 'bg-[#2554db] text-white shadow-lg shadow-blue-950/20' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}><Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span>{item.label}</span></button>;
 }
 
+export function BusinessContextBar({ memberships, activeBusinessId, onSelect }: { memberships: BusinessMembership[]; activeBusinessId: string; onSelect: (businessId: string) => void }) {
+  if (!memberships.length) return null;
+  const active = memberships.find((row) => row.id === activeBusinessId) || null;
+  return <div className="flex min-w-0 flex-1 items-center gap-2 sm:max-w-[320px] sm:flex-none" data-testid="provider-business-bar">
+    <Building2 className="h-4 w-4 shrink-0 text-[#2554db]" aria-hidden="true" />
+    <label htmlFor="provider-business-select" className="sr-only">Business</label>
+    {needsBusinessChoice(memberships) ? <select id="provider-business-select" data-testid="provider-business-select" value={activeBusinessId} onChange={(event) => onSelect(event.target.value)} className="h-10 min-w-0 flex-1 appearance-none rounded-xl border border-slate-300 bg-white px-2 text-xs font-bold text-slate-800 outline-none focus:border-[#2554db] dark:border-slate-700 dark:bg-slate-900 dark:text-white">{memberships.map((business) => <option key={business.id} value={business.id}>{businessLabel(business)}{isBusinessOperational(business) ? '' : ` · ${businessApprovalLabel(business)}`}</option>)}</select> : <span data-testid="provider-business-name" className="min-w-0 truncate text-xs font-black text-slate-800 dark:text-slate-100">{businessLabel(active)}</span>}
+    {active && <span data-testid="provider-business-approval" className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${isBusinessOperational(active) ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'}`}>{businessApprovalLabel(active)}</span>}
+  </div>;
+}
+
+function ProviderContextPanel({ notice, memberships, onRetry, onRefreshMemberships, onSelect }: { notice: ProviderContextNotice; memberships: BusinessMembership[]; onRetry: () => void; onRefreshMemberships: () => void; onSelect: (businessId: string) => void }) {
+  const usable = memberships.filter(isBusinessOperational);
+  return <div role="alert" data-testid="provider-context-notice" data-notice-kind={notice.kind} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0f1727]">
+    <h2 className="text-xl font-black text-slate-950 dark:text-white">{notice.title}</h2>
+    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">{notice.description}</p>
+    {notice.action === 'select' && <div className="mt-5 flex flex-wrap gap-2" data-testid="provider-business-choices">{usable.map((business) => <button key={business.id} type="button" onClick={() => onSelect(business.id)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 text-xs font-black text-slate-700 hover:border-[#2554db] hover:text-[#2554db] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><Building2 className="h-4 w-4" />{businessLabel(business)}<span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">{businessApprovalLabel(business)}</span></button>)}</div>}
+    {notice.action === 'contact-admin' && <p data-testid="provider-contact-admin" className="mt-5 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">Contact your business owner or a platform administrator to request access.</p>}
+    <div className="mt-5 flex flex-wrap gap-2">
+      {notice.action === 'retry' && <button type="button" onClick={onRetry} data-testid="provider-context-retry" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#2554db] px-4 text-sm font-black text-white"><RefreshCw className="h-4 w-4" />Try again</button>}
+      {(notice.action === 'refresh-memberships' || notice.action === 'select') && <button type="button" onClick={onRefreshMemberships} data-testid="provider-refresh-memberships" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><RefreshCw className="h-4 w-4" />Refresh memberships</button>}
+    </div>
+  </div>;
+}
+
 function EmptyState({ icon: Icon, title, children, action }: { icon: typeof BedDouble; title: string; children: string; action?: { label: string; onClick: () => void } }) {
   return <div className="flex min-h-[220px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/60 px-6 py-10 text-center dark:border-slate-700 dark:bg-slate-900/40"><span className="grid h-14 w-14 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"><Icon className="h-7 w-7" aria-hidden="true" /></span><h3 className="mt-4 text-lg font-black text-slate-950 dark:text-white">{title}</h3><p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{children}</p>{action && <button type="button" onClick={action.onClick} className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#2554db] px-4 text-sm font-black text-white shadow-lg shadow-blue-200/50 dark:shadow-none"><Plus className="h-4 w-4" />{action.label}</button>}</div>;
 }
 
-export default function PgProviderWorkspace({ businessId, businessRole, onAddProperty, onSwitchToMarketplace }: { businessId?: string; businessRole?: string; onAddProperty?: () => void; onSwitchToMarketplace?: () => void }) {
+export default function PgProviderWorkspace({ businessId, businessRole, businesses: businessesProp, onSelectBusiness, onAddProperty, onSwitchToMarketplace }: { businessId?: string; businessRole?: string; businesses?: BusinessMembership[]; onSelectBusiness?: (businessId: string) => void; onAddProperty?: () => void; onSwitchToMarketplace?: () => void }) {
   const [listings, setListings] = useState<ProviderPgListing[]>([]);
   const [inventory, setInventory] = useState<Record<string, InventorySnapshot>>({});
   const [bookings, setBookings] = useState<PgBooking[]>([]);
@@ -69,23 +116,77 @@ export default function PgProviderWorkspace({ businessId, businessRole, onAddPro
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'business' | 'payments' | 'notifications' | 'team'>('business');
 
+  const [memberships, setMemberships] = useState<BusinessMembership[]>(businessesProp || []);
+  const [activeBusinessId, setActiveBusinessId] = useState(businessId || '');
+  const [contextNotice, setContextNotice] = useState<ProviderContextNotice | null>(null);
+  // Only the newest request may write state, so a slow response for the
+  // previous business can never overwrite the business now selected.
+  const requestGuard = useRef(createLatestRequestGuard());
+
+  useEffect(() => {
+    if (businessesProp) {
+      setMemberships(businessesProp);
+      setActiveBusinessId((current) => resolveBusinessSelection(businessesProp, businessId || current));
+      return;
+    }
+    let active = true;
+    fetchBusinesses()
+      .then((rows) => {
+        if (!active) return;
+        setMemberships(rows);
+        setActiveBusinessId((current) => resolveBusinessSelection(rows, businessId || current));
+      })
+      .catch(() => { if (active) setContextNotice(noticeForProviderError('BUSINESS_LIST_UNAVAILABLE')); });
+    return () => { active = false; };
+  }, [businessesProp, businessId]);
+
+  useEffect(() => { if (businessId) setActiveBusinessId(businessId); }, [businessId]);
+
+  const activeBusiness = memberships.find((row) => row.id === activeBusinessId) || null;
+  const selectBusiness = useCallback((nextId: string) => {
+    setActiveBusinessId(nextId);
+    setSelectedProperty('all');
+    onSelectBusiness?.(nextId);
+  }, [onSelectBusiness]);
+
   const refresh = useCallback(async () => {
-    setRefreshing(true); setError('');
+    const token = requestGuard.current.begin();
+    setRefreshing(true); setError(''); setContextNotice(null);
     try {
-      const [providerListings, session, bookingResult] = await Promise.all([loadProviderPgListings(businessId), fetchCurrentAuthSession(), fetchPgBookings().catch(() => ({ ok: true, bookings: [] as PgBooking[] }))]);
+      const providerListings = await loadProviderPgListings(activeBusinessId || undefined);
+      const [session, bookingResult] = await Promise.all([
+        fetchCurrentAuthSession(),
+        fetchPgBookings(activeBusinessId || undefined).catch((cause) => {
+          // A refusal here is a permission result, not an empty booking list.
+          if (businessCodeOf(cause)) throw cause;
+          return { ok: true, bookings: [] as PgBooking[] };
+        }),
+      ]);
+      if (!requestGuard.current.isLatest(token)) return;
       setListings(providerListings); setBookings(bookingResult.bookings || []);
       const profileName = String(session.user?.name || session.user?.email || '').split('@')[0].trim();
       if (profileName) setOwnerName(profileName.split(/[._-]/)[0] || profileName);
       setSelectedProperty((current) => current === 'all' || providerListings.some((listing) => listing.id === current) ? current : providerListings[0]?.id || 'all');
       const inventoryEntries = await Promise.all(providerListings.map(async (listing) => {
-        try { const result = await fetchPgInventory(listing.id, tomorrowLocal(), 1); return [listing.id, { roomTypes: result.roomTypes || [], loaded: true }] as const; }
-        catch { return [listing.id, { roomTypes: [], loaded: false }] as const; }
+        try { const result = await fetchPgInventory(listing.id, tomorrowLocal(), 1, activeBusinessId || undefined); return [listing.id, { roomTypes: result.roomTypes || [], loaded: true }] as const; }
+        catch (cause) { if (businessCodeOf(cause)) throw cause; return [listing.id, { roomTypes: [], loaded: false }] as const; }
       }));
+      if (!requestGuard.current.isLatest(token)) return;
       setInventory(Object.fromEntries(inventoryEntries));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'PG_OWNER_DASHBOARD_UNAVAILABLE'); }
-    finally { setLoading(false); setRefreshing(false); }
-  }, [businessId]);
-  useEffect(() => { void refresh(); }, [refresh]);
+    } catch (cause) {
+      if (!requestGuard.current.isLatest(token)) return;
+      // Drop the previous business's data before reporting the refusal so an
+      // authorization failure can never look like an empty dashboard.
+      setListings([]); setBookings([]); setInventory({}); setSelectedProperty('all');
+      const code = businessCodeOf(cause);
+      const notice = code ? noticeForProviderError(code, { hasBusinesses: memberships.length > 0, businessCount: memberships.length }) : null;
+      if (notice) setContextNotice(notice);
+      else setError(cause instanceof Error ? cause.message : 'PG_OWNER_DASHBOARD_UNAVAILABLE');
+    } finally {
+      if (requestGuard.current.isLatest(token)) { setLoading(false); setRefreshing(false); }
+    }
+  }, [activeBusinessId, memberships.length]);
+  useEffect(() => { setLoading(true); void refresh(); }, [refresh]);
 
   const visibleListings = selectedProperty === 'all' ? listings : listings.filter((listing) => listing.id === selectedProperty);
   const selectedListing = visibleListings[0] || listings[0];
@@ -106,6 +207,21 @@ export default function PgProviderWorkspace({ businessId, businessRole, onAddPro
     return { rooms: selectedRooms, beds, availableBeds, occupiedBeds: Math.max(0, beds - availableBeds), contractedRentPaise };
   }, [selectedRooms]);
   const navTo = (next: OwnerSection) => { setSection(next); setMobileNavOpen(false); };
+
+  if (contextNotice) {
+    return <section className="pg-owner-airbnb -mx-1 rounded-[28px] border border-slate-200 bg-[#f7f9fc] p-4 text-slate-900 shadow-sm dark:border-slate-800 dark:bg-[#0b1220] dark:text-white sm:-mx-2 sm:p-6" aria-label="Provider business context">
+      <div className="mx-auto max-w-3xl space-y-4">
+        <BusinessContextBar memberships={memberships} activeBusinessId={activeBusinessId} onSelect={selectBusiness} />
+        <ProviderContextPanel
+          notice={contextNotice}
+          memberships={memberships}
+          onRetry={() => void refresh()}
+          onRefreshMemberships={() => { setContextNotice(null); setLoading(true); void refresh(); }}
+          onSelect={(id) => { setContextNotice(null); setLoading(true); selectBusiness(id); }}
+        />
+      </div>
+    </section>;
+  }
 
   return <section className="pg-owner-airbnb -mx-1 overflow-hidden rounded-[28px] border border-slate-200 bg-[#f7f9fc] text-slate-900 shadow-sm dark:border-slate-800 dark:bg-[#0b1220] dark:text-white sm:-mx-2" aria-label="PG owner dashboard"><div className="flex min-h-[720px]">
     <aside className={`fixed inset-y-0 left-0 z-50 flex h-screen w-[286px] min-h-0 flex-col transform bg-[#071d42] px-4 py-5 text-white shadow-2xl transition-transform duration-200 md:static md:h-auto md:min-h-[720px] md:z-auto md:translate-x-0 md:shadow-none ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`} aria-label="PG owner navigation"><div className="flex shrink-0 items-center justify-between px-2"><div className="flex items-center gap-2.5"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[#2554db] text-xl font-black">B</span><div><p className="text-[11px] font-black tracking-[.22em] text-blue-100">BOOKOURSPACE</p><p className="mt-0.5 text-xs font-semibold text-slate-400">PG owner console</p></div></div><button type="button" onClick={() => setMobileNavOpen(false)} className="rounded-lg p-2 text-slate-300 hover:bg-white/10 md:hidden" aria-label="Close navigation"><X className="h-5 w-5" /></button></div><nav className="mt-8 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1" aria-label="Owner sections">{NAV_GROUPS.map((group) => <div key={group.label || 'home'}>{group.label && <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[.18em] text-slate-500">{group.label}</p>}<div className="space-y-1">{group.items.map((item) => <NavButton key={item.id} item={item} active={section === item.id} onClick={() => navTo(item.id)} />)}</div></div>)}</nav><div className="mt-4 shrink-0 border-t border-white/10 pt-4"><button type="button" className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3.5 text-sm font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="h-[18px] w-[18px]" /> Sign out</button></div></aside>
