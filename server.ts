@@ -45,7 +45,9 @@ import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
 import {
   evaluateProviderBusinessContext,
+  permissionForProviderRoute,
   selectBusinessContext,
+  strictPermissionDefaults,
 } from './src/lib/businessAccess';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
 import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
@@ -2979,9 +2981,15 @@ Task:
     req.headers['x-business-id'] = businessId;
     try {
       const { rows } = await pgRuntimePool.query(
+        // Sections and actions are read through to_jsonb(ma) on purpose: the
+        // allowed_actions column arrives with a later migration, and a plain
+        // column reference would turn every provider request into a 500 if the
+        // server is deployed before that migration is applied.
         `select b.id,b.module_type,b.approval_status,b.is_enabled,m.role,
                 a.enabled as module_enabled,a.approval_status as module_approval_status,
-                ma.allowed_modules as member_modules
+                ma.allowed_modules as member_modules,
+                to_jsonb(ma) -> 'allowed_sections' as member_sections,
+                to_jsonb(ma) -> 'allowed_actions' as member_actions
            from public.businesses b
            join public.business_members m on m.business_id=b.id and m.user_id=$2 and m.status='active'
            join public.business_module_access a on a.business_id=b.id and a.module_type=b.module_type
@@ -2990,14 +2998,18 @@ Task:
         [businessId, actorId],
       );
       const business = rows[0];
+      const permission = permissionForProviderRoute(req.method, req.originalUrl);
       const decision = evaluateProviderBusinessContext({
         role: claims.role,
         path: req.originalUrl,
         business,
+        permission,
+        strictDefaults: strictPermissionDefaults(process.env),
       });
       if (!decision.ok) return void res.status(decision.status).json({ ok: false, error: decision.error });
       if (!business) return void res.status(403).json({ ok: false, error: 'BUSINESS_ACCESS_DENIED' });
       res.locals.businessContext = business;
+      res.locals.providerPermission = permission;
       next();
     } catch {
       res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });

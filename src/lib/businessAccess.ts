@@ -295,24 +295,145 @@ export interface ProviderBusinessContextRow {
   module_approval_status?: string | null;
   role?: string | null;
   member_modules?: string[] | null;
+  member_sections?: AccessSections | null;
+  member_actions?: AccessActions | null;
+}
+
+/** HTTP method -> the action the route performs. Unknown methods are treated as manage. */
+export const ACTION_FOR_METHOD: Readonly<Record<string, AccessAction>> = {
+  GET: 'view',
+  HEAD: 'view',
+  OPTIONS: 'view',
+  POST: 'create',
+  PUT: 'edit',
+  PATCH: 'edit',
+  DELETE: 'delete',
+};
+
+/** Path fragments that turn an otherwise plain request into a decision/manage request. */
+const APPROVAL_PATH = /\/(approve|reject|decision|review|publish|settle|verify)(\/|$)/i;
+const MANAGE_PATH = /\/(assign|transfer|ownership[-a-z]*|members|access)(\/|$)/i;
+
+export interface ProviderRoutePermission {
+  moduleKey: AccessModule;
+  action: AccessAction;
+  sectionKey: string | null;
+}
+
+/**
+ * Provider route prefix -> the workspace section it belongs to. Longest prefix
+ * wins, so `/api/stays/host/properties` never falls back to a broader prefix.
+ * Paths without an entry stay module-gated only, which is the pre-existing
+ * behaviour and keeps shared surfaces (for example `/api/provider/listings`)
+ * working for every module.
+ */
+// Only endpoint families that actually exist in the server are mapped. Anything
+// else resolves to no section, which keeps its pre-existing module-only gate
+// instead of inventing a restriction the product cannot honour.
+const PROVIDER_SECTION_PREFIX_ROWS = [
+  // Host stays: src/server/stayHostApi.ts
+  { prefix: '/api/stays/host/properties', moduleKey: 'hotel_stay', sectionKey: 'properties' },
+  { prefix: '/api/stays/host/listings', moduleKey: 'hotel_stay', sectionKey: 'properties' },
+  { prefix: '/api/stays/host/onboard', moduleKey: 'hotel_stay', sectionKey: 'properties' },
+  { prefix: '/api/stays/host/media-order', moduleKey: 'hotel_stay', sectionKey: 'properties' },
+  { prefix: '/api/stays/host/room-types', moduleKey: 'hotel_stay', sectionKey: 'rooms' },
+  { prefix: '/api/stays/host/units', moduleKey: 'hotel_stay', sectionKey: 'rooms' },
+  { prefix: '/api/stays/host/blocks', moduleKey: 'hotel_stay', sectionKey: 'calendar' },
+  { prefix: '/api/stays/host/bookings', moduleKey: 'hotel_stay', sectionKey: 'reservations' },
+  // Services: src/server/serviceBookingApi.ts, serviceCommerceApi.ts
+  { prefix: '/api/services/provider/workers', moduleKey: 'services', sectionKey: 'workers' },
+  { prefix: '/api/services/workers', moduleKey: 'services', sectionKey: 'workers' },
+  { prefix: '/api/services/provider/schedule', moduleKey: 'services', sectionKey: 'schedule' },
+  { prefix: '/api/services/earnings', moduleKey: 'services', sectionKey: 'payments' },
+  { prefix: '/api/services/payment-claims', moduleKey: 'services', sectionKey: 'payments' },
+  { prefix: '/api/services/bookings', moduleKey: 'services', sectionKey: 'bookings' },
+  // PG: src/server/pgAdminApi.ts
+  { prefix: '/api/provider/pg/bookings', moduleKey: 'pg_hostels', sectionKey: 'bookings' },
+  { prefix: '/api/pg/bookings', moduleKey: 'pg_hostels', sectionKey: 'bookings' },
+  // Movies: src/server/moviesShowtimesApi.ts / server.ts
+  { prefix: '/api/movies/screens', moduleKey: 'movies', sectionKey: 'screens' },
+  { prefix: '/api/movies/support', moduleKey: 'movies', sectionKey: 'support' },
+  { prefix: '/api/movies/bookings', moduleKey: 'movies', sectionKey: 'bookings' },
+  // Venues: src/server/venueBookingsApi.ts
+  { prefix: '/api/provider/venues', moduleKey: 'venues', sectionKey: 'listings' },
+  { prefix: '/api/venue-bookings', moduleKey: 'venues', sectionKey: 'bookings' },
+  // Classes: src/server/classEnrollmentApi.ts
+  { prefix: '/api/provider/classes/batches', moduleKey: 'classes', sectionKey: 'batches' },
+  { prefix: '/api/provider/classes/enrollments', moduleKey: 'classes', sectionKey: 'students' },
+  { prefix: '/api/provider/classes/listings', moduleKey: 'classes', sectionKey: 'courses' },
+] satisfies ReadonlyArray<{ prefix: string; moduleKey: AccessModule; sectionKey: string }>;
+
+const PROVIDER_SECTION_PREFIXES: ReadonlyArray<{ prefix: string; moduleKey: AccessModule; sectionKey: string }> =
+  PROVIDER_SECTION_PREFIX_ROWS.slice().sort((a, b) => b.prefix.length - a.prefix.length);
+
+export function sectionForProviderPath(rawPath: string): string | null {
+  const pathOnly = String(rawPath || '').split(/[?#]/)[0];
+  const normalized = `/${pathOnly.replace(/^\/+/, '')}`;
+  const entry = PROVIDER_SECTION_PREFIXES.find(
+    (candidate) => normalized === candidate.prefix || normalized.startsWith(`${candidate.prefix}/`),
+  );
+  return entry ? entry.sectionKey : null;
+}
+
+/** Action a provider request performs, from its method and path. */
+export function actionForProviderRoute(rawMethod: string, rawPath: string): AccessAction {
+  const pathOnly = String(rawPath || '').split(/[?#]/)[0];
+  if (APPROVAL_PATH.test(pathOnly)) return 'approve';
+  if (MANAGE_PATH.test(pathOnly)) return 'manage';
+  return ACTION_FOR_METHOD[String(rawMethod || 'GET').toUpperCase()] || 'manage';
+}
+
+/** Resolve the permission a provider route requires, or `null` for module-only routes. */
+export function permissionForProviderRoute(rawMethod: string, rawPath: string): ProviderRoutePermission | null {
+  const moduleKey = providerModuleForPath(rawPath);
+  if (!moduleKey) return null;
+  return {
+    moduleKey,
+    action: actionForProviderRoute(rawMethod, rawPath),
+    sectionKey: sectionForProviderPath(rawPath),
+  };
+}
+
+/**
+ * Deny-by-default switch. Off by default: a member without any grant row keeps
+ * the legacy unrestricted contract until an explicit full-grant backfill has
+ * been applied and reviewed.
+ */
+export function strictPermissionDefaults(env?: Record<string, string | undefined>): boolean {
+  return String(env?.BOS_STRICT_PERMISSION_DEFAULTS || '') === '1';
 }
 
 export type BusinessContextDecision =
   | { ok: true }
-  | { ok: false; status: 403; error: 'BUSINESS_ACCESS_DENIED' | 'BUSINESS_MODULE_MISMATCH' | 'BUSINESS_MODULE_FORBIDDEN' };
+  | {
+      ok: false;
+      status: 403;
+      error:
+        | 'BUSINESS_ACCESS_DENIED'
+        | 'BUSINESS_MODULE_MISMATCH'
+        | 'BUSINESS_MODULE_FORBIDDEN'
+        | 'BUSINESS_SECTION_FORBIDDEN'
+        | 'BUSINESS_ACTION_FORBIDDEN'
+        | 'BUSINESS_PERMISSIONS_REQUIRED';
+    };
 
 /**
  * Authorize a provider request against the resolved business. Administrators
  * bypass the gate; every other role must hold an active, approved business and
- * may only use the module the route serves, within their member grant.
+ * may only use the module the route serves, within their member grant of
+ * modules, sections and actions.
  */
 export function evaluateProviderBusinessContext(input: {
   role?: string | null;
   path: string;
   business: ProviderBusinessContextRow | null | undefined;
+  /** Section/action the route requires. `null` keeps the module-only check. */
+  permission?: ProviderRoutePermission | null;
+  /** When true, a member with no grant row is denied instead of unrestricted. */
+  strictDefaults?: boolean;
 }): BusinessContextDecision {
   const deny = (
-    error: 'BUSINESS_ACCESS_DENIED' | 'BUSINESS_MODULE_MISMATCH' | 'BUSINESS_MODULE_FORBIDDEN',
+    error: Extract<BusinessContextDecision, { ok: false }>['error'],
   ): BusinessContextDecision => ({ ok: false, status: 403, error });
   if (String(input.role || '') === 'admin') return { ok: true };
   const business = input.business;
@@ -330,8 +451,21 @@ export function evaluateProviderBusinessContext(input: {
   if (expectedModule && moduleType !== expectedModule) return deny('BUSINESS_MODULE_MISMATCH');
   const memberRole = String(business.role || '');
   if (memberRole !== 'owner') {
-    const scope = accessScopeFrom({ allowed_modules: business.member_modules ?? null });
+    // No grant row means `member_modules` is null. That is unrestricted unless
+    // strict defaults are enabled, which requires an explicit grant.
+    if (input.strictDefaults && !Array.isArray(business.member_modules)) {
+      return deny('BUSINESS_PERMISSIONS_REQUIRED');
+    }
+    const scope = accessScopeFrom({
+      allowed_modules: business.member_modules ?? null,
+      allowed_sections: business.member_sections ?? null,
+      allowed_actions: business.member_actions ?? null,
+    });
     if (!moduleGranted(scope, moduleType)) return deny('BUSINESS_MODULE_FORBIDDEN');
+    if (input.permission) {
+      if (!sectionGranted(scope, moduleType, input.permission.sectionKey)) return deny('BUSINESS_SECTION_FORBIDDEN');
+      if (!actionGranted(scope, moduleType, input.permission.action)) return deny('BUSINESS_ACTION_FORBIDDEN');
+    }
   }
   return { ok: true };
 }
