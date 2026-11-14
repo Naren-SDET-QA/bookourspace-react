@@ -62,7 +62,7 @@ const AdminDataManagementSection = lazy(() => import('./AdminDataManagementSecti
 const AdminAnnouncementsSection = lazy(() => import('./AdminAnnouncementsSection').then((module) => ({ default: module.AdminAnnouncementsSection })));
 const AdminPlatformModuleSettings = lazy(() => import('./AdminPlatformModuleSettings').then((module) => ({ default: module.AdminPlatformModuleSettings })));
 const AdminAuthAccessSettings = lazy(() => import('./AdminAuthAccessSettings').then((module) => ({ default: module.AdminAuthAccessSettings })));
-const AdminCustomerModuleAccess = lazy(() => import('./AdminCustomerModuleAccess').then((module) => ({ default: module.AdminCustomerModuleAccess })));
+const AdminUserPermissions = lazy(() => import('./AdminUserPermissions').then((module) => ({ default: module.AdminUserPermissions })));
 const AdminMarketplaceListings = lazy(() => import('./AdminMarketplaceListings').then((module) => ({ default: module.AdminMarketplaceListings })));
 const AdminStayInventory = lazy(() => import('./AdminStayInventory').then((module) => ({ default: module.AdminStayInventory })));
 const AdminAnalyticsPerformanceModule = lazy(() => import('./AdminAnalyticsAndBilling').then((module) => ({ default: module.AdminAnalyticsPerformanceModule })));
@@ -1507,7 +1507,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     },
     {
       id: 'customer_module_access',
-      label: 'Customer Module Access',
+      label: 'User Permissions',
       badge: 'Grants',
       priority: true,
       icon: KeyRound,
@@ -5553,8 +5553,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               SECTION 10: APP SETTINGS & AUDIT HISTORY (Languages, Notifications, Support, Audit Trail)
              ===================================================================== */}
           {activeSection === 'customer_module_access' && (
-            <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading customer module access…</p>}>
-              <AdminCustomerModuleAccess />
+            <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading user permissions…</p>}>
+              <AdminUserPermissions />
             </Suspense>
           )}
 

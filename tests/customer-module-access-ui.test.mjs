@@ -24,15 +24,28 @@ test('the migration protects grant rows and provides an authoritative RPC', asyn
   assert.doesNotMatch(migration, /for insert to authenticated\s+using \(auth\.uid\(\) = user_id\)/i);
 });
 
-test('the admin console exposes a Customer Module Access section', async () => {
+test('the admin console exposes the User Permissions section', async () => {
   const dashboard = await read('src/components/AdminDashboard.tsx');
   assert.match(dashboard, /customer_module_access/);
-  assert.match(dashboard, /Customer Module Access/);
-  const component = await read('src/components/AdminCustomerModuleAccess.tsx');
+  assert.match(dashboard, /label: 'User Permissions'/);
+  assert.match(dashboard, /AdminUserPermissions/);
+
+  const component = await read('src/components/AdminUserPermissions.tsx');
+  // Customer grants keep their existing endpoints.
   assert.match(component, /saveAdminCustomerModuleAccess/);
   assert.match(component, /revokeAdminCustomerModuleAccess/);
-  assert.match(component, /Audit history/);
   assert.match(component, /CUSTOMER_VISIBLE_MODULE_KEYS/);
+  // The matrix covers module, section and action for both scopes.
+  assert.match(component, /MODULE_SECTION_KEYS/);
+  assert.match(component, /ACCESS_ACTIONS/);
+  assert.match(component, /setBusinessMemberAccess/);
+  // Copy, reset and history are reachable from the console.
+  assert.match(component, /copyAdminPermissions/);
+  assert.match(component, /resetAdminPermissions/);
+  assert.match(component, /fetchAdminPermissionHistory/);
+  assert.match(component, /Enable all/);
+  assert.match(component, /Restore full access/);
+  assert.match(component, /role="dialog"/);
 });
 
 test('the customer surface filters modules and blocks direct section URLs', async () => {

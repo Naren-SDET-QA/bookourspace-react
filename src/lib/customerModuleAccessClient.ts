@@ -26,6 +26,9 @@ export interface AdminCustomer {
   modules: CustomerModuleGrant[];
 }
 
+/** Sections and actions of one stored customer module grant. */
+export type AdminCustomerGrant = CustomerModuleGrant & { sections: string[]; actions: string[] };
+
 async function readJson(response: Response): Promise<any> {
   try {
     return await response.json();
@@ -76,7 +79,15 @@ export async function verifyCustomerModule(moduleKey: string): Promise<{ ok: boo
   }
 }
 
-export async function fetchAdminCustomerModuleAccess(params: { query?: string; limit?: number; offset?: number } = {}): Promise<{
+export async function fetchAdminCustomerModuleAccess(params: {
+  query?: string;
+  limit?: number;
+  offset?: number;
+  /** Only customers with a live grant for this module. */
+  module?: string;
+  /** `yes` / `no` on whether the customer holds any grant at all. */
+  granted?: string;
+} = {}): Promise<{
   ok: boolean;
   customers?: AdminCustomer[];
   total?: number;
@@ -86,6 +97,8 @@ export async function fetchAdminCustomerModuleAccess(params: { query?: string; l
   if (params.query) query.set('q', params.query);
   if (params.limit) query.set('limit', String(params.limit));
   if (params.offset) query.set('offset', String(params.offset));
+  if (params.module) query.set('module', params.module);
+  if (params.granted) query.set('granted', params.granted);
   try {
     const response = await fetch(`/api/admin/customer-module-access${query.toString() ? `?${query.toString()}` : ''}`, {
       headers: buildAuthHeaders({ accept: 'application/json' }),

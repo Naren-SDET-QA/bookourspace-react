@@ -62,11 +62,14 @@ export interface BusinessMember {
   /** `null` means the member is unrestricted inside this business. */
   allowed_modules?: string[] | null;
   allowed_sections?: Record<string, string[]> | null;
+  /** Empty per module means every action. */
+  allowed_actions?: Record<string, string[]> | null;
 }
 
 export interface BusinessMemberAccessPayload {
   allowedModules: string[];
   allowedSections: Record<string, string[]>;
+  allowedActions?: Record<string, string[]>;
 }
 
 /** Set a member's module/section scope, or pass `null` to restore full access. */
