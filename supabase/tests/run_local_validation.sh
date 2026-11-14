@@ -525,6 +525,25 @@ BACKFILL_SQL_FAIL=$(grep -c "NOTICE:  FAIL" "$OUT/permission-backfill.out" || tr
 BACKFILL_SQL_ERRORS=$(grep -Ec '^psql:.*(ERROR|FATAL):' "$OUT/permission-backfill.out" || true)
 echo "    PASS=$BACKFILL_SQL_PASS FAIL=$BACKFILL_SQL_FAIL SQL_ERRORS=$BACKFILL_SQL_ERRORS"
 
+echo "=== 5c7. Permission gates with strict flags enabled (PostgreSQL) ==="
+rm -f "$OUT/permission-gates-node.out"
+BOS_LISTINGS_DATABASE_URL="postgres://postgres@127.0.0.1:$PGPORT/$DB?sslmode=disable" \
+NODE_ENV=test \
+node --import tsx --test "$REPO_ROOT/tests/permission-gates-postgres.integration.test.mjs" \
+  > "$OUT/permission-gates-node.out" 2>&1 \
+  || {
+    sed -E 's/(postgres(ql)?:\/\/)[^@ ]+@/\1[redacted]@/g' "$OUT/permission-gates-node.out" | tail -60 >&2
+    fail "permission gates PostgreSQL integration"
+  }
+# The reporter prints its summary as "# pass 9" (TAP) or with a spec marker
+# prefix, so match the counts themselves rather than the marker, which is not
+# ASCII-safe in every locale.
+grep -E "(tests|pass|fail) [0-9]+" "$OUT/permission-gates-node.out" | sed 's/^/    /'
+GATE_NODE_PASS=$(grep -E " pass [0-9]+" "$OUT/permission-gates-node.out" | grep -oE '[0-9]+$' | tail -1)
+GATE_NODE_FAIL=$(grep -E " fail [0-9]+" "$OUT/permission-gates-node.out" | grep -oE '[0-9]+$' | tail -1)
+: "${GATE_NODE_PASS:=0}"
+: "${GATE_NODE_FAIL:=0}"
+
 echo "=== 5c4. Classes enrollment migration reapply idempotency ==="
 pq -d "$DB" -q -v ON_ERROR_STOP=1 \
   -f "$REPO_ROOT/supabase/migrations/20261103200000_class_batches_and_enrollment.sql" \
@@ -746,12 +765,14 @@ echo "=== 7. verdict ==="
 [ "$BOOTSTRAP_SQL_FAIL" = "0" ] || fail "$BOOTSTRAP_SQL_FAIL Super Admin bootstrap assertion(s) failed"
 [ "$MEDIA_FINALIZATION_PASS" = "20" ] || fail "media finalization suite ran only $MEDIA_FINALIZATION_PASS passing assertion(s)"
 [ "$MEDIA_FINALIZATION_FAIL" = "0" ] || fail "$MEDIA_FINALIZATION_FAIL media finalization assertion(s) failed"
-[ "$AUDIT_REPAIR_PASS" -ge 5 ] || fail "audit blocker repair suite ran only $AUDIT_REPAIR_PASS passing assertion(s)"
+[ "$AUDIT_REPAIR_PASS" -ge 7 ] || fail "audit blocker repair suite ran only $AUDIT_REPAIR_PASS passing assertion(s)"
 [ "$AUDIT_REPAIR_FAIL" = "0" ] || fail "$AUDIT_REPAIR_FAIL audit blocker repair assertion(s) failed"
 [ "$PERMISSION_SQL_FAIL" = "0" ] || fail "$PERMISSION_SQL_FAIL permission grant assertion(s) failed"
 [ "$PERMISSION_SQL_ERRORS" = "0" ] || fail "$PERMISSION_SQL_ERRORS permission grant SQL error(s) occurred"
 [ "$BACKFILL_SQL_FAIL" = "0" ] || fail "$BACKFILL_SQL_FAIL permission backfill assertion(s) failed"
 [ "$BACKFILL_SQL_ERRORS" = "0" ] || fail "$BACKFILL_SQL_ERRORS permission backfill SQL error(s) occurred"
+[ "$GATE_NODE_FAIL" = "0" ] || fail "permission gate integration reported $GATE_NODE_FAIL failure(s)"
+[ "$GATE_NODE_PASS" -ge 8 ] || fail "permission gate integration ran only $GATE_NODE_PASS passing test(s)"
 [ "$BACKFILL_SQL_PASS" -ge 10 ] || fail "permission backfill suite ran only $BACKFILL_SQL_PASS passing assertion(s)"
 [ "$PERMISSION_SQL_PASS" -ge 20 ] || fail "permission grant suite ran only $PERMISSION_SQL_PASS passing assertion(s)"
 [ "$CLASS_SQL_FAIL" = "0" ] || fail "$CLASS_SQL_FAIL class enrollment assertion(s) failed"

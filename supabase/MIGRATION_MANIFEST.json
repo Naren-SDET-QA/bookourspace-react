@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 117,
+  "migrationCount": 118,
   "migrations": [
     {
       "order": 2,
@@ -950,12 +950,20 @@
       "file": "supabase/migrations/20261114110000_strict_permission_backfill.sql",
       "bytes": 5393,
       "sha256": "02c69a7b8f8ed709eec5414f358f6f494acaac4549b07ed1f0a00b7714afeaa3"
+    },
+    {
+      "order": 119,
+      "version": "20261114120000",
+      "name": "customer_audit_profile_cascade",
+      "file": "supabase/migrations/20261114120000_customer_audit_profile_cascade.sql",
+      "bytes": 2537,
+      "sha256": "a01a48ac923829da5af343dd49b6e57a3f3d389f39e6fe255fe2edc7ee86146b"
     }
   ],
   "review": {
-    "at": "2026-11-14T05:17:52.384Z",
-    "note": "Phases 2 and 6 permission work: additive section/action grant columns and RPCs, plus privilege-only hardening that makes both grant tables server-mediated and rejects malformed JSON. Not applied to any hosted database.",
-    "migrationCount": 117,
+    "at": "2026-11-14T08:30:02.542Z",
+    "note": "Account deletion no longer fails when the user holds customer module grants: the customer module audit trigger no longer writes history for a profile that the same cascade already deleted.",
+    "migrationCount": 118,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }

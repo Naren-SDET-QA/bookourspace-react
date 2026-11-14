@@ -11,6 +11,7 @@ declare
   v_self uuid := 'a1111111-1111-4111-8111-111111111111';
   v_admin uuid := 'a2222222-2222-4222-8222-222222222222';
   v_listing text := 'audit-repair-listing';
+  v_cascade uuid := 'a3333333-3333-4333-8333-333333333333';
   v_membership uuid;
   v_policy text;
   v_accepted boolean;
@@ -105,6 +106,39 @@ begin
     raise exception 'FAIL authenticated still holds write privileges on customer_module_access';
   end if;
   raise notice 'PASS customer module access grants let RLS enforce reads';
+
+  -- Deleting an account that holds module grants must complete. The delete
+  -- cascades into customer_module_access, and before the repair the audit
+  -- trigger then inserted a 'revoke' row for a profile that no longer existed,
+  -- so the audit foreign key aborted the whole account deletion with 23503.
+  insert into auth.users (id, email, raw_user_meta_data)
+  values (v_cascade, 'audit-cascade@example.com', '{"full_name":"Audit Cascade"}'::jsonb)
+  on conflict (id) do nothing;
+  update public.profiles set role = 'customer', account_status = 'active' where id = v_cascade;
+  insert into public.platform_module_flags (module_key, is_enabled) values ('pg', true)
+  on conflict (module_key) do update set is_enabled = true;
+  insert into public.customer_module_access (user_id, module_key) values (v_cascade, 'pg')
+  on conflict do nothing;
+
+  if not exists (
+    select 1 from public.customer_module_access_audit
+     where user_id = v_cascade and action = 'grant'
+  ) then
+    raise exception 'FAIL a normal grant stopped being audited';
+  end if;
+
+  delete from auth.users where id = v_cascade;
+
+  if exists (select 1 from public.profiles where id = v_cascade) then
+    raise exception 'FAIL the account survived deletion';
+  end if;
+  if exists (select 1 from public.customer_module_access where user_id = v_cascade) then
+    raise exception 'FAIL module grants survived the account deletion';
+  end if;
+  if exists (select 1 from public.customer_module_access_audit where user_id = v_cascade) then
+    raise exception 'FAIL deleted-account history was left behind without its account';
+  end if;
+  raise notice 'PASS an account holding module grants can be deleted';
 
   raise notice 'PASS audit blocker SQL suite completed';
 end $$;
