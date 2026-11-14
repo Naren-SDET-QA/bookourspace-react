@@ -3216,6 +3216,7 @@ function MarketplaceAppContent() {
             <SelfHealingBoundary moduleId="provider_portal_module" moduleName="Provider Portal & Hub Module">
               <ProviderDashboard
                 currentLang={currentLang}
+                onChangeLang={setCurrentLang}
                 initialWorkspace={hasInstituteAccess ? 'institute' : 'pg'}
                 onSwitchToMarketplace={() => {
                   setActiveView('marketplace');

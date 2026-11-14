@@ -25,7 +25,7 @@ import PgProviderWorkspace, { BusinessContextBar } from './PgProviderWorkspace';
 import InstituteOwnerDashboard from './InstituteOwnerDashboard';
 import StaysOwnerAdminDashboard, { stayOwnerSections, type StayOwnerSection } from './StaysOwnerAdminDashboard';
 import ServicesProviderDashboard, { serviceSections, type ServiceView } from './ServicesProviderDashboard';
-import ProviderPortalShell, { ProviderStatCard, type ProviderPortalModule } from './ProviderPortalShell';
+import ProviderPortalShell, { ProviderStatCard, PROVIDER_MODULE_LABELS, type ProviderPortalModule } from './ProviderPortalShell';
 import { accessScopeFrom, grantedSections, moduleGranted } from '../lib/businessAccess';
 import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
 import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
@@ -38,6 +38,7 @@ interface ProviderDashboardProps {
   onSwitchToAdminReview?: () => void;
   onSwitchToMarketplace?: () => void;
   currentLang?: AppLanguage;
+  onChangeLang?: (lang: AppLanguage) => void;
   initialWorkspace?: 'pg' | 'institute';
 }
 
@@ -48,6 +49,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   onSwitchToAdminReview,
   onSwitchToMarketplace,
   currentLang = 'en',
+  onChangeLang,
   initialWorkspace = 'pg',
 }) => {
   const { listings, enquiries, bookings, postingPlans, deleteListing, toggleFeaturedListing, supabaseProfile } = useMarketplace();
@@ -107,6 +109,26 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   const pendingListings = businessListings.filter(l => l.status === 'pending_approval');
   const activeListings = businessListings.filter(l => l.status === 'active');
   const totalViews = businessListings.reduce((sum, l) => sum + l.viewsCount, 0);
+
+  // Bell badge: real work waiting on the provider, not a static dot.
+  const notifications = useMemo(() => [
+    ...pendingListings.map((listing) => ({
+      id: `listing-${listing.id}`,
+      title: 'Listing awaiting review',
+      detail: listing.title,
+      module: 'listings' as const,
+    })),
+    ...enquiries
+      .filter((enquiry) => enquiry.status === 'new')
+      // Only this account's enquiries count; the context is marketplace-wide.
+      .filter((enquiry) => !supabaseProfile?.id || enquiry.providerId === supabaseProfile.id)
+      .map((enquiry) => ({
+        id: `enquiry-${enquiry.id}`,
+        title: 'New customer enquiry',
+        detail: `${enquiry.customerName} · ${enquiry.listingTitle}`,
+        module: 'enquiries' as const,
+      })),
+  ].slice(0, 12), [pendingListings, enquiries, supabaseProfile?.id]);
 
   type ProviderWorkspaceTab = 'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'services' | 'pg_inventory' | 'institute' | 'team';
   const [activeSubTab, setActiveSubTab] = useState<ProviderWorkspaceTab>('pg_inventory');
@@ -259,14 +281,18 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       onNavigate={navigatePortalModule}
       allowedModules={allowedPortalModules}
       role={supabaseProfile?.role}
-      title="Provider workspace"
+      userName={supabaseProfile?.full_name}
+      notifications={notifications}
+      currentLang={currentLang}
+      onChangeLanguage={onChangeLang}
+      title={PROVIDER_MODULE_LABELS[activePortalModule] || 'Provider workspace'}
       subtitle={selectedBusiness ? `${selectedBusiness.name} · ${BUSINESS_MODULE_LABELS[selectedBusiness.module_type]}` : 'Business operations'}
       onOpenMarketplace={onSwitchToMarketplace}
     >
     <div className="min-w-0 space-y-6 pb-24">
       {/* Pending Admin Approval Alert Banner (Display only for Admin) */}
       {pendingListings.length > 0 && onSwitchToAdminReview && (
-        <div className="bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-700 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-700 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase">
               <Clock className="w-3.5 h-3.5" />
@@ -313,14 +339,14 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {!businesses.length && !businessError && <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />}
       {businesses.length > 0 && (
-        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-900 dark:bg-violet-950/20">
+        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#CDEFE7] bg-[#ECFBF6] p-3 dark:border-violet-900 dark:bg-violet-950/20">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">Business</span>
+            <span className="text-[10px] font-black uppercase tracking-wide text-[#0B8F76] dark:text-[#5FE3CB]">Business</span>
             {/* The business selector lives above the KPI cards so the active
                 business is visible before any dashboard metric. */}
             <BusinessContextBar memberships={businesses} activeBusinessId={selectedBusinessId} onSelect={setSelectedBusinessId} />
           </div>
-          <span className="text-[10px] font-semibold text-violet-700/80 dark:text-violet-300/80">{selectedBusiness?.role || 'Provider account'}</span>
+          <span className="text-[10px] font-semibold text-[#0B8F76]/80 dark:text-[#5FE3CB]/80">{selectedBusiness?.role || 'Provider account'}</span>
         </section>
       )}
       {businessError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">Business context unavailable: {businessError}. Showing the legacy provider view.</p>}
@@ -360,7 +386,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                 onSelect();
                 requestAnimationFrame(() => document.getElementById('provider-workspace-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
               }}
-              className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition ${active ? 'border-[#527a40] bg-[#527a40] text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
+              className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition ${active ? 'border-[#0B8F76] bg-[#0B8F76] text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="whitespace-nowrap">{label}</span>
@@ -373,7 +399,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       {/* --- SUBTAB: ANALYTICS & PERFORMANCE (D3 CHARTS) --- */}
       {activeSubTab === 'analytics' && (
         <div className="space-y-5 animate-in fade-in duration-200">
-          <div className="bg-gradient-to-r from-indigo-950 via-purple-950 to-slate-900 text-white rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-purple-700/40">
+          <div className="bg-gradient-to-r from-[#0B1526] via-[#132238] to-[#0B1526] text-white rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-[#12C2A0]/25">
             <div>
               <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950">
                 D3.js Powered Business Growth Intelligence
@@ -388,7 +414,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                   )}
                 </span>
               </h3>
-              <p className="text-xs text-purple-200 mt-0.5">
+              <p className="text-xs text-white/70 mt-0.5">
                 {loc(
                   'Track your weekly profile view counts, booking conversion funnel, and enquiry response speed.',
                   'వారాంతపు ప్రొఫైల్ వీక్షణలు, బుకింగ్ కన్వర్షన్ రేట్లు మరియు ఎంక్వైరీ రెస్పాన్స్ సమయాన్ని ట్రాక్ చేయండి.',
@@ -398,15 +424,15 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
             </div>
             <div className="grid grid-cols-3 gap-2 text-center shrink-0">
               <div className="bg-white/10 rounded-2xl px-3 py-2 border border-white/10">
-                <div className="text-[10px] text-purple-200 font-bold">Conversion</div>
+                <div className="text-[10px] text-white/70 font-bold">Conversion</div>
                 <div className="text-base font-black text-emerald-400">8.6%</div>
               </div>
               <div className="bg-white/10 rounded-2xl px-3 py-2 border border-white/10">
-                <div className="text-[10px] text-purple-200 font-bold">Avg Response</div>
+                <div className="text-[10px] text-white/70 font-bold">Avg Response</div>
                 <div className="text-base font-black text-amber-300">4.2m</div>
               </div>
               <div className="bg-white/10 rounded-2xl px-3 py-2 border border-white/10">
-                <div className="text-[10px] text-purple-200 font-bold">Growth YoY</div>
+                <div className="text-[10px] text-white/70 font-bold">Growth YoY</div>
                 <div className="text-base font-black text-sky-300">+34%</div>
               </div>
             </div>
@@ -414,7 +440,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* D3 Chart 1: Profile View Counts (D3 Area & Line Trend Chart) */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="font-black text-sm text-slate-900 dark:text-white">
@@ -488,7 +514,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
             </div>
 
             {/* D3 Chart 2: Booking Conversion Rates Funnel */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="font-black text-sm text-slate-900 dark:text-white">
@@ -534,7 +560,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           </div>
 
           {/* D3 Chart 3: Enquiry Response Times & Impact on Conversion */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h4 className="font-black text-sm text-slate-900 dark:text-white">
@@ -606,7 +632,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           {businessListings.map(listing => (
             <div
               key={listing.id}
-              className={`bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+              className={`bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
                 listing.status === 'pending_approval'
                   ? 'border-2 border-amber-400 dark:border-amber-600 bg-amber-50/30 dark:bg-amber-950/20'
                   : listing.status === 'rejected'
@@ -762,14 +788,14 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       {activeSubTab === 'enquiries' && (
         <div className="space-y-3">
           {enquiries.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl text-center border border-slate-200 dark:border-slate-800 text-xs text-slate-400">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl text-center border border-slate-200 dark:border-slate-800 text-xs text-slate-400">
               {loc('No enquiries received yet.', 'ఇంకా ఎంక్వైరీలు రాలేదు.', 'अभी तक कोई पूछताछ नहीं मिली है।')}
             </div>
           ) : (
             enquiries.map(enq => (
               <div
                 key={enq.id}
-                className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div className="space-y-1 max-w-xl">
                   <div className="flex items-center gap-2">
@@ -816,14 +842,14 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       {activeSubTab === 'bookings' && (
         <div className="space-y-3">
           {bookings.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl text-center border border-slate-200 dark:border-slate-800 text-xs text-slate-400">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl text-center border border-slate-200 dark:border-slate-800 text-xs text-slate-400">
               {loc('No confirmed bookings yet.', 'ఇంకా బుకింగ్‌లు లేవు.', 'अभी तक कोई बुकिंग नहीं है।')}
             </div>
           ) : (
             bookings.map(b => (
               <div
                 key={b.id}
-                className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -882,7 +908,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           {postingPlans.filter(p => p.isActive).map(plan => (
             <div
               key={plan.id}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-4"
+              className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-4"
             >
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
