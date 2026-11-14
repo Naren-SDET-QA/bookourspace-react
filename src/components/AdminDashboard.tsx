@@ -1524,7 +1524,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading administrator tools…</p>}>
     <div className="space-y-5 pb-24 text-slate-900 dark:text-slate-100">
       {/* Top Executive Header with Draft / Preview / Publish & Audit Quick-Access */}
-      <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-purple-950 text-white p-4 sm:p-5 rounded-3xl shadow-lg border border-indigo-800/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-purple-950 text-white p-4 sm:p-5 rounded-3xl shadow-lg border border-teal-800/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider mb-1">
             <ShieldCheck className="w-3.5 h-3.5" />
@@ -1533,10 +1533,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <h2 className="text-lg sm:text-2xl font-black tracking-tight">
             Modular Platform Command Center
           </h2>
-          <p className="text-xs text-indigo-200">
+          <p className="text-xs text-teal-200">
             Dedicated independent sections for Users, Payments, Ads, Reports & Analytics, Theme Management, Content, Listings, Bookings & Feature Builder
           </p>
-          <LastUpdated at={auditLogs[0]?.timestamp} label="Latest audit" className="mt-1 block text-[11px] font-semibold text-indigo-200" />
+          <LastUpdated at={auditLogs[0]?.timestamp} label="Latest audit" className="mt-1 block text-[11px] font-semibold text-teal-200" />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1577,7 +1577,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => setActiveSection('app_settings')}
-            className="px-3 py-1.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 rounded-xl bg-teal-600/80 hover:bg-teal-600 text-white border border-teal-400/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
           >
             <History className="w-3.5 h-3.5 text-amber-300" />
             <span>Audit Log ({auditLogs.length})</span>
@@ -1586,9 +1586,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* ADMIN HOME & LANDING PAGE LAYOUT STYLE SELECTOR */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-indigo-200 dark:border-indigo-900/70 p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-teal-200 dark:border-teal-900/70 p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-200 text-[10px] font-black uppercase">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-100 dark:bg-indigo-950 text-teal-800 dark:text-teal-200 text-[10px] font-black uppercase">
             <Sparkles className="w-3 h-3" />
             <span>Home &amp; Landing Page Experience</span>
           </div>
@@ -1618,8 +1618,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }}
             className={`px-4 py-2.5 rounded-2xl border-2 text-left text-xs font-black transition cursor-pointer flex items-center justify-between gap-3 ${
               homeScreenStyle === 'bento_landing_hub'
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
-                : 'bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                ? 'bg-teal-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-teal-400'
             }`}
           >
             <div>
@@ -1656,8 +1656,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }}
             className={`px-4 py-2.5 rounded-2xl border-2 text-left text-xs font-black transition cursor-pointer flex items-center justify-between gap-3 ${
               homeScreenStyle === 'classic_marketplace'
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
-                : 'bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                ? 'bg-teal-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-teal-400'
             }`}
           >
             <div>
@@ -1770,11 +1770,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Live Preview Drawer when Admin clicks "Preview Published State" */}
       {isPreviewDrawerOpen && (
-        <div className="bg-indigo-50/90 dark:bg-indigo-950/40 border-2 border-indigo-400 dark:border-indigo-700 rounded-3xl p-4 space-y-3 animate-in fade-in duration-150">
-          <div className="flex items-center justify-between border-b border-indigo-200 dark:border-indigo-800 pb-2">
+        <div className="bg-teal-50/90 dark:bg-indigo-950/40 border-2 border-teal-400 dark:border-teal-700 rounded-3xl p-4 space-y-3 animate-in fade-in duration-150">
+          <div className="flex items-center justify-between border-b border-teal-200 dark:border-teal-800 pb-2">
             <div className="flex items-center gap-2">
-              <Eye className="w-4 h-4 text-indigo-600" />
-              <span className="text-xs font-black uppercase tracking-wider text-indigo-900 dark:text-indigo-200">
+              <Eye className="w-4 h-4 text-teal-700" />
+              <span className="text-xs font-black uppercase tracking-wider text-teal-900 dark:text-teal-200">
                 Live App State Inspector (Draft vs Published)
               </span>
             </div>
@@ -1860,9 +1860,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onClick={() => setActiveSection(item.id)}
                     className={`w-full px-3 py-2.5 rounded-2xl text-left text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-[#4338CA] text-white shadow-sm'
+                        ? 'bg-[#0B8F76] text-white shadow-sm'
                         : item.priority
-                        ? 'bg-indigo-50/70 dark:bg-indigo-950/30 text-slate-900 dark:text-white hover:bg-indigo-100 dark:hover:bg-indigo-950/60 border border-indigo-200/60 dark:border-indigo-800/50'
+                        ? 'bg-teal-50/70 dark:bg-indigo-950/30 text-slate-900 dark:text-white hover:bg-teal-100 dark:hover:bg-indigo-950/60 border border-teal-200/60 dark:border-teal-800/50'
                         : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
@@ -1872,7 +1872,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           isSelected
                             ? 'text-[#FFE500]'
                             : item.priority
-                            ? 'text-[#4338CA] dark:text-indigo-400'
+                            ? 'text-[#0B8F76] dark:text-teal-500'
                             : 'text-slate-500'
                         }`}
                       />
@@ -1910,7 +1910,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {log.action}
                 </div>
                 <div className="text-slate-500 truncate">{log.details}</div>
-                <div className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold mt-0.5">
+                <div className="text-[9px] text-teal-700 dark:text-teal-500 font-bold mt-0.5">
                   {log.actorName} • {log.timestamp.slice(11, 16)}
                 </div>
               </div>
@@ -1927,11 +1927,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-teal-700 dark:text-teal-500">
                     Section 01 • Independent User & Access Control
                   </span>
                   <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <Users className="w-5 h-5 text-indigo-600" />
+                    <Users className="w-5 h-5 text-teal-700" />
                     <span>User Management (Customers, Providers & Admins)</span>
                   </h3>
                   <p className="text-xs text-slate-500">
@@ -1943,7 +1943,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsAddingUser(!isAddingUser)}
-                    className="px-3.5 py-2 rounded-xl bg-[#4338CA] hover:bg-indigo-800 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-[#0B8F76] hover:bg-indigo-800 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>+ Add User / Provider</span>
@@ -1991,10 +1991,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {isAddingUser && (
                 <form
                   onSubmit={(e) => handleCreateUser(e, 'published')}
-                  className="bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 space-y-3 text-xs"
+                  className="bg-teal-50/60 dark:bg-indigo-950/30 border border-teal-200 dark:border-teal-800 rounded-2xl p-4 space-y-3 text-xs"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-black text-indigo-950 dark:text-indigo-200 uppercase text-[11px]">
+                    <span className="font-black text-indigo-950 dark:text-teal-200 uppercase text-[11px]">
                       Create New User / Provider Account
                     </span>
                     <button
@@ -2073,13 +2073,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       type="button"
                       onClick={(e) => handleCreateUser(e, 'draft')}
-                      className="px-3.5 py-2 rounded-xl border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 font-bold cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl border border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300 font-bold cursor-pointer"
                     >
                       Save as Draft
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-xl bg-[#4338CA] text-white font-black cursor-pointer"
+                      className="px-4 py-2 rounded-xl bg-[#0B8F76] text-white font-black cursor-pointer"
                     >
                       Publish User Account
                     </button>
@@ -2196,7 +2196,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 onChange={() =>
                                   handleToggleRolePermission(rp.role, permKey)
                                 }
-                                className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
+                                className="w-4 h-4 rounded text-teal-700 cursor-pointer"
                               />
                             </td>
                           ))}
@@ -2297,7 +2297,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 onClick={() => handleToggleSuspendUser(u)}
                                 className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
                                   u.accountStatus === 'suspended'
-                                    ? 'bg-indigo-600 text-white'
+                                    ? 'bg-teal-600 text-white'
                                     : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
                                 }`}
                               >
@@ -2373,11 +2373,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ₹{totalRevenue.toLocaleString('en-IN')}
                   </div>
                 </div>
-                <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900">
-                  <span className="text-[10px] font-bold text-indigo-700 uppercase">
+                <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-indigo-950/30 border border-teal-200 dark:border-teal-900">
+                  <span className="text-[10px] font-bold text-teal-700 uppercase">
                     Platform Commission ({paymentSettings.platformCommissionPercent}%)
                   </span>
-                  <div className="text-xl font-black text-indigo-700 dark:text-indigo-300 mt-0.5">
+                  <div className="text-xl font-black text-teal-700 dark:text-teal-300 mt-0.5">
                     ₹
                     {Math.round(
                       (totalRevenue * paymentSettings.platformCommissionPercent) /
@@ -2504,7 +2504,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       )
                                     )
                                   }
-                                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 text-slate-700 dark:text-slate-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-teal-50 text-slate-700 dark:text-slate-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
                                 >
                                   <Printer className="w-3 h-3" />
                                   <span>Print</span>
@@ -2864,7 +2864,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsCreatingAd(!isCreatingAd)}
-                    className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>+ New Ad Campaign</span>
@@ -2886,7 +2886,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onClick={() => setAdSubTab(tab.id as any)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer transition ${
                       adSubTab === tab.id
-                        ? 'bg-purple-700 text-white'
+                        ? 'bg-teal-700 text-white'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                     }`}
                   >
@@ -3042,7 +3042,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           }
                           className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                         />
-                        <label className="px-3 py-2 rounded-xl bg-indigo-600 text-white font-bold cursor-pointer flex items-center gap-1 shrink-0">
+                        <label className="px-3 py-2 rounded-xl bg-teal-600 text-white font-bold cursor-pointer flex items-center gap-1 shrink-0">
                           <Upload className="w-3.5 h-3.5" />
                           <span>Upload</span>
                           <input
@@ -3113,7 +3113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       type="button"
                       onClick={() => handleSaveAdCampaign('published')}
-                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black cursor-pointer flex items-center gap-1"
+                      className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black cursor-pointer flex items-center gap-1"
                     >
                       <Send className="w-3.5 h-3.5" />
                       <span>Publish Live to App</span>
@@ -3144,7 +3144,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="w-20 h-20 rounded-lg object-cover shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <span className="text-[9px] font-black px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded bg-teal-100 text-teal-800">
                         {previewAd.badgeText}
                       </span>
                       <h4 className="font-black text-sm mt-1">
@@ -3153,7 +3153,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <p className="text-xs text-slate-500">
                         {previewAd.subheadline}
                       </p>
-                      <div className="text-[11px] font-bold text-indigo-600 mt-1">
+                      <div className="text-[11px] font-bold text-teal-700 mt-1">
                         {previewAd.advertiserName} • 📍 {previewAd.targetCity} → [
                         {previewAd.ctaText}]
                       </div>
@@ -3199,7 +3199,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
                               Slot: {ad.placement}
                             </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800">
                               Section: {ad.targetSection}
                             </span>
                             <span className="text-[10px] text-slate-500 font-bold">
@@ -3346,7 +3346,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     return (
                       <div key={city} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
                         <span className="flex items-center gap-2 text-[12px] font-bold text-slate-800 dark:text-slate-100">
-                          <MapPin className="h-3.5 w-3.5 text-[#7C3AED]" />
+                          <MapPin className="h-3.5 w-3.5 text-[#0B8F76]" />
                           {city}
                         </span>
                         <div className="flex items-center gap-2">
@@ -3603,7 +3603,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {/* Recent Audit Activity Table */}
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
                 <h3 className="font-black text-sm flex items-center gap-2">
-                  <History className="w-4 h-4 text-indigo-600" />
+                  <History className="w-4 h-4 text-teal-700" />
                   <span>Recent Admin Activity & Audit Trail</span>
                 </h3>
                 <div className="space-y-2">
@@ -3613,7 +3613,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 flex items-center justify-between text-xs"
                     >
                       <div>
-                        <span className="font-black text-indigo-600 dark:text-indigo-400">
+                        <span className="font-black text-teal-700 dark:text-teal-500">
                           [{log.section}]
                         </span>{' '}
                         <strong className="text-slate-900 dark:text-white">
@@ -3659,7 +3659,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       onClick={() => setContentSubTab(tab.id as any)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${
                         contentSubTab === tab.id
-                          ? 'bg-[#4338CA] text-white'
+                          ? 'bg-[#0B8F76] text-white'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                       }`}
                     >
@@ -3705,7 +3705,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           logAction('Content Management', 'Category bar layout', `Set category pills to ${label.toLowerCase()}`, 'published');
                           showAdminNotification(`✅ Category bar: ${label}`);
                         }}
-                        className={`rounded-lg px-3 py-1.5 text-[11px] font-black ${active ? 'bg-[#4338CA] text-white' : 'text-slate-600 dark:text-slate-300'}`}
+                        className={`rounded-lg px-3 py-1.5 text-[11px] font-black ${active ? 'bg-[#0B8F76] text-white' : 'text-slate-600 dark:text-slate-300'}`}
                       >
                         {label}
                       </button>
@@ -3725,7 +3725,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsAddingCategory(true)}
-                        className="px-2.5 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        className="px-2.5 py-1.5 rounded-xl bg-teal-600 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>Add Category</span>
@@ -3882,7 +3882,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         />
                         <button
                           type="submit"
-                          className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold cursor-pointer"
+                          className="px-3 py-1.5 rounded-xl bg-teal-600 text-white text-xs font-bold cursor-pointer"
                         >
                           + Add
                         </button>
@@ -3898,7 +3898,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => setIsAddingField(!isAddingField)}
-                          className="px-2.5 py-1 rounded-xl bg-purple-600 text-white text-xs font-bold cursor-pointer"
+                          className="px-2.5 py-1 rounded-xl bg-teal-600 text-white text-xs font-bold cursor-pointer"
                         >
                           + Add Field
                         </button>
@@ -3935,7 +3935,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
                           <button
                             type="submit"
-                            className="px-3 py-1.5 rounded-lg bg-purple-600 text-white font-bold cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg bg-teal-600 text-white font-bold cursor-pointer"
                           >
                             Save Field
                           </button>
@@ -3972,7 +3972,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="space-y-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Simple catalog editor</span>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-teal-700">Simple catalog editor</span>
                       <h4 className="text-xl font-black text-slate-900 dark:text-white">Manage Categories</h4>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Add, edit, and organize categories and subsections. Changes appear instantly in the app.
@@ -3990,7 +3990,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsAddingCategory(true)}
-                        className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-[#4338CA] px-3 text-xs font-black text-white"
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-[#0B8F76] px-3 text-xs font-black text-white"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         <span>Add Category</span>
@@ -4001,7 +4001,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
                     <div className="rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900">
                       <div className="flex items-center gap-2">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"><Layers className="h-4 w-4" /></span>
+                        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-700 dark:bg-indigo-950/60 dark:text-teal-200"><Layers className="h-4 w-4" /></span>
                         <span className="text-lg font-black text-slate-900 dark:text-white">{categories.length}</span>
                       </div>
                       <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Main Categories</p>
@@ -4033,7 +4033,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center dark:border-slate-700 dark:bg-slate-900/50">
                       <Layers className="mx-auto h-8 w-8 text-slate-400" />
                       <p className="mt-2 text-sm font-black text-slate-700 dark:text-slate-200">No categories yet</p>
-                      <button type="button" onClick={() => setIsAddingCategory(true)} className="mt-3 rounded-xl bg-[#4338CA] px-4 py-2 text-xs font-black text-white">Add the first category</button>
+                      <button type="button" onClick={() => setIsAddingCategory(true)} className="mt-3 rounded-xl bg-[#0B8F76] px-4 py-2 text-xs font-black text-white">Add the first category</button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -4065,7 +4065,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   onClick={() => setSelectedCatId(category.id)}
                                   className={`flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
                                     isSelected
-                                      ? 'border-[#4338CA] bg-indigo-50 dark:bg-indigo-950/40'
+                                      ? 'border-[#0B8F76] bg-teal-50 dark:bg-indigo-950/40'
                                       : 'border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/60'
                                   }`}
                                 >
@@ -4142,7 +4142,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-center text-base dark:border-slate-700 dark:bg-slate-800"
                             />
                           </label>
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-lg text-white">{simpleCategoryDraft.name.trim().slice(0, 1).toUpperCase() || '•'}</div>
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 text-lg text-white">{simpleCategoryDraft.name.trim().slice(0, 1).toUpperCase() || '•'}</div>
                         </div>
 
                         <div className="rounded-xl border border-slate-200 p-2 dark:border-slate-700">
@@ -4210,7 +4210,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button
                             type="submit"
                             disabled={!simpleCategoryDirty || simpleCategorySaving}
-                            className="rounded-xl bg-[#4338CA] px-3 py-1.5 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-xl bg-[#0B8F76] px-3 py-1.5 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {simpleCategorySaving ? 'Saving…' : 'Save Changes'}
                           </button>
@@ -4273,7 +4273,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               placeholder="Add subsection…"
                               className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                             />
-                            <button type="submit" className="shrink-0 rounded-lg bg-[#4338CA] px-2 py-1.5 text-[10px] font-black text-white">Add</button>
+                            <button type="submit" className="shrink-0 rounded-lg bg-[#0B8F76] px-2 py-1.5 text-[10px] font-black text-white">Add</button>
                           </form>
                         </div>
 
@@ -4357,7 +4357,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           '✅ Banner published to live Marketplace!'
                         );
                       }}
-                      className="px-4 py-2 rounded-xl bg-[#4338CA] text-white font-black cursor-pointer"
+                      className="px-4 py-2 rounded-xl bg-[#0B8F76] text-white font-black cursor-pointer"
                     >
                       + Add & Publish Banner
                     </button>
@@ -4441,20 +4441,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               'published'
                             );
                           }}
-                          className="w-4 h-4 rounded text-indigo-600"
+                          className="w-4 h-4 rounded text-teal-700"
                         />
                       </label>
                     ))}
                   </div>
                   {/* Independent 6-Section Visibility Control: Spotlight Subcategories (స్పాట్లైట్ సబ్-కేటగిరీలు) */}
-                  <div className="p-4 rounded-2xl border-2 border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
+                  <div className="p-4 rounded-2xl border-2 border-teal-200 dark:border-teal-900/60 bg-teal-50/40 dark:bg-indigo-950/20 space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">
                             🌟 స్పాట్లైట్ సబ్-కేటగిరీలు (Spotlight Subcategories) — Per-Section Visibility
                           </span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 border border-indigo-300 dark:bg-indigo-900/60 dark:text-indigo-200 dark:border-indigo-700">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-teal-100 text-teal-900 border border-teal-300 dark:bg-indigo-900/60 dark:text-teal-200 dark:border-teal-700">
                             {Object.values(spotlightModuleMap).filter(Boolean).length} / 6 Sections Enabled
                           </span>
                         </div>
@@ -4526,7 +4526,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between gap-2 cursor-pointer ${
                               isEnabled
                                 ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 shadow-2xs'
-                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-indigo-300'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-teal-300'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-1">
@@ -4833,7 +4833,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               transition={{ duration: 0.22, ease: 'easeOut' }}
             >
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs">
-                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600">
+                <span className="text-[10px] font-black uppercase tracking-wider text-teal-700">
                   Section 06a • Hotels &amp; Stays Operations
                 </span>
                 <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
@@ -4874,7 +4874,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       onClick={() => setModerationFilter(f.id as any)}
                       className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${
                         moderationFilter === f.id
-                          ? 'bg-[#4338CA] text-white'
+                          ? 'bg-[#0B8F76] text-white'
                           : 'bg-slate-100 dark:bg-slate-800'
                       }`}
                     >
@@ -5059,7 +5059,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {activeSection === 'bookings_events' && (
             <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-5">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600">
+                <span className="text-[10px] font-black uppercase tracking-wider text-teal-700">
                   Section 07 • Reservations, Disputes & Live Events
                 </span>
                 <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
@@ -5161,7 +5161,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={ev.id}
                       className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 text-xs"
                     >
-                      <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black uppercase">
+                      <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-black uppercase">
                         {ev.status} • {ev.section}
                       </span>
                       <div className="font-black text-sm">{ev.title}</div>
@@ -5328,7 +5328,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {/* Per-Section Visibility Matrix for Spotlight Subcategories & Search Date-Range Filter */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
                   {/* Card 1: Spotlight Subcategories per-section toggles */}
-                  <div className="p-4 rounded-2xl border-2 border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
+                  <div className="p-4 rounded-2xl border-2 border-teal-200 dark:border-teal-900/60 bg-teal-50/40 dark:bg-indigo-950/20 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div>
                         <div className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">
@@ -5565,7 +5565,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </Suspense>
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-4 text-xs">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-teal-700">
                     Section 10 • General Configuration & Support
                   </span>
                   <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
@@ -5647,7 +5647,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             },
                           })
                         }
-                        className="rounded text-indigo-600"
+                        className="rounded text-teal-700"
                       />
                       <span>{label}</span>
                     </label>
@@ -5674,7 +5674,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         '✅ App settings published to live application!'
                       );
                     }}
-                    className="px-4 py-2 rounded-xl bg-[#4338CA] text-white font-black cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-[#0B8F76] text-white font-black cursor-pointer"
                   >
                     Publish App Settings
                   </button>
@@ -5686,7 +5686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h4 className="font-black text-base flex items-center gap-2">
-                      <History className="w-5 h-5 text-indigo-600" />
+                      <History className="w-5 h-5 text-teal-700" />
                       <span>Immutable Admin Audit History ({auditLogs.length})</span>
                     </h4>
                     <p className="text-xs text-slate-500">
@@ -5742,7 +5742,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {log.actorName}
                             </td>
                             <td className="py-2.5 px-3">
-                              <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                              <span className="px-2 py-0.5 rounded-full bg-teal-50 dark:bg-indigo-950 text-teal-700 dark:text-teal-300 text-[10px] font-bold">
                                 {log.section}
                               </span>
                             </td>
@@ -5783,11 +5783,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800">
                     Immutable Security Ledger • Super Admin Console
                   </span>
                   <h3 className="text-base sm:text-lg font-black mt-1 flex items-center gap-2">
-                    <History className="w-5 h-5 text-indigo-600" />
+                    <History className="w-5 h-5 text-teal-700" />
                     <span>Audit Logs & Sensitive Action Trail</span>
                   </h3>
                   <p className="text-xs text-slate-500">
@@ -5819,7 +5819,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       );
                       showAdminNotification('🛡️ Security Audit Checkpoint logged!');
                     }}
-                    className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-black cursor-pointer"
                   >
                     + Log Checkpoint
                   </button>
@@ -5857,12 +5857,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="font-black text-slate-900 dark:text-white">
                               {log.actorName}
                             </div>
-                            <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400">
+                            <div className="text-[10px] font-mono text-teal-700 dark:text-teal-500">
                               ID: ADM-NARENDRA-0{(idx % 3) + 1}
                             </div>
                           </td>
                           <td className="py-2.5 px-3">
-                            <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                            <span className="px-2 py-0.5 rounded-full bg-teal-50 dark:bg-indigo-950 text-teal-700 dark:text-teal-300 text-[10px] font-bold">
                               {log.section}
                             </span>
                           </td>
@@ -6111,7 +6111,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {item.message}
                         </p>
                         <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px] font-bold text-slate-500">
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
+                          <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-indigo-950/60 text-teal-700 dark:text-teal-300">
                             Role: {item.segmentRole}
                           </span>
                           <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">
@@ -6176,7 +6176,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="submit"
                 disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
-                className="px-5 py-2 bg-purple-600 text-white rounded-xl font-bold cursor-not-allowed disabled:opacity-40"
+                className="px-5 py-2 bg-teal-600 text-white rounded-xl font-bold cursor-not-allowed disabled:opacity-40"
               >
                 Save Plan
               </button>
@@ -6235,7 +6235,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-purple-600 text-white rounded-xl font-bold"
+                  className="px-5 py-2 bg-teal-600 text-white rounded-xl font-bold"
                 >
                   Create Category
                 </button>
@@ -6290,7 +6290,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className={`px-4 py-2 rounded-xl text-white text-xs font-black cursor-pointer ${
                   confirmModal.danger
                     ? 'bg-rose-600 hover:bg-rose-700'
-                    : 'bg-[#4338CA] hover:bg-indigo-800'
+                    : 'bg-[#0B8F76] hover:bg-indigo-800'
                 }`}
               >
                 {confirmModal.confirmLabel}

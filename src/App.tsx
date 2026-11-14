@@ -3279,7 +3279,7 @@ function MarketplaceAppContent() {
                     setActiveView('marketplace');
                     setIsLivePageEditorOpen(true);
                   }}
-                  className="rounded-xl bg-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-700"
+                  className="rounded-xl bg-teal-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-teal-700"
                 >
                   Live Page Editor
                 </button>
@@ -3294,7 +3294,7 @@ function MarketplaceAppContent() {
                   <button
                     type="button"
                     aria-pressed="true"
-                    className="rounded-lg bg-indigo-600 px-3 py-1 text-[11px] font-bold text-white"
+                    className="rounded-lg bg-teal-600 px-3 py-1 text-[11px] font-bold text-white"
                   >
                     Admin Console
                   </button>
@@ -3317,7 +3317,7 @@ function MarketplaceAppContent() {
                     }}
                     className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[11px] font-black transition ${
                       adminSection === tab.id
-                        ? 'bg-indigo-600 text-white shadow-sm'
+                        ? 'bg-teal-600 text-white shadow-sm'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                     }`}
                   >
@@ -3417,7 +3417,7 @@ function MarketplaceAppContent() {
                       setUserRole('admin');
                       setActiveView('admin_console');
                     }}
-                    className="px-3.5 py-2 rounded-xl bg-[#4338CA] hover:bg-indigo-800 text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-[#0B8F76] hover:bg-[#087A66] text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
                   >
                     <ShieldCheck className="w-3.5 h-3.5 text-[#FFE500]" />
                     <span>Open Admin Review Queue ({pendingAdminListings.length})</span>
@@ -3428,12 +3428,12 @@ function MarketplaceAppContent() {
 
             {/* AUTHORIZED ADMIN LIVE PAGE EDITOR RIBBON (ONLY SHOWN WHEN ADMIN IS LOGGED IN) */}
             {userRole === 'admin' && (
-              <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-purple-950 text-white rounded-2xl p-3 sm:px-4 border border-indigo-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs">
+              <div className="bg-gradient-to-r from-slate-950 via-[#0B1526] to-[#0B1526] text-white rounded-2xl p-3 sm:px-4 border border-teal-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase shrink-0">
                     OTA Live Editor • {livePageConfig.versionId}
                   </span>
-                  <span className="text-xs font-bold text-indigo-100 truncate">
+                  <span className="text-xs font-bold text-teal-100 truncate">
                     Editing Customer Page: <strong>{currentLivePage.icon} {currentLivePage.pageName}</strong> — Customize text, banners, section order, colors, categories & forms across Web, Android & iOS.
                   </span>
                 </div>

@@ -238,8 +238,8 @@ export function AdminStayInventory() {
     <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="admin-stays-title">
       <StayAdminReviewPanel />
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Atomic Supabase RPC · RLS protected</p><h4 id="admin-stays-title" className="text-lg font-black">Hotels & stays inventory</h4><p className="text-xs text-slate-500">Properties, room types and physical units save in one transaction. Deactivation preserves linked booking records.</p></div>
-        <button type="button" onClick={() => edit()} disabled={!authorized || saving} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create property</button>
+        <div><p className="text-[10px] font-black uppercase tracking-wider text-teal-700">Atomic Supabase RPC · RLS protected</p><h4 id="admin-stays-title" className="text-lg font-black">Hotels & stays inventory</h4><p className="text-xs text-slate-500">Properties, room types and physical units save in one transaction. Deactivation preserves linked booking records.</p></div>
+        <button type="button" onClick={() => edit()} disabled={!authorized || saving} className="min-h-10 rounded-xl bg-teal-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create property</button>
       </div>
       {!authorized && !loading && <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">Management requires a Supabase-authenticated active admin profile. The separate server admin session is not sufficient.</p>}
       {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs text-rose-900">{error}</p>}
@@ -254,7 +254,7 @@ export function AdminStayInventory() {
         </article>)}</div>
         <div className="flex items-center justify-between text-xs"><span>{total} property records</span><div className="flex items-center gap-2"><button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={!page || loading} className="rounded-lg border px-3 py-2 disabled:opacity-40">Previous</button><span>Page {page + 1} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><button type="button" onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * PAGE_SIZE >= total || loading} className="rounded-lg border px-3 py-2 disabled:opacity-40">Next</button></div></div>
       </>}
-      {draft && <form onSubmit={save} className="space-y-4 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3">
+      {draft && <form onSubmit={save} className="space-y-4 rounded-2xl border border-teal-100 bg-teal-50/40 p-3">
         <div className="flex items-center justify-between gap-3"><h5 className="font-bold">{draft.listingId ? 'Edit property & inventory' : 'Create property'}</h5><button type="button" onClick={() => setDraft(null)} className="rounded-lg border px-3 py-1.5 text-xs">Close</button></div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <select aria-label="Stay provider" value={draft.ownerId} onChange={(event) => setInput({ ownerId: event.target.value })} required className="rounded-lg border p-2 text-xs"><option value="">Choose active provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.full_name || provider.email || provider.id}</option>)}</select>
@@ -277,7 +277,7 @@ export function AdminStayInventory() {
           <div className="space-y-2">{room.units.map((unit, unitIndex) => <div key={unit.id ?? `new-unit-${roomIndex}-${unitIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]"><input aria-label={`Unit ${unitIndex + 1} label`} placeholder="Unit / room label" value={unit.label} onChange={(event) => updateUnit(roomIndex, unitIndex, { label: event.target.value })} className="rounded-lg border p-2 text-xs" /><input aria-label={`Unit ${unitIndex + 1} floor`} placeholder="Floor (optional)" value={unit.floor} onChange={(event) => updateUnit(roomIndex, unitIndex, { floor: event.target.value })} className="rounded-lg border p-2 text-xs" /><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={unit.is_active} onChange={(event) => updateUnit(roomIndex, unitIndex, { is_active: event.target.checked })} /> Active</label><button type="button" onClick={() => updateRoom(roomIndex, { units: [...room.units, { label: '', floor: '', is_active: true }] })} className="rounded-lg border px-2 text-xs font-bold">Add unit</button></div>)}</div>
         </fieldset>)}<button type="button" onClick={() => setDraft({ ...draft, roomTypes: [...draft.roomTypes, blankRoom()] })} className="rounded-lg border border-dashed px-3 py-2 text-xs font-bold">Add room type</button></div>
         <p className="text-[11px] text-slate-600">Omitted inventory rows are retained. Use inactive toggles for safe deactivation; physical deletion is intentionally unavailable. Publishing requires at least one active room type and one active unit. Online booking remains disabled until its complete workflow is verified.</p>
-        <div className="flex gap-2"><button disabled={saving} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Saving transaction…' : 'Save inventory'}</button><button type="button" disabled={saving} onClick={() => setDraft(null)} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button></div>
+        <div className="flex gap-2"><button disabled={saving} className="rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Saving transaction…' : 'Save inventory'}</button><button type="button" disabled={saving} onClick={() => setDraft(null)} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button></div>
       </form>}
     </section>
   );
@@ -348,10 +348,10 @@ function StayAdminReviewPanel() {
   };
 
   return (
-    <div className="mb-6 space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+    <div className="mb-6 space-y-3 rounded-2xl border border-teal-100 bg-teal-50/50 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Super Admin review</p>
+          <p className="text-[10px] font-black uppercase tracking-wider text-teal-700">Super Admin review</p>
           <h5 className="text-sm font-black">Approve, reject, request changes, suspend or reactivate</h5>
         </div>
         <button type="button" onClick={() => void load()} className="rounded-lg border px-3 py-1.5 text-xs font-bold">Refresh queue</button>
@@ -362,7 +362,7 @@ function StayAdminReviewPanel() {
         {rows.slice(0, 20).map((row) => {
           const life = stayLifecycleOf(stayPayload(row.payload));
           return (
-            <article key={row.listing_id} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white p-2 ${selected === row.listing_id ? 'border-indigo-400' : 'border-slate-200'}`}>
+            <article key={row.listing_id} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white p-2 ${selected === row.listing_id ? 'border-teal-400' : 'border-slate-200'}`}>
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold">{row.name || row.title}</p>
                 <p className="text-[11px] text-slate-500">{row.city} · {row.owner_name || 'owner'} · {life} · {row.status}{row.payload && stayPayload(row.payload).demo === true ? ' · demo' : ''}</p>

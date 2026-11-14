@@ -374,7 +374,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+              <span className="px-2.5 py-0.5 rounded-md bg-teal-100 dark:bg-indigo-950/80 text-teal-700 dark:text-teal-300 text-[10px] font-black uppercase tracking-wider">
                 Scheduled App Notices & Status Board
               </span>
               <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider">
@@ -393,7 +393,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
             <button
               type="button"
               onClick={handleCreateNewNotice}
-              className="px-4 py-2 rounded-xl text-xs font-black bg-[#4338CA] hover:bg-indigo-800 text-white flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-4 py-2 rounded-xl text-xs font-black bg-[#0B8F76] hover:bg-indigo-800 text-white flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <Plus className="w-4 h-4" /> New Scheduled Notice
             </button>
@@ -491,7 +491,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
                 onClick={() => setSelectedNoticeId(item.id)}
                 className={`cursor-pointer rounded-2xl border p-4 transition-all ${
                   isSelected
-                    ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-[#4338CA] shadow-sm'
+                    ? 'bg-teal-50/70 dark:bg-indigo-950/30 border-[#0B8F76] shadow-sm'
                     : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-slate-300'
                 }`}
               >
@@ -543,7 +543,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
               {/* Editor Top Toolbar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-teal-700 dark:text-teal-500">
                     Editing Notice {selectedNotice.id}
                   </span>
                   <h4 className="text-base font-black text-slate-900 dark:text-white">
@@ -592,7 +592,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
               {/* Quick Templates */}
               <div>
                 <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-indigo-500" /> Quick Status Presets
+                  <Sparkles className="w-3 h-3 text-teal-600" /> Quick Status Presets
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_TEMPLATES.map((preset) => (
@@ -600,7 +600,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
                       key={preset.label}
                       type="button"
                       onClick={() => handleApplyPreset(preset)}
-                      className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800/60 text-xs font-bold transition-all"
+                      className="px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-indigo-950/50 hover:bg-teal-100 text-teal-700 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800/60 text-xs font-bold transition-all"
                     >
                       {preset.label}
                     </button>
@@ -690,7 +690,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <div>
                   <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
-                    <Layout className="w-3 h-3 text-indigo-600" /> App Placement
+                    <Layout className="w-3 h-3 text-teal-700" /> App Placement
                   </label>
                   <select
                     value={selectedNotice.placement}
@@ -711,7 +711,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
 
                 <div>
                   <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
-                    <Users className="w-3 h-3 text-indigo-600" /> Target Audience
+                    <Users className="w-3 h-3 text-teal-700" /> Target Audience
                   </label>
                   <select
                     value={selectedNotice.targetAudience}
@@ -731,7 +731,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
 
                 <div>
                   <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
-                    <Globe className="w-3 h-3 text-indigo-600" /> Target Language
+                    <Globe className="w-3 h-3 text-teal-700" /> Target Language
                   </label>
                   <select
                     value={selectedNotice.language}
@@ -774,7 +774,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
 
                 <div>
                   <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-indigo-600" /> Start Date & Time
+                    <Calendar className="w-3 h-3 text-teal-700" /> Start Date & Time
                   </label>
                   <input
                     type="datetime-local"
@@ -786,7 +786,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
 
                 <div>
                   <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-indigo-600" /> End Date & Time
+                    <Calendar className="w-3 h-3 text-teal-700" /> End Date & Time
                   </label>
                   <input
                     type="datetime-local"
@@ -812,7 +812,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
                     type="checkbox"
                     checked={selectedNotice.dismissible}
                     onChange={(e) => updateSelectedNotice({ dismissible: e.target.checked })}
-                    className="w-4 h-4 rounded accent-[#4338CA]"
+                    className="w-4 h-4 rounded accent-[#0B8F76]"
                   />
                   <span className="text-xs font-black text-slate-700 dark:text-slate-200">
                     {selectedNotice.dismissible ? 'Dismissible (Yes)' : 'Pinned / Non-Dismissible'}
@@ -824,7 +824,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                    <Eye className="w-3.5 h-3.5 text-[#4338CA]" /> Live App Placement Preview ({PLACEMENT_LABELS[selectedNotice.placement]})
+                    <Eye className="w-3.5 h-3.5 text-[#0B8F76]" /> Live App Placement Preview ({PLACEMENT_LABELS[selectedNotice.placement]})
                   </span>
                   <div className="flex items-center gap-1">
                     {(['en', 'te', 'hi'] as const).map((lng) => (
@@ -834,7 +834,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
                         onClick={() => setPreviewLang(lng)}
                         className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
                           previewLang === lng
-                            ? 'bg-[#4338CA] text-white'
+                            ? 'bg-[#0B8F76] text-white'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                         }`}
                       >
@@ -855,7 +855,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
             {/* Change History */}
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm">
               <h5 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-3">
-                <History className="w-3.5 h-3.5 text-[#4338CA]" /> Announcements Change History ({announcementLogs.length})
+                <History className="w-3.5 h-3.5 text-[#0B8F76]" /> Announcements Change History ({announcementLogs.length})
               </h5>
               {announcementLogs.length === 0 ? (
                 <p className="text-xs text-slate-400">
@@ -878,7 +878,7 @@ export const AdminAnnouncementsSection: React.FC<AdminAnnouncementsSectionProps>
                         <span className="text-[10px] font-bold text-slate-400 block">
                           {log.timestamp}
                         </span>
-                        <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400">
+                        <span className="text-[10px] font-black text-teal-700 dark:text-teal-500">
                           {log.actorName}
                         </span>
                       </div>
@@ -919,7 +919,7 @@ const NoticeBannerVisual: React.FC<NoticeBannerVisualProps> = ({
     { wrap: string; badge: string; icon: React.ReactNode }
   > = {
     development: {
-      wrap: 'bg-gradient-to-r from-indigo-900 via-[#4338CA] to-amber-700 text-white border-indigo-500/40',
+      wrap: 'bg-gradient-to-r from-indigo-900 via-[#0B8F76] to-amber-700 text-white border-teal-500/40',
       badge: 'bg-amber-400 text-slate-950',
       icon: <Wrench className="w-4 h-4 text-amber-300 shrink-0" />,
     },
@@ -929,9 +929,9 @@ const NoticeBannerVisual: React.FC<NoticeBannerVisualProps> = ({
       icon: <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />,
     },
     info: {
-      wrap: 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-950 dark:text-indigo-100 border-indigo-200 dark:border-indigo-800',
-      badge: 'bg-[#4338CA] text-white',
-      icon: <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />,
+      wrap: 'bg-teal-50 dark:bg-indigo-950/80 text-indigo-950 dark:text-indigo-100 border-teal-200 dark:border-teal-800',
+      badge: 'bg-[#0B8F76] text-white',
+      icon: <Info className="w-4 h-4 text-teal-700 dark:text-teal-500 shrink-0" />,
     },
     warning: {
       wrap: 'bg-rose-50 dark:bg-rose-950/80 text-rose-950 dark:text-rose-100 border-rose-300 dark:border-rose-800',

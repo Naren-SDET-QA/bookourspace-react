@@ -240,10 +240,10 @@ export function AdminMarketplaceListings() {
   return (
     <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="admin-marketplace-listings-title">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Transactional PostgreSQL with RLS</p><h4 id="admin-marketplace-listings-title" className="text-lg font-black">Marketplace listings</h4><p className="text-xs text-slate-500">PG, services, halls, classes and general listings. Hotels require a linked property and room inventory; this tool does not create that inventory.</p></div>
+        <div><p className="text-[10px] font-black uppercase tracking-wider text-teal-700">Transactional PostgreSQL with RLS</p><h4 id="admin-marketplace-listings-title" className="text-lg font-black">Marketplace listings</h4><p className="text-xs text-slate-500">PG, services, halls, classes and general listings. Hotels require a linked property and room inventory; this tool does not create that inventory.</p></div>
         <div className="flex flex-wrap items-center gap-2">
           <LiveEditEntryButton initialModule="pg_hostels" />
-          <button type="button" onClick={() => { setEditingId(null); setFormOpen(true); setForm({ ...BLANK, ownerId: providers[0]?.id ?? '' }); }} disabled={!authorized || busy} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create draft</button>
+          <button type="button" onClick={() => { setEditingId(null); setFormOpen(true); setForm({ ...BLANK, ownerId: providers[0]?.id ?? '' }); }} disabled={!authorized || busy} className="min-h-10 rounded-xl bg-teal-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create draft</button>
         </div>
       </div>
       {!authorized && !busy && <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900" role="status">Management requires an active, server-verified administrator session with a matching active PostgreSQL profile.</p>}
@@ -262,7 +262,7 @@ export function AdminMarketplaceListings() {
             <p className="text-[11px] text-slate-500">Activation changes the PostgreSQL profile role only after server-side Admin authorization. Listing publication remains a separate review.</p>
           </section>
           <input aria-label="Search listings" value={search} onChange={(event) => { setPage(0); setSearch(event.target.value); }} placeholder="Search title or category" className="min-h-10 w-full rounded-xl border border-slate-200 px-3 text-sm sm:max-w-sm" />
-          {formOpen && <form onSubmit={save} className="grid gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 sm:grid-cols-2 lg:grid-cols-4">
+          {formOpen && <form onSubmit={save} className="grid gap-2 rounded-2xl border border-teal-100 bg-teal-50/50 p-3 sm:grid-cols-2 lg:grid-cols-4">
             <select aria-label="Listing owner" value={form.ownerId} onChange={(event) => setForm({ ...form, ownerId: event.target.value })} required disabled={Boolean(editingId)} className="rounded-lg border p-2 text-xs"><option value="">Choose active provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.fullName || provider.email || provider.id}</option>)}</select>
             <input aria-label="Listing title" placeholder="Title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required className="rounded-lg border p-2 text-xs" />
             <input aria-label="Category ID" placeholder="Category ID (for example hotel-budget)" value={form.categoryId} onChange={(event) => setForm({ ...form, categoryId: event.target.value })} required className="rounded-lg border p-2 text-xs" />
@@ -273,7 +273,7 @@ export function AdminMarketplaceListings() {
             <input aria-label="City" placeholder="City" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} className="rounded-lg border p-2 text-xs" />
             <input aria-label="Area" placeholder="Area" value={form.area} onChange={(event) => setForm({ ...form, area: event.target.value })} className="rounded-lg border p-2 text-xs" />
             <textarea aria-label="Description" placeholder="Description" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-10 rounded-lg border p-2 text-xs sm:col-span-2" />
-            <div className="flex gap-2 sm:col-span-2 lg:col-span-4"><button disabled={busy} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy ? 'Saving…' : editingId ? 'Save changes' : 'Create draft'}</button><button type="button" onClick={() => { setEditingId(null); setForm(BLANK); setFormOpen(false); }} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button></div>
+            <div className="flex gap-2 sm:col-span-2 lg:col-span-4"><button disabled={busy} className="rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy ? 'Saving…' : editingId ? 'Save changes' : 'Create draft'}</button><button type="button" onClick={() => { setEditingId(null); setForm(BLANK); setFormOpen(false); }} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button></div>
             <p className="text-[11px] text-slate-600 sm:col-span-2 lg:col-span-4">New records start as pending drafts. A hotel listing alone does not create stay room inventory or enable online booking.</p>
           </form>}
           {busy && <p role="status" className="text-xs text-slate-500">Loading listings…</p>}

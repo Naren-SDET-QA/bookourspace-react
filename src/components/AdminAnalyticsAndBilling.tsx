@@ -223,7 +223,7 @@ interface AdminAnalyticsPerformanceModuleProps {
   onOpenBillingEngine?: () => void;
 }
 
-const MODULE_COLORS = ['#4338CA', '#10B981', '#9333EA', '#F59E0B', '#0EA5E9', '#E11D48'];
+const MODULE_COLORS = ['#0B8F76', '#10B981', '#9333EA', '#F59E0B', '#0EA5E9', '#E11D48'];
 
 export const AdminAnalyticsPerformanceModule: React.FC<
   AdminAnalyticsPerformanceModuleProps
@@ -325,11 +325,11 @@ export const AdminAnalyticsPerformanceModule: React.FC<
       {/* Header & Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
         <div>
-          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+          <span className="text-[10px] font-black uppercase tracking-wider text-teal-700 dark:text-teal-500">
             Recharts + D3.js • Enterprise Intelligence & Velocity Engine
           </span>
           <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-indigo-600" />
+            <TrendingUp className="w-5 h-5 text-teal-700" />
             <span>Analytics & Performance Across All Marketplace Modules</span>
           </h3>
           <p className="text-xs text-slate-500">
@@ -366,7 +366,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
                 onClick={() => setTimeframe(t.id)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-black cursor-pointer transition ${
                   timeframe === t.id
-                    ? 'bg-[#4338CA] text-white'
+                    ? 'bg-[#0B8F76] text-white'
                     : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -390,11 +390,11 @@ export const AdminAnalyticsPerformanceModule: React.FC<
 
       {/* D3-Computed Executive KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900">
-          <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300">
+        <div className="p-4 rounded-2xl bg-teal-50/70 dark:bg-indigo-950/30 border border-teal-200 dark:border-teal-900">
+          <span className="text-[10px] font-black uppercase text-teal-700 dark:text-teal-300">
             Avg Daily Bookings (Peak {d3Stats.maxDailyBookings}/day)
           </span>
-          <div className="text-2xl font-black text-indigo-900 dark:text-white mt-1">
+          <div className="text-2xl font-black text-teal-900 dark:text-white mt-1">
             {d3Stats.meanBookings} / day
           </div>
           <div className="text-[11px] font-bold text-emerald-600 mt-0.5">
@@ -452,7 +452,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
                 Daily confirmed bookings vs new customer & provider registrations
               </p>
             </div>
-            <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black">
+            <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-black">
               Live Stream
             </span>
           </div>
@@ -462,8 +462,8 @@ export const AdminAnalyticsPerformanceModule: React.FC<
               <AreaChart data={dailySeries}>
                 <defs>
                   <linearGradient id="colorBookings" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4338CA" stopOpacity={0.45} />
-                    <stop offset="95%" stopColor="#4338CA" stopOpacity={0.02} />
+                    <stop offset="5%" stopColor="#0B8F76" stopOpacity={0.45} />
+                    <stop offset="95%" stopColor="#0B8F76" stopOpacity={0.02} />
                   </linearGradient>
                   <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#10B981" stopOpacity={0.45} />
@@ -479,7 +479,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
                   type="monotone"
                   dataKey="bookings"
                   name="Daily Bookings"
-                  stroke="#4338CA"
+                  stroke="#0B8F76"
                   strokeWidth={2.5}
                   fillOpacity={1}
                   fill="url(#colorBookings)"
@@ -573,7 +573,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
               <Bar
                 dataKey="bookings"
                 name="Total Bookings"
-                fill="#4338CA"
+                fill="#0B8F76"
                 radius={[6, 6, 0, 0]}
               />
               <Bar
@@ -946,7 +946,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                   <div className="font-bold text-slate-900 dark:text-white">
                     {rec.providerName}
                   </div>
-                  <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                  <div className="text-[10px] text-teal-700 dark:text-teal-500 font-semibold">
                     ✉️ {rec.providerEmail}
                   </div>
                 </td>
@@ -1004,7 +1004,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                         : rec.paymentStatus === 'overdue'
                         ? 'bg-rose-100 text-rose-800 border-rose-300'
                         : rec.paymentStatus === 'invoice_sent'
-                        ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                        ? 'bg-teal-100 text-teal-800 border-teal-300'
                         : 'bg-amber-100 text-amber-800 border-amber-300'
                     }`}
                   >
@@ -1020,7 +1020,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                       type="button"
                       onClick={() => handleResendInvoiceEmail(rec)}
                       disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
-                      className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] hover:bg-indigo-100 cursor-not-allowed disabled:opacity-40"
+                      className="px-2 py-1 rounded-lg bg-teal-50 dark:bg-indigo-950 text-teal-700 dark:text-teal-300 font-bold text-[10px] hover:bg-teal-100 cursor-not-allowed disabled:opacity-40"
                       title="Send / Resend Automated Invoice Email"
                     >
                       ✉️ Email

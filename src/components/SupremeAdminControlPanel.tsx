@@ -373,7 +373,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-indigo-100 dark:border-slate-800 shadow-lg overflow-hidden mb-6">
+    <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-teal-100 dark:border-slate-800 shadow-lg overflow-hidden mb-6">
       {/* Top Visual Header */}
       <div className="bg-gradient-to-r from-[#0e3c7e] via-[#134e9b] to-[#1e3a8a] px-5 py-4 text-white flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -452,11 +452,11 @@ export const SupremeAdminControlPanel: React.FC = () => {
       {activeSubTab === 'drag_builder' && (
         <div className="p-5 space-y-6">
           {/* 1-Tap Visual Quick-Add Buttons for Non-Technical Users */}
-          <div className="bg-indigo-50/70 dark:bg-slate-800/60 border border-indigo-100 dark:border-slate-700 rounded-2xl p-4">
+          <div className="bg-teal-50/70 dark:bg-slate-800/60 border border-teal-100 dark:border-slate-700 rounded-2xl p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-indigo-600" />
+                  <Sparkles className="w-4 h-4 text-teal-700" />
                   1-Tap Add Any Feature (No Developer Needed — Auto Updates UI & Database)
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300">
@@ -467,7 +467,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleQuickAddFeature('editbox', 'Special Offer Note')}
-                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 text-indigo-900 dark:text-indigo-200 text-xs font-black hover:bg-indigo-600 hover:text-white transition-all cursor-pointer shadow-xs"
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-teal-200 text-teal-900 dark:text-teal-200 text-xs font-black hover:bg-teal-600 hover:text-white transition-all cursor-pointer shadow-xs"
                 >
                   ➕ Add EditBox
                 </button>
@@ -493,7 +493,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
             </div>
 
             {/* Custom Feature Creator Form */}
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 pt-2 border-t border-indigo-100 dark:border-slate-700">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 pt-2 border-t border-teal-100 dark:border-slate-700">
               <input
                 type="text"
                 value={newLabel}
@@ -532,7 +532,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleQuickAddFeature()}
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Add to UI + DB
@@ -564,12 +564,12 @@ export const SupremeAdminControlPanel: React.FC = () => {
                   onDragStart={() => handleFeatureDragStart(idx)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => handleFeatureDrop(idx)}
-                  className="p-3.5 rounded-2xl border-2 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-300 shadow-xs transition-all flex flex-col justify-between gap-2.5 cursor-grab active:cursor-grabbing"
+                  className="p-3.5 rounded-2xl border-2 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-teal-300 shadow-xs transition-all flex flex-col justify-between gap-2.5 cursor-grab active:cursor-grabbing"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-black uppercase">
+                      <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-indigo-950 text-teal-700 dark:text-teal-300 text-[10px] font-black uppercase">
                         {feat.fieldType}
                       </span>
                       <span className="text-xs font-black text-slate-900 dark:text-white truncate">
@@ -595,7 +595,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                           className="w-10 h-10 rounded-lg object-cover border"
                         />
                       )}
-                      <label className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 text-slate-700 dark:text-slate-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer">
+                      <label className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-teal-50 text-slate-700 dark:text-slate-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer">
                         <Upload className="w-3 h-3" />
                         Upload Any Image Format
                         <input
@@ -636,7 +636,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleAddUndefinedTemplate}
-                  className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-black cursor-pointer hover:bg-indigo-700"
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-black cursor-pointer hover:bg-teal-700"
                 >
                   + Add Undefined Slot
                 </button>
@@ -750,7 +750,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {managedUsers.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50">
-                    <td className="py-3 px-3 font-mono font-black text-indigo-700 dark:text-indigo-400">
+                    <td className="py-3 px-3 font-mono font-black text-teal-700 dark:text-teal-500">
                       {u.invoiceNo}
                       <div className="text-[10px] text-slate-400 font-sans">
                         {u.paymentDate}
@@ -799,7 +799,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                           onClick={() =>
                             printGSTInvoiceReceipt(buildPayloadFromUser(u))
                           }
-                          className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[11px] inline-flex items-center gap-1 cursor-pointer shadow-xs"
+                          className="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-[11px] inline-flex items-center gap-1 cursor-pointer shadow-xs"
                         >
                           <Printer className="w-3.5 h-3.5" />
                           Print Receipt
@@ -880,7 +880,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
           </div>
 
           {connResponseLog && (
-            <div className="p-3 rounded-xl bg-indigo-950 text-emerald-300 font-mono text-xs border border-indigo-800">
+            <div className="p-3 rounded-xl bg-indigo-950 text-emerald-300 font-mono text-xs border border-teal-800">
               {connResponseLog}
             </div>
           )}
@@ -893,7 +893,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-black">
+                    <span className="px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 text-[10px] font-black">
                       {c.protocol}
                     </span>
                     <span className="text-[10px] font-black text-emerald-600 flex items-center gap-1">
@@ -914,7 +914,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleTestConnector(c)}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-teal-600 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" />
                     Ping / Sync
@@ -948,28 +948,28 @@ export const SupremeAdminControlPanel: React.FC = () => {
                         type="text"
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
-                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 text-xs font-bold"
+                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 text-xs font-bold"
                         placeholder="Title"
                       />
                       <input
                         type="number"
                         value={editPrice}
                         onChange={(e) => setEditPrice(e.target.value)}
-                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 text-xs font-bold"
+                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 text-xs font-bold"
                         placeholder="Price"
                       />
                       <input
                         type="text"
                         value={editProviderName}
                         onChange={(e) => setEditProviderName(e.target.value)}
-                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 text-xs font-bold"
+                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 text-xs font-bold"
                         placeholder="Provider Name"
                       />
                       <input
                         type="text"
                         value={editPhone}
                         onChange={(e) => setEditPhone(e.target.value)}
-                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 text-xs font-bold"
+                        className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 text-xs font-bold"
                         placeholder="Phone"
                       />
                     </div>
@@ -1019,7 +1019,7 @@ export const SupremeAdminControlPanel: React.FC = () => {
                           setEditProviderName(item.providerName);
                           setEditPhone(item.providerPhone);
                         }}
-                        className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-800 dark:text-slate-200 text-xs font-bold cursor-pointer"
+                        className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-teal-400 text-slate-800 dark:text-slate-200 text-xs font-bold cursor-pointer"
                       >
                         ✏️ Edit Anything
                       </button>

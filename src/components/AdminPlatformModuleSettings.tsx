@@ -84,10 +84,10 @@ export function AdminPlatformModuleSettings() {
   };
 
   return (
-    <section className="rounded-3xl border border-indigo-200 bg-white p-5 shadow-sm dark:border-indigo-900 dark:bg-slate-900" aria-labelledby="admin-platform-modules-title">
+    <section className="rounded-3xl border border-teal-200 bg-white p-5 shadow-sm dark:border-teal-900 dark:bg-slate-900" aria-labelledby="admin-platform-modules-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-indigo-700 dark:text-indigo-300">Database-backed controls</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300">Database-backed controls</p>
           <h3 id="admin-platform-modules-title" className="mt-1 text-lg font-black">Platform availability</h3>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600 dark:text-slate-300">Visibility and owner-contact settings use the existing Supabase module table and RLS. Online booking remains locked until its complete server-side workflow is ready.</p>
         </div>
@@ -184,7 +184,7 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
     <div className="mt-6 space-y-4 border-t border-slate-200 pt-5 dark:border-slate-800">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-indigo-700 dark:text-indigo-300">Diagnostics</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300">Diagnostics</p>
           <h4 className="text-sm font-black">Module health</h4>
         </div>
         <p className="text-[11px] font-semibold text-slate-500" role="status">
@@ -214,7 +214,7 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
       </ul>
 
       <div>
-        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-indigo-700 dark:text-indigo-300">Presentation</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300">Presentation</p>
         <h4 className="text-sm font-black">Section labels &amp; headlines</h4>
         <p className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
           Stored in the existing live-page configuration with draft, publish and version history. Invalid values fall back to
@@ -260,7 +260,7 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
         <button type="button" onClick={() => void persist('draft')} disabled={busy} className="min-h-10 rounded-xl border border-slate-300 px-4 text-xs font-bold disabled:opacity-50 dark:border-slate-700">
           Save draft
         </button>
-        <button type="button" onClick={() => void persist('publish')} disabled={busy} className="min-h-10 rounded-xl bg-indigo-700 px-4 text-xs font-bold text-white disabled:opacity-50">
+        <button type="button" onClick={() => void persist('publish')} disabled={busy} className="min-h-10 rounded-xl bg-teal-700 px-4 text-xs font-bold text-white disabled:opacity-50">
           Publish to customers
         </button>
         <button

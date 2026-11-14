@@ -256,7 +256,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
   return (
     <div className="space-y-6">
       {/* SUPER ADMIN IDENTITY & AUTH BANNER */}
-      <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-purple-950 text-white rounded-3xl p-6 sm:p-7 shadow-lg border border-indigo-500/30">
+      <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-purple-950 text-white rounded-3xl p-6 sm:p-7 shadow-lg border border-teal-500/30">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="space-y-1.5">
             <div className="flex items-center gap-2.5 flex-wrap">
@@ -275,7 +275,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
             <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
               BookOurSpace Authoritative Management Suite
             </h2>
-            <p className="text-xs text-indigo-200/90 max-w-3xl leading-relaxed">
+            <p className="text-xs text-teal-200/90 max-w-3xl leading-relaxed">
               Full governance across all 6 modules: users, providers, listings, bookings, payments, manual approvals, fee waivers, refunds, database records, schema migrations, configuration, and audit logs with mandatory reason recording.
             </p>
           </div>
@@ -285,7 +285,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
               type="button"
               onClick={fetchOverview}
               disabled={loading}
-              className="px-4 py-2.5 rounded-2xl bg-indigo-600/60 hover:bg-indigo-600 text-white border border-indigo-400/30 text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+              className="px-4 py-2.5 rounded-2xl bg-teal-600/60 hover:bg-teal-600 text-white border border-teal-400/30 text-xs font-bold flex items-center gap-2 transition cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh State
@@ -304,13 +304,13 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
 
         {/* INTEGRITY STATUS CHIP */}
         {auditIntegrity && (
-          <div className="mt-4 pt-4 border-t border-indigo-500/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="mt-4 pt-4 border-t border-teal-500/20 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 text-indigo-100">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-bold">Ledger Integrity:</span>
               <span>{auditIntegrity.message}</span>
             </div>
-            <div className="text-[11px] text-indigo-300 font-mono">
+            <div className="text-[11px] text-teal-300 font-mono">
               Root: {String(auditIntegrity.genesisRootHash || 'GENESIS').slice(0, 16)}... | Latest: {String(auditIntegrity.latestChainHash || 'ACTIVE').slice(0, 16)}...
             </div>
           </div>
@@ -338,7 +338,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
               onClick={() => setActiveTab(tab.id as SuperAdminTab)}
               className={`px-4 py-2.5 rounded-2xl text-xs font-black whitespace-nowrap flex items-center gap-2 transition cursor-pointer ${
                 isActive
-                  ? 'bg-indigo-600 text-white shadow-sm'
+                  ? 'bg-teal-600 text-white shadow-sm'
                   : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
               }`}
             >
@@ -354,7 +354,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
         <div className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-1">
-              <span className="text-[10px] font-black uppercase text-indigo-600">Users & Accounts</span>
+              <span className="text-[10px] font-black uppercase text-teal-700">Users & Accounts</span>
               <div className="text-2xl font-black text-slate-900 dark:text-white">{stats.users.total} Total</div>
               <div className="text-xs text-slate-500">{stats.users.active} Active • {stats.users.providers} Providers • {stats.users.admins} Admins</div>
             </div>
@@ -377,7 +377,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
 
           <div className="bg-slate-50 dark:bg-slate-900/60 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
             <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-indigo-600" />
+              <ShieldCheck className="w-4 h-4 text-teal-700" />
               Super Admin Quick Action Center
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400">
@@ -394,7 +394,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                     { userId: 'USR-1001', action: 'promote', role: 'admin', isSuperAdmin: true }
                   )
                 }
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-indigo-500 transition cursor-pointer"
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-teal-500 transition cursor-pointer"
               >
                 <div className="font-bold text-xs text-slate-900 dark:text-white">Promote Super Admin</div>
                 <div className="text-[11px] text-slate-500">Elevate role with server signature</div>
@@ -410,7 +410,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                     { scope: 'stale_locks', mode: 'purge' }
                   )
                 }
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-indigo-500 transition cursor-pointer"
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-teal-500 transition cursor-pointer"
               >
                 <div className="font-bold text-xs text-slate-900 dark:text-white">Flush Expired Concurrency Locks</div>
                 <div className="text-[11px] text-slate-500">Zero orphaned reservations</div>
@@ -426,7 +426,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                     { endpoint: 'backup' }
                   )
                 }
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-indigo-500 transition cursor-pointer"
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-teal-500 transition cursor-pointer"
               >
                 <div className="font-bold text-xs text-slate-900 dark:text-white">Atomic Store Snapshot</div>
                 <div className="text-[11px] text-slate-500">Create backup before major updates</div>
@@ -473,7 +473,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-slate-900 dark:text-white">{u.name}</span>
-                      <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 font-extrabold uppercase text-[10px]">
+                      <span className="px-2 py-0.5 rounded-full bg-teal-100 dark:bg-indigo-950 text-teal-800 dark:text-teal-300 font-extrabold uppercase text-[10px]">
                         {u.role}
                       </span>
                       {u.verified && (
@@ -526,7 +526,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                           { userId: u.id, action: 'promote', role: 'admin', isSuperAdmin: false }
                         )
                       }
-                      className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-600 text-white font-bold text-[11px] cursor-pointer"
                     >
                       Make Admin
                     </button>
@@ -595,7 +595,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                           { listingId: l.id, action: 'edit_pricing', patchData: { price: l.price * 1.1 } }
                         )
                       }
-                      className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-600 text-white font-bold text-[11px] cursor-pointer"
                     >
                       Update Pricing
                     </button>
@@ -707,7 +707,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                           { bookingId: b.id, action: 'reschedule', rescheduledDate: '2026-11-25' }
                         )
                       }
-                      className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-600 text-white font-bold text-[11px] cursor-pointer"
                     >
                       Reschedule
                     </button>
@@ -721,7 +721,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                           { bookingId: b.id, action: 'override_lock' }
                         )
                       }
-                      className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] cursor-pointer"
                     >
                       Release Locks
                     </button>
@@ -783,7 +783,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
           {/* DIRECT REFUND & CANCELLATION FEE WAIVERS */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 text-xs">
             <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-indigo-600" />
+              <DollarSign className="w-4 h-4 text-teal-700" />
               Direct Refund & 100% Fee Waiver
             </h4>
             <p className="text-slate-500">Issue an authoritative direct refund or grant a cancellation fee waiver override with mandatory justification.</p>
@@ -817,7 +817,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                     { action: 'direct_refund', bookingId: directRefundBookingId, amount: directRefundAmount }
                   )
                 }
-                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black cursor-pointer transition shadow-xs"
+                className="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-600 text-white font-black cursor-pointer transition shadow-xs"
               >
                 Issue Direct Refund with Reason
               </button>
@@ -835,8 +835,8 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs space-y-1">
-              <span className="font-black text-indigo-900 dark:text-indigo-200 uppercase text-[10px]">Tables & RLS</span>
+            <div className="p-4 rounded-2xl bg-teal-50/60 dark:bg-indigo-950/40 border border-teal-200 dark:border-teal-800 text-xs space-y-1">
+              <span className="font-black text-teal-900 dark:text-teal-200 uppercase text-[10px]">Tables & RLS</span>
               <div className="text-xl font-black text-indigo-950 dark:text-indigo-100">19 Tables / 57 Policies</div>
               <div className="text-slate-500 text-[11px]">All tables have Row Level Security enabled.</div>
             </div>
@@ -863,7 +863,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                   { endpoint: 'dry_run' }
                 )
               }
-              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-xs"
+              className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-600 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-xs"
             >
               <Database className="w-3.5 h-3.5" />
               Run Migration Dry-Run
@@ -969,7 +969,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                 retentionMode === 'purge'
               )
             }
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs cursor-pointer shadow-xs transition"
+            className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-600 text-white font-black text-xs cursor-pointer shadow-xs transition"
           >
             Execute Retention Policy with Reason
           </button>
@@ -1017,7 +1017,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                <ShieldCheck className="w-5 h-5 text-teal-700" />
                 <h3 className="text-base font-black text-slate-900 dark:text-white">{actionModal.title}</h3>
               </div>
               <button
@@ -1055,7 +1055,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                 className={`w-full p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border text-xs text-slate-900 dark:text-white focus:outline-none ${
                   reasonError
                     ? 'border-rose-500 focus:ring-1 focus:ring-rose-500'
-                    : 'border-slate-200 dark:border-slate-700 focus:border-indigo-500'
+                    : 'border-slate-200 dark:border-slate-700 focus:border-teal-500'
                 }`}
               />
               {reasonError && (
@@ -1079,7 +1079,7 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
                 onClick={handleExecuteControlledAction}
                 disabled={loading}
                 className={`px-5 py-2.5 rounded-xl text-xs font-black text-white cursor-pointer transition shadow-xs flex items-center gap-2 ${
-                  actionModal.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'
+                  actionModal.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-teal-600 hover:bg-teal-600'
                 }`}
               >
                 {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
