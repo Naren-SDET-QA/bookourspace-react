@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 116,
+  "migrationCount": 117,
   "migrations": [
     {
       "order": 2,
@@ -942,12 +942,20 @@
       "file": "supabase/migrations/20261114100000_permission_rls_hardening.sql",
       "bytes": 10062,
       "sha256": "00be0019c9312f1376fd030096c547fdd7700f4adee90f0e1b35867211c0d3ee"
+    },
+    {
+      "order": 118,
+      "version": "20261114110000",
+      "name": "strict_permission_backfill",
+      "file": "supabase/migrations/20261114110000_strict_permission_backfill.sql",
+      "bytes": 5393,
+      "sha256": "02c69a7b8f8ed709eec5414f358f6f494acaac4549b07ed1f0a00b7714afeaa3"
     }
   ],
   "review": {
     "at": "2026-11-14T05:17:52.384Z",
     "note": "Phases 2 and 6 permission work: additive section/action grant columns and RPCs, plus privilege-only hardening that makes both grant tables server-mediated and rejects malformed JSON. Not applied to any hosted database.",
-    "migrationCount": 116,
+    "migrationCount": 117,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }

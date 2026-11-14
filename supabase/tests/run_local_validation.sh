@@ -513,6 +513,18 @@ PERMISSION_SQL_FAIL=$(grep -c "NOTICE:  FAIL" "$OUT/permission-grants.out" || tr
 PERMISSION_SQL_ERRORS=$(grep -Ec '^psql:.*(ERROR|FATAL):' "$OUT/permission-grants.out" || true)
 echo "    PASS=$PERMISSION_SQL_PASS FAIL=$PERMISSION_SQL_FAIL SQL_ERRORS=$PERMISSION_SQL_ERRORS"
 
+echo "=== 5c6. Deny-by-default permission backfill SQL suite ==="
+pq -d "$DB" -f "$REPO_ROOT/supabase/tests/permission_backfill_test.sql" > "$OUT/permission-backfill.out" 2>&1 \
+  || {
+    grep -E "ERROR|FAIL|DETAIL" "$OUT/permission-backfill.out" | head -10 >&2
+    fail "permission backfill SQL tests (see $OUT/permission-backfill.out)"
+  }
+sed -E 's/^psql:[^ ]* NOTICE:  //;s/^NOTICE:  //' "$OUT/permission-backfill.out" | grep -E "^(PASS|FAIL)" | sed 's/^/    /'
+BACKFILL_SQL_PASS=$(grep -c "NOTICE:  PASS" "$OUT/permission-backfill.out" || true)
+BACKFILL_SQL_FAIL=$(grep -c "NOTICE:  FAIL" "$OUT/permission-backfill.out" || true)
+BACKFILL_SQL_ERRORS=$(grep -Ec '^psql:.*(ERROR|FATAL):' "$OUT/permission-backfill.out" || true)
+echo "    PASS=$BACKFILL_SQL_PASS FAIL=$BACKFILL_SQL_FAIL SQL_ERRORS=$BACKFILL_SQL_ERRORS"
+
 echo "=== 5c4. Classes enrollment migration reapply idempotency ==="
 pq -d "$DB" -q -v ON_ERROR_STOP=1 \
   -f "$REPO_ROOT/supabase/migrations/20261103200000_class_batches_and_enrollment.sql" \
@@ -738,6 +750,9 @@ echo "=== 7. verdict ==="
 [ "$AUDIT_REPAIR_FAIL" = "0" ] || fail "$AUDIT_REPAIR_FAIL audit blocker repair assertion(s) failed"
 [ "$PERMISSION_SQL_FAIL" = "0" ] || fail "$PERMISSION_SQL_FAIL permission grant assertion(s) failed"
 [ "$PERMISSION_SQL_ERRORS" = "0" ] || fail "$PERMISSION_SQL_ERRORS permission grant SQL error(s) occurred"
+[ "$BACKFILL_SQL_FAIL" = "0" ] || fail "$BACKFILL_SQL_FAIL permission backfill assertion(s) failed"
+[ "$BACKFILL_SQL_ERRORS" = "0" ] || fail "$BACKFILL_SQL_ERRORS permission backfill SQL error(s) occurred"
+[ "$BACKFILL_SQL_PASS" -ge 10 ] || fail "permission backfill suite ran only $BACKFILL_SQL_PASS passing assertion(s)"
 [ "$PERMISSION_SQL_PASS" -ge 20 ] || fail "permission grant suite ran only $PERMISSION_SQL_PASS passing assertion(s)"
 [ "$CLASS_SQL_FAIL" = "0" ] || fail "$CLASS_SQL_FAIL class enrollment assertion(s) failed"
 [ "$CLASS_SQL_ERRORS" = "0" ] || fail "$CLASS_SQL_ERRORS class enrollment SQL error(s) occurred"
