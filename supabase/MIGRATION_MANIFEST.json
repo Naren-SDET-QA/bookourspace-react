@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 115,
+  "migrationCount": 116,
   "migrations": [
     {
       "order": 2,
@@ -934,12 +934,20 @@
       "file": "supabase/migrations/20261114090000_module_section_action_grants.sql",
       "bytes": 9852,
       "sha256": "b5c789b4a2117754e138550b5de3eff310dc4191018f1cc104b61f939996e604"
+    },
+    {
+      "order": 117,
+      "version": "20261114100000",
+      "name": "permission_rls_hardening",
+      "file": "supabase/migrations/20261114100000_permission_rls_hardening.sql",
+      "bytes": 10062,
+      "sha256": "00be0019c9312f1376fd030096c547fdd7700f4adee90f0e1b35867211c0d3ee"
     }
   ],
   "review": {
     "at": "2026-11-14T05:17:52.384Z",
-    "note": "Phase 2 permission grants: additive customer section/action columns, member action grants, widened audit trigger and two read RPCs. Not applied to any hosted database.",
-    "migrationCount": 115,
+    "note": "Phases 2 and 6 permission work: additive section/action grant columns and RPCs, plus privilege-only hardening that makes both grant tables server-mediated and rejects malformed JSON. Not applied to any hosted database.",
+    "migrationCount": 116,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }

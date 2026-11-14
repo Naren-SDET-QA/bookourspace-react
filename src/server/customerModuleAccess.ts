@@ -489,9 +489,10 @@ export class CustomerModuleAccessRepository {
     const sections = row.allowed_sections || {};
     const actions = row.allowed_actions || {};
     await this.pool.query(
+      // allowed_modules is a text[] column, not jsonb.
       `insert into public.business_member_access
          (business_id, user_id, allowed_modules, allowed_sections${memberActions ? ', allowed_actions' : ''}, updated_by)
-       values ($1, $2, $3::jsonb, $4::jsonb${memberActions ? ', $5::jsonb, $6' : ', $5'})
+       values ($1, $2, $3, $4::jsonb${memberActions ? ', $5::jsonb, $6' : ', $5'})
        on conflict (business_id, user_id) do update
           set allowed_modules = excluded.allowed_modules,
               allowed_sections = excluded.allowed_sections,

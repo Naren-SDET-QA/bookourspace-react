@@ -94,9 +94,15 @@ begin
   if exists (
     select 1 from pg_policies
      where schemaname = 'public' and tablename = 'customer_module_access'
-       and policyname not in ('Customers read their own module access', 'Admins manage customer module access')
+       and policyname not in ('Customers read their own module access', 'Admins read every customer module access')
   ) then
     raise exception 'FAIL unexpected customer_module_access policy';
+  end if;
+  -- Grants are server-mediated: the browser role may read, never write.
+  if has_table_privilege('authenticated', 'public.customer_module_access', 'INSERT')
+     or has_table_privilege('authenticated', 'public.customer_module_access', 'UPDATE')
+     or has_table_privilege('authenticated', 'public.customer_module_access', 'DELETE') then
+    raise exception 'FAIL authenticated still holds write privileges on customer_module_access';
   end if;
   raise notice 'PASS customer module access grants let RLS enforce reads';
 

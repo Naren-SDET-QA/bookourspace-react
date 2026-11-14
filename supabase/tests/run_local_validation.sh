@@ -501,6 +501,18 @@ CLASS_SQL_FAIL=$(grep -c "NOTICE:  FAIL" "$OUT/class-enrollment.out" || true)
 CLASS_SQL_ERRORS=$(grep -Ec '^psql:.*(ERROR|FATAL):' "$OUT/class-enrollment.out" || true)
 echo "    PASS=$CLASS_SQL_PASS FAIL=$CLASS_SQL_FAIL SQL_ERRORS=$CLASS_SQL_ERRORS"
 
+echo "=== 5c5. Customer and member permission grant SQL suite ==="
+pq -d "$DB" -f "$REPO_ROOT/supabase/tests/permission_grants_test.sql" > "$OUT/permission-grants.out" 2>&1 \
+  || {
+    grep -E "ERROR|FAIL|DETAIL" "$OUT/permission-grants.out" | head -10 >&2
+    fail "permission grant SQL tests (see $OUT/permission-grants.out)"
+  }
+sed -E 's/^psql:[^ ]* NOTICE:  //;s/^NOTICE:  //' "$OUT/permission-grants.out" | grep -E "^(PASS|FAIL)" | sed 's/^/    /'
+PERMISSION_SQL_PASS=$(grep -c "NOTICE:  PASS" "$OUT/permission-grants.out" || true)
+PERMISSION_SQL_FAIL=$(grep -c "NOTICE:  FAIL" "$OUT/permission-grants.out" || true)
+PERMISSION_SQL_ERRORS=$(grep -Ec '^psql:.*(ERROR|FATAL):' "$OUT/permission-grants.out" || true)
+echo "    PASS=$PERMISSION_SQL_PASS FAIL=$PERMISSION_SQL_FAIL SQL_ERRORS=$PERMISSION_SQL_ERRORS"
+
 echo "=== 5c4. Classes enrollment migration reapply idempotency ==="
 pq -d "$DB" -q -v ON_ERROR_STOP=1 \
   -f "$REPO_ROOT/supabase/migrations/20261103200000_class_batches_and_enrollment.sql" \
@@ -724,6 +736,9 @@ echo "=== 7. verdict ==="
 [ "$MEDIA_FINALIZATION_FAIL" = "0" ] || fail "$MEDIA_FINALIZATION_FAIL media finalization assertion(s) failed"
 [ "$AUDIT_REPAIR_PASS" -ge 5 ] || fail "audit blocker repair suite ran only $AUDIT_REPAIR_PASS passing assertion(s)"
 [ "$AUDIT_REPAIR_FAIL" = "0" ] || fail "$AUDIT_REPAIR_FAIL audit blocker repair assertion(s) failed"
+[ "$PERMISSION_SQL_FAIL" = "0" ] || fail "$PERMISSION_SQL_FAIL permission grant assertion(s) failed"
+[ "$PERMISSION_SQL_ERRORS" = "0" ] || fail "$PERMISSION_SQL_ERRORS permission grant SQL error(s) occurred"
+[ "$PERMISSION_SQL_PASS" -ge 20 ] || fail "permission grant suite ran only $PERMISSION_SQL_PASS passing assertion(s)"
 [ "$CLASS_SQL_FAIL" = "0" ] || fail "$CLASS_SQL_FAIL class enrollment assertion(s) failed"
 [ "$CLASS_SQL_ERRORS" = "0" ] || fail "$CLASS_SQL_ERRORS class enrollment SQL error(s) occurred"
 [ "$CLASS_SQL_PASS" -ge 12 ] || fail "class enrollment SQL suite ran only $CLASS_SQL_PASS passing assertion(s)"
