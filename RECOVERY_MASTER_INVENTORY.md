@@ -97,6 +97,46 @@ Recovery: `git bundle verify <file>` then `git fetch <file> 'refs/*:refs/recover
 7. **Verify**: `tsc --noEmit`, `vite build`, `npm test`, module E2E, and per-feature entry points. No real WhatsApp/email sends — test recipients only.
 8. **Push** only after all of the above, and only on explicit approval.
 
-## 7. Explicitly unverified
+## 7. Phase 4 execution log (integration branch)
 
-Every "Implemented" status above is a **code-level** finding. No typecheck, build, unit, integration or E2E run has been performed yet, and no runtime entry point has been exercised in a browser.
+Branch: `integration/recover-20261115` (local only — **not pushed**)
+
+| Step | Commit | Result |
+|---|---|---|
+| Freeze 62 uncommitted files | `76945cf` | 63 files, +3006/−1191 (excludes `e2e-artifacts/`) |
+| Reattach rewritten `main` | `5b136bc` (`refs/recovery/main-reattached`) | `-s ours` graft onto fork point `48b2040`; tree identical to `origin/main` |
+| Merge `main` into `dev` | `2a774b6` | 29 conflicts resolved, 36 files auto-merged |
+| Movies migration correction | `a56e82b` | dev's grandfathering variant restored; manifest regenerated |
+
+**Why the graft was required:** the author rewrite gave `main` commits with no shared ancestry, so git refused the merge as unrelated histories. The naive base (`3230675`, old main tip) would have applied **247 deletions**, including every GPS tracking component, because `main` forked *before* those 282 files existed. `48b2040` is content-identical to main's real fork point and is already an ancestor of `dev`, so the merge diffed only main's true 121-file business-ownership delta.
+
+**Conflict resolution rules applied:**
+- `dev` won every UI/branding conflict — they were almost entirely the teal token migration (`brand-teal-deep`) versus main's older indigo literals (`#527a40`, `#2554db`).
+- `dev` won `businessAccess.ts`, `businessClient.ts`, `businessApi.ts`, `serviceDispatchApi.ts` — verified as supersets: identical endpoint lists, plus `allowed_actions` persistence and the action-grant permission system that main predates.
+- `main` won the newer product rules it owns (`sectionStyleSettings` style retirement, business rollback runbook, business tests).
+- Generated files (`MIGRATION_MANIFEST.json`, `migrations.sha256`) were regenerated, never hand-merged: **119 migrations, unique versions, checksums verified**.
+
+**Verification actually run:**
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | **0 errors** |
+| `npm run build` (vite) | **exit 0**, 1.02 s |
+| `npm test` full suite | 640 tests, 572 pass, 37 fail (run *before* the migration fix) |
+| Focused re-run after fix | `movies-schema-compat` now passes; 3 failures remain |
+| Conflict markers in tree | 0 |
+| Migration manifest verify | PASS |
+
+**The 3 remaining failures are pre-existing, not merge damage** — each assertion was already unsatisfied on the frozen `dev` tree (`76945cf`) before the merge:
+
+| Failing assertion | Pre-merge evidence |
+|---|---|
+| `provider APIs require server-verified business context` | `76945cf:server.ts` has no `BUSINESS_CONTEXT_REQUIRED` (dev returns `BUSINESS_ACCESS_DENIED`); dev's own test already expected it |
+| `Provider Portal exposes a business switcher` | `76945cf:ProviderDashboard.tsx` has no `Select business`; main's does |
+| `admin style panel locks PG and Classes` | `76945cf:AdminDashboard.tsx` has no `PG and Classes are locked to Style 3` |
+
+These are the concrete remaining integration gaps: main's business-context error code and business switcher were never ported into dev's newer provider shell.
+
+## 8. Explicitly unverified
+
+Every "Implemented" status above is a **code-level** finding unless listed in the Phase 4 log. No E2E/Playwright run, no live WhatsApp or Resend send, no GPS entry point driven in a browser, and no authenticated provider/customer/admin journey has been exercised. Nothing has been pushed, merged to `main`, or deployed.
