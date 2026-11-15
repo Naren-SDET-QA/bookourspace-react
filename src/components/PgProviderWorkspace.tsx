@@ -79,7 +79,7 @@ export function BusinessContextBar({ memberships, activeBusinessId, onSelect }: 
   const active = memberships.find((row) => row.id === activeBusinessId) || null;
   return <div className="flex min-w-0 flex-1 items-center gap-2 sm:max-w-[320px] sm:flex-none" data-testid="provider-business-bar">
     <Building2 className="h-4 w-4 shrink-0 text-[#0B8F76]" aria-hidden="true" />
-    <label htmlFor="provider-business-select" className="sr-only">Business</label>
+    <label htmlFor="provider-business-select" className="sr-only">Select business</label>
     {needsBusinessChoice(memberships) ? <select id="provider-business-select" data-testid="provider-business-select" value={activeBusinessId} onChange={(event) => onSelect(event.target.value)} className="h-10 min-w-0 flex-1 appearance-none rounded-xl border border-slate-300 bg-white px-2 text-xs font-bold text-slate-800 outline-none focus:border-[#12C2A0] dark:border-slate-700 dark:bg-slate-900 dark:text-white">{memberships.map((business) => <option key={business.id} value={business.id}>{businessLabel(business)}{isBusinessOperational(business) ? '' : ` · ${businessApprovalLabel(business)}`}</option>)}</select> : <span data-testid="provider-business-name" className="min-w-0 truncate text-xs font-black text-slate-800 dark:text-slate-100">{businessLabel(active)}</span>}
     {active && <span data-testid="provider-business-approval" className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${isBusinessOperational(active) ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'}`}>{businessApprovalLabel(active)}</span>}
   </div>;

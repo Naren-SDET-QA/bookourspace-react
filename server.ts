@@ -2981,7 +2981,11 @@ Task:
         requestedBusinessId,
         candidates.rows.map((row: Record<string, unknown>) => String(row.id)),
       );
-      if (!selection.ok) return void res.status(selection.status).json({ ok: false, error: selection.error });
+      if (!selection.ok) {
+        // A multi-business owner must choose a context; a single-business owner
+        // was derived above. A missing context is a requirement, not a denial.
+        return void res.status(selection.status).json({ ok: false, error: 'BUSINESS_CONTEXT_REQUIRED' });
+      }
       businessId = selection.businessId;
     }
     req.headers['x-business-id'] = businessId;

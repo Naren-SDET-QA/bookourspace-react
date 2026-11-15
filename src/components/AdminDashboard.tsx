@@ -3388,28 +3388,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div>
                     <h4 className="text-[13px] font-black text-slate-900 dark:text-white">BookOurSpace section display styles</h4>
                     <p className="text-[11px] text-slate-500">Choose which design each section opens with. Applies to every visitor.</p>
-                    <p className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">Customers never choose a style — these settings decide what everyone sees. Classes are locked to Style 3 and Halls to Style 2.</p>
+                    <p className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">PG and Classes are locked to Style 3. Halls is locked to Style 2. The other styles are disabled.</p>
                   </div>
                   <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">Layout</span>
                 </div>
                 <div className="mt-3 space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
-                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace PG</span>
-                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
-                      {[['style1', 'Style 1'], ['style2', 'Style 2'], ['style3', 'Style 3']].map(([val, label]) => (
-                        <button
-                          key={val}
-                          type="button"
-                          aria-pressed={sectionStyles.pg === val}
-                          onClick={() => {
-                            const next = { ...sectionStyles, pg: val as SectionStyles['pg'] };
-                            void commitSectionStyles(next);
-                          }}
-                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.pg === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                    <span className="flex items-center gap-1.5 text-[12px] font-bold text-slate-800 dark:text-slate-100"><Lock className="h-3.5 w-3.5 text-amber-600" /> BookOurSpace PG</span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md bg-[#7c3aed] px-2.5 py-1 text-[11px] font-bold text-white">Style 3</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">Style 1 &amp; 2 disabled</span>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">

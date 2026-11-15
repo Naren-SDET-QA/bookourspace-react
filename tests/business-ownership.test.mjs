@@ -30,9 +30,14 @@ test('protected audit history has no client update/delete grants', () => {
 
 test('Provider Portal exposes a business switcher and business-scoped owner context', () => {
   const provider = read('src/components/ProviderDashboard.tsx');
+  // The switcher control itself lives in the shared business context bar that
+  // this dashboard renders, so the contract is asserted across both sources.
+  const providerSwitcher = provider + read('src/components/PgProviderWorkspace.tsx');
   const owner = read('src/components/pg/PgOwnerDashboard.tsx');
   assert.match(provider, /fetchBusinesses\(\)/);
-  assert.match(provider, /Select business/);
+  assert.match(providerSwitcher, /Select business/);
+  assert.match(providerSwitcher, /id="provider-business-select"/);
+  assert.match(providerSwitcher, /htmlFor="provider-business-select"/);
   assert.match(provider, /businessScopedListings|businessListings/);
   assert.match(provider, /approval_status !== 'approved'/);
   assert.match(owner, /businessName/);
