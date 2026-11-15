@@ -64,9 +64,12 @@ import {
 } from './ModularSystemEngine';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { UserWalletAndLedgerSection } from './UserWalletAndQuickModals';
+import { startGoogleOAuthPopup } from '../lib/supabaseClient';
+import { MarketSectionVisibility } from '../shared/marketSectionVisibility';
 
 interface CraftoTopServicesBarProps {
   activeMarketSection: MarketSectionType;
+  marketSectionVisibility?: MarketSectionVisibility;
   onSelectMarketSection: (sec: MarketSectionType) => void;
   selectedCategory: string;
   onSelectCategory: (catId: string) => void;
@@ -120,6 +123,7 @@ interface CraftoTopServicesBarProps {
 
 export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   activeMarketSection = 'pg_hostels',
+  marketSectionVisibility,
   onSelectMarketSection,
   selectedCategory,
   onSelectCategory,
@@ -181,7 +185,6 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
     authUser,
     isAccountBlocked,
     blockedReason,
-    loginWithGoogle,
     logoutGoogleSession,
   } = useMarketplace();
 
@@ -806,7 +809,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   { id: 'services', emoji: '🛠️', label: ui.secServices },
                   { id: 'hotel_stay', emoji: '🏨', label: ui.secStay },
                   { id: 'movies', emoji: '🎬', label: ui.secMovies },
-                ].map((sec) => (
+                ].filter((sec) => !marketSectionVisibility || marketSectionVisibility[sec.id as MarketSectionType]).map((sec) => (
                   <button
                     key={sec.id}
                     type="button"
@@ -917,7 +920,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 label: currentLang === 'en' ? 'Movies' : ui.secMoviesShort,
                 lightBg: 'bg-[#F5F3FF] border-[#DDD6FE]/80',
               },
-            ].map((tab) => {
+            ].filter((tab) => !marketSectionVisibility || marketSectionVisibility[tab.id]).map((tab) => {
               const isActive = activeMarketSection === tab.id;
               return (
                 <button
@@ -1176,13 +1179,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   setOauthAuthError(null);
                   setOauthAuthSuccess(null);
                   setOauthLoading(true);
-                  const res = await loginWithGoogle({
-                    email: loginEmailInput.trim().toLowerCase() || 'customer@gmail.com',
-                    name: loginNameInput.trim() || 'NARENDRA',
-                    phone: loginPhoneInput.trim() || '98480 12345',
-                    requestedRole: 'customer',
-                    allowRoleChange: false,
-                  });
+                  const res = await startGoogleOAuthPopup('customer');
                   setOauthLoading(false);
                   if (!res.ok) {
                     setOauthAuthError(res.message || 'Google login failed. Account may be blocked.');

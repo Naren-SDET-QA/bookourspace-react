@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { 
   Sparkles, 
   MapPin, 
@@ -74,24 +74,24 @@ import { FlipkartBannerSlider } from './components/FlipkartBannerSlider';
 import { FlipkartFilterSidebar } from './components/FlipkartFilterSidebar';
 import { TrendingNearMeSection } from './components/TrendingNearMeSection';
 import { SectionSpotlightShowcase } from './components/SectionSpotlightShowcase';
-import { DistrictMoviesSection } from './components/DistrictMoviesSection';
+const DistrictMoviesSection = lazy(() => import('./components/DistrictMoviesSection').then((m) => ({ default: m.DistrictMoviesSection })));
 
 // Universal Marketplace Components
 import { ListingCard } from './components/ListingCard';
-import { ListingDetailModal } from './components/ListingDetailModal';
-import { ClassCompareModal } from './components/ClassCompareModal';
 import { CompareFloatingBar } from './components/CompareFloatingBar';
-import { BookingEnquiryModal } from './components/BookingEnquiryModal';
-import { ChatModal } from './components/ChatModal';
-import { PostListingWizard } from './components/PostListingWizard';
-import { ProviderDashboard } from './components/ProviderDashboard';
-import { AdminDashboard } from './components/AdminDashboard';
-import { PaymentModal } from './components/PaymentModal';
-import { VoiceRegistrationModal } from './components/VoiceRegistrationModal';
-import { VoiceSearchModal } from './components/VoiceSearchModal';
-import { ReviewSubmissionModal } from './components/ReviewSubmissionModal';
-import { RunningBatchesModal } from './components/RunningBatchesModal';
-import { SupabaseAuthModal } from './components/SupabaseAuthModal';
+const ClassCompareModal = lazy(() => import('./components/ClassCompareModal').then((m) => ({ default: m.ClassCompareModal })));
+const BookingEnquiryModal = lazy(() => import('./components/BookingEnquiryModal').then((m) => ({ default: m.BookingEnquiryModal })));
+const ChatModal = lazy(() => import('./components/ChatModal').then((m) => ({ default: m.ChatModal })));
+const PostListingWizard = lazy(() => import('./components/PostListingWizard').then((m) => ({ default: m.PostListingWizard })));
+const ListingDetailModal = lazy(() => import('./components/ListingDetailModal').then((m) => ({ default: m.ListingDetailModal })));
+const ProviderDashboard = lazy(() => import('./components/ProviderDashboard').then((m) => ({ default: m.ProviderDashboard })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
+const PaymentModal = lazy(() => import('./components/PaymentModal').then((m) => ({ default: m.PaymentModal })));
+const VoiceRegistrationModal = lazy(() => import('./components/VoiceRegistrationModal').then((m) => ({ default: m.VoiceRegistrationModal })));
+const VoiceSearchModal = lazy(() => import('./components/VoiceSearchModal').then((m) => ({ default: m.VoiceSearchModal })));
+const ReviewSubmissionModal = lazy(() => import('./components/ReviewSubmissionModal').then((m) => ({ default: m.ReviewSubmissionModal })));
+const RunningBatchesModal = lazy(() => import('./components/RunningBatchesModal').then((m) => ({ default: m.RunningBatchesModal })));
+const SupabaseAuthModal = lazy(() => import('./components/SupabaseAuthModal').then((m) => ({ default: m.SupabaseAuthModal })));
 import { 
   AppLanguage, 
   translations, 
@@ -124,6 +124,11 @@ import {
   saveHomeScreenLayoutStyle,
 } from './components/ModularSystemEngine';
 import { SuperAppBentoHomeHub } from './components/SuperAppBentoHomeHub';
+import { fetchMarketSectionVisibility } from './lib/supabaseClient';
+import {
+  DEFAULT_MARKET_SECTION_VISIBILITY,
+  MarketSectionVisibility,
+} from './shared/marketSectionVisibility';
 import { CategoryRailStreamExplorer } from './components/CategoryRailStreamExplorer';
 import { LiveSponsoredAdsStrip } from './components/LiveSponsoredAdsStrip';
 import { LiveScheduledAnnouncementsBanner } from './components/AdminAnnouncementsSection';
@@ -212,6 +217,24 @@ function MarketplaceAppContent() {
 
   // Active Market Section: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies'
   const [activeMarketSection, setActiveMarketSection] = useState<MarketSectionType>('pg_hostels');
+  const [marketSectionVisibility, setMarketSectionVisibility] = useState<MarketSectionVisibility>(
+    DEFAULT_MARKET_SECTION_VISIBILITY
+  );
+
+  useEffect(() => {
+    let active = true;
+    const refreshVisibility = () => {
+      void fetchMarketSectionVisibility().then((visibility) => {
+        if (active) setMarketSectionVisibility(visibility);
+      });
+    };
+    refreshVisibility();
+    window.addEventListener('focus', refreshVisibility);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshVisibility);
+    };
+  }, []);
 
   // View Mode: 'grid' vs 'map' (Toggle between Flipkart Product Grid and Live Map Hero)
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
@@ -229,6 +252,18 @@ function MarketplaceAppContent() {
 
   // Subcategory filter state (e.g. "House cleaning", "Bathroom cleaning", "Electrician", "Tap repair", "AC", etc.)
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('all');
+
+  useEffect(() => {
+    if (marketSectionVisibility[activeMarketSection]) return;
+    const fallback = (Object.keys(marketSectionVisibility) as MarketSectionType[]).find(
+      (section) => marketSectionVisibility[section]
+    );
+    if (fallback) {
+      setActiveMarketSection(fallback);
+      setSelectedCategory('all');
+      setSelectedSubcategory('all');
+    }
+  }, [activeMarketSection, marketSectionVisibility, setSelectedCategory]);
 
   // Distance Radius filter state: 'all' | 5 | 10 | 15 km
   const [selectedRadius, setSelectedRadius] = useState<number | 'all'>('all');
@@ -1324,7 +1359,12 @@ function MarketplaceAppContent() {
       {isBentoHomeScreen ? (
         <SuperAppBentoHomeHub
           activeMarketSection={activeMarketSection}
+          marketSectionVisibility={marketSectionVisibility}
           onSelectCategoryAndAdvance={(sec, catId = 'all', subcat = 'all') => {
+            if (!marketSectionVisibility[sec]) {
+              showToast('This marketplace section is currently unavailable.');
+              return;
+            }
             setActiveMarketSection(sec);
             setSelectedCategory(catId);
             setSelectedSubcategory(subcat);
@@ -1431,7 +1471,12 @@ function MarketplaceAppContent() {
           {/* 1. FLIPKART SIGNATURE TOP BAR & CATEGORY RIBBON */}
           <CraftoTopServicesBar
             activeMarketSection={activeMarketSection}
+            marketSectionVisibility={marketSectionVisibility}
             onSelectMarketSection={(sec) => {
+              if (!marketSectionVisibility[sec]) {
+                showToast('This marketplace section is currently unavailable.');
+                return;
+              }
               setActiveMarketSection(sec);
               setSelectedCategory('all');
               setSelectedSubcategory('all');
@@ -2089,6 +2134,7 @@ function MarketplaceAppContent() {
             </div>
             
             <SelfHealingBoundary moduleId="provider_portal_module" moduleName="Provider Portal & Hub Module">
+              <Suspense fallback={<div className="p-6 text-sm text-slate-500">Loading provider dashboard…</div>}>
               <ProviderDashboard
                 currentLang={currentLang}
                 onOpenPostWizard={() => setIsPostWizardOpen(true)}
@@ -2112,6 +2158,7 @@ function MarketplaceAppContent() {
                     : undefined
                 }
               />
+              </Suspense>
             </SelfHealingBoundary>
           </div>
         )}
@@ -2137,7 +2184,9 @@ function MarketplaceAppContent() {
               </button>
             </div>
             <SelfHealingBoundary moduleId="admin_console_module" moduleName="Super Admin Console Module">
+              <Suspense fallback={<div className="p-6 text-sm text-slate-500">Loading admin dashboard…</div>}>
               <AdminDashboard
+                onMarketSectionVisibilityChange={setMarketSectionVisibility}
                 onApprovedNavigateToApp={(approvedListing) => {
                   const targetSec = resolveSectionForCategory(approvedListing.categoryId);
                   setActiveMarketSection(targetSec);
@@ -2153,6 +2202,7 @@ function MarketplaceAppContent() {
                   setIsLivePageEditorOpen(true);
                 }}
               />
+              </Suspense>
             </SelfHealingBoundary>
           </div>
         )}
@@ -2750,16 +2800,19 @@ function MarketplaceAppContent() {
                   listings={filteredListings}
                   currentLang={currentLang}
                   verifiedOnly={verifiedOnly}
-                  onToggleVerifiedOnly={() => setVerifiedOnly((prev) => !prev)}
+                  onToggleVerifiedOnly={() => setVerifiedOnly(!verifiedOnly)}
                   sortBy={sortBy}
                   onChangeSortBy={(s) => setSortBy(s)}
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
                   onOpenVoiceSearch={() => setIsVoiceSearchOpen(true)}
                   favoriteIds={favoriteIds}
-                  onToggleFavorite={toggleFavorite}
+                  onToggleFavorite={(id) => toggleFavorite(id)}
                   comparedListingIds={comparedListingIds}
-                  onToggleCompare={handleToggleCompare}
+                  onToggleCompare={(id) => {
+                    const listing = listings.find((item) => item.id === id);
+                    if (listing) handleToggleCompare(listing);
+                  }}
                   onSelectListing={handleSelectListing}
                   onBookNow={(l) => setBookingListing(l)}
                   onEnquire={(l) => setChatListing(l)}
@@ -2931,8 +2984,8 @@ function MarketplaceAppContent() {
               );
 
               const topFeaturedThree = (
-                sectionSpecificPool.filter((l) => l.featured).length >= 3
-                  ? sectionSpecificPool.filter((l) => l.featured)
+                sectionSpecificPool.filter((l) => l.isFeatured).length >= 3
+                  ? sectionSpecificPool.filter((l) => l.isFeatured)
                   : sectionSpecificPool.length > 0
                   ? sectionSpecificPool
                   : filteredListings
@@ -4442,6 +4495,7 @@ function MarketplaceAppContent() {
             {/* 4B. BOOKOURSPACE MOVIES & GOING-OUT SECTION (SHOWN IN MOVIES SECTION USING EXISTING IMAGES & DB ONLY) */}
             {activeMarketSection === 'movies' && (
               <SelfHealingBoundary moduleId="district_movies_section" moduleName="BookOurSpace Movies Section">
+                <Suspense fallback={<div className="p-6 text-sm text-slate-500">Loading movies…</div>}>
                 <DistrictMoviesSection
                   listings={filteredListings.length > 0 ? filteredListings : listings}
                   currentLang={currentLang}
@@ -4459,6 +4513,7 @@ function MarketplaceAppContent() {
                     })
                   }
                 />
+                </Suspense>
               </SelfHealingBoundary>
             )}
 
@@ -5177,15 +5232,15 @@ function MarketplaceAppContent() {
       )}
 
       {/* EASY VOICE REGISTRATION & POST MODAL */}
-      <VoiceRegistrationModal
+      {isVoiceRegisterOpen && <Suspense fallback={null}><VoiceRegistrationModal
         isOpen={isVoiceRegisterOpen}
         onClose={() => setIsVoiceRegisterOpen(false)}
         currentLang={currentLang}
         onRegisterSuccess={handleVoiceRegisterSuccess}
-      />
+      /></Suspense>}
 
       {/* POST LISTING WIZARD (CUSTOMER -> PROVIDER REGISTRATION & ADMIN REVIEW REQUEST) */}
-      <PostListingWizard
+      {isPostWizardOpen && <Suspense fallback={null}><PostListingWizard
         isOpen={isPostWizardOpen}
         onClose={() => setIsPostWizardOpen(false)}
         currentLang={currentLang}
@@ -5217,10 +5272,10 @@ function MarketplaceAppContent() {
               : '🛡️ Switched to Admin Console — Review & Approve the Provider Request below!'
           );
         }}
-      />
+      /></Suspense>}
 
       {/* LISTING DETAIL MODAL */}
-      <ListingDetailModal
+      {selectedDetailListing && <Suspense fallback={null}><ListingDetailModal
         listing={selectedDetailListing}
         currentLang={currentLang}
         onClose={() => setSelectedDetailListing(null)}
@@ -5232,10 +5287,10 @@ function MarketplaceAppContent() {
           setSelectedDetailListing(null);
           setChatListing(l);
         }}
-      />
+      /></Suspense>}
 
       {/* CURRENT RUNNING BATCHES MODAL (CONFIGURABLE SCHEDULE LINK & ALL-FORMAT IMAGES) */}
-      <RunningBatchesModal
+      {runningBatchesListing && <Suspense fallback={null}><RunningBatchesModal
         listing={runningBatchesListing}
         onClose={() => setRunningBatchesListing(null)}
         onUpdateBatchUrl={(listingId, newUrl, batchImages) => {
@@ -5267,10 +5322,10 @@ function MarketplaceAppContent() {
         onBookBatch={(l) => {
           setBookingListing(l);
         }}
-      />
+      /></Suspense>}
 
       {/* UNIVERSAL BOOKING & APPLICATION MODAL */}
-      <BookingEnquiryModal
+      {bookingListing && <Suspense fallback={null}><BookingEnquiryModal
         listing={bookingListing}
         currentLang={currentLang}
         initialDateRange={
@@ -5280,10 +5335,10 @@ function MarketplaceAppContent() {
         }
         onClose={() => setBookingListing(null)}
         onOpenReview={(l) => setReviewListing(l)}
-      />
+      /></Suspense>}
 
       {/* DYNAMIC REVIEW & RATING SUBMISSION MODAL */}
-      <ReviewSubmissionModal
+      {reviewListing && <Suspense fallback={null}><ReviewSubmissionModal
         listing={reviewListing}
         isOpen={!!reviewListing}
         currentLang={currentLang}
@@ -5295,10 +5350,10 @@ function MarketplaceAppContent() {
               : `⭐ Thank you! Average rating updated to ${newRating}★ (${newCount} reviews)!`
           );
         }}
-      />
+      /></Suspense>}
 
       {/* CHAT MODAL */}
-      <ChatModal
+      {chatListing && <Suspense fallback={null}><ChatModal
         listing={chatListing}
         currentLang={currentLang}
         onClose={() => setChatListing(null)}
@@ -5306,10 +5361,10 @@ function MarketplaceAppContent() {
           setChatListing(null);
           setBookingListing(l);
         }}
-      />
+      /></Suspense>}
 
       {/* PAYMENT & SUBSCRIPTION CHECKOUT MODAL */}
-      <PaymentModal
+      {paymentModalState.isOpen && <Suspense fallback={null}><PaymentModal
         isOpen={paymentModalState.isOpen}
         planName={paymentModalState.planName}
         amount={paymentModalState.amount}
@@ -5319,15 +5374,15 @@ function MarketplaceAppContent() {
         onSuccess={() => {
           showToast(`🎉 Payment & GST Invoice for "${paymentModalState.planName}" verified!`);
         }}
-      />
+      /></Suspense>}
 
       {/* VOICE SEARCH MODAL (TELUGU / MULTILINGUAL) */}
-      <VoiceSearchModal
+      {isVoiceSearchOpen && <Suspense fallback={null}><VoiceSearchModal
         isOpen={isVoiceSearchOpen}
         onClose={() => setIsVoiceSearchOpen(false)}
         onSearch={handleVoiceSearchResult}
         currentLang={currentLang}
-      />
+      /></Suspense>}
 
       {/* CLASS & PG COMPARE FLOATING DOCK */}
       <CompareFloatingBar
@@ -5339,7 +5394,7 @@ function MarketplaceAppContent() {
       />
 
       {/* SIDE-BY-SIDE CLASS & PG COMPARISON MODAL (UP TO 3 ITEMS) */}
-      <ClassCompareModal
+      {isCompareModalOpen && <Suspense fallback={null}><ClassCompareModal
         isOpen={isCompareModalOpen}
         onClose={() => setIsCompareModalOpen(false)}
         comparedListings={comparedListings}
@@ -5355,7 +5410,7 @@ function MarketplaceAppContent() {
           setChatListing(l);
         }}
         currentLang={currentLang}
-      />
+      /></Suspense>}
 
       {/* QUICK ACTION MODALS (MY FAVORITES, WALLET & LEDGER, SUPPORT, REFER & EARN, HELP CENTRE) */}
       <QuickActionModals
@@ -5444,13 +5499,13 @@ function MarketplaceAppContent() {
       )}
 
       {/* SUPABASE AUTHENTICATION MODAL */}
-      <SupabaseAuthModal
+      {isAuthModalOpen && <Suspense fallback={null}><SupabaseAuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         currentUser={supabaseUser}
         onAuthSuccess={(msg) => showToast(msg)}
         onNavigateView={(target) => setActiveView(target)}
-      />
+      /></Suspense>}
 
       {/* LIVE NOTIFICATIONS & ALERTS MODAL */}
       {showNotificationsDropdown && (

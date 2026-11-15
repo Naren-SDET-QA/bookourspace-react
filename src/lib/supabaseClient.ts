@@ -8,21 +8,27 @@ import {
   UserRole,
 } from '../types/marketplace';
 import { ensureListingPriceBreakdown } from '../data/seedData';
+import { resolveSupabaseProjectConfig } from './supabaseProjectConfig';
+import {
+  MarketSectionId,
+  MarketSectionVisibility,
+  normalizeMarketSectionVisibility,
+} from '../shared/marketSectionVisibility';
 
-// Configured for BookOurSpace Supabase Project: ezrxykyocgbolpaebnqx
-// Read strictly from Vite frontend environment variables.
-// Never put any PostgreSQL password or service-role key in frontend code.
-export const SUPABASE_PROJECT_ID = 'ezrxykyocgbolpaebnqx';
+// Frontend configuration is explicit and allowlisted. Missing or invalid values
+// leave Supabase disabled; there is no baked-in project fallback.
+const supabaseProjectConfig = resolveSupabaseProjectConfig({
+  url: import.meta.env.VITE_SUPABASE_URL,
+  projectId: import.meta.env.VITE_SUPABASE_PROJECT_ID,
+  allowedProjectRefs: import.meta.env.VITE_SUPABASE_ALLOWED_PROJECT_REFS,
+});
+export const SUPABASE_PROJECT_ID = supabaseProjectConfig.projectId;
+export const SUPABASE_PROJECT_URL = supabaseProjectConfig.url;
+export const SUPABASE_AUTH_CALLBACK_URL = SUPABASE_PROJECT_URL
+  ? `${SUPABASE_PROJECT_URL}/auth/v1/callback`
+  : '';
 
-const envSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-export const SUPABASE_PROJECT_URL =
-  envSupabaseUrl && envSupabaseUrl.includes(SUPABASE_PROJECT_ID)
-    ? envSupabaseUrl.replace(/\/+$/, '')
-    : `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-
-export const SUPABASE_AUTH_CALLBACK_URL = `${SUPABASE_PROJECT_URL}/auth/v1/callback`;
-
-const rawSupabaseUrl = SUPABASE_PROJECT_URL;
+const rawSupabaseUrl = supabaseProjectConfig.url;
 const rawPublishableKey = (
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
@@ -70,8 +76,8 @@ function isSafePublishableKey(key: string): boolean {
 }
 
 export const isSupabaseConfigured: boolean =
+  supabaseProjectConfig.ok &&
   Boolean(rawSupabaseUrl) &&
-  rawSupabaseUrl.startsWith('http') &&
   Boolean(rawPublishableKey) &&
   rawPublishableKey !== 'your-supabase-publishable-or-anon-key' &&
   isSafePublishableKey(rawPublishableKey);
@@ -350,56 +356,41 @@ export async function deleteRlsListing(id: string): Promise<boolean> {
 }
 
 export async function fetchRlsBookings(): Promise<Booking[] | null> {
-  const user = await requireAuthenticatedUser();
-  if (!supabase || !user) return null;
-
-  const { data, error } = await supabase
-    .from('bookings')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-
-  if (error || !data) return null;
-
-  return data.map((row: any) => ({
-    ...(row.payload || {}),
-    id: row.id,
-    listingId: row.listing_id,
-    listingTitle: row.listing_title,
-    providerId: row.provider_id,
-    customerName: row.customer_name,
-    customerPhone: row.customer_phone,
-    scheduledDate: row.scheduled_date,
-    timeSlot: row.scheduled_time,
-    totalAmount: Number(row.amount ?? 0),
-    status: row.status,
-    createdAt: row.created_at ? new Date(row.created_at).toLocaleDateString() : 'Just now',
-  }));
+  try {
+    const response = await fetch('/api/isolation/bookings?page=0&limit=100', { headers: buildAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok || !data.ok || !Array.isArray(data.bookings)) return null;
+    return data.bookings.map((row: any) => ({
+      ...row,
+      totalAmount: Number(row.totalAmount || 0),
+      createdAt: row.createdAt ? new Date(row.createdAt).toLocaleDateString() : 'Just now',
+    } as Booking));
+  } catch { return null; }
 }
 
 export async function insertRlsBooking(booking: Booking): Promise<boolean> {
-  const user = await requireAuthenticatedUser();
-  if (!supabase || !user) return false;
-
-  const { error } = await supabase.from('bookings').upsert(
-    {
-      id: booking.id,
-      user_id: user.id,
-      listing_id: booking.listingId,
-      listing_title: booking.listingTitle,
-      provider_id: booking.providerId,
-      customer_name: booking.customerName,
-      customer_phone: booking.customerPhone,
-      scheduled_date: booking.scheduledDate,
-      scheduled_time: booking.timeSlot,
-      amount: booking.totalAmount,
-      status: booking.status,
-      payload: booking,
-    },
-    { onConflict: 'id' }
-  );
-
-  return !error;
+  const idempotencyKey = String((booking as Booking & { idempotencyKey?: string }).idempotencyKey || booking.id);
+  try {
+    const response = await fetch('/api/bookings/atomic', {
+      method: 'POST',
+      headers: buildAuthHeaders({ 'x-idempotency-key': idempotencyKey }),
+      body: JSON.stringify({
+        ...booking,
+        id: booking.id,
+        idempotencyKey,
+        listingId: booking.listingId,
+        listingTitle: booking.listingTitle,
+        providerId: booking.providerId,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        scheduledDate: booking.scheduledDate,
+        timeSlot: booking.timeSlot,
+        totalAmount: Number(booking.totalAmount || 0),
+      }),
+    });
+    const result = await response.json();
+    return response.ok && Boolean(result.ok);
+  } catch { return false; }
 }
 
 export async function fetchRlsEnquiries(): Promise<Enquiry[] | null> {
@@ -784,20 +775,37 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
   return headers;
 }
 
-/**
- * Initiates Google OAuth via Supabase (when configured) or via `/api/auth/google/authenticate`
- * and `/api/auth/google/url` popup flow. Enforces Google-only authentication, auto-registration
- * for new users, existing user sign-in, role-based routing, and account blocking checks.
- */
+export interface AdminPaymentReconciliationQueue {
+  payments: Array<{ intent_id: string; actor_id: string; amount: number; merchant_vpa: string; utr_number: string; purpose: string; listing_id: string | null; created_at: string }>;
+  refunds: Array<{ id: string; booking_id: string; payment_intent_id: string; actor_id: string; amount: number; reason: string; created_at: string }>;
+}
+
+export async function fetchAdminPaymentReconciliation(): Promise<AdminPaymentReconciliationQueue | null> {
+  try {
+    const response = await fetch('/api/admin/payment-reconciliation?limit=50', { headers: buildAuthHeaders() });
+    const data = await response.json();
+    return response.ok && data.ok ? { payments: data.payments || [], refunds: data.refunds || [] } : null;
+  } catch { return null; }
+}
+
+export async function reviewAdminPaymentOrRefund(params: {
+  kind: 'payment' | 'refund'; id: string; approve: boolean; reason: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const base = params.kind === 'payment' ? '/api/admin/payments/' : '/api/admin/refunds/';
+  const suffix = params.kind === 'payment' ? '/reconcile' : '/reconcile';
+  try {
+    const response = await fetch(`${base}${encodeURIComponent(params.id)}${suffix}`, {
+      method: 'POST', headers: buildAuthHeaders(), body: JSON.stringify({ approve: params.approve, reason: params.reason }),
+    });
+    const data = await response.json();
+    return { ok: response.ok && Boolean(data.ok), error: data.error };
+  } catch { return { ok: false, error: 'NETWORK_ERROR' }; }
+}
+
+/** Exchange a Google ID token only after the server verifies its Google claims. */
 export async function authenticateWithGoogleServer(params: {
-  email: string;
-  name?: string;
-  googleSub?: string;
-  avatarUrl?: string;
-  phone?: string;
-  city?: string;
+  idToken?: string;
   requestedRole?: UserRole;
-  allowRoleChange?: boolean;
 }): Promise<{
   ok: boolean;
   httpStatus: number;
@@ -813,16 +821,8 @@ export async function authenticateWithGoogleServer(params: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        authProvider: 'google',
-        supabaseProjectId: SUPABASE_PROJECT_ID,
-        email: params.email.trim().toLowerCase(),
-        name: params.name?.trim(),
-        googleSub: params.googleSub || `google-oauth2|${params.email.trim().toLowerCase()}`,
-        avatarUrl: params.avatarUrl,
-        phone: params.phone?.trim(),
-        city: params.city?.trim() || 'Hyderabad',
+        idToken: params.idToken || '',
         requestedRole: params.requestedRole || 'customer',
-        allowRoleChange: Boolean(params.allowRoleChange),
       }),
     });
     const data = await resp.json();
@@ -848,6 +848,59 @@ export async function authenticateWithGoogleServer(params: {
       error: 'NETWORK_ERROR',
       message: err?.message || 'Google authentication failed.',
     };
+  }
+}
+
+/** Start only the server-verified Google authorization-code flow. */
+export async function startGoogleOAuthPopup(requestedRole: UserRole = 'customer'): Promise<{
+  ok: boolean;
+  user?: AuthoritativeGoogleUser;
+  redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
+  error?: string;
+  message?: string;
+}> {
+  const popup = window.open('about:blank', 'bos_google_oauth_popup', 'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no');
+  if (!popup) return { ok: false, error: 'POPUP_BLOCKED', message: 'Allow the sign-in popup and try again.' };
+
+  try {
+    const config = await fetchGoogleOAuthConfig(requestedRole);
+    if (!config.ok || !config.url) {
+      popup.close();
+      return { ok: false, error: 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'Verified Google sign-in is unavailable. Please try again later.' };
+    }
+    const oauthUrl = new URL(config.url);
+    if (oauthUrl.protocol !== 'https:' || oauthUrl.hostname !== 'accounts.google.com') {
+      popup.close();
+      return { ok: false, error: 'INVALID_GOOGLE_OAUTH_URL' };
+    }
+
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: { ok: boolean; user?: AuthoritativeGoogleUser; redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console'; error?: string; message?: string }) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        clearTimeout(timeout);
+        if (!result.ok) popup.close();
+        resolve(result);
+      };
+      const onMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin || event.source !== popup) return;
+        const data = event.data;
+        if (data?.type === 'OAUTH_AUTH_SUCCESS' && data.user && data.sessionToken) {
+          setStoredAuthoritativeSession(data.sessionToken, data.user);
+          finish({ ok: true, user: data.user, redirectTarget: data.redirectTarget });
+        } else if (data?.type === 'OAUTH_AUTH_ERROR') {
+          finish({ ok: false, error: data.error || 'GOOGLE_AUTH_FAILED', message: data.message || 'Google sign-in could not be completed.' });
+        }
+      };
+      window.addEventListener('message', onMessage);
+      const timeout = window.setTimeout(() => finish({ ok: false, error: 'GOOGLE_OAUTH_TIMEOUT', message: 'Google sign-in timed out. Please try again.' }), 5 * 60 * 1000);
+      popup.location.replace(oauthUrl.toString());
+    });
+  } catch {
+    popup.close();
+    return { ok: false, error: 'GOOGLE_OAUTH_UNAVAILABLE', message: 'Verified Google sign-in is unavailable. Please try again later.' };
   }
 }
 
@@ -883,41 +936,6 @@ export async function fetchGoogleOAuthConfig(requestedRole: UserRole = 'customer
   } catch {
     return { ok: false };
   }
-}
-
-export async function signInWithSupabaseGoogleOAuth(requestedRole: UserRole = 'customer'): Promise<{
-  ok: boolean;
-  url?: string;
-  supabaseAuthorizeUrl?: string;
-  error?: string;
-}> {
-  const redirectTo = `${window.location.origin}/auth/callback?role=${encodeURIComponent(requestedRole)}`;
-  const directSupabaseAuthorizeUrl = `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-    redirectTo
-  )}&access_type=offline&prompt=select_account`;
-
-  if (supabase) {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        skipBrowserRedirect: true,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'select_account',
-        },
-      },
-    });
-    if (!error && data?.url) {
-      return { ok: true, url: data.url, supabaseAuthorizeUrl: directSupabaseAuthorizeUrl };
-    }
-  }
-
-  return {
-    ok: false,
-    supabaseAuthorizeUrl: directSupabaseAuthorizeUrl,
-    error: 'Supabase publishable key not yet injected in frontend environment.',
-  };
 }
 
 export async function verifyProtectedRouteAccess(
@@ -1297,6 +1315,40 @@ export async function syncServerAdminModule(
   }
 }
 
+export async function fetchMarketSectionVisibility(): Promise<MarketSectionVisibility> {
+  try {
+    const response = await fetch('/api/market-sections');
+    if (!response.ok) throw new Error('Unable to load marketplace sections.');
+    const data = await response.json();
+    if (!data?.ok) throw new Error('Unable to load marketplace sections.');
+    return normalizeMarketSectionVisibility(data.sections);
+  } catch {
+    // Visibility flags affect navigation only; defaults preserve the current app
+    // experience if the local server is temporarily unavailable.
+    return normalizeMarketSectionVisibility(undefined);
+  }
+}
+
+export async function updateMarketSectionVisibility(
+  sectionId: MarketSectionId,
+  enabled: boolean
+): Promise<{ ok: true; sections: MarketSectionVisibility } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(`/api/admin/market-sections/${encodeURIComponent(sectionId)}`, {
+      method: 'PUT',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) {
+      return { ok: false, message: data?.error || 'Unable to update section visibility.' };
+    }
+    return { ok: true, sections: normalizeMarketSectionVisibility(data.sections) };
+  } catch {
+    return { ok: false, message: 'Unable to reach the server. Section visibility was not changed.' };
+  }
+}
+
 // ============================================================================
 // AUTHORITATIVE MULTI-USER ATOMIC TRANSACTIONS & SERVER VERIFICATION HELPERS
 // Uses both Supabase PL/pgSQL RPCs (when cloud DB is connected) and Express
@@ -1371,22 +1423,6 @@ export async function holdAuthoritativeSeats(params: {
   message?: string;
 }> {
   const sessionId = params.sessionId || getOrCreateClientSessionId();
-
-  // 1. If live Supabase is configured & authenticated, also invoke the PostgreSQL atomic RPC
-  if (supabase) {
-    try {
-      await supabase.rpc('hold_movie_seats_atomic', {
-        p_listing_id: params.listingId,
-        p_show_date: params.dateIso,
-        p_show_time: params.showtime,
-        p_seats: params.seats,
-        p_session_id: sessionId,
-        p_ttl_seconds: 300,
-      });
-    } catch {
-      // Continue to Express authoritative lock store
-    }
-  }
 
   try {
     const resp = await fetch('/api/seats/hold', {
@@ -1507,35 +1543,6 @@ export async function createAuthoritativeBookingAtomic(params: {
     });
     const data = await resp.json();
 
-    // If live Supabase is connected, also persist via the PostgreSQL atomic RPC
-    if (resp.ok && data.booking && supabase) {
-      try {
-        await supabase.rpc('create_booking_atomic', {
-          p_booking_id: data.booking.id,
-          p_idempotency_key: params.idempotencyKey,
-          p_listing_id: params.listingId,
-          p_listing_title: params.listingTitle,
-          p_provider_id: params.providerId,
-          p_customer_name: params.customerName,
-          p_customer_phone: params.customerPhone,
-          p_customer_address: params.customerAddress || 'Hyderabad',
-          p_scheduled_date: params.scheduledDate,
-          p_time_slot: params.timeSlot,
-          p_total_amount: params.totalAmount,
-          p_payment_status: data.booking.paymentStatus,
-          p_payment_utr: params.paymentUtr || null,
-          p_qr_signature: data.booking.qrSignature,
-          p_qr_pass_token: data.booking.qrPassToken,
-          p_seats: params.seats && params.seats.length > 0 ? params.seats : null,
-          p_show_time: params.showtime || null,
-          p_session_id: sessionId,
-          p_notes: params.notes || '',
-        });
-      } catch {
-        // Fallback to standard RLS table insert if RPC migration not yet run on external project
-      }
-    }
-
     return {
       ok: resp.ok && Boolean(data.ok),
       status: resp.status,
@@ -1560,6 +1567,9 @@ export async function createServerPaymentIntent(params: {
   merchantVpa: string;
   planOrListing: string;
   userId?: string;
+  purpose?: 'booking' | 'subscription' | 'service';
+  listingId?: string;
+  idempotencyKey?: string;
 }): Promise<{
   ok: boolean;
   intentId?: string;
@@ -1570,8 +1580,8 @@ export async function createServerPaymentIntent(params: {
   try {
     const resp = await fetch('/api/payments/create-intent', {
       method: 'POST',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify(params),
+      headers: buildAuthHeaders({ 'x-idempotency-key': params.idempotencyKey || crypto.randomUUID() }),
+      body: JSON.stringify({ ...params, purpose: params.purpose || 'booking' }),
     });
     const data = await resp.json();
     return {
@@ -1592,12 +1602,11 @@ export async function verifyServerUpiPayment(params: {
   gatewaySignature?: string;
   amount?: number;
   merchantVpa?: string;
-  simulateBankWebhookSettlement?: boolean;
 }): Promise<{
   ok: boolean;
   httpStatus: number;
   verified: boolean;
-  status: 'verified' | 'pending_provider_reconciliation' | 'rejected';
+  status: 'verified' | 'pending_provider_reconciliation' | 'pending_reconciliation' | 'rejected';
   intentId?: string;
   utrNumber?: string;
   paymentVerificationToken?: string;
@@ -1605,42 +1614,13 @@ export async function verifyServerUpiPayment(params: {
   message?: string;
 }> {
   try {
-    let gatewaySignature = params.gatewaySignature;
-
-    // Only obtain bank webhook settlement signature when explicitly requested via bank webhook verification
-    if (params.simulateBankWebhookSettlement && !gatewaySignature) {
-      const settleResp = await fetch('/api/payments/webhook-settle', {
-        method: 'POST',
-        headers: buildAuthHeaders(),
-        body: JSON.stringify({
-          intentId: params.intentId,
-          utrNumber: params.utrNumber,
-          amount: params.amount,
-        }),
-      });
-      if (settleResp.ok) {
-        const settleData = await settleResp.json();
-        gatewaySignature = settleData.gatewaySignature;
-      } else {
-        const errData = await settleResp.json().catch(() => ({}));
-        return {
-          ok: false,
-          httpStatus: settleResp.status,
-          verified: false,
-          status: 'rejected',
-          error: errData.error || 'SETTLEMENT_FAILED',
-          message: errData.message || 'Bank settlement verification failed.',
-        };
-      }
-    }
-
     const resp = await fetch('/api/payments/verify-upi', {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({
         intentId: params.intentId,
         utrNumber: params.utrNumber,
-        gatewaySignature,
+        gatewaySignature: params.gatewaySignature,
         amount: params.amount,
         merchantVpa: params.merchantVpa,
       }),

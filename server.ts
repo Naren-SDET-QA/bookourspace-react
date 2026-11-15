@@ -1,12 +1,83 @@
+import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { resolveSupabaseProjectConfig } from './src/lib/supabaseProjectConfig';
+import { GoogleIdentityClaims, verifyGoogleIdTokenClaims } from './src/server/googleIdTokenVerifier';
+import {
+  DEFAULT_MARKET_SECTION_VISIBILITY,
+  isMarketSectionId,
+  normalizeMarketSectionVisibility,
+} from './src/shared/marketSectionVisibility';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const serverSupabaseConfig = resolveSupabaseProjectConfig({
+  url: process.env.SUPABASE_URL,
+  projectId: process.env.SUPABASE_PROJECT_ID,
+  allowedProjectRefs: process.env.SUPABASE_ALLOWED_PROJECT_REFS,
+});
+const SERVER_SUPABASE_PROJECT_ID = serverSupabaseConfig.projectId;
+const SERVER_SUPABASE_URL = serverSupabaseConfig.url;
+const serverServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const serverSupabase: SupabaseClient | null = serverSupabaseConfig.ok && serverServiceRoleKey
+  ? createClient(SERVER_SUPABASE_URL, serverServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    })
+  : null;
+
+function requireServerSupabase(res: express.Response): SupabaseClient | null {
+  if (serverSupabase) return serverSupabase;
+  res.status(503).json({
+    ok: false,
+    error: 'BOOKING_DATABASE_UNAVAILABLE',
+    message: 'The server-side Supabase database connection is not configured.',
+  });
+  return null;
+}
+
+const GOOGLE_OAUTH_STATE_COOKIE = 'bos_google_oauth_state';
+const googleOAuthStates = new Map<string, { role: string; expiresAt: number }>();
+let googleJwksCache: { keys?: Array<Record<string, unknown>> } | null = null;
+let googleJwksCacheExpiresAt = 0;
+
+function configuredAppOrigin(): string | null {
+  const raw = String(process.env.APP_URL || '').trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const local = ['localhost', '127.0.0.1'].includes(url.hostname);
+    if ((!local && url.protocol !== 'https:') || (local && !['http:', 'https:'].includes(url.protocol)) ||
+        url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyGoogleIdToken(idToken: string, clientId: string): Promise<GoogleIdentityClaims | null> {
+  if (!idToken || !clientId) return null;
+  try {
+    if (!googleJwksCache || googleJwksCacheExpiresAt <= Date.now()) {
+      const response = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+      if (!response.ok) return null;
+      const keys = await response.json() as { keys?: Array<Record<string, unknown>> };
+      if (!Array.isArray(keys.keys)) return null;
+      const cacheControl = response.headers.get('cache-control') || '';
+      const maxAge = Number(cacheControl.match(/max-age=(\d+)/i)?.[1] || 300);
+      googleJwksCache = keys;
+      googleJwksCacheExpiresAt = Date.now() + Math.min(Math.max(maxAge, 60), 3600) * 1000;
+    }
+    return verifyGoogleIdTokenClaims(idToken, clientId, googleJwksCache);
+  } catch {
+    return null;
+  }
+}
 
 const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
 
@@ -207,7 +278,12 @@ function saveServerStore(data: ServerStoreData) {
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({
+    limit: '10mb',
+    verify: (req, _res, buffer) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    },
+  }));
 
   // 1. GET Live Page Config (OTA endpoint consumed by Web, Android, and iOS clients)
   app.get('/api/live-page-config', (_req, res) => {
@@ -832,8 +908,11 @@ Task:
   // ============================================================================
 
   const AUTH_STORE_FILE_PATH = path.join(__dirname, 'authoritative-marketplace-store.json');
-  const SERVER_HMAC_SECRET =
-    process.env.BOS_SERVER_HMAC_SECRET || 'bos-production-hmac-secret-2026-v1-a9f8e7d6c5b4';
+  const configuredHmacSecret = process.env.BOS_SERVER_HMAC_SECRET?.trim();
+  if (process.env.NODE_ENV === 'production' && !configuredHmacSecret) {
+    throw new Error('BOS_SERVER_HMAC_SECRET must be configured before production startup.');
+  }
+  const SERVER_HMAC_SECRET = configuredHmacSecret || crypto.randomBytes(32).toString('hex');
 
   interface SeatLockEntry {
     key: string; // `${listingId}::${dateIso}::${showtime}::${seatId}`
@@ -1273,11 +1352,13 @@ Task:
     };
   }
 
-  function saveAuthoritativeStore(store: AuthoritativeStore): void {
+  function saveAuthoritativeStore(store: AuthoritativeStore): boolean {
     try {
       fs.writeFileSync(AUTH_STORE_FILE_PATH, JSON.stringify(store, null, 2), 'utf-8');
+      return true;
     } catch (err) {
       console.error('Failed to persist authoritative store:', err);
+      return false;
     }
   }
 
@@ -1432,13 +1513,11 @@ Task:
     return item;
   }
 
-  const SUPABASE_PROJECT_ID = 'ezrxykyocgbolpaebnqx';
-  const rawEnvSupabaseUrl = (process.env.VITE_SUPABASE_URL || '').trim();
-  const SUPABASE_PROJECT_URL =
-    rawEnvSupabaseUrl && rawEnvSupabaseUrl.includes(SUPABASE_PROJECT_ID)
-      ? rawEnvSupabaseUrl.replace(/\/+$/, '')
-      : `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-  const SUPABASE_AUTH_CALLBACK_URL = `${SUPABASE_PROJECT_URL}/auth/v1/callback`;
+  const SUPABASE_PROJECT_ID = SERVER_SUPABASE_PROJECT_ID;
+  const SUPABASE_PROJECT_URL = SERVER_SUPABASE_URL;
+  const SUPABASE_AUTH_CALLBACK_URL = SUPABASE_PROJECT_URL
+    ? `${SUPABASE_PROJECT_URL}/auth/v1/callback`
+    : '';
 
   function authenticateOrRegisterGoogleUser(params: {
     email: string;
@@ -1675,388 +1754,151 @@ Task:
   }
 
   // ============================================================================
-  // 1. GOOGLE-ONLY OAUTH 2.0, SUPABASE OAUTH & SESSION ENDPOINTS
-  //    Configured for Supabase Project: ezrxykyocgbolpaebnqx
+  // 1. GOOGLE-ONLY OAUTH 2.0 AND SESSION ENDPOINTS
   // ============================================================================
 
-  // 1A. GET GOOGLE OAUTH AUTHORIZATION URL (Supabase OAuth + Popup Flow for Iframe Preview & Cloud Run)
+  // 1A. Google authorization-code flow. The server owns the OAuth state and verifies
+  // Google's signed ID token before creating an authoritative session.
   app.get('/api/auth/google/url', (req, res) => {
+    const appOrigin = configuredAppOrigin();
+    const googleClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+    const googleClientSecret = String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
     const requestedRole = String(req.query.role || 'customer').toLowerCase();
-    const requestOrigin =
-      String(req.query.origin || '').trim() ||
-      process.env.APP_URL?.replace(/\/+$/, '') ||
-      `${req.protocol}://${req.get('host')}`;
-    const callbackUrl = `${requestOrigin}/auth/callback`;
-    const devCallbackUrl =
-      'https://ais-dev-2sp75t3mb2qar3lhuhwjxd-429336547561.asia-southeast1.run.app/auth/callback';
-    const sharedCallbackUrl =
-      'https://ais-pre-2sp75t3mb2qar3lhuhwjxd-429336547561.asia-southeast1.run.app/auth/callback';
-
-    const supabaseAuthorizeUrl = `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-      `${callbackUrl}?role=${encodeURIComponent(requestedRole)}`
-    )}&access_type=offline&prompt=select_account`;
-
-    const googleClientId =
-      process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
-    const isRealGoogleConfigured =
-      Boolean(googleClientId) &&
-      !googleClientId.includes('your-google-oauth-client-id');
-
-    const supabasePublishableKey = (
-      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      process.env.VITE_SUPABASE_ANON_KEY ||
-      ''
-    ).trim();
-    const isSupabaseKeyConfigured =
-      Boolean(supabasePublishableKey) &&
-      supabasePublishableKey !== 'your-supabase-publishable-or-anon-key';
-
-    const statePayload = Buffer.from(
-      JSON.stringify({
-        role: requestedRole,
-        origin: requestOrigin,
-        supabaseProjectId: SUPABASE_PROJECT_ID,
-        ts: Date.now(),
-      }),
-      'utf-8'
-    ).toString('base64url');
-
-    if (isRealGoogleConfigured) {
-      const params = new URLSearchParams({
-        client_id: googleClientId,
-        redirect_uri: callbackUrl,
-        response_type: 'code',
-        scope: 'openid email profile',
-        access_type: 'offline',
-        prompt: 'select_account',
-        state: statePayload,
-      });
-      res.json({
-        ok: true,
-        configured: true,
-        googleCloudConfigured: true,
-        supabaseConfigured: isSupabaseKeyConfigured,
-        supabaseProjectId: SUPABASE_PROJECT_ID,
-        supabaseUrl: SUPABASE_PROJECT_URL,
-        supabaseAuthorizeUrl,
-        supabaseAuthCallbackUrl: SUPABASE_AUTH_CALLBACK_URL,
-        authProvider: 'google',
-        url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
-        callbackUrl,
-        devCallbackUrl,
-        sharedCallbackUrl,
-      });
+    if (!serverSupabaseConfig.ok || !appOrigin || !googleClientId || !googleClientSecret ||
+        !['customer', 'provider', 'admin'].includes(requestedRole)) {
+      res.status(503).json({ ok: false, error: 'GOOGLE_OAUTH_NOT_CONFIGURED' });
       return;
     }
 
-    // Return popup URL to the built-in Supabase + Google OAuth callback handler
-    const fallbackParams = new URLSearchParams({
-      oauth_picker: '1',
-      role: requestedRole,
-      state: statePayload,
+    const state = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    googleOAuthStates.set(state, { role: requestedRole, expiresAt });
+    for (const [knownState, value] of googleOAuthStates) {
+      if (value.expiresAt <= Date.now()) googleOAuthStates.delete(knownState);
+    }
+    const callbackUrl = `${appOrigin}/auth/callback`;
+    const secureCookie = appOrigin.startsWith('https://') ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `${GOOGLE_OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/auth/callback; Max-Age=600${secureCookie}`);
+    const params = new URLSearchParams({
+      client_id: googleClientId,
+      redirect_uri: callbackUrl,
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'online',
+      prompt: 'select_account',
+      state,
     });
-    res.json({
-      ok: true,
-      configured: isSupabaseKeyConfigured,
-      googleCloudConfigured: false,
-      supabaseConfigured: isSupabaseKeyConfigured,
-      supabaseProjectId: SUPABASE_PROJECT_ID,
-      supabaseUrl: SUPABASE_PROJECT_URL,
-      supabaseAuthorizeUrl,
-      supabaseAuthCallbackUrl: SUPABASE_AUTH_CALLBACK_URL,
-      authProvider: 'google',
-      url: `${callbackUrl}?${fallbackParams.toString()}`,
-      callbackUrl,
-      devCallbackUrl,
-      sharedCallbackUrl,
-      message:
-        'Configured for Supabase project ezrxykyocgbolpaebnqx Google OAuth popup flow.',
-    });
+    res.json({ ok: true, configured: true, authProvider: 'google', url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, callbackUrl });
   });
 
-  // 1B. SUPABASE & GOOGLE OAUTH CALLBACK HANDLER (/auth/callback & /auth/callback/)
+  function sendGoogleOAuthPopupResult(res: express.Response, appOrigin: string, payload: Record<string, unknown>, status = 200) {
+    const safePayload = JSON.stringify(payload).replace(/</g, '\\u003c');
+    const safeOrigin = JSON.stringify(appOrigin).replace(/</g, '\\u003c');
+    res.status(status).type('html').send(`<!doctype html><meta charset="utf-8"><title>Google sign-in</title><script>
+      if (window.opener) { window.opener.postMessage(${safePayload}, ${safeOrigin}); window.close(); }
+      else { window.location.replace(${safeOrigin}); }
+    </script><p>Google sign-in could not be completed. Return to BookOurSpace and try again.</p>`);
+  }
+
   app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+    const appOrigin = configuredAppOrigin();
+    const callbackUrl = appOrigin ? `${appOrigin}/auth/callback` : '';
+    const state = String(req.query.state || '').trim();
     const code = String(req.query.code || '').trim();
-    const stateRaw = String(req.query.state || '').trim();
-    const oauthPicker = String(req.query.oauth_picker || '') === '1';
-    let requestedRole = String(req.query.role || 'customer').toLowerCase();
+    const suppliedIdentity = ['email', 'google_email', 'name', 'google_name', 'sub', 'google_sub', 'avatar', 'google_avatar']
+      .some((key) => Object.prototype.hasOwnProperty.call(req.query, key));
+    const cookieHeader = String(req.headers.cookie || '');
+    const stateCookie = cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${GOOGLE_OAUTH_STATE_COOKIE}=`))?.slice(GOOGLE_OAUTH_STATE_COOKIE.length + 1);
+    const stateEntry = googleOAuthStates.get(state);
+    res.setHeader('Set-Cookie', `${GOOGLE_OAUTH_STATE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/auth/callback; Max-Age=0${appOrigin?.startsWith('https://') ? '; Secure' : ''}`);
 
-    if (stateRaw) {
-      try {
-        const parsedState = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf-8'));
-        if (parsedState?.role) requestedRole = String(parsedState.role).toLowerCase();
-      } catch {
-        // ignore malformed state
-      }
+    if (!appOrigin || !serverSupabaseConfig.ok || suppliedIdentity || !code || !state || stateCookie !== state || !stateEntry || stateEntry.expiresAt <= Date.now()) {
+      if (state) googleOAuthStates.delete(state);
+      res.status(400).send('Google sign-in could not be verified. Start sign-in again from BookOurSpace.');
+      return;
+    }
+    googleOAuthStates.delete(state); // one-time state prevents callback replay
+
+    const googleClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+    const googleClientSecret = String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
+    if (!googleClientId || !googleClientSecret) {
+      res.status(503).send('Google sign-in is not configured.');
+      return;
     }
 
-    let googleEmail = String(req.query.google_email || req.query.email || '').trim();
-    let googleName = String(req.query.google_name || req.query.name || '').trim();
-    let googleSub = String(req.query.google_sub || req.query.sub || '').trim();
-    let googleAvatar = String(req.query.google_avatar || req.query.avatar || '').trim();
-
-    // If a real OAuth authorization code was returned by Google, exchange it for tokens and userinfo
-    const googleClientId =
-      process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
-    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-    if (code && googleClientId && googleClientSecret && !googleClientId.includes('your-google-oauth-client-id')) {
-      try {
-        const requestOrigin =
-          process.env.APP_URL?.replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
-        const callbackUrl = `${requestOrigin}/auth/callback`;
-        const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            code,
-            client_id: googleClientId,
-            client_secret: googleClientSecret,
-            redirect_uri: callbackUrl,
-            grant_type: 'authorization_code',
-          }),
-        });
-        const tokenData: any = await tokenResp.json();
-        if (tokenData && tokenData.access_token) {
-          const profileResp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-            headers: { Authorization: `Bearer ${tokenData.access_token}` },
-          });
-          const profileData: any = await profileResp.json();
-          if (profileData && profileData.email) {
-            googleEmail = String(profileData.email);
-            googleName = String(profileData.name || '');
-            googleSub = String(profileData.id || '');
-            googleAvatar = String(profileData.picture || '');
-          }
-        }
-      } catch (err) {
-        console.error('Google OAuth token exchange error:', err);
+    let identity: Awaited<ReturnType<typeof verifyGoogleIdToken>> = null;
+    try {
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ code, client_id: googleClientId, client_secret: googleClientSecret, redirect_uri: callbackUrl, grant_type: 'authorization_code' }),
+      });
+      if (tokenResponse.ok) {
+        const tokenData: any = await tokenResponse.json();
+        identity = await verifyGoogleIdToken(String(tokenData.id_token || ''), googleClientId);
       }
+    } catch {
+      identity = null;
     }
-
-    // When opened as a Supabase OAuth redirect (e.g. /auth/callback#access_token=...) or interactive popup picker
-    if (!googleEmail) {
-      const store = loadAuthoritativeStore();
-      const sampleAccounts = store.users.slice(0, 6);
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in with Google — BookOurSpace (Supabase ${SUPABASE_PROJECT_ID})</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
-    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 20px; max-width: 440px; width: 100%; padding: 24px; box-shadow: 0 20px 25px -5px rgba(15,23,42,0.1); }
-    .title { font-size: 18px; font-weight: 800; margin: 8px 0 4px; }
-    .sub { font-size: 12px; color: #64748b; margin-bottom: 16px; }
-    .acct { display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 8px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; cursor: pointer; text-decoration: none; color: inherit; box-sizing: border-box; }
-    .acct:hover { border-color: #4338ca; background: #eef2ff; }
-    .badge { font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: #e0e7ff; color: #3730a3; }
-    .blocked { background: #fee2e2; color: #991b1b; }
-    input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; margin-bottom: 10px; box-sizing: border-box; }
-    button.primary { width: 100%; padding: 11px; border: none; border-radius: 12px; background: #4338ca; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; }
-    .supa-btn { display: block; width: 100%; text-align: center; padding: 10px 12px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; font-weight: 800; font-size: 12px; text-decoration: none; box-sizing: border-box; }
-    .supa-btn:hover { background: #f1f5f9; border-color: #4338ca; }
-  </style>
-</head>
-<body>
-  <div class="card" id="oauth-card">
-    <div style="font-size:11px;font-weight:800;color:#4338ca;">GOOGLE OAUTH 2.0 • SUPABASE (${SUPABASE_PROJECT_ID})</div>
-    <div class="title">Sign in with Google</div>
-    <div class="sub" id="status-sub">New users automatically receive a Customer profile. Existing users keep their assigned role and data.</div>
-    <a class="supa-btn" href="${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-        `${req.protocol}://${req.get('host')}/auth/callback`
-      )}">
-      Redirect via Supabase Auth (${SUPABASE_PROJECT_ID}.supabase.co)
-    </a>
-    ${sampleAccounts
-      .map(
-        (u) => `
-      <a class="acct" href="/auth/callback?google_email=${encodeURIComponent(
-        u.email
-      )}&google_name=${encodeURIComponent(u.name)}&google_sub=${encodeURIComponent(
-          u.googleSub || `google-${u.id}`
-        )}">
-        <div>
-          <div style="font-weight:700;font-size:13px;">${u.name}</div>
-          <div style="font-size:11px;color:#64748b;">${u.email}</div>
-        </div>
-        <span class="badge ${
-          u.accountStatus === 'suspended' || u.accountStatus === 'blocked' ? 'blocked' : ''
-        }">${
-          u.accountStatus === 'suspended' || u.accountStatus === 'blocked'
-            ? u.accountStatus
-            : u.role
-        }</span>
-      </a>`
-      )
-      .join('')}
-    <hr style="border:none;border-top:1px solid #e2e8f0;margin:14px 0;" />
-    <form method="GET" action="/auth/callback">
-      <input type="email" name="google_email" required placeholder="new.customer@gmail.com" />
-      <input type="text" name="google_name" placeholder="Full Name (New Customer Auto-Registration)" />
-      <button type="submit" class="primary">Continue with Google</button>
-    </form>
-  </div>
-  <script>
-    (async function handleSupabaseHashCallback() {
-      try {
-        const hash = window.location.hash ? window.location.hash.substring(1) : '';
-        if (!hash) return;
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get('access_token');
-        if (!accessToken) return;
-        document.getElementById('status-sub').innerText = 'Verifying Supabase Google OAuth session...';
-        let email = '';
-        let name = '';
-        let sub = '';
-        let avatar = '';
-        const parts = accessToken.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-          email = payload.email || (payload.user_metadata && payload.user_metadata.email) || '';
-          name = (payload.user_metadata && (payload.user_metadata.full_name || payload.user_metadata.name)) || '';
-          sub = payload.sub || '';
-          avatar = (payload.user_metadata && (payload.user_metadata.avatar_url || payload.user_metadata.picture)) || '';
-        }
-        if (email) {
-          const resp = await fetch('/api/auth/google/authenticate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              authProvider: 'google',
-              supabaseProjectId: ${JSON.stringify(SUPABASE_PROJECT_ID)},
-              email,
-              name,
-              googleSub: sub,
-              avatarUrl: avatar
-            })
-          });
-          const data = await resp.json();
-          if (resp.ok && data.ok && window.opener) {
-            window.opener.postMessage({
-              type: 'OAUTH_AUTH_SUCCESS',
-              isNewUser: data.isNewUser,
-              user: data.user,
-              sessionToken: data.sessionToken,
-              redirectTarget: data.redirectTarget
-            }, '*');
-            window.close();
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('Supabase hash callback parse error:', e);
-      }
-    })();
-  </script>
-</body>
-</html>`);
+    if (!identity) {
+      sendGoogleOAuthPopupResult(res, appOrigin, { type: 'OAUTH_AUTH_ERROR', error: 'GOOGLE_ID_TOKEN_INVALID', message: 'Google could not verify this sign-in. Please try again.' }, 401);
       return;
     }
 
     const authResult = authenticateOrRegisterGoogleUser({
-      email: googleEmail,
-      name: googleName,
-      googleSub,
-      avatarUrl: googleAvatar,
+      email: identity.email,
+      name: identity.name,
+      googleSub: identity.sub,
+      avatarUrl: identity.picture,
+      requestedRole: stateEntry.role,
+      allowRoleChange: false,
+    });
+    if (!authResult.ok) {
+      sendGoogleOAuthPopupResult(res, appOrigin, { type: 'OAUTH_AUTH_ERROR', error: authResult.error, accountStatus: authResult.accountStatus, message: authResult.message }, authResult.status);
+      return;
+    }
+    sendGoogleOAuthPopupResult(res, appOrigin, {
+      type: 'OAUTH_AUTH_SUCCESS',
+      isNewUser: authResult.isNewUser,
+      user: authResult.user,
+      sessionToken: authResult.sessionToken,
+      redirectTarget: authResult.redirectTarget,
+    });
+  });
+
+  // 1C. The API accepts a Google ID token only. Email, role, and profile fields from the
+  // request body are never used as identity or administrator evidence.
+  app.post('/api/auth/google/authenticate', async (req, res) => {
+    const googleClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+    const idToken = typeof req.body?.idToken === 'string' ? req.body.idToken : '';
+    if (!serverSupabaseConfig.ok || !googleClientId || !idToken) {
+      res.status(401).json({ ok: false, error: 'GOOGLE_OAUTH_PROOF_REQUIRED', message: 'Complete Google sign-in to continue.' });
+      return;
+    }
+    const identity = await verifyGoogleIdToken(idToken, googleClientId);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'GOOGLE_ID_TOKEN_INVALID' });
+      return;
+    }
+    const requestedRole = ['customer', 'provider', 'admin'].includes(String(req.body?.requestedRole || '').toLowerCase())
+      ? String(req.body.requestedRole).toLowerCase()
+      : 'customer';
+    const result = authenticateOrRegisterGoogleUser({
+      email: identity.email,
+      name: identity.name,
+      googleSub: identity.sub,
+      avatarUrl: identity.picture,
       requestedRole,
       allowRoleChange: false,
     });
-
-    if (!authResult.ok) {
-      res.status(authResult.status).send(`<!DOCTYPE html>
-<html>
-  <body>
-    <script>
-      if (window.opener) {
-        window.opener.postMessage(${JSON.stringify({
-          type: 'OAUTH_AUTH_ERROR',
-          error: authResult.error,
-          accountStatus: authResult.accountStatus,
-          message: authResult.message,
-        })}, '*');
-        window.close();
-      } else {
-        document.body.innerText = ${JSON.stringify(authResult.message)};
-      }
-    </script>
-  </body>
-</html>`);
-      return;
-    }
-
-    res.send(`<!DOCTYPE html>
-<html>
-  <body>
-    <script>
-      if (window.opener) {
-        window.opener.postMessage(${JSON.stringify({
-          type: 'OAUTH_AUTH_SUCCESS',
-          isNewUser: authResult.isNewUser,
-          user: authResult.user,
-          sessionToken: authResult.sessionToken,
-          redirectTarget: authResult.redirectTarget,
-        })}, '*');
-        window.close();
-      } else {
-        window.location.href = '/';
-      }
-    </script>
-    <p>Google authentication successful. Closing window...</p>
-  </body>
-</html>`);
-  });
-
-  // 1C. AUTHORITATIVE GOOGLE OAUTH AUTHENTICATE / AUTO-REGISTER ENDPOINT
-  app.post('/api/auth/google/authenticate', (req, res) => {
-    const {
-      email,
-      name,
-      googleSub,
-      avatarUrl,
-      phone,
-      requestedRole,
-      allowRoleChange,
-      city,
-      authProvider,
-    } = req.body || {};
-
-    // Enforce Google-only login policy
-    if (authProvider && String(authProvider).toLowerCase() !== 'google') {
-      res.status(400).json({
-        ok: false,
-        error: 'GOOGLE_OAUTH_ONLY',
-        message: 'Only Google OAuth authentication is permitted. Password and non-Google logins are disabled.',
-      });
-      return;
-    }
-
-    const result = authenticateOrRegisterGoogleUser({
-      email: String(email || ''),
-      name: name ? String(name) : undefined,
-      googleSub: googleSub ? String(googleSub) : undefined,
-      avatarUrl: avatarUrl ? String(avatarUrl) : undefined,
-      phone: phone ? String(phone) : undefined,
-      requestedRole: requestedRole ? String(requestedRole) : undefined,
-      allowRoleChange: Boolean(allowRoleChange),
-      city: city ? String(city) : undefined,
-    });
-
     if (!result.ok) {
-      res.status(result.status).json(result);
+      res.status(result.status).json({ ok: false, error: result.error, message: result.message, accountStatus: result.accountStatus });
       return;
     }
-
     res.status(result.isNewUser ? 201 : 200).json({
-      ok: true,
-      authProvider: 'google',
-      supabaseProjectId: SUPABASE_PROJECT_ID,
-      isNewUser: result.isNewUser,
-      user: result.user,
-      sessionToken: result.sessionToken,
-      claims: result.claims,
-      redirectTarget: result.redirectTarget,
+      ok: true, authProvider: 'google', supabaseProjectId: SUPABASE_PROJECT_ID,
+      isNewUser: result.isNewUser, user: result.user, sessionToken: result.sessionToken,
+      claims: result.claims, redirectTarget: result.redirectTarget,
     });
   });
 
@@ -2223,8 +2065,8 @@ Task:
 
     // Prevent arbitrary unverified self-escalation to admin unless valid admin key/passcode is supplied
     if (requestedRole === 'admin') {
-      const expectedAdminPasscode = process.env.BOS_ADMIN_PASSCODE || 'bos-admin-2026-verified';
-      if (adminPasscode !== expectedAdminPasscode) {
+      const expectedAdminPasscode = process.env.BOS_ADMIN_PASSCODE?.trim();
+      if (!expectedAdminPasscode || adminPasscode !== expectedAdminPasscode) {
         res.status(403).json({
           ok: false,
           error: 'ADMIN_ESCALATION_DENIED',
@@ -2255,7 +2097,7 @@ Task:
   });
 
   // 2. GET AUTHORITATIVE SEAT LOCKS FOR A MOVIE / SHOWTIME
-  app.get('/api/seats/locks', (req, res) => {
+  app.get('/api/seats/locks', async (req, res) => {
     const listingId = String(req.query.listingId || '').trim();
     const dateIso = String(req.query.dateIso || '').trim();
     const showtime = String(req.query.showtime || '').trim();
@@ -2265,30 +2107,25 @@ Task:
       return;
     }
 
-    const store = loadAuthoritativeStore();
-    if (pruneExpiredSeatHolds(store)) {
-      saveAuthoritativeStore(store);
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const { data, error } = await db
+      .from('seat_locks')
+      .select('seat_id, session_id, status, expires_at')
+      .eq('listing_id', listingId)
+      .eq('show_date', dateIso)
+      .eq('show_time', showtime)
+      .or(`status.eq.booked,expires_at.gt.${new Date().toISOString()}`);
+    if (error) {
+      res.status(503).json({ ok: false, error: 'SEAT_INVENTORY_UNAVAILABLE' });
+      return;
     }
-
-    // Baseline occupied seats (C4, C5, E7) + all dynamically held/booked seats
-    const bookedSeats = new Set<string>(['C4', 'C5', 'E7']);
-    const heldSeats: Array<{ seatId: string; sessionId: string; expiresAt: number }> = [];
-    const prefix = `${listingId}::${dateIso}::${showtime}::`;
-
-    for (const [key, lock] of Object.entries(store.seatLocks)) {
-      if (!key.startsWith(prefix)) continue;
-      if (lock.status === 'booked') {
-        bookedSeats.add(lock.seatId);
-      } else if (lock.status === 'held' && lock.expiresAt > Date.now()) {
-        heldSeats.push({
-          seatId: lock.seatId,
-          sessionId: lock.sessionId,
-          expiresAt: lock.expiresAt,
-        });
-      }
-    }
-
-    const allLocked = Array.from(new Set([...Array.from(bookedSeats), ...heldSeats.map((h) => h.seatId)]));
+    const rows = data || [];
+    const bookedSeats = rows.filter((row) => row.status === 'booked').map((row) => row.seat_id);
+    const heldSeats = rows
+      .filter((row) => row.status === 'held')
+      .map((row) => ({ seatId: row.seat_id, expiresAt: Date.parse(row.expires_at) }));
+    const allLocked = Array.from(new Set([...bookedSeats, ...heldSeats.map((h) => h.seatId)]));
     res.json({
       ok: true,
       listingId,
@@ -2301,95 +2138,51 @@ Task:
   });
 
   // 3. ATOMIC SEAT HOLD (Prevents Race Conditions Between Concurrent Users + Blocks Suspended Users)
-  app.post('/api/seats/hold', (req, res) => {
-    const { listingId, dateIso, showtime, seats, sessionId, userId, ttlSeconds } = req.body || {};
+  app.post('/api/seats/hold', async (req, res) => {
+    const { listingId, dateIso, showtime, seats, ttlSeconds } = req.body || {};
     const sessionClaims = verifySessionTokenFromRequest(req);
+    if (!sessionClaims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
     const store = loadAuthoritativeStore();
-
-    const blocked = findBlockedUserInStore(
-      store,
-      sessionClaims?.userId || userId,
-      sessionClaims?.email
-    );
-    if (blocked) {
-      res.status(403).json({
-        ok: false,
-        error: 'ACCOUNT_BLOCKED',
-        message: 'Suspended or blocked accounts cannot lock seats.',
-      });
+    if (findBlockedUserInStore(store, sessionClaims.userId, sessionClaims.email)) {
+      res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
       return;
     }
 
     const cleanListingId = String(listingId || '').trim();
     const cleanDateIso = String(dateIso || '').trim();
     const cleanShowtime = String(showtime || '').trim();
-    const cleanSessionId = String(sessionId || '').trim();
+    const cleanSessionId = sessionClaims.userId;
     const seatList: string[] = Array.isArray(seats)
       ? Array.from(new Set(seats.map((s: any) => String(s || '').trim().toUpperCase()).filter(Boolean)))
       : [];
 
     if (!cleanListingId || !cleanDateIso || !cleanShowtime || !cleanSessionId || seatList.length === 0) {
-      res.status(400).json({
-        ok: false,
-        error: 'INVALID_HOLD_REQUEST',
-        message: 'listingId, dateIso, showtime, sessionId, and non-empty seats[] are required.',
-      });
+      res.status(400).json({ ok: false, error: 'INVALID_HOLD_REQUEST' });
       return;
     }
-
-    pruneExpiredSeatHolds(store);
-
-    const baselineSold = new Set(['C4', 'C5', 'E7']);
-    const conflictingSeats: string[] = [];
-    const now = Date.now();
-
-    for (const seatId of seatList) {
-      if (baselineSold.has(seatId)) {
-        conflictingSeats.push(seatId);
-        continue;
-      }
-      const key = `${cleanListingId}::${cleanDateIso}::${cleanShowtime}::${seatId}`;
-      const existing = store.seatLocks[key];
-      if (existing) {
-        if (existing.status === 'booked') {
-          conflictingSeats.push(seatId);
-        } else if (existing.status === 'held' && existing.sessionId !== cleanSessionId && existing.expiresAt > now) {
-          conflictingSeats.push(seatId);
-        }
-      }
-    }
-
-    if (conflictingSeats.length > 0) {
-      saveAuthoritativeStore(store);
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const { data, error } = await db.rpc('hold_movie_seats_atomic', {
+      p_listing_id: cleanListingId,
+      p_show_date: cleanDateIso,
+      p_show_time: cleanShowtime,
+      p_seats: seatList,
+      p_session_id: cleanSessionId,
+      p_ttl_seconds: Math.max(60, Math.min(900, Number(ttlSeconds) || 300)),
+    });
+    if (error || !data?.ok) {
       res.status(409).json({
         ok: false,
-        error: 'SEAT_CONFLICT',
-        conflictingSeats,
-        message: `Seats ${conflictingSeats.join(', ')} are already locked or booked by another customer.`,
+        error: data?.error || 'SEAT_CONFLICT',
+        conflictingSeats: data?.conflictingSeats || [],
+        message: data?.message || 'One or more seats are unavailable.',
       });
       return;
     }
-
-    const ttlMs = Math.max(60, Math.min(900, Number(ttlSeconds) || 300)) * 1000;
-    const expiresAt = now + ttlMs;
-
-    for (const seatId of seatList) {
-      const key = `${cleanListingId}::${cleanDateIso}::${cleanShowtime}::${seatId}`;
-      store.seatLocks[key] = {
-        key,
-        listingId: cleanListingId,
-        dateIso: cleanDateIso,
-        showtime: cleanShowtime,
-        seatId,
-        sessionId: cleanSessionId,
-        userId: String(sessionClaims?.userId || userId || cleanSessionId),
-        status: 'held',
-        expiresAt,
-        createdAt: new Date(now).toISOString(),
-      };
-    }
-
-    saveAuthoritativeStore(store);
+    const expiresAt = Date.parse(data.expiresAt);
     const lockToken = computeHmac(
       `${cleanListingId}|${cleanDateIso}|${cleanShowtime}|${seatList.sort().join(',')}|${cleanSessionId}`,
       'SEAT_HOLD'
@@ -2408,676 +2201,386 @@ Task:
   });
 
   // 4. RELEASE HELD SEATS
-  app.post('/api/seats/release', (req, res) => {
-    const { listingId, dateIso, showtime, seats, sessionId } = req.body || {};
+  app.post('/api/seats/release', async (req, res) => {
+    const { listingId, dateIso, showtime, seats } = req.body || {};
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
     const cleanListingId = String(listingId || '').trim();
     const cleanDateIso = String(dateIso || '').trim();
     const cleanShowtime = String(showtime || '').trim();
-    const cleanSessionId = String(sessionId || '').trim();
+    const cleanSessionId = claims.userId;
     const seatList: string[] = Array.isArray(seats)
       ? seats.map((s: any) => String(s || '').trim().toUpperCase())
       : [];
 
-    const store = loadAuthoritativeStore();
-    let releasedCount = 0;
-
-    for (const [key, entry] of Object.entries(store.seatLocks)) {
-      if (
-        entry.status === 'held' &&
-        entry.sessionId === cleanSessionId &&
-        (!cleanListingId || entry.listingId === cleanListingId) &&
-        (!cleanDateIso || entry.dateIso === cleanDateIso) &&
-        (!cleanShowtime || entry.showtime === cleanShowtime) &&
-        (seatList.length === 0 || seatList.includes(entry.seatId))
-      ) {
-        delete store.seatLocks[key];
-        releasedCount++;
-      }
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    let query = db.from('seat_locks').delete({ count: 'exact' })
+      .eq('session_id', cleanSessionId).eq('status', 'held');
+    if (cleanListingId) query = query.eq('listing_id', cleanListingId);
+    if (cleanDateIso) query = query.eq('show_date', cleanDateIso);
+    if (cleanShowtime) query = query.eq('show_time', cleanShowtime);
+    if (seatList.length) query = query.in('seat_id', seatList);
+    const { count, error } = await query;
+    if (error) {
+      res.status(503).json({ ok: false, error: 'SEAT_RELEASE_FAILED' });
+      return;
     }
-
-    if (releasedCount > 0) {
-      saveAuthoritativeStore(store);
-    }
-
-    res.json({ ok: true, releasedCount });
+    res.json({ ok: true, releasedCount: count || 0 });
   });
 
   // 5. SERVER-SIDE UPI PAYMENT INTENT CREATION
-  app.post('/api/payments/create-intent', (req, res) => {
-    const { amount, merchantVpa, planOrListing, userId } = req.body || {};
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      res.status(400).json({ ok: false, error: 'INVALID_AMOUNT' });
-      return;
+  app.post('/api/payments/create-intent', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const blocked = findBlockedUserInStore(loadAuthoritativeStore(), claims.userId, claims.email);
+    if (blocked) return res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
+
+    const amount = Number(req.body?.amount);
+    const purpose = String(req.body?.purpose || 'booking');
+    const listingId = String(req.body?.listingId || '').trim() || null;
+    const idempotencyKey = String(req.headers['x-idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 10000000 || !idempotencyKey) {
+      return res.status(400).json({ ok: false, error: 'INVALID_PAYMENT_INTENT' });
+    }
+    if (!['booking', 'subscription', 'service'].includes(purpose)) {
+      return res.status(400).json({ ok: false, error: 'INVALID_PAYMENT_PURPOSE' });
     }
 
-    const intentId = `INT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const nowIso = new Date().toISOString();
-    const store = loadAuthoritativeStore();
-
-    const record: PaymentIntentRecord = {
-      intentId,
-      userId: String(userId || 'guest'),
-      amount: numericAmount,
-      merchantVpa: String(merchantVpa || 'bookourspace@okhdfcbank').trim(),
-      planOrListing: String(planOrListing || 'BookOurSpace Service').trim(),
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const intentId = `INT-${crypto.randomUUID()}`;
+    const requestedProvider = String(req.body?.provider || 'upi');
+    if (!['upi', 'razorpay'].includes(requestedProvider)) return res.status(400).json({ ok: false, error: 'INVALID_PAYMENT_PROVIDER' });
+    if (requestedProvider === 'razorpay' && (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET)) {
+      return res.status(503).json({ ok: false, error: 'RAZORPAY_NOT_CONFIGURED' });
+    }
+    const merchantVpa = (process.env.BOS_UPI_MERCHANT_VPA || '').trim();
+    if (requestedProvider === 'upi' && !merchantVpa) return res.status(503).json({ ok: false, error: 'UPI_MERCHANT_NOT_CONFIGURED' });
+    const intent = {
+      intent_id: intentId,
+      actor_id: claims.userId,
+      user_id: null,
+      amount,
+      merchant_vpa: requestedProvider === 'upi' ? merchantVpa : 'razorpay',
       status: 'created',
-      createdAt: nowIso,
-      updatedAt: nowIso,
+      payment_provider: requestedProvider,
+      purpose,
+      listing_id: listingId,
+      idempotency_key: idempotencyKey,
     };
-
-    store.paymentIntents[intentId] = record;
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      intentId,
-      amount: record.amount,
-      merchantVpa: record.merchantVpa,
-      status: record.status,
-      createdAt: nowIso,
-    });
+    const { data, error } = await db.from('payment_verifications').insert(intent).select('intent_id, amount, merchant_vpa, status, created_at').single();
+    if (error?.code === '23505') {
+      const existing = await db.from('payment_verifications')
+        .select('intent_id, amount, merchant_vpa, status, created_at')
+        .eq('actor_id', claims.userId).eq('idempotency_key', idempotencyKey).maybeSingle();
+      if (existing.data) return res.json({ ok: true, ...existing.data, intentId: existing.data.intent_id });
+    }
+    if (error || !data) return res.status(503).json({ ok: false, error: 'PAYMENT_INTENT_CREATE_FAILED' });
+    return res.status(201).json({ ok: true, intentId: data.intent_id, amount: data.amount, merchantVpa: data.merchant_vpa, status: data.status, createdAt: data.created_at });
   });
 
-  // 6. SIMULATED / GATEWAY NPCI WEBHOOK SETTLEMENT (Generates Authoritative Server Gateway Signature)
+  // 6. Legacy public settlement endpoint. A caller cannot mint its own payment proof.
   app.post('/api/payments/webhook-settle', (req, res) => {
-    const { intentId, utrNumber, amount } = req.body || {};
-    const cleanIntentId = String(intentId || '').trim();
-    const cleanUtr = String(utrNumber || '').trim().replace(/\s+/g, '');
-
-    if (!cleanIntentId || !/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
-      res.status(400).json({
-        ok: false,
-        error: 'INVALID_SETTLEMENT_PAYLOAD',
-        message: 'Valid intentId and 12-to-22 character alphanumeric bank UTR are required.',
-      });
-      return;
-    }
-
-    const store = loadAuthoritativeStore();
-    const intent = store.paymentIntents[cleanIntentId];
-    if (!intent) {
-      res.status(404).json({ ok: false, error: 'PAYMENT_INTENT_NOT_FOUND' });
-      return;
-    }
-
-    const existingUtr = store.usedUtrs[cleanUtr];
-    if (existingUtr && existingUtr.intentId !== cleanIntentId) {
-      res.status(409).json({
-        ok: false,
-        error: 'DUPLICATE_UTR_REPLAY',
-        message: `UTR ${cleanUtr} has already been used for another transaction (${existingUtr.intentId}).`,
-      });
-      return;
-    }
-
-    const effectiveAmount = Number(amount ?? intent.amount);
-    const gatewaySignature = computeHmac(
-      `${cleanIntentId}|${effectiveAmount.toFixed(2)}|${cleanUtr}|${intent.merchantVpa}`,
-      'UPI_GATEWAY_WEBHOOK'
-    );
-
-    res.json({
-      ok: true,
-      intentId: cleanIntentId,
-      utrNumber: cleanUtr,
-      amount: effectiveAmount,
-      gatewaySignature,
+    res.status(410).json({
+      ok: false,
+      error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+      message: 'Payment settlement must be confirmed by a configured provider webhook.',
     });
   });
 
-  // 7. SERVER-SIDE UPI PAYMENT VERIFICATION (Enforces: UTR alone != verified payment)
-  app.post('/api/payments/verify-upi', (req, res) => {
-    const { intentId, utrNumber, gatewaySignature, amount, merchantVpa } = req.body || {};
-    const cleanIntentId = String(intentId || '').trim();
-    const cleanUtr = String(utrNumber || '').trim().replace(/\s+/g, '');
-    const cleanSig = String(gatewaySignature || '').trim();
+  // Razorpay webhook is the only automatic payment settlement boundary.
+  app.post('/api/payments/razorpay/webhook', async (req, res) => {
+    const secret = (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
+    if (!secret) return res.status(503).json({ ok: false, error: 'RAZORPAY_WEBHOOK_NOT_CONFIGURED' });
+    const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+    const signature = String(req.headers['x-razorpay-signature'] || '').trim();
+    const eventId = String(req.headers['x-razorpay-event-id'] || '').trim();
+    if (!rawBody || !signature || !eventId) return res.status(400).json({ ok: false, error: 'INVALID_WEBHOOK_HEADERS' });
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    if (!safeTimingEqualHex(signature, expected)) return res.status(401).json({ ok: false, error: 'INVALID_WEBHOOK_SIGNATURE' });
+    let event: any;
+    try { event = JSON.parse(rawBody.toString('utf8')); } catch { return res.status(400).json({ ok: false, error: 'INVALID_WEBHOOK_BODY' }); }
+    const type = String(event?.event || '');
+    const payment = event?.payload?.payment?.entity;
+    const refund = event?.payload?.refund?.entity;
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const { data, error } = await db.rpc('process_razorpay_event', {
+      p_event_id: eventId,
+      p_event_type: type,
+      p_payload_sha256: crypto.createHash('sha256').update(rawBody).digest('hex'),
+      p_order_id: payment?.order_id || null,
+      p_amount_paise: Number(payment?.amount ?? refund?.amount ?? 0),
+      p_provider_payment_id: payment?.id || refund?.payment_id || null,
+      p_provider_refund_id: refund?.id || null,
+      p_actor_hint: null,
+    });
+    if (error || !data?.ok) return res.status(503).json({ ok: false, error: 'WEBHOOK_PROCESSING_FAILED' });
+    return res.json({ ok: true, duplicate: Boolean(data.duplicate), ignored: Boolean(data.ignored) });
+  });
 
-    if (!/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
-      res.status(400).json({
-        ok: false,
-        verified: false,
-        error: 'INVALID_UTR_FORMAT',
-        message: 'A valid 12-digit NPCI UTR reference number is required.',
-      });
-      return;
+  app.post('/api/payments/razorpay/create-order', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const keyId = (process.env.RAZORPAY_KEY_ID || '').trim();
+    const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+    if (!keyId || !keySecret) return res.status(503).json({ ok: false, error: 'RAZORPAY_NOT_CONFIGURED' });
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const intentId = String(req.body?.intentId || '').trim();
+    const found = await db.from('payment_verifications').select('intent_id, amount, status, payment_provider, actor_id, provider_order_id')
+      .eq('intent_id', intentId).eq('actor_id', claims.userId).eq('payment_provider', 'razorpay').maybeSingle();
+    if (found.error || !found.data) return res.status(404).json({ ok: false, error: 'PAYMENT_INTENT_NOT_FOUND' });
+    if (found.data.provider_order_id) return res.json({ ok: true, orderId: found.data.provider_order_id, amount: Number(found.data.amount), currency: 'INR', keyId });
+    if (found.data.status !== 'created') return res.status(409).json({ ok: false, error: 'PAYMENT_INTENT_NOT_OPEN' });
+    const basic = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+    const providerResponse = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST', headers: { authorization: `Basic ${basic}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ amount: Math.round(Number(found.data.amount) * 100), currency: 'INR', receipt: intentId, notes: { payment_intent_id: intentId } }),
+    });
+    const order = await providerResponse.json().catch(() => ({}));
+    if (!providerResponse.ok || !order.id) return res.status(502).json({ ok: false, error: 'RAZORPAY_ORDER_CREATE_FAILED' });
+    const saved = await db.from('payment_verifications').update({ provider_order_id: order.id, updated_at: new Date().toISOString() })
+      .eq('intent_id', intentId).eq('actor_id', claims.userId).is('provider_order_id', null).select('provider_order_id').maybeSingle();
+    if (saved.error || !saved.data) return res.status(409).json({ ok: false, error: 'RAZORPAY_ORDER_RACE' });
+    return res.status(201).json({ ok: true, orderId: saved.data.provider_order_id, amount: Number(found.data.amount), currency: 'INR', keyId });
+  });
+
+  // 7. Record a customer UTR for manual bank reconciliation. A browser can never verify settlement.
+  app.post('/api/payments/verify-upi', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return res.status(401).json({ ok: false, verified: false, error: 'UNAUTHORIZED_SESSION' });
+    const intentId = String(req.body?.intentId || '').trim();
+    const utrNumber = String(req.body?.utrNumber || '').trim().replace(/\s+/g, '').toUpperCase();
+    if (!intentId || !/^[A-Z0-9]{12,22}$/.test(utrNumber)) {
+      return res.status(400).json({ ok: false, verified: false, error: 'INVALID_UPI_SUBMISSION' });
     }
-
-    const store = loadAuthoritativeStore();
-    let intent = cleanIntentId ? store.paymentIntents[cleanIntentId] : undefined;
-
-    // Anti-replay: reject if UTR was already used on a different payment intent
-    const existingUtr = store.usedUtrs[cleanUtr];
-    if (existingUtr && existingUtr.intentId !== cleanIntentId) {
-      res.status(409).json({
-        ok: false,
-        verified: false,
-        error: 'DUPLICATE_UTR_REPLAY',
-        message: `UTR ${cleanUtr} was already submitted for transaction ${existingUtr.intentId}. Replay rejected.`,
-      });
-      return;
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const { data: intent, error: lookupError } = await db.from('payment_verifications')
+      .select('intent_id, actor_id, amount, merchant_vpa, status, utr_number, payment_provider')
+      .eq('intent_id', intentId).eq('actor_id', claims.userId).maybeSingle();
+    if (lookupError || !intent) return res.status(404).json({ ok: false, verified: false, error: 'PAYMENT_INTENT_NOT_FOUND' });
+    if (intent.payment_provider !== 'upi') return res.status(409).json({ ok: false, verified: false, error: 'PAYMENT_PROVIDER_MISMATCH' });
+    if (intent.status === 'verified' && intent.utr_number === utrNumber) {
+      return res.json({ ok: true, verified: true, status: 'verified', intentId, utrNumber, amount: intent.amount,
+        message: 'Payment is verified in the server reconciliation ledger.' });
     }
-
-    if (!intent) {
-      const generatedIntentId = cleanIntentId || `INT-${Date.now()}`;
-      intent = {
-        intentId: generatedIntentId,
-        userId: 'guest',
-        amount: Number(amount) || 1,
-        merchantVpa: String(merchantVpa || 'bookourspace@okhdfcbank').trim(),
-        planOrListing: 'Direct UPI Payment',
-        status: 'created',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      store.paymentIntents[generatedIntentId] = intent;
+    if (intent.utr_number && intent.utr_number !== utrNumber) {
+      return res.status(409).json({ ok: false, verified: false, error: 'UTR_ALREADY_SUBMITTED' });
     }
-
-    const expectedSig = computeHmac(
-      `${intent.intentId}|${intent.amount.toFixed(2)}|${cleanUtr}|${intent.merchantVpa}`,
-      'UPI_GATEWAY_WEBHOOK'
-    );
-
-    const hasValidGatewayProof = cleanSig.length > 0 && safeTimingEqualHex(cleanSig, expectedSig);
-
-    // CRITICAL SECURITY RULE: UTR alone != success!
-    if (!hasValidGatewayProof) {
-      intent.utrNumber = cleanUtr;
-      intent.status = 'pending_provider_reconciliation';
-      intent.updatedAt = new Date().toISOString();
-      store.usedUtrs[cleanUtr] = {
-        intentId: intent.intentId,
-        status: 'pending_provider_reconciliation',
-        recordedAt: intent.updatedAt,
-      };
-      saveAuthoritativeStore(store);
-
-      res.status(202).json({
-        ok: true,
-        verified: false,
-        status: 'pending_provider_reconciliation',
-        intentId: intent.intentId,
-        utrNumber: cleanUtr,
-        message:
-          'UTR recorded as Pending Bank Reconciliation. Submitting a UTR number alone does not mark payment as verified until bank/gateway webhook confirmation.',
-      });
-      return;
+    if (intent.payment_provider !== 'upi' || !['created', 'pending_reconciliation'].includes(intent.status)) {
+      return res.status(409).json({ ok: false, verified: false, error: 'PAYMENT_NOT_SUBMITTABLE', status: intent.status });
     }
-
-    // Cryptographic gateway/webhook signature verified
-    const verificationToken = computeHmac(
-      `${intent.intentId}|${cleanUtr}|VERIFIED|${intent.amount.toFixed(2)}`,
-      'PAYMENT_VERIFIED_TOKEN'
-    );
-
-    intent.utrNumber = cleanUtr;
-    intent.gatewaySignature = cleanSig;
-    intent.status = 'verified';
-    intent.paymentVerificationToken = verificationToken;
-    intent.updatedAt = new Date().toISOString();
-
-    store.usedUtrs[cleanUtr] = {
-      intentId: intent.intentId,
-      status: 'verified',
-      recordedAt: intent.updatedAt,
-    };
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      verified: true,
-      status: 'verified',
-      intentId: intent.intentId,
-      utrNumber: cleanUtr,
-      amount: intent.amount,
-      paymentVerificationToken: verificationToken,
-      message: 'Payment cryptographically verified via bank/gateway settlement signature.',
+    let updateIntent = db.from('payment_verifications').update({
+      utr_number: utrNumber,
+      status: 'pending_reconciliation',
+      updated_at: new Date().toISOString(),
+    }).eq('intent_id', intentId).eq('actor_id', claims.userId).in('status', ['created', 'pending_reconciliation']);
+    updateIntent = intent.utr_number ? updateIntent.eq('utr_number', utrNumber) : updateIntent.is('utr_number', null);
+    const { data, error } = await updateIntent.select('intent_id, status, utr_number').maybeSingle();
+    if (error?.code === '23505') return res.status(409).json({ ok: false, verified: false, error: 'DUPLICATE_UTR_REPLAY' });
+    if (!data && !error) return res.status(409).json({ ok: false, verified: false, error: 'UTR_ALREADY_SUBMITTED' });
+    if (error || !data) return res.status(503).json({ ok: false, verified: false, error: 'UPI_RECONCILIATION_SUBMISSION_FAILED' });
+    return res.status(202).json({
+      ok: true, verified: false, status: data.status, intentId: data.intent_id, utrNumber: data.utr_number,
+      message: 'Payment reference recorded and awaiting independent bank reconciliation.',
     });
   });
 
-  // 8. ATOMIC BOOKING CREATION (Enforces Account Blocking, Idempotency, Seat/Slot Concurrency & Signs QR Pass)
-  app.post('/api/bookings/atomic', (req, res) => {
+  // 7A. Only an administrator may record a bank-reconciliation decision.
+  app.post('/api/admin/payments/:intentId/reconcile', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || claims.role !== 'admin') return res.status(claims ? 403 : 401).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 8) return res.status(400).json({ ok: false, error: 'ADMIN_REASON_REQUIRED' });
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const { data, error } = await db.rpc('approve_upi_reconciliation', {
+      p_intent_id: String(req.params.intentId), p_admin_actor_id: claims.userId,
+      p_reason: reason, p_approve: req.body?.approve === true,
+    });
+    if (error || !data?.ok) return res.status(409).json({ ok: false, error: data?.error || 'RECONCILIATION_FAILED' });
+    return res.json({ ok: true, status: data.status });
+  });
+
+  app.post('/api/admin/refunds/:refundId/reconcile', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || claims.role !== 'admin') return res.status(claims ? 403 : 401).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 8) return res.status(400).json({ ok: false, error: 'ADMIN_REASON_REQUIRED' });
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const { data, error } = await db.rpc('review_manual_refund', {
+      p_refund_id: String(req.params.refundId), p_admin_actor_id: claims.userId,
+      p_reason: reason, p_approve: req.body?.approve === true,
+    });
+    if (error || !data?.ok) return res.status(409).json({ ok: false, error: data?.error || 'REFUND_RECONCILIATION_FAILED' });
+    return res.json({ ok: true, status: data.status });
+  });
+
+  // 8. Database-authoritative booking creation. The RPC owns inventory locking and idempotency.
+  app.post('/api/bookings/atomic', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const blocked = findBlockedUserInStore(loadAuthoritativeStore(), claims.userId, claims.email);
+    if (blocked) return res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
+
     const body = req.body || {};
-    const sessionClaims = verifySessionTokenFromRequest(req);
-    const store = loadAuthoritativeStore();
-
-    // Enforce account blocking on bookings
-    const blocked = findBlockedUserInStore(
-      store,
-      sessionClaims?.userId || body.customerUserId,
-      sessionClaims?.email || body.customerEmail
-    );
-    if (blocked) {
-      res.status(403).json({
-        ok: false,
-        error: 'ACCOUNT_BLOCKED',
-        accountStatus: blocked.accountStatus,
-        message: `Account "${blocked.name}" is ${blocked.accountStatus}. Booking creation is blocked.`,
-      });
-      return;
-    }
-
-    const idempotencyKey = String(body.idempotencyKey || req.headers['x-idempotency-key'] || '').trim();
-    if (!idempotencyKey) {
-      res.status(400).json({
-        ok: false,
-        error: 'MISSING_IDEMPOTENCY_KEY',
-        message: 'idempotencyKey is required to prevent duplicate bookings.',
-      });
-      return;
-    }
-
+    const idempotencyKey = String(req.headers['x-idempotency-key'] || body.idempotencyKey || '').trim();
     const listingId = String(body.listingId || '').trim();
     const scheduledDate = String(body.scheduledDate || '').trim();
     const timeSlot = String(body.timeSlot || '').trim();
-    if (!listingId || !scheduledDate || !timeSlot) {
-      res.status(400).json({
-        ok: false,
-        error: 'MISSING_REQUIRED_FIELDS',
-        message: 'listingId, scheduledDate, and timeSlot are required.',
-      });
-      return;
-    }
-
-    pruneExpiredSeatHolds(store);
-
-    // 8A. IDEMPOTENCY CHECK: Return existing booking if idempotencyKey was already processed
-    const existingByIdempotency = store.bookings.find((b) => b.idempotencyKey === idempotencyKey);
-    if (existingByIdempotency) {
-      res.json({
-        ok: true,
-        idempotentReplay: true,
-        booking: existingByIdempotency,
-      });
-      return;
-    }
-
+    const totalAmount = Number(body.totalAmount);
     const seats: string[] = Array.isArray(body.seats)
-      ? Array.from(new Set(body.seats.map((s: any) => String(s || '').trim().toUpperCase()).filter(Boolean)))
+      ? Array.from(new Set(body.seats.map((seat: unknown) => String(seat || '').trim().toUpperCase()).filter(Boolean)))
       : [];
-    const showtime = String(body.showtime || timeSlot).trim();
-    const sessionId = String(body.sessionId || sessionClaims?.userId || 'direct-session').trim();
-    const now = Date.now();
-
-    // 8B. MOVIE SEAT CONCURRENCY CHECK & ATOMIC RESERVATION
-    if (seats.length > 0) {
-      const baselineSold = new Set(['C4', 'C5', 'E7']);
-      const conflictingSeats: string[] = [];
-
-      for (const seatId of seats) {
-        if (baselineSold.has(seatId)) {
-          conflictingSeats.push(seatId);
-          continue;
-        }
-        const key = `${listingId}::${scheduledDate}::${showtime}::${seatId}`;
-        const lock = store.seatLocks[key];
-        if (lock) {
-          if (lock.status === 'booked') {
-            conflictingSeats.push(seatId);
-          } else if (lock.status === 'held' && lock.sessionId !== sessionId && lock.expiresAt > now) {
-            conflictingSeats.push(seatId);
-          }
-        }
-      }
-
-      if (conflictingSeats.length > 0) {
-        saveAuthoritativeStore(store);
-        res.status(409).json({
-          ok: false,
-          error: 'SEAT_ALREADY_BOOKED',
-          conflictingSeats,
-          message: `Cannot complete booking: seat(s) ${conflictingSeats.join(', ')} were already booked by another user.`,
-        });
-        return;
-      }
-    } else {
-      // 8C. EXCLUSIVE SLOT CONCURRENCY GUARD (Prevents duplicate concurrent slot bookings)
-      const duplicateSlotBooking = store.bookings.find(
-        (b) =>
-          b.status === 'confirmed' &&
-          b.listingId === listingId &&
-          b.scheduledDate === scheduledDate &&
-          b.timeSlot === timeSlot &&
-          (body.exclusiveSlot !== false || b.customerPhone === String(body.customerPhone || '').trim())
-      );
-
-      if (duplicateSlotBooking) {
-        res.status(409).json({
-          ok: false,
-          error: 'SLOT_ALREADY_BOOKED',
-          conflictingBookingId: duplicateSlotBooking.id,
-          message: `Slot "${timeSlot}" on ${scheduledDate} for listing ${listingId} is already reserved.`,
-        });
-        return;
-      }
+    if (!idempotencyKey || !listingId || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) || !timeSlot || !Number.isFinite(totalAmount) || totalAmount < 0) {
+      return res.status(400).json({ ok: false, error: 'INVALID_BOOKING_INPUT' });
     }
-
-    // 8D. SERVER-SIDE PAYMENT STATUS RESOLUTION (Never trust client 'paid' boolean without intent verification)
-    const paymentMode: 'pay_later' | 'pay_qr' = body.paymentMode === 'pay_qr' ? 'pay_qr' : 'pay_later';
-    let paymentStatus: 'pay_later' | 'pending_verification' | 'verified' = 'pay_later';
-    const paymentIntentId = body.paymentIntentId ? String(body.paymentIntentId).trim() : undefined;
-    const paymentUtr = body.paymentUtr ? String(body.paymentUtr).trim() : undefined;
-
-    if (paymentMode === 'pay_qr') {
-      const intent = paymentIntentId ? store.paymentIntents[paymentIntentId] : undefined;
-      if (
-        intent &&
-        intent.status === 'verified' &&
-        (!body.paymentVerificationToken ||
-          intent.paymentVerificationToken === String(body.paymentVerificationToken))
-      ) {
-        paymentStatus = 'verified';
-      } else {
-        // Even if client claims QR paid or submits a raw UTR, server marks it pending_verification until webhook proof
-        paymentStatus = 'pending_verification';
-      }
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const bookingId = String(body.id || `bk-${crypto.randomUUID()}`);
+    const passCode = `BOS-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+    const { qrSignature, qrPassToken } = signQrPassPayload({ passCode, bookingId, listingId, scheduledDate, seats });
+    const mode = body.paymentMode === 'pay_qr' ? 'pay_qr' : 'pay_later';
+    const checkoutDate = String(body.checkOutDate || scheduledDate);
+    const result = await db.rpc('create_booking_transaction', {
+      p_actor_id: claims.userId,
+      p_booking_id: bookingId,
+      p_idempotency_key: idempotencyKey,
+      p_listing_id: listingId,
+      p_listing_title: String(body.listingTitle || 'BookOurSpace Listing'),
+      p_customer_name: String(body.customerName || claims.name || 'Customer'),
+      p_customer_phone: String(body.customerPhone || claims.phone || ''),
+      p_customer_address: String(body.customerAddress || ''),
+      p_scheduled_date: scheduledDate,
+      p_check_out_date: checkoutDate,
+      p_time_slot: timeSlot,
+      p_show_time: String(body.showtime || ''),
+      p_screen_id: String(body.screenId || ''),
+      p_total_amount: totalAmount,
+      p_payment_intent_id: String(body.paymentIntentId || ''),
+      p_payment_mode: mode,
+      p_seats: seats,
+      p_session_id: claims.userId,
+      p_pass_code: passCode,
+      p_qr_signature: qrSignature,
+      p_qr_pass_token: qrPassToken,
+      p_notes: String(body.notes || ''),
+    });
+    if (result.error) return res.status(503).json({ ok: false, error: 'BOOKING_DATABASE_ERROR' });
+    const payload = result.data;
+    if (!payload?.ok) {
+      const status = payload?.error === 'PAYMENT_NOT_VERIFIED' ? 402 : payload?.error === 'SLOT_OR_SEAT_UNAVAILABLE' ? 409 : 400;
+      return res.status(status).json({ ok: false, error: payload?.error || 'BOOKING_REJECTED' });
     }
-
-    // Strict Movie Checkout Rule: Never confirm booking when requireVerifiedPayment is set unless paymentStatus === 'verified'
-    if (body.requireVerifiedPayment === true && paymentStatus !== 'verified') {
-      res.status(402).json({
-        ok: false,
-        error: 'PAYMENT_NOT_VERIFIED',
-        paymentStatus,
-        message:
-          'Payment is not server-verified. Submitting a UTR or screenshot alone cannot confirm a ticket until bank settlement verification completes.',
-      });
-      return;
-    }
-
-    const bookingId = String(body.id || `bk-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`);
-    const rawPassCode = String(
-      body.passCode ||
-        body.invoiceNumber ||
-        `BOS-PASS-${bookingId.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase()}`
-    )
-      .trim()
-      .toUpperCase();
-
-    const { qrSignature, qrPassToken } = signQrPassPayload({
-      passCode: rawPassCode,
-      bookingId,
-      listingId,
-      scheduledDate,
+    const row = payload.booking || {};
+    const booking = {
+      id: row.id, idempotencyKey: row.idempotency_key, listingId: row.listing_id,
+      listingTitle: row.listing_title, providerId: row.provider_id, customerUserId: row.actor_id,
+      customerName: row.customer_name, customerPhone: row.customer_phone, customerAddress: row.customer_address,
+      scheduledDate: row.scheduled_date, checkInDate: row.check_in_date, checkOutDate: row.check_out_date,
+      timeSlot: row.time_slot || row.scheduled_time, showtime: row.show_time, screenId: row.cinema_screen_id, totalAmount: Number(row.total_amount),
+      paymentStatus: row.payment_status, status: row.status, paymentIntentId: row.payment_intent_id,
+      paymentUtr: row.payment_utr, passCode: row.pass_code, qrSignature: row.qr_signature,
+      qrPassToken: row.qr_pass_token, checkedInAt: row.checked_in_at, cancelledAt: row.cancelled_at,
+      refundStatus: row.refund_status, createdAt: row.created_at,
       seats,
-    });
-
-    // Atomically mark all seats as 'booked'
-    if (seats.length > 0) {
-      for (const seatId of seats) {
-        const key = `${listingId}::${scheduledDate}::${showtime}::${seatId}`;
-        store.seatLocks[key] = {
-          key,
-          listingId,
-          dateIso: scheduledDate,
-          showtime,
-          seatId,
-          sessionId,
-          userId: String(sessionClaims?.userId || body.customerUserId || sessionId),
-          status: 'booked',
-          bookingId,
-          expiresAt: now + 365 * 24 * 60 * 60 * 1000,
-          createdAt: new Date(now).toISOString(),
-        };
-      }
-    }
-
-    const customerUserId = String(sessionClaims?.userId || body.customerUserId || 'customer-guest');
-    const expiresAtDate = new Date(`${scheduledDate}T23:59:59.000Z`);
-    const expiresAtIso = Number.isNaN(expiresAtDate.getTime())
-      ? new Date(now + 48 * 60 * 60 * 1000).toISOString()
-      : new Date(expiresAtDate.getTime() + 6 * 60 * 60 * 1000).toISOString();
-
-    const newBooking: AuthoritativeBookingRecord = {
-      id: bookingId,
-      idempotencyKey,
-      listingId,
-      listingTitle: String(body.listingTitle || 'BookOurSpace Listing'),
-      providerId: String(body.providerId || 'prov-1'),
-      customerUserId,
-      customerName: String(body.customerName || 'Guest Customer'),
-      customerPhone: String(body.customerPhone || '9848012345'),
-      customerAddress: String(body.customerAddress || 'Hyderabad'),
-      scheduledDate,
-      checkInDate: body.checkInDate ? String(body.checkInDate) : scheduledDate,
-      checkOutDate: body.checkOutDate ? String(body.checkOutDate) : scheduledDate,
-      timeSlot,
-      showtime: seats.length > 0 ? showtime : undefined,
-      seats: seats.length > 0 ? seats : undefined,
-      screenId: body.screenId ? String(body.screenId) : undefined,
-      screenName: body.screenName ? String(body.screenName) : undefined,
-      foodAddons: Array.isArray(body.foodAddons) ? body.foodAddons.map(String) : undefined,
-      baseAmount: body.baseAmount !== undefined ? Number(body.baseAmount) : undefined,
-      taxAmount: body.taxAmount !== undefined ? Number(body.taxAmount) : undefined,
-      discountAmount: body.discountAmount !== undefined ? Number(body.discountAmount) : undefined,
-      promoCode: body.promoCode ? String(body.promoCode) : undefined,
-      totalAmount: Number(body.totalAmount) || 0,
-      paymentMode,
-      paymentStatus,
-      paymentIntentId,
-      paymentUtr,
-      status: 'confirmed',
-      passCode: rawPassCode,
-      qrSignature,
-      qrPassToken,
-      expiresAtIso,
-      notes: body.notes ? String(body.notes) : undefined,
-      createdAt: new Date(now).toISOString(),
     };
-
-    store.bookings.unshift(newBooking);
-
-    appendAuthoritativeNotification(store, {
-      recipientUserId: customerUserId,
-      targetRole: 'all_users',
-      title: '📅 Booking Confirmed & Signed QR Pass Ready',
-      message: `${newBooking.customerName} booked "${newBooking.listingTitle}" for ${newBooking.scheduledDate} (${newBooking.timeSlot}). Pass: ${newBooking.passCode}`,
-      type: 'booking',
-      linkId: newBooking.id,
-    });
-
-    saveAuthoritativeStore(store);
-
-    res.status(201).json({
-      ok: true,
-      idempotentReplay: false,
-      booking: newBooking,
-    });
+    return res.status(payload.idempotentReplay ? 200 : 201).json({ ok: true, idempotentReplay: Boolean(payload.idempotentReplay), booking });
   });
 
-  // 9. CRYPTOGRAPHIC QR PASS SIGNING & VERIFICATION ENDPOINTS
-  app.post('/api/passes/verify', (req, res) => {
-    const { passToken, passCode, signature, markCheckedIn, verifierRole } = req.body || {};
-    const store = loadAuthoritativeStore();
-
+  // 9. Verify server-issued passes against the booking ledger; check-in is atomic.
+  app.post('/api/passes/verify', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    const { passToken, passCode, signature, markCheckedIn } = req.body || {};
     let cleanCode = String(passCode || '').trim().toUpperCase();
     let providedSig = String(signature || '').trim().toUpperCase();
-
     const rawToken = String(passToken || '').trim();
     if (rawToken.includes('.')) {
       const parts = rawToken.split('.');
       cleanCode = parts[0].trim().toUpperCase();
       providedSig = parts.slice(1).join('.').trim().toUpperCase();
-    } else if (!cleanCode && rawToken) {
-      cleanCode = rawToken.toUpperCase();
+    } else if (!cleanCode && rawToken) cleanCode = rawToken.toUpperCase();
+    if (!cleanCode) return res.status(400).json({ ok: false, verified: false, error: 'MISSING_PASS_CODE' });
+    if (markCheckedIn && (!claims || !['provider', 'admin'].includes(claims.role))) {
+      return res.status(claims ? 403 : 401).json({ ok: false, verified: false, error: 'SCANNER_ROLE_REQUIRED' });
     }
-
-    if (!cleanCode) {
-      res.status(400).json({ ok: false, verified: false, error: 'MISSING_PASS_CODE' });
-      return;
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    let query = db.from('bookings').select('id, actor_id, listing_id, listing_title, customer_name, scheduled_date, scheduled_time, time_slot, show_time, total_amount, payment_status, status, checked_in_at, pass_code, qr_signature, qr_pass_token, expires_at, refund_status');
+    let result = await query.eq('pass_code', cleanCode).maybeSingle();
+    if (!result.data && !result.error) result = await db.from('bookings').select('id, actor_id, listing_id, listing_title, customer_name, scheduled_date, scheduled_time, time_slot, show_time, total_amount, payment_status, status, checked_in_at, pass_code, qr_signature, qr_pass_token, expires_at, refund_status').eq('id', cleanCode).maybeSingle();
+    if (!result.data && rawToken) result = await db.from('bookings').select('id, actor_id, listing_id, listing_title, customer_name, scheduled_date, scheduled_time, time_slot, show_time, total_amount, payment_status, status, checked_in_at, pass_code, qr_signature, qr_pass_token, expires_at, refund_status').eq('qr_pass_token', rawToken).maybeSingle();
+    const row = result.data;
+    if (result.error || !row) return res.status(404).json({ ok: false, verified: false, error: 'PASS_NOT_FOUND_OR_FORGED' });
+    const seatResult = await db.from('seat_locks').select('seat_id').eq('booking_id', row.id).eq('status', 'booked');
+    if (seatResult.error) return res.status(503).json({ ok: false, verified: false, error: 'PASS_INVENTORY_UNAVAILABLE' });
+    const seats = (seatResult.data || []).map((seat) => seat.seat_id).sort();
+    const expected = signQrPassPayload({ passCode: row.pass_code, bookingId: row.id, listingId: row.listing_id, scheduledDate: row.scheduled_date, seats });
+    if (!providedSig || !safeTimingEqualHex(providedSig, expected.qrSignature) || row.qr_signature !== expected.qrSignature) {
+      return res.status(403).json({ ok: false, verified: false, error: 'INVALID_OR_FORGED_QR_SIGNATURE' });
     }
-
-    // Look up authoritative booking by passCode or qrPassToken or bookingId
-    const booking = store.bookings.find(
-      (b) =>
-        b.passCode.toUpperCase() === cleanCode ||
-        b.qrPassToken.toUpperCase() === rawToken.toUpperCase() ||
-        b.id.toUpperCase() === cleanCode
-    );
-
-    if (!booking) {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'PASS_NOT_FOUND_OR_FORGED',
-        message: `QR Pass "${cleanCode}" does not match any server-issued booking record.`,
-      });
-      return;
+    if (row.status !== 'confirmed' || ['refund_pending', 'refunded', 'failed'].includes(row.payment_status)) {
+      return res.status(403).json({ ok: false, verified: false, error: 'BOOKING_NOT_VALID' });
     }
-
-    // Verify cryptographic HMAC signature
-    const expected = signQrPassPayload({
-      passCode: booking.passCode,
-      bookingId: booking.id,
-      listingId: booking.listingId,
-      scheduledDate: booking.scheduledDate,
-      seats: booking.seats,
-    });
-
-    if (!providedSig || !safeTimingEqualHex(providedSig, expected.qrSignature)) {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'INVALID_OR_FORGED_QR_SIGNATURE',
-        message: 'Cryptographic HMAC-SHA256 signature is missing or invalid. Forged QR passes are rejected.',
-      });
-      return;
-    }
-
-    if (booking.status === 'cancelled') {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'BOOKING_CANCELLED',
-        message: `QR Pass ${booking.passCode} has been cancelled and refunded. Theatre entry is denied.`,
-      });
-      return;
-    }
-
-    if (booking.paymentMode === 'pay_qr' && booking.paymentStatus !== 'verified') {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'PAYMENT_NOT_VERIFIED',
-        message: `QR Pass ${booking.passCode} payment is pending bank settlement verification. Entry is denied.`,
-      });
-      return;
-    }
-
-    if (booking.expiresAtIso && new Date(booking.expiresAtIso).getTime() < Date.now()) {
-      res.status(403).json({
-        ok: false,
-        verified: false,
-        error: 'TICKET_EXPIRED',
-        message: `QR Pass ${booking.passCode} expired at ${booking.expiresAtIso}.`,
-      });
-      return;
-    }
-
-    const existingCheckIn = store.checkedInPasses[booking.passCode];
+    if (seats.length && row.payment_status !== 'verified') return res.status(403).json({ ok: false, verified: false, error: 'PAYMENT_NOT_VERIFIED' });
+    if (row.checked_in_at) return res.status(409).json({ ok: false, verified: true, alreadyCheckedIn: true, error: 'PASS_ALREADY_USED', checkedInAt: row.checked_in_at });
     if (markCheckedIn) {
-      if (existingCheckIn) {
-        res.status(409).json({
-          ok: false,
-          verified: true,
-          alreadyCheckedIn: true,
-          error: 'PASS_ALREADY_USED',
-          checkedInAt: existingCheckIn.checkedInAt,
-          message: `QR Pass ${booking.passCode} was already scanned and used at ${existingCheckIn.checkedInAt}.`,
-        });
-        return;
-      }
-
       const checkedInAt = new Date().toISOString();
-      store.checkedInPasses[booking.passCode] = {
-        checkedInAt,
-        checkedInBy: String(verifierRole || 'provider_scanner'),
-      };
-      booking.checkedInAt = checkedInAt;
-      saveAuthoritativeStore(store);
+      const updated = await db.from('bookings').update({ checked_in_at: checkedInAt }).eq('id', row.id).eq('status', 'confirmed').is('checked_in_at', null).select('checked_in_at').maybeSingle();
+      if (updated.error || !updated.data) return res.status(409).json({ ok: false, verified: false, error: 'PASS_ALREADY_USED' });
+      row.checked_in_at = updated.data.checked_in_at;
     }
-
-    res.json({
-      ok: true,
-      verified: true,
-      passCode: booking.passCode,
-      qrPassToken: booking.qrPassToken,
-      booking: {
-        id: booking.id,
-        listingId: booking.listingId,
-        listingTitle: booking.listingTitle,
-        customerName: booking.customerName,
-        scheduledDate: booking.scheduledDate,
-        timeSlot: booking.timeSlot,
-        showtime: booking.showtime,
-        seats: booking.seats,
-        screenName: booking.screenName,
-        foodAddons: booking.foodAddons,
-        totalAmount: booking.totalAmount,
-        paymentStatus: booking.paymentStatus,
-        status: booking.status,
-        checkedInAt: booking.checkedInAt || existingCheckIn?.checkedInAt || null,
-      },
-    });
+    return res.json({ ok: true, verified: true, passCode: row.pass_code, qrPassToken: row.qr_pass_token, booking: {
+      id: row.id, listingId: row.listing_id, listingTitle: row.listing_title, customerName: row.customer_name,
+      scheduledDate: row.scheduled_date, timeSlot: row.time_slot || row.scheduled_time, showtime: row.show_time,
+      seats, totalAmount: Number(row.total_amount), paymentStatus: row.payment_status, status: row.status, checkedInAt: row.checked_in_at || null,
+    }});
   });
 
   // 10. STRICT CUSTOMER / PROVIDER / ADMIN ROLE ISOLATION ENDPOINTS (With Live Account Blocking Check)
-  app.get('/api/isolation/bookings', (req, res) => {
+  app.get('/api/isolation/bookings', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    if (!claims) {
-      res.status(401).json({
-        ok: false,
-        error: 'UNAUTHORIZED_SESSION',
-        message: 'Valid signed session token (x-bos-session-token or Authorization Bearer) is required.',
-      });
-      return;
-    }
-
-    const store = loadAuthoritativeStore();
-    const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
-    if (blocked) {
-      res.status(403).json({
-        ok: false,
-        error: 'ACCOUNT_BLOCKED',
-        accountStatus: blocked.accountStatus,
-        message: 'Access denied: account has been suspended or blocked by Admin.',
-      });
-      return;
-    }
-
-    if (claims.role === 'admin') {
-      res.json({
-        ok: true,
-        role: 'admin',
-        bookings: store.bookings,
-      });
-      return;
-    }
-
-    if (claims.role === 'provider') {
-      const providerBookings = store.bookings.filter(
-        (b) => b.providerId === claims.providerId || b.providerId === claims.userId
-      );
-      res.json({
-        ok: true,
-        role: 'provider',
-        providerId: claims.providerId,
-        bookings: providerBookings,
-      });
-      return;
-    }
-
-    // Customer role: strictly isolated to own customerUserId
-    const customerBookings = store.bookings.filter((b) => b.customerUserId === claims.userId);
-    res.json({
-      ok: true,
-      role: 'customer',
-      userId: claims.userId,
-      bookings: customerBookings,
-    });
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const blocked = findBlockedUserInStore(loadAuthoritativeStore(), claims.userId, claims.email);
+    if (blocked) return res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const page = Math.max(0, Number.parseInt(String(req.query.page || '0'), 10) || 0);
+    const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
+    let query = db.from('bookings').select('id, idempotency_key, actor_id, listing_id, listing_title, provider_id, customer_name, customer_phone, customer_address, scheduled_date, scheduled_time, time_slot, show_time, check_in_date, check_out_date, total_amount, payment_status, payment_intent_id, payment_utr, status, pass_code, qr_signature, qr_pass_token, checked_in_at, cancelled_at, refund_amount, refund_status, created_at', { count: 'exact' }).order('created_at', { ascending: false }).range(page * limit, (page + 1) * limit - 1);
+    if (claims.role === 'customer') query = query.eq('actor_id', claims.userId);
+    else if (claims.role === 'provider') query = query.eq('provider_id', claims.providerId || claims.userId);
+    const { data, error, count } = await query;
+    if (error) return res.status(503).json({ ok: false, error: 'BOOKINGS_UNAVAILABLE' });
+    const rows = data || [];
+    const seatQuery = rows.length ? await db.from('seat_locks').select('booking_id, seat_id').in('booking_id', rows.map((row) => row.id)).eq('status', 'booked') : { data: [], error: null };
+    if (seatQuery.error) return res.status(503).json({ ok: false, error: 'BOOKING_SEATS_UNAVAILABLE' });
+    const seatsByBooking = new Map<string, string[]>();
+    for (const seat of seatQuery.data || []) seatsByBooking.set(seat.booking_id, [...(seatsByBooking.get(seat.booking_id) || []), seat.seat_id]);
+    const bookings = rows.map((row) => ({
+      id: row.id, idempotencyKey: row.idempotency_key, listingId: row.listing_id, listingTitle: row.listing_title,
+      providerId: row.provider_id, customerUserId: row.actor_id, customerName: row.customer_name, customerPhone: row.customer_phone,
+      customerAddress: row.customer_address, scheduledDate: row.scheduled_date, checkInDate: row.check_in_date,
+      checkOutDate: row.check_out_date, timeSlot: row.time_slot || row.scheduled_time, showtime: row.show_time,
+      totalAmount: Number(row.total_amount), paymentStatus: row.payment_status, paymentIntentId: row.payment_intent_id,
+      paymentUtr: row.payment_utr, status: row.status, passCode: row.pass_code, qrSignature: row.qr_signature,
+      qrPassToken: row.qr_pass_token, checkedInAt: row.checked_in_at, cancelledAt: row.cancelled_at,
+      refundAmount: Number(row.refund_amount || 0), refundStatus: row.refund_status, createdAt: row.created_at,
+      seats: seatsByBooking.get(row.id) || [],
+    }));
+    return res.json({ ok: true, role: claims.role, userId: claims.role === 'customer' ? claims.userId : undefined,
+      providerId: claims.role === 'provider' ? claims.providerId : undefined, bookings, page, limit,
+      total: count || 0, hasMore: (page + 1) * limit < (count || 0), nextPage: (page + 1) * limit < (count || 0) ? page + 1 : null });
   });
 
-  app.get('/api/isolation/admin-summary', (req, res) => {
+  app.get('/api/isolation/admin-summary', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
@@ -3098,21 +2601,47 @@ Task:
       return;
     }
 
-    res.json({
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const [bookings, locks, intents, verified, pending] = await Promise.all([
+      db.from('bookings').select('id', { count: 'exact', head: true }),
+      db.from('seat_locks').select('id', { count: 'exact', head: true }).eq('status', 'held').gt('expires_at', new Date().toISOString()),
+      db.from('payment_verifications').select('intent_id', { count: 'exact', head: true }),
+      db.from('payment_verifications').select('intent_id', { count: 'exact', head: true }).eq('status', 'verified'),
+      db.from('payment_verifications').select('intent_id', { count: 'exact', head: true }).eq('status', 'pending_reconciliation'),
+    ]);
+    if ([bookings, locks, intents, verified, pending].some((result) => result.error)) {
+      return res.status(503).json({ ok: false, error: 'ADMIN_SUMMARY_UNAVAILABLE' });
+    }
+    return res.json({
       ok: true,
       role: 'admin',
       totalUsers: store.users.length,
       blockedUsersCount: store.users.filter(
         (u) => u.accountStatus === 'suspended' || u.accountStatus === 'blocked'
       ).length,
-      totalBookings: store.bookings.length,
-      totalActiveSeatLocks: Object.keys(store.seatLocks).length,
-      totalPaymentIntents: Object.keys(store.paymentIntents).length,
-      verifiedPaymentsCount: Object.values(store.paymentIntents).filter((p) => p.status === 'verified').length,
-      pendingReconciliationCount: Object.values(store.paymentIntents).filter(
-        (p) => p.status === 'pending_provider_reconciliation'
-      ).length,
+      totalBookings: bookings.count || 0,
+      totalActiveSeatLocks: locks.count || 0,
+      totalPaymentIntents: intents.count || 0,
+      verifiedPaymentsCount: verified.count || 0,
+      pendingReconciliationCount: pending.count || 0,
     });
+  });
+
+  app.get('/api/admin/payment-reconciliation', async (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims || claims.role !== 'admin') return res.status(claims ? 403 : 401).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const page = Math.max(0, Number.parseInt(String(req.query.page || '0'), 10) || 0);
+    const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
+    const [payments, refunds] = await Promise.all([
+      db.from('payment_verifications').select('intent_id, actor_id, amount, merchant_vpa, utr_number, purpose, listing_id, booking_id, created_at, updated_at', { count: 'exact' }).eq('payment_provider', 'upi').eq('status', 'pending_reconciliation').order('created_at', { ascending: true }).range(page * limit, (page + 1) * limit - 1),
+      db.from('payment_refunds').select('id, booking_id, payment_intent_id, actor_id, amount, reason, created_at', { count: 'exact' }).eq('status', 'pending_manual').order('created_at', { ascending: true }).range(page * limit, (page + 1) * limit - 1),
+    ]);
+    if (payments.error || refunds.error) return res.status(503).json({ ok: false, error: 'RECONCILIATION_QUEUE_UNAVAILABLE' });
+    return res.json({ ok: true, payments: payments.data || [], refunds: refunds.data || [], page, limit,
+      paymentCount: payments.count || 0, refundCount: refunds.count || 0 });
   });
 
   // ============================================================================
@@ -3697,6 +3226,63 @@ Task:
   // ============================================================================
   // 14. ALL 17 ADMIN MODULES AUTHORITATIVE STATE SYNC (/api/admin/modules)
   // ============================================================================
+  // Public navigation config contains visibility only. Admin updates are persisted
+  // in the authoritative store and require a current, active server-side admin.
+  app.get('/api/market-sections', (_req, res) => {
+    const store = loadAuthoritativeStore();
+    const saved = store.adminModules.market_section_visibility?.payload;
+    res.json({ ok: true, sections: normalizeMarketSectionVisibility(saved) });
+  });
+
+  app.put('/api/admin/market-sections/:sectionId', (req, res) => {
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (claims.role !== 'admin') {
+      res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+      return;
+    }
+
+    const store = loadAuthoritativeStore();
+    const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
+    const currentAdmin = store.users.find(
+      (user) => user.id.toLowerCase() === claims.userId.toLowerCase() ||
+        (claims.email && user.email.toLowerCase() === claims.email.toLowerCase())
+    );
+    if (blocked || !currentAdmin || currentAdmin.role !== 'admin') {
+      res.status(403).json({ ok: false, error: blocked ? 'ACCOUNT_BLOCKED' : 'FORBIDDEN_ADMIN_ONLY' });
+      return;
+    }
+
+    const sectionId = String(req.params.sectionId || '');
+    if (!isMarketSectionId(sectionId) || typeof req.body?.enabled !== 'boolean') {
+      res.status(400).json({ ok: false, error: 'INVALID_MARKET_SECTION_SETTING' });
+      return;
+    }
+
+    const existing = normalizeMarketSectionVisibility(
+      store.adminModules.market_section_visibility?.payload || DEFAULT_MARKET_SECTION_VISIBILITY
+    );
+    const next = { ...existing, [sectionId]: req.body.enabled };
+    if (!Object.values(next).some(Boolean)) {
+      res.status(409).json({ ok: false, error: 'AT_LEAST_ONE_SECTION_REQUIRED' });
+      return;
+    }
+
+    store.adminModules.market_section_visibility = {
+      payload: next,
+      updatedBy: claims.userId,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!saveAuthoritativeStore(store)) {
+      res.status(500).json({ ok: false, error: 'MARKET_SECTION_SAVE_FAILED' });
+      return;
+    }
+    res.json({ ok: true, sections: next });
+  });
+
   const ALL_17_ADMIN_MODULE_IDS = [
     'user_management',
     'payment_management',
@@ -3948,15 +3534,28 @@ Task:
   }
 
   // 15A. GET AUTHORITATIVE CINEMA INVENTORY, SCREENS, POLICIES, BOOKINGS, REFUNDS & AUDIT LOGS
-  app.get('/api/movies/inventory', (req, res) => {
+  app.get('/api/movies/inventory', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     const store = loadAuthoritativeStore();
-    if (pruneExpiredSeatHolds(store)) {
-      saveAuthoritativeStore(store);
-    }
     const engine = getCinemaModuleStore(store);
 
-    const normalizedScreens = engine.screens.map((s: any) => ({
+    let cinemaScreens: any[] = engine.screens;
+    if (serverSupabase) {
+      const databaseScreens = await serverSupabase.from('cinema_screens').select('*').order('cinema_listing_id').order('screen_name');
+      if (databaseScreens.error) return res.status(503).json({ ok: false, error: 'CINEMA_SCREEN_INVENTORY_UNAVAILABLE' });
+      if (databaseScreens.data?.length) cinemaScreens = databaseScreens.data.map((row: any) => ({
+        id: row.id, screenId: row.id, listingId: row.cinema_listing_id, cinemaListingId: row.cinema_listing_id,
+        cinemaName: row.cinema_title, cinemaTitle: row.cinema_title, area: row.area, screenName: row.screen_name,
+        projectionFormat: row.format, soundFormat: row.sound_system, format: row.format, soundSystem: row.sound_system,
+        totalSeats: row.total_seats, tiers: row.tiers, seatTiers: row.tiers, wheelchairSeats: row.wheelchair_seats,
+        showtimes: row.showtimes, cancellationAllowed: row.cancellation_allowed,
+        cancellationCutoffMins: row.cancellation_cutoff_minutes, cancellationCutoffMinutes: row.cancellation_cutoff_minutes,
+        refundPercent: row.refund_percent, convenienceFeePerSeat: Number(row.convenience_fee_per_seat),
+        gstPercent: Number(row.gst_percent), updatedAt: row.updated_at,
+      }));
+    }
+
+    const normalizedScreens = cinemaScreens.map((s: any) => ({
       ...s,
       id: s.id || s.screenId,
       screenId: s.screenId || s.id,
@@ -3983,19 +3582,50 @@ Task:
       gstPercent: s.gstPercent ?? 18,
     }));
 
-    const movieBookings = store.bookings.filter(
-      (b) =>
-        b.listingId.startsWith('movie-') ||
-        b.listingId.startsWith('listing-movie-') ||
-        (Array.isArray(b.seats) && b.seats.length > 0)
-    );
-
-    const visibleBookings =
-      !claims
-        ? movieBookings
-        : claims.role === 'admin' || claims.role === 'provider'
-        ? movieBookings
-        : movieBookings.filter((b) => b.customerUserId === claims.userId);
+    const page = Math.max(0, Number.parseInt(String(req.query.page || '0'), 10) || 0);
+    const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
+    let visibleBookings: any[] = [];
+    let refunds: any[] = [];
+    let visibleBookingCount = 0;
+    if (claims) {
+      const db = requireServerSupabase(res);
+      if (!db) return;
+      const configuredMovieListingIds = normalizedScreens
+        .map((screen: any) => String(screen.cinemaListingId || screen.listingId || ''))
+        .filter((id: string) => /^[A-Za-z0-9_-]+$/.test(id));
+      const movieFilters = ['listing_id.like.movie-%', 'listing_id.like.listing-movie-%',
+        ...configuredMovieListingIds.map((id: string) => `listing_id.eq.${id}`)];
+      let bookingQuery = db.from('bookings').select('id, actor_id, listing_id, listing_title, provider_id, customer_name, customer_phone, scheduled_date, scheduled_time, time_slot, show_time, total_amount, payment_status, status, pass_code, qr_signature, qr_pass_token, checked_in_at, cancelled_at, refund_amount, refund_status, created_at', { count: 'exact' }).order('created_at', { ascending: false }).range(page * limit, (page + 1) * limit - 1);
+      bookingQuery = bookingQuery.or(movieFilters.join(','));
+      if (claims.role === 'customer') bookingQuery = bookingQuery.eq('actor_id', claims.userId);
+      if (claims.role === 'provider') bookingQuery = bookingQuery.eq('provider_id', claims.providerId || claims.userId);
+      const bookingsResult = await bookingQuery;
+      if (bookingsResult.error) return res.status(503).json({ ok: false, error: 'MOVIE_INVENTORY_UNAVAILABLE' });
+      visibleBookingCount = bookingsResult.count || 0;
+      const rows = bookingsResult.data || [];
+      const seatResult = rows.length ? await db.from('seat_locks').select('booking_id, seat_id').in('booking_id', rows.map((booking) => booking.id)).eq('status', 'booked') : { data: [], error: null };
+      if (seatResult.error) return res.status(503).json({ ok: false, error: 'MOVIE_SEATS_UNAVAILABLE' });
+      const seats = new Map<string, string[]>();
+      for (const item of seatResult.data || []) seats.set(item.booking_id, [...(seats.get(item.booking_id) || []), item.seat_id]);
+      const movieRows = rows;
+      visibleBookings = movieRows.map((booking) => ({
+        id: booking.id, listingId: booking.listing_id, listingTitle: booking.listing_title,
+        providerId: booking.provider_id, customerUserId: booking.actor_id, customerName: booking.customer_name,
+        customerPhone: booking.customer_phone, scheduledDate: booking.scheduled_date,
+        timeSlot: booking.time_slot || booking.scheduled_time, showtime: booking.show_time,
+        seats: seats.get(booking.id) || [], totalAmount: Number(booking.total_amount),
+        paymentStatus: booking.payment_status, status: booking.status, passCode: booking.pass_code,
+        qrSignature: booking.qr_signature, qrPassToken: booking.qr_pass_token, checkedInAt: booking.checked_in_at,
+        cancelledAt: booking.cancelled_at, refundAmount: Number(booking.refund_amount || 0),
+        refundStatus: booking.refund_status, createdAt: booking.created_at,
+      }));
+      const movieBookingIds = movieRows.map((booking) => booking.id);
+      if (movieBookingIds.length) {
+        const refundResult = await db.from('payment_refunds').select('id, booking_id, amount, status, reason, provider_refund_id, created_at, processed_at').in('booking_id', movieBookingIds).order('created_at', { ascending: false });
+        if (refundResult.error) return res.status(503).json({ ok: false, error: 'MOVIE_REFUNDS_UNAVAILABLE' });
+        refunds = refundResult.data || [];
+      }
+    }
 
     const normalizedAuditLogs = (engine.auditLogs || []).map((l: any) => ({
       ...l,
@@ -4009,7 +3639,12 @@ Task:
       offers: engine.promos,
       promos: engine.promos,
       bookings: visibleBookings,
-      refunds: engine.refunds || [],
+      refunds,
+      page,
+      limit,
+      total: visibleBookingCount,
+      hasMore: (page + 1) * limit < visibleBookingCount,
+      nextPage: (page + 1) * limit < visibleBookingCount ? page + 1 : null,
       supportTickets: (engine.supportTickets || []).map((t: any) => ({
         ...t,
         id: t.id || t.ticketId,
@@ -4021,7 +3656,7 @@ Task:
   });
 
   // 15B. CREATE OR UPDATE CINEMA SCREEN, SEAT LAYOUT, SHOWTIMES & CANCELLATION POLICY (Provider / Admin Only)
-  app.put('/api/movies/screens', (req, res) => {
+  app.put('/api/movies/screens', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) {
       res.status(401).json({
@@ -4051,6 +3686,14 @@ Task:
     const body = req.body || {};
     const listingId = String(body.listingId || body.cinemaListingId || 'movie-hyd-1').trim();
     const screenId = String(body.screenId || body.id || `scr-${listingId}`).trim();
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    if (claims.role === 'provider') {
+      const owner = await db.from('listings').select('owner_id').eq('id', listingId).maybeSingle();
+      if (owner.error || !owner.data || ![claims.userId, claims.providerId].includes(String(owner.data.owner_id))) {
+        return res.status(403).json({ ok: false, error: 'FORBIDDEN_LISTING_OWNER' });
+      }
+    }
     const engine = getCinemaModuleStore(store);
 
     const existingIdx = engine.screens.findIndex(
@@ -4106,6 +3749,27 @@ Task:
       updatedAt: new Date().toISOString(),
     };
 
+    const screenSave = await db.from('cinema_screens').upsert({
+      id: screenId,
+      cinema_listing_id: listingId,
+      cinema_title: updatedScreen.cinemaTitle,
+      area: updatedScreen.area || 'Hyderabad',
+      screen_name: updatedScreen.screenName,
+      format: updatedScreen.projectionFormat,
+      sound_system: updatedScreen.soundFormat,
+      total_seats: Number(updatedScreen.totalSeats || 80),
+      tiers: updatedScreen.tiers,
+      wheelchair_seats: updatedScreen.wheelchairSeats,
+      showtimes: updatedScreen.showtimes,
+      cancellation_allowed: updatedScreen.cancellationAllowed !== false,
+      cancellation_cutoff_minutes: updatedScreen.cancellationCutoffMins,
+      refund_percent: updatedScreen.refundPercent,
+      convenience_fee_per_seat: Number(updatedScreen.convenienceFeePerSeat || 0),
+      gst_percent: Number(updatedScreen.gstPercent || 0),
+      updated_at: updatedScreen.updatedAt,
+    }, { onConflict: 'id' });
+    if (screenSave.error) return res.status(503).json({ ok: false, error: 'CINEMA_SCREEN_SAVE_FAILED' });
+
     if (existingIdx >= 0) {
       engine.screens[existingIdx] = updatedScreen;
     } else {
@@ -4133,162 +3797,60 @@ Task:
     });
   });
 
-  // 15C. ATOMIC TICKET CANCELLATION, SEAT LOCK RELEASE & REFUND ENGINE
-  app.post('/api/movies/bookings/:id/cancel', (req, res) => {
+  // 15C. Cancellation is transactional; refunds remain pending until a provider event or bank reconciliation.
+  app.post('/api/movies/bookings/:id/cancel', async (req, res) => {
     const claims = verifySessionTokenFromRequest(req);
-    const bookingIdOrPass = String(req.params.id || '').trim();
-    const { reason = 'Customer requested cancellation', sessionId, customerPhone } = req.body || {};
-
-    const store = loadAuthoritativeStore();
-    if (claims) {
-      const blocked = findBlockedUserInStore(store, claims.userId, claims.email);
-      if (blocked) {
-        res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
-        return;
-      }
+    if (!claims) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    const blocked = findBlockedUserInStore(loadAuthoritativeStore(), claims.userId, claims.email);
+    if (blocked) return res.status(403).json({ ok: false, error: 'ACCOUNT_BLOCKED' });
+    const db = requireServerSupabase(res);
+    if (!db) return;
+    const key = String(req.params.id || '').trim();
+    let lookup = await db.from('bookings').select('id, actor_id, listing_id, payment_intent_id, status, pass_code')
+      .eq('id', key).maybeSingle();
+    if (!lookup.data) lookup = await db.from('bookings').select('id, actor_id, listing_id, payment_intent_id, status, pass_code')
+      .eq('pass_code', key.toUpperCase()).maybeSingle();
+    const booking = lookup.data;
+    if (lookup.error || !booking) return res.status(404).json({ ok: false, error: 'BOOKING_NOT_FOUND' });
+    let authorized = claims.role === 'admin' || booking.actor_id === claims.userId;
+    if (claims.role === 'provider') {
+      const listing = await db.from('listings').select('owner_id').eq('id', booking.listing_id).maybeSingle();
+      authorized = Boolean(listing.data && (String(listing.data.owner_id) === claims.userId || String(listing.data.owner_id) === claims.providerId));
     }
-
-    const booking = store.bookings.find(
-      (b) =>
-        b.id === bookingIdOrPass ||
-        b.passCode.toUpperCase() === bookingIdOrPass.toUpperCase()
-    );
-
-    if (!booking) {
-      res.status(404).json({
-        ok: false,
-        error: 'BOOKING_NOT_FOUND',
-        message: `Booking "${bookingIdOrPass}" was not found.`,
-      });
-      return;
+    if (!authorized) return res.status(403).json({ ok: false, error: 'FORBIDDEN_NOT_BOOKING_OWNER' });
+    const result = await db.rpc('cancel_booking_transaction', {
+      p_booking_id: booking.id, p_actor_id: booking.actor_id, p_reason: String(req.body?.reason || 'Customer requested cancellation'),
+    });
+    if (result.error || !result.data?.ok) {
+      const code = result.data?.error || 'CANCELLATION_FAILED';
+      return res.status(code === 'BOOKING_NOT_FOUND' ? 404 : 409).json({ ok: false, error: code });
     }
-
-    const cleanReqPhone = String(customerPhone || '').replace(/\D/g, '');
-    const cleanBookingPhone = String(booking.customerPhone || '').replace(/\D/g, '');
-
-    // Verify ownership or provider/admin privileges
-    const isOwner =
-      (claims && booking.customerUserId === claims.userId) ||
-      (sessionId && booking.customerUserId === String(sessionId)) ||
-      (cleanReqPhone && cleanReqPhone === cleanBookingPhone) ||
-      !claims;
-    const isProviderOrAdmin =
-      claims && (claims.role === 'admin' || claims.role === 'provider');
-
-    if (!isOwner && !isProviderOrAdmin) {
-      res.status(403).json({
-        ok: false,
-        error: 'FORBIDDEN_NOT_BOOKING_OWNER',
-        message: 'You can only cancel your own movie bookings unless you are an authorized Provider or Admin.',
-      });
-      return;
-    }
-
-    if (booking.status === 'cancelled') {
-      res.status(409).json({
-        ok: false,
-        error: 'ALREADY_CANCELLED',
-        message: `Booking ${booking.passCode} has already been cancelled and refunded.`,
-      });
-      return;
-    }
-
-    // Reject cancellation if QR ticket was already scanned at the theatre gate
-    const checkInRecord = store.checkedInPasses[booking.passCode];
-    if (checkInRecord || booking.checkedInAt) {
-      res.status(409).json({
-        ok: false,
-        error: 'CANNOT_CANCEL_USED_TICKET',
-        checkedInAt: checkInRecord?.checkedInAt || booking.checkedInAt,
-        message: `Cannot cancel ticket ${booking.passCode} because it was already scanned for theatre entry at ${checkInRecord?.checkedInAt || booking.checkedInAt}.`,
-      });
-      return;
-    }
-
-    const engine = getCinemaModuleStore(store);
-    const screenConfig: any = engine.screens.find(
-      (s: any) => s.listingId === booking.listingId || s.cinemaListingId === booking.listingId
-    );
-    const refundPercent = screenConfig ? screenConfig.refundPercent : 80;
-    const refundAmount = Math.round((booking.totalAmount * refundPercent) / 100);
-    const cancellationFee = Math.max(0, booking.totalAmount - refundAmount);
-
-    // Atomically release all locked seats for this booking so other users can book them immediately
-    const releasedSeats: string[] = [];
-    if (Array.isArray(booking.seats) && booking.seats.length > 0) {
-      const showtimeKey = booking.showtime || booking.timeSlot.split('·')[0].trim();
-      for (const seatId of booking.seats) {
-        const lockKey = `${booking.listingId}::${booking.scheduledDate}::${showtimeKey}::${seatId}`;
-        if (store.seatLocks[lockKey]) {
-          delete store.seatLocks[lockKey];
-          releasedSeats.push(seatId);
-        }
-        for (const [k, v] of Object.entries(store.seatLocks)) {
-          if (v.bookingId === booking.id && v.seatId === seatId) {
-            delete store.seatLocks[k];
-            if (!releasedSeats.includes(seatId)) releasedSeats.push(seatId);
-          }
+    const payload = result.data;
+    let refund: any = null;
+    if (payload.refundId) {
+      const refundQuery = await db.from('payment_refunds')
+        .select('id, booking_id, payment_intent_id, amount, status, reason, provider_refund_id, created_at')
+        .eq('id', payload.refundId).maybeSingle();
+      refund = refundQuery.data;
+      const keyId = (process.env.RAZORPAY_KEY_ID || '').trim();
+      const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+      if (refund && payload.paymentProvider === 'razorpay' && payload.providerPaymentId && keyId && keySecret && !refund.provider_refund_id) {
+        const authorization = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const providerResponse = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(payload.providerPaymentId)}/refund`, {
+          method: 'POST', headers: { authorization: `Basic ${authorization}`, 'content-type': 'application/json', 'X-Refund-Idempotency': `refund-${refund.id}` },
+          body: JSON.stringify({ amount: Math.round(Number(refund.amount) * 100), notes: { booking_id: booking.id, refund_id: refund.id } }),
+        });
+        const providerRefund = await providerResponse.json().catch(() => ({}));
+        if (providerResponse.ok && providerRefund.id) {
+          const savedRefund = await db.from('payment_refunds').update({ provider_refund_id: providerRefund.id, status: 'provider_pending', updated_at: new Date().toISOString() })
+            .eq('id', refund.id).is('provider_refund_id', null).select('id, amount, status, provider_refund_id').maybeSingle();
+          if (savedRefund.data) refund = { ...refund, ...savedRefund.data };
         }
       }
     }
-
-    const nowIso = new Date().toISOString();
-    booking.status = 'cancelled';
-    booking.paymentStatus = 'refunded';
-    booking.cancelledAt = nowIso;
-    booking.cancellationReason = String(reason);
-    booking.refundAmount = refundAmount;
-    booking.refundStatus = 'completed';
-
-    const refundRecord = {
-      id: `RFD-MOV-${Date.now().toString().slice(-6)}`,
-      refundId: `RFD-MOV-${Date.now().toString().slice(-6)}`,
-      bookingId: booking.id,
-      passCode: booking.passCode,
-      listingId: booking.listingId,
-      listingTitle: booking.listingTitle,
-      customerUserId: booking.customerUserId,
-      customerName: booking.customerName,
-      originalAmount: booking.totalAmount,
-      refundPercent,
-      cancellationFee,
-      refundAmount,
-      releasedSeats,
-      reason: String(reason),
-      status: 'processed',
-      processedAt: nowIso,
-    };
-
-    engine.refunds.unshift(refundRecord);
-    engine.auditLogs.unshift({
-      id: `MOV-AUD-${Date.now().toString().slice(-5)}`,
-      timestamp: nowIso,
-      createdAt: nowIso,
-      actor: claims?.name || booking.customerName || 'Customer',
-      role: claims?.role || 'customer',
-      action: 'BOOKING_CANCELLED_AND_REFUNDED',
-      targetId: booking.passCode,
-      details: `Cancelled ${booking.passCode} (${booking.listingTitle}). Released seats [${releasedSeats.join(', ')}]. Refunded ₹${refundAmount} (${refundPercent}% policy).`,
-    });
-
-    appendAuthoritativeNotification(store, {
-      recipientUserId: booking.customerUserId,
-      targetRole: 'all_users',
-      title: `💸 Movie Ticket Cancelled & ₹${refundAmount} Refund Processed`,
-      message: `Pass ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released. Refund ₹${refundAmount} (${refundPercent}%) initiated to source UPI.`,
-      type: 'payment',
-      linkId: booking.id,
-    });
-
-    saveAuthoritativeStore(store);
-
-    res.json({
-      ok: true,
-      booking,
-      refund: refundRecord,
-      releasedSeats,
-      message: `Ticket ${booking.passCode} cancelled. Seats ${releasedSeats.join(', ')} released and ₹${refundAmount} (${refundPercent}%) refunded.`,
-    });
+    return res.json({ ok: true, booking: payload.booking, refund, refundAmount: Number(payload.refundAmount || 0),
+      message: refund?.status === 'processed' ? 'Cancellation and verified refund are complete.' :
+        refund ? 'Cancellation is complete; the refund remains pending provider or bank confirmation.' : 'Booking cancelled. No refundable payment was recorded.' });
   });
 
   // 15D. CUSTOMER CINEMA SUPPORT & DISPUTE TICKETS

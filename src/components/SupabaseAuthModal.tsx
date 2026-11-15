@@ -1,25 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
   X,
-  Mail,
   User as UserIcon,
   Phone,
   LogOut,
   CheckCircle2,
   AlertCircle,
-  ArrowRight,
   ShieldCheck,
   RefreshCw,
   Save,
   ShieldAlert,
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
-import {
-  isSupabaseConfigured,
-  SUPABASE_PROJECT_ID,
-  fetchGoogleOAuthConfig,
-  signInWithSupabaseGoogleOAuth,
-} from '../lib/supabaseClient';
+import { SUPABASE_PROJECT_ID, startGoogleOAuthPopup } from '../lib/supabaseClient';
 import { UserRole } from '../types/marketplace';
 import { useMarketplace } from '../context/MarketplaceContext';
 
@@ -43,7 +36,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     authUser,
     isAccountBlocked,
     blockedReason,
-    loginWithGoogle,
     logoutGoogleSession,
     updateUserProfile,
     syncAccountData,
@@ -54,7 +46,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     transactions,
   } = useMarketplace();
 
-  const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('customer');
@@ -70,7 +61,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       setFullName(authUser.name || 'Marketplace User');
       setPhone(authUser.phone || '');
       setRole(authUser.role || userRole);
-      setEmail(authUser.email || '');
     } else if (currentUser) {
       setFullName(
         supabaseProfile?.full_name ||
@@ -85,7 +75,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
           (currentUser.user_metadata?.role as UserRole) ||
           userRole
       );
-      setEmail(currentUser.email || '');
     }
   }, [authUser, currentUser, supabaseProfile, userRole]);
 
@@ -122,92 +111,12 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     setInfoMsg(null);
     setLoading(true);
     try {
-      if (isSupabaseConfigured) {
-        const supaRes = await signInWithSupabaseGoogleOAuth(role);
-        if (supaRes.ok && supaRes.url) {
-          const popup = window.open(
-            supaRes.url,
-            'bos_google_oauth_popup',
-            'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
-          );
-          if (popup) {
-            setInfoMsg('Complete Google sign-in in the popup window...');
-            setLoading(false);
-            return;
-          }
-        }
+      const result = await startGoogleOAuthPopup(role);
+      if (!result.ok) {
+        setErrorMsg(result.message || 'Verified Google sign-in is unavailable.');
       }
-
-      const cfg = await fetchGoogleOAuthConfig(role);
-      if (cfg.ok && cfg.url) {
-        const popup = window.open(
-          cfg.url,
-          'bos_google_oauth_popup',
-          'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
-        );
-        if (popup) {
-          setInfoMsg('Complete Google sign-in in the popup window...');
-          setLoading(false);
-          return;
-        }
-      }
-      setErrorMsg('Popup blocked or unavailable. Use the Google Account form below to continue.');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Could not launch Google OAuth popup.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleDirectSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setInfoMsg(null);
-
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !normalizedEmail.includes('@')) {
-      setErrorMsg('Please enter a valid Google email address.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await loginWithGoogle({
-        email: normalizedEmail,
-        name: fullName.trim() || undefined,
-        phone: phone.trim() || undefined,
-        requestedRole: 'customer',
-        allowRoleChange: false,
-      });
-
-      if (!result.ok) {
-        setErrorMsg(
-          result.message ||
-            'Google authentication failed. Check if your account is active.'
-        );
-        return;
-      }
-
-      const signedUser = result.user;
-      const target =
-        result.redirectTarget ||
-        (signedUser?.role === 'admin'
-          ? 'admin_console'
-          : signedUser?.role === 'provider'
-          ? 'provider_portal'
-          : 'marketplace');
-
-      onAuthSuccess?.(
-        result.isNewUser
-          ? `Welcome ${signedUser?.name}! Google account auto-registered (${signedUser?.role.toUpperCase()})`
-          : `Welcome back ${signedUser?.name}! Signed in with Google (${signedUser?.role.toUpperCase()})`
-      );
-      if (onNavigateView) {
-        onNavigateView(target);
-      }
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Google authentication failed.');
     } finally {
       setLoading(false);
     }
@@ -498,79 +407,9 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               <span>Continue with Google OAuth Popup</span>
             </button>
 
-            <div className="relative flex items-center justify-center">
-              <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-              <span className="bg-white dark:bg-slate-900 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
-                Or Instant Google Account Sign-In / Auto-Register
-              </span>
-              <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-            </div>
-
-            <form onSubmit={handleGoogleDirectSubmit} className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Google Email Address *
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="yourname@gmail.com"
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-10 pr-3.5 py-2.5 text-xs outline-hidden focus:border-[#4A148C]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                    Full Name (New User)
-                  </label>
-                  <div className="relative">
-                    <UserIcon className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="Auto-filled if existing"
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-2.5 py-2 text-xs outline-hidden focus:border-[#4A148C]"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                    Mobile (Optional)
-                  </label>
-                  <div className="relative">
-                    <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="9876543210"
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-2.5 py-2 text-xs outline-hidden focus:border-[#4A148C]"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#4A148C] hover:bg-purple-900 disabled:opacity-50 text-white text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition"
-              >
-                <span>
-                  {loading
-                    ? 'Verifying with Google OAuth...'
-                    : 'Sign In / Auto-Register with Google'}
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
+            <p className="text-center text-[11px] text-slate-500 dark:text-slate-400">
+              Sign-in identity is verified by Google. Entering an email address alone cannot create or access an account.
+            </p>
           </div>
         )}
       </div>

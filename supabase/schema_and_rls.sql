@@ -472,6 +472,50 @@ CREATE POLICY "Users can view own payment verifications"
   TO authenticated
   USING (auth.uid() = user_id OR public.is_admin());
 
+-- A client-submitted UTR is never proof. Only a trusted provider settlement
+-- handler may write the verified ledger row required by this guard.
+CREATE OR REPLACE FUNCTION public.guard_booking_payment_and_customer_updates()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.payment_status NOT IN ('pay_later', 'verified') THEN
+      RAISE EXCEPTION 'PAYMENT_VERIFICATION_REQUIRED';
+    END IF;
+
+    IF NEW.payment_status = 'verified' AND NOT EXISTS (
+      SELECT 1
+      FROM public.payment_verifications pv
+      WHERE pv.utr_number = NEW.payment_utr
+        AND pv.amount = NEW.amount
+        AND pv.status = 'verified'
+        AND pv.verified_at IS NOT NULL
+        AND NULLIF(pv.gateway_signature, '') IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'PAYMENT_LEDGER_VERIFICATION_REQUIRED';
+    END IF;
+  ELSIF TG_OP = 'UPDATE'
+    AND auth.uid() = OLD.user_id
+    AND NOT public.is_admin() THEN
+    IF OLD.status <> 'confirmed'
+      OR NEW.status <> 'cancelled'
+      OR (to_jsonb(NEW) - 'status') IS DISTINCT FROM (to_jsonb(OLD) - 'status') THEN
+      RAISE EXCEPTION 'CUSTOMER_BOOKING_UPDATE_NOT_ALLOWED';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_booking_payment_and_customer_updates ON public.bookings;
+CREATE TRIGGER guard_booking_payment_and_customer_updates
+  BEFORE INSERT OR UPDATE ON public.bookings
+  FOR EACH ROW EXECUTE FUNCTION public.guard_booking_payment_and_customer_updates();
+
 -- 9C. ATOMIC PL/pgSQL RPC: HOLD MOVIE SEATS WITH ROW-LEVEL CONFLICT DETECTION
 CREATE OR REPLACE FUNCTION public.hold_movie_seats_atomic(
   p_listing_id TEXT,
@@ -826,10 +870,16 @@ CREATE POLICY "Owners can delete their own listings"
 
 -- Enforce active account check on bookings creation
 DROP POLICY IF EXISTS "Authenticated users can create their own bookings" ON public.bookings;
-CREATE POLICY "Authenticated users can create their own bookings"
+DROP POLICY IF EXISTS "Providers and admins can update booking status" ON public.bookings;
+CREATE POLICY "Bookings are created only by the server transaction"
   ON public.bookings FOR INSERT
   TO authenticated
-  WITH CHECK (auth.uid() = user_id AND public.is_active_user());
+  WITH CHECK (false);
+CREATE POLICY "Bookings are updated only by the server transaction"
+  ON public.bookings FOR UPDATE
+  TO authenticated
+  USING (false)
+  WITH CHECK (false);
 
 -- 10B. NOTIFICATIONS TABLE (Targeted & Broadcast Notifications with RLS)
 CREATE TABLE IF NOT EXISTS public.notifications (
@@ -862,6 +912,22 @@ CREATE POLICY "Users can view their own or role-targeted notifications"
     )
   );
 
+-- Additive indexes for the observed listing, booking-history, provider, and
+-- seat-hold cleanup query patterns. The unique seat tuple already has an index.
+CREATE INDEX IF NOT EXISTS idx_listings_created_at_desc
+  ON public.listings (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_owner_created_at_desc
+  ON public.listings (owner_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bookings_user_created_at_desc
+  ON public.bookings (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bookings_provider_created_at_desc
+  ON public.bookings (provider_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bookings_listing_slot_status
+  ON public.bookings (listing_id, scheduled_date, scheduled_time, status);
+CREATE INDEX IF NOT EXISTS idx_seat_locks_expired_holds
+  ON public.seat_locks (expires_at)
+  WHERE status = 'held';
+
 DROP POLICY IF EXISTS "Authenticated active users and admins can create notifications" ON public.notifications;
 CREATE POLICY "Authenticated active users and admins can create notifications"
   ON public.notifications FOR INSERT
@@ -887,14 +953,6 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
     BEGIN
       ALTER PUBLICATION supabase_realtime ADD TABLE public.listings;
-    EXCEPTION WHEN duplicate_object THEN NULL;
-    END;
-    BEGIN
-      ALTER PUBLICATION supabase_realtime ADD TABLE public.bookings;
-    EXCEPTION WHEN duplicate_object THEN NULL;
-    END;
-    BEGIN
-      ALTER PUBLICATION supabase_realtime ADD TABLE public.seat_locks;
     EXCEPTION WHEN duplicate_object THEN NULL;
     END;
     BEGIN
@@ -955,6 +1013,21 @@ CREATE POLICY "Providers and admins can manage cinema screens"
       WHERE p.id = auth.uid() AND p.role IN ('provider', 'admin') AND p.account_status = 'active'
     )
   );
+
+-- Booking, payment, and seat-lock data are accessed through the signed server
+-- API only. Do not expose service authority through browser RPC or table grants.
+REVOKE ALL ON public.bookings FROM anon, authenticated;
+REVOKE ALL ON public.payment_verifications FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.bookings TO service_role;
+GRANT SELECT, INSERT, UPDATE ON public.payment_verifications TO service_role;
+DROP POLICY IF EXISTS "Anyone can view active seat locks" ON public.seat_locks;
+DROP POLICY IF EXISTS "Authenticated users can hold own seats" ON public.seat_locks;
+DROP POLICY IF EXISTS "Authenticated users can update own seat locks" ON public.seat_locks;
+REVOKE ALL ON public.seat_locks FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.seat_locks TO service_role;
+REVOKE ALL ON FUNCTION public.hold_movie_seats_atomic(TEXT,TEXT,TEXT,TEXT[],TEXT,INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.hold_movie_seats_atomic(TEXT,TEXT,TEXT,TEXT[],TEXT,INT) TO service_role;
+REVOKE ALL ON FUNCTION public.create_booking_atomic(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,NUMERIC,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT,TEXT,TEXT) FROM PUBLIC, anon, authenticated;
 
 CREATE TABLE IF NOT EXISTS public.movie_refunds (
   id TEXT PRIMARY KEY DEFAULT ('RFD-' || gen_random_uuid()::text),

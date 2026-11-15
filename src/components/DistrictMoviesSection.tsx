@@ -66,6 +66,7 @@ import {
   resolveMovieSupportTicket,
   AuthoritativeCinemaScreenConfig,
   getOrCreateClientSessionId,
+  startGoogleOAuthPopup,
 } from '../lib/supabaseClient';
 
 interface DistrictMoviesSectionProps {
@@ -216,7 +217,6 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     supabaseUser,
     supabaseProfile,
     authUser,
-    loginWithGoogle,
     userRole,
     setUserRole,
     updateListing,
@@ -627,9 +627,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       if (activePillar === 'private' && item.categoryId !== 'movie-private') return false;
 
       if (selectedCityArea !== 'All Hyderabad') {
-        const areaMatch =
-          item.location.area.toLowerCase().includes(selectedCityArea.toLowerCase()) ||
-          item.location.address.toLowerCase().includes(selectedCityArea.toLowerCase());
+        const areaMatch = item.location.area
+          .toLowerCase()
+          .includes(selectedCityArea.toLowerCase());
         if (!areaMatch) return false;
       }
 
@@ -970,7 +970,8 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
       amount: grandTotal,
       merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
       planOrListing: `Movie Ticket: ${bookingModalListing.title} (${selectedShowtime} · ${selectedSeats.join(', ')})`,
-      userId: authUser?.id || supabaseUser?.id || getOrCreateClientSessionId(),
+      purpose: 'booking',
+      listingId: bookingModalListing.id,
     });
     if (intentRes.ok && intentRes.intentId) {
       setPaymentIntentId(intentRes.intentId);
@@ -982,15 +983,9 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
     if (isSigningInGoogle) return;
     setIsSigningInGoogle(true);
     try {
-      const res = await loginWithGoogle({
-        email: guestEmailInput.trim() || 'rahul.sharma@gmail.com',
-        name: guestNameInput.trim() || 'Rahul Sharma',
-        phone: guestPhoneInput.trim() || '9848012345',
-        city: 'Hyderabad',
-        requestedRole: 'customer',
-      });
+      const res = await startGoogleOAuthPopup('customer');
       if (res.ok) {
-        triggerDistrictToast(`✓ Signed in with Google as ${res.user?.email || guestEmailInput}`);
+        triggerDistrictToast(`✓ Signed in with Google as ${res.user?.email || 'your account'}`);
       } else {
         triggerDistrictToast(res.message || 'Google login failed.');
       }
@@ -1000,7 +995,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
   };
 
   // Verify UPI Payment (supports testing UTR-only unsettled vs Bank Webhook Verified Settlement)
-  const handleVerifyPaymentAndConfirmTicket = async (simulateBankWebhookSettlement: boolean) => {
+  const handleVerifyPaymentAndConfirmTicket = async () => {
     if (!bookingModalListing || selectedSeats.length === 0 || isAtomicallyBooking) return;
     const cleanUtr = upiUtrInput.replace(/\D/g, '');
     if (cleanUtr.length !== 12) {
@@ -1020,7 +1015,8 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
           amount: grandTotal,
           merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
           planOrListing: `Movie Ticket: ${bookingModalListing.title}`,
-          userId: authUser?.id || supabaseUser?.id || getOrCreateClientSessionId(),
+          purpose: 'booking',
+          listingId: bookingModalListing.id,
         });
         currentIntentId = created.intentId || null;
         setPaymentIntentId(currentIntentId);
@@ -1038,7 +1034,6 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
         utrNumber: cleanUtr,
         amount: grandTotal,
         merchantVpa: bookingModalListing.upiId || 'bookourspace.movies@okaxis',
-        simulateBankWebhookSettlement,
       });
 
       if (!verifyRes.ok && verifyRes.httpStatus === 409) {
@@ -1050,9 +1045,7 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
         return;
       }
 
-      // Now call atomic booking endpoint with requireVerifiedPayment: true
-      // If simulateBankWebhookSettlement was false, verifyRes.paymentVerificationToken is undefined,
-      // and the server MUST reject with 402 PAYMENT_NOT_VERIFIED!
+      // Call the atomic booking endpoint only when the provider has verified settlement.
       const activeDateIso = dateStrip[selectedDateOffset].iso;
       const sessionId = getOrCreateClientSessionId();
       const sortedSeatsKey = [...selectedSeats].sort().join('-');
@@ -3582,29 +3575,18 @@ export const DistrictMoviesSection: React.FC<DistrictMoviesSectionProps> = ({
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div className="pt-1">
                     <button
                       type="button"
-                      data-testid="submit-utr-unsettled-btn"
+                      data-testid="submit-utr-verification-btn"
                       disabled={isAtomicallyBooking}
-                      onClick={() => handleVerifyPaymentAndConfirmTicket(false)}
-                      className="py-2.5 px-3 rounded-xl border border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold cursor-pointer"
+                      onClick={handleVerifyPaymentAndConfirmTicket}
+                      className="w-full py-2.5 px-4 rounded-xl border border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-xs font-bold cursor-pointer"
                     >
-                      Submit UTR Only (Test Unsettled Guard)
-                    </button>
-
-                    <button
-                      type="button"
-                      data-testid="verify-settlement-confirm-btn"
-                      disabled={isAtomicallyBooking}
-                      onClick={() => handleVerifyPaymentAndConfirmTicket(true)}
-                      className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow-lg"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
                       <span>
                         {isAtomicallyBooking
-                          ? 'Verifying Settlement...'
-                          : `Verify Bank Webhook & Issue Ticket (₹${grandTotal})`}
+                          ? 'Checking payment status…'
+                          : `Submit UTR for verification (₹${grandTotal})`}
                       </span>
                     </button>
                   </div>

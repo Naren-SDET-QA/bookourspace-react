@@ -51,7 +51,6 @@ import {
   AuthoritativeGoogleUser,
   getStoredGoogleAuthUser,
   setStoredAuthoritativeSession,
-  authenticateWithGoogleServer,
   fetchCurrentAuthSession,
   logoutAuthoritativeSession,
   fetchServerNotifications,
@@ -59,6 +58,7 @@ import {
   markServerNotificationRead,
   clearServerNotifications,
   syncServerProviderListing,
+  authenticateWithGoogleServer,
 } from '../lib/supabaseClient';
 
 interface MarketplaceContextType {
@@ -69,14 +69,8 @@ interface MarketplaceContextType {
   isAccountBlocked: boolean;
   blockedReason: string | null;
   loginWithGoogle: (params: {
-    email: string;
-    name?: string;
-    googleSub?: string;
-    avatarUrl?: string;
-    phone?: string;
-    city?: string;
+    idToken?: string;
     requestedRole?: UserRole;
-    allowRoleChange?: boolean;
   }) => Promise<{
     ok: boolean;
     isNewUser?: boolean;
@@ -435,26 +429,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setSupabaseSession(data.session);
       setSupabaseUser(data.session?.user ?? null);
       void loadRlsData(data.session?.user ?? null);
-      if (data.session?.user?.email) {
-        void authenticateWithGoogleServer({
-          email: data.session.user.email,
-          name:
-            data.session.user.user_metadata?.full_name ||
-            data.session.user.user_metadata?.name,
-          googleSub:
-            data.session.user.user_metadata?.sub || data.session.user.id,
-          avatarUrl:
-            data.session.user.user_metadata?.avatar_url ||
-            data.session.user.user_metadata?.picture,
-          allowRoleChange: false,
-        }).then((syncRes) => {
-          if (mounted && syncRes.ok && syncRes.user) {
-            setAuthUser(syncRes.user);
-            setUserRole(syncRes.user.role);
-            syncLocalProfileWithGoogleUser(syncRes.user);
-          }
-        });
-      }
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
@@ -462,36 +436,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setSupabaseSession(session);
       setSupabaseUser(session?.user ?? null);
       void loadRlsData(session?.user ?? null);
-      if (event === 'SIGNED_IN' && session?.user?.email) {
-        void authenticateWithGoogleServer({
-          email: session.user.email,
-          name:
-            session.user.user_metadata?.full_name ||
-            session.user.user_metadata?.name,
-          googleSub: session.user.user_metadata?.sub || session.user.id,
-          avatarUrl:
-            session.user.user_metadata?.avatar_url ||
-            session.user.user_metadata?.picture,
-          allowRoleChange: false,
-        }).then((syncRes) => {
-          if (mounted && syncRes.ok && syncRes.user) {
-            setIsAccountBlocked(false);
-            setBlockedReason(null);
-            setAuthUser(syncRes.user);
-            setUserRole(syncRes.user.role);
-            syncLocalProfileWithGoogleUser(syncRes.user);
-            window.dispatchEvent(
-              new CustomEvent('bos-google-oauth-redirect', {
-                detail: {
-                  user: syncRes.user,
-                  isNewUser: syncRes.isNewUser,
-                  redirectTarget: syncRes.redirectTarget,
-                },
-              })
-            );
-          }
-        });
-      }
     });
 
     const unsubscribeRealtime = subscribeToRlsChanges(() => {
@@ -635,14 +579,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [authUser?.id, userRole]);
 
   const loginWithGoogle = async (params: {
-    email: string;
-    name?: string;
-    googleSub?: string;
-    avatarUrl?: string;
-    phone?: string;
-    city?: string;
+    idToken?: string;
     requestedRole?: UserRole;
-    allowRoleChange?: boolean;
   }) => {
     const res = await authenticateWithGoogleServer(params);
     if (!res.ok) {

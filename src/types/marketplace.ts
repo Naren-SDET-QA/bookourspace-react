@@ -113,6 +113,7 @@ export interface MarketplaceListing {
   providerNameTe?: string;
   providerNameHi?: string;
   providerPhone: string;
+  upiId?: string;
   providerEmail: string;
   providerAvatar: string;
   providerRating: number;

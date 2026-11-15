@@ -128,11 +128,18 @@ import {
   updateServerAdminUserRole,
   updateServerAdminUserVerify,
   sendServerNotification,
+  fetchAdminPaymentReconciliation,
+  reviewAdminPaymentOrRefund,
+  AdminPaymentReconciliationQueue,
+  fetchMarketSectionVisibility,
+  updateMarketSectionVisibility,
 } from '../lib/supabaseClient';
+import { MarketSectionId, MarketSectionVisibility } from '../shared/marketSectionVisibility';
 
 interface AdminDashboardProps {
   onApprovedNavigateToApp?: (listing: MarketplaceListing) => void;
   onOpenLivePageEditor?: () => void;
+  onMarketSectionVisibilityChange?: (visibility: MarketSectionVisibility) => void;
 }
 
 export type SuperAdminSectionId =
@@ -166,6 +173,7 @@ interface SensitiveActionModalState {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onApprovedNavigateToApp,
   onOpenLivePageEditor,
+  onMarketSectionVisibilityChange,
 }) => {
   const {
     categories,
@@ -318,6 +326,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [homeScreenStyle, setHomeScreenStyle] = useState<HomeScreenLayoutStyle>(() =>
     loadHomeScreenLayoutStyle()
   );
+  const [marketSectionVisibility, setMarketSectionVisibility] = useState<MarketSectionVisibility | null>(null);
+  const [savingMarketSection, setSavingMarketSection] = useState<MarketSectionId | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetchMarketSectionVisibility().then((visibility) => {
+      if (active) setMarketSectionVisibility(visibility);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const toggleMarketSection = async (sectionId: MarketSectionId) => {
+    if (!marketSectionVisibility || savingMarketSection) return;
+    const enabled = !marketSectionVisibility[sectionId];
+    setSavingMarketSection(sectionId);
+    const result = await updateMarketSectionVisibility(sectionId, enabled);
+    setSavingMarketSection(null);
+    if (!result.ok) {
+      showAdminNotification(
+        result.message === 'AT_LEAST_ONE_SECTION_REQUIRED'
+          ? 'Keep at least one marketplace section enabled.'
+          : 'Could not save section visibility. Check that you are signed in as an active admin.'
+      );
+      return;
+    }
+    setMarketSectionVisibility(result.sections);
+    onMarketSectionVisibilityChange?.(result.sections);
+    logAction(
+      'Feature Management',
+      `${enabled ? 'Enabled' : 'Disabled'} ${sectionId}`,
+      `Marketplace section ${sectionId} set to ${enabled ? 'ON' : 'OFF'}`,
+      'published'
+    );
+    showAdminNotification(`Marketplace section ${sectionId.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}.`);
+  };
 
   // Preview Mode Toggle (Draft / Preview / Publish workflow)
   const [isPreviewDrawerOpen, setIsPreviewDrawerOpen] = useState(false);
@@ -635,10 +678,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'transactions'
     | 'automated_billing'
     | 'refunds'
+    | 'reconciliation'
     | 'payouts'
     | 'commissions_plans'
     | 'payment_settings'
   >('transactions');
+  const [reconciliationQueue, setReconciliationQueue] = useState<AdminPaymentReconciliationQueue>({ payments: [], refunds: [] });
+  const [reconciliationBusy, setReconciliationBusy] = useState(false);
+  const [reconciliationReasons, setReconciliationReasons] = useState<Record<string, string>>({});
+  const [reconciliationError, setReconciliationError] = useState('');
+  const refreshReconciliationQueue = async () => {
+    const queue = await fetchAdminPaymentReconciliation();
+    if (queue) {
+      setReconciliationQueue(queue);
+      setReconciliationError('');
+    } else {
+      setReconciliationError('Unable to load the server reconciliation queue. Confirm admin access and database configuration.');
+    }
+  };
+  useEffect(() => {
+    if (paymentSubTab === 'reconciliation') void refreshReconciliationQueue();
+  }, [paymentSubTab]);
+  const handleReconcileDecision = async (kind: 'payment' | 'refund', id: string, approve: boolean) => {
+    const reason = String(reconciliationReasons[`${kind}:${id}`] || '').trim();
+    if (reason.length < 8) {
+      setReconciliationError('Enter at least eight characters describing the independent bank or refund verification.');
+      return;
+    }
+    setReconciliationBusy(true);
+    setReconciliationError('');
+    const result = await reviewAdminPaymentOrRefund({ kind, id, approve, reason });
+    setReconciliationBusy(false);
+    if (!result.ok) {
+      setReconciliationError(result.error || 'The server rejected this reconciliation action.');
+      return;
+    }
+    setReconciliationReasons((current) => ({ ...current, [`${kind}:${id}`]: '' }));
+    await refreshReconciliationQueue();
+  };
   const [newTxDesc, setNewTxDesc] = useState(
     'BOS Verified Partner Subscription'
   );
@@ -2088,6 +2165,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     { id: 'transactions', label: `Transactions (${transactions.length})` },
                     { id: 'automated_billing', label: '⚡ Automated Billing & Cycle Emails' },
                     { id: 'refunds', label: `Refunds (${refunds.length})` },
+                    { id: 'reconciliation', label: `Bank Reconciliation (${reconciliationQueue.payments.length + reconciliationQueue.refunds.length})` },
                     { id: 'payouts', label: `Payouts (${payouts.length})` },
                     { id: 'commissions_plans', label: 'Commissions & Plans' },
                     { id: 'payment_settings', label: 'Payment Settings' },
@@ -2354,6 +2432,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </tbody>
                   </table>
                 </div>
+              )}
+
+              {paymentSubTab === 'reconciliation' && (
+                <section className="space-y-4" aria-labelledby="bank-reconciliation-heading">
+                  <div>
+                    <h4 id="bank-reconciliation-heading" className="font-black text-slate-900 dark:text-white">Independent bank and refund review</h4>
+                    <p className="mt-1 text-xs text-slate-500">Approval records an auditable admin decision. Verify the reference against your bank statement before approving; the customer submitted UTR alone is not proof.</p>
+                  </div>
+                  {reconciliationError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{reconciliationError}</p>}
+                  <div className="space-y-3">
+                    {reconciliationQueue.payments.map((payment) => {
+                      const key = `payment:${payment.intent_id}`;
+                      return <article key={payment.intent_id} className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+                        <div className="flex flex-wrap justify-between gap-2 text-sm">
+                          <div><strong>UPI payment · ₹{Number(payment.amount).toLocaleString('en-IN')}</strong><div className="text-xs text-slate-500">UTR {payment.utr_number} · {payment.merchant_vpa}</div></div>
+                          <div className="text-right text-xs text-slate-500">Intent {payment.intent_id}<br />Customer {payment.actor_id}</div>
+                        </div>
+                        <label className="block text-xs font-bold">Bank statement verification note
+                          <input value={reconciliationReasons[key] || ''} minLength={8} onChange={(event) => setReconciliationReasons((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2.5 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder="Record the independent bank match" />
+                        </label>
+                        <div className="flex gap-2"><button disabled={reconciliationBusy} onClick={() => void handleReconcileDecision('payment', payment.intent_id, true)} className="rounded-xl bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Approve verified payment</button><button disabled={reconciliationBusy} onClick={() => void handleReconcileDecision('payment', payment.intent_id, false)} className="rounded-xl border border-rose-300 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">Reject reference</button></div>
+                      </article>;
+                    })}
+                    {reconciliationQueue.refunds.map((refund) => {
+                      const key = `refund:${refund.id}`;
+                      return <article key={refund.id} className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 space-y-3 dark:border-amber-900 dark:bg-amber-950/20">
+                        <div className="flex flex-wrap justify-between gap-2 text-sm"><div><strong>Manual UPI refund · ₹{Number(refund.amount).toLocaleString('en-IN')}</strong><div className="text-xs text-slate-500">Refund {refund.id} · Booking {refund.booking_id}</div></div><div className="text-xs text-slate-500">{refund.reason}</div></div>
+                        <label className="block text-xs font-bold">Bank refund verification note
+                          <input value={reconciliationReasons[key] || ''} minLength={8} onChange={(event) => setReconciliationReasons((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2.5 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder="Record the refund transfer or rejection evidence" />
+                        </label>
+                        <div className="flex gap-2"><button disabled={reconciliationBusy} onClick={() => void handleReconcileDecision('refund', refund.id, true)} className="rounded-xl bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Approve completed refund</button><button disabled={reconciliationBusy} onClick={() => void handleReconcileDecision('refund', refund.id, false)} className="rounded-xl border border-rose-300 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">Reject refund proof</button></div>
+                      </article>;
+                    })}
+                    {!reconciliationQueue.payments.length && !reconciliationQueue.refunds.length && !reconciliationError && <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-800">No payment or refund items are awaiting reconciliation.</p>}
+                  </div>
+                </section>
               )}
 
               {/* SUB-TAB 2C: PROVIDER PAYOUTS */}
@@ -4470,6 +4584,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <p className="text-xs text-slate-500">
                     Toggle platform modules ON or OFF in real time and build custom UI + DB fields without developer support.
                   </p>
+                </div>
+
+                <div className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 space-y-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900 dark:text-white">Marketplace sections</div>
+                    <div className="text-[10px] text-slate-500">
+                      Choose which sections appear in customer navigation. Changes save on the server and sync across sessions. Keep at least one enabled.
+                    </div>
+                  </div>
+                  {marketSectionVisibility ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {ALL_SIX_MARKET_MODULES.map((module) => {
+                        const sectionId = module.id as MarketSectionId;
+                        const isEnabled = marketSectionVisibility[sectionId];
+                        return (
+                          <button
+                            key={sectionId}
+                            type="button"
+                            disabled={savingMarketSection !== null}
+                            aria-pressed={isEnabled}
+                            onClick={() => void toggleMarketSection(sectionId)}
+                            className={`px-3 py-2 rounded-xl border font-black flex items-center justify-between gap-2 transition disabled:opacity-60 ${
+                              isEnabled
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                            }`}
+                          >
+                            <span className="truncate">{module.emoji} {module.shortLabel}</span>
+                            <span className="text-[9px]">{savingMarketSection === sectionId ? 'SAVING…' : isEnabled ? 'ON' : 'OFF'}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">Loading saved section settings…</p>
+                  )}
                 </div>
 
                 {/* Per-Section Visibility Matrix for Spotlight Subcategories & Search Date-Range Filter */}

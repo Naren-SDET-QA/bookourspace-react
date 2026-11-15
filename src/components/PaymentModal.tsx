@@ -163,6 +163,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [paymentIntentId, setPaymentIntentId] = useState('');
   const [transactionId, setTransactionId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [paidViaLabel, setPaidViaLabel] = useState('Direct 0%-Fee UPI / Google Pay');
@@ -354,9 +355,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         if (canMakePayment) {
           const response = await request.show();
           await response.complete('success');
-          finalizePaymentSuccess(
-            `GPAY-TEZ-${Date.now().toString().slice(-8)}`,
-            `Google Pay Android (${merchantVpa})`
+          setAppLaunchedNotice(
+            'Payment was submitted by Google Pay. Enter the actual bank UTR below; the booking remains pending until a payment provider confirms settlement.'
           );
           return;
         }
@@ -410,29 +410,47 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const finalizePaymentSuccess = async (
     customTxId?: string,
     customMethodLabel?: string,
-    useBankWebhookSettlement: boolean = true
   ) => {
+    if (paymentMethod !== 'upi') {
+      setAppLaunchedNotice('This payment method is unavailable until a real payment provider is configured. No payment was recorded.');
+      return;
+    }
+
+    const cleanUtr = utrReference.trim().replace(/\s+/g, '');
+    if (!/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
+      setAppLaunchedNotice('Enter the actual 12–22 character bank UTR after completing your UPI payment.');
+      return;
+    }
+
     setIsProcessing(true);
     triggerGlobalGlobeLoader('Verifying 0%-Fee Direct Payment & Generating Official GST Invoice...', 750);
 
     try {
-      const cleanUtr = utrReference.trim().replace(/\s+/g, '');
-      const intentRes = await createServerPaymentIntent({
-        amount: totalPayable,
-        merchantVpa,
-        planOrListing: planName,
-      });
-      const activeIntentId = intentRes.intentId || `INT-${Date.now()}`;
+      let activeIntentId = paymentIntentId;
+      if (!activeIntentId) {
+        const intentRes = await createServerPaymentIntent({
+          amount: totalPayable,
+          merchantVpa,
+          planOrListing: planName,
+          purpose: 'subscription',
+        });
+        if (!intentRes.ok || !intentRes.intentId) {
+          setAppLaunchedNotice('Unable to start payment verification. No payment was recorded.');
+          setIsProcessing(false);
+          return;
+        }
+        activeIntentId = intentRes.intentId;
+        setPaymentIntentId(activeIntentId);
+      }
 
       // If user typed a manual UTR, validate format & anti-replay on the server
       // Enforces: UTR alone != verified payment unless accompanied by bank webhook signature
       if (paymentMethod === 'upi' && cleanUtr.length > 0) {
         const verifyRes = await verifyServerUpiPayment({
           intentId: activeIntentId,
-          utrNumber: cleanUtr.length >= 12 ? cleanUtr : cleanUtr.padEnd(12, '0'),
+          utrNumber: cleanUtr,
           amount: totalPayable,
           merchantVpa,
-          simulateBankWebhookSettlement: useBankWebhookSettlement,
         });
 
         if (verifyRes.httpStatus === 409 || verifyRes.error === 'DUPLICATE_UTR_REPLAY') {
@@ -447,21 +465,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           setAppLaunchedNotice(
             `⏳ ${verifyRes.message || 'UTR recorded for bank reconciliation. UTR alone is not marked as paid until bank webhook confirmation.'}`
           );
-          setIsProcessing(false);
-          return;
-        }
-      } else if (paymentMethod === 'upi') {
-        // Verify via simulated bank webhook settlement for 1-tap UPI QR flow
-        const autoUtr = `${Date.now()}${Math.floor(10 + Math.random() * 89)}`.slice(-12);
-        const verifyRes = await verifyServerUpiPayment({
-          intentId: activeIntentId,
-          utrNumber: autoUtr,
-          amount: totalPayable,
-          merchantVpa,
-          simulateBankWebhookSettlement: true,
-        });
-        if (!verifyRes.verified) {
-          setAppLaunchedNotice('⏳ Payment pending bank webhook reconciliation.');
           setIsProcessing(false);
           return;
         }
@@ -524,14 +527,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <h3 className="font-black text-slate-900 dark:text-white text-base">
-                  Zero-Fee Direct UPI & Google Pay
+                  UPI Payment Verification
                 </h3>
                 <span className="px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300/50">
-                  0% Commission
+                  Settlement Pending
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Works on iOS (iPhone), Android & Web • Direct Bank Settlement
+                Payment is confirmed only after provider settlement verification.
               </p>
             </div>
           </div>
@@ -1187,11 +1190,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       },
                     }}
                     onLoadPaymentData={(paymentData) => {
-                      const desc = paymentData?.paymentMethodData?.description || 'Google Pay';
-                      finalizePaymentSuccess(
-                        `GPAY-${Date.now().toString().slice(-8)}`,
-                        `Google Pay Official (${desc})`
-                      );
+                      void paymentData;
+                      setAppLaunchedNotice('Google Pay returned payment data. Settlement still needs confirmation from a configured payment provider. No payment was recorded.');
                     }}
                   />
                 </div>

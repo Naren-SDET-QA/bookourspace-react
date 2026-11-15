@@ -30,9 +30,11 @@ import { venue12Categories } from '../data/venueData';
 import { AppLanguage, allIndianLanguages } from '../utils/translations';
 import { getUILabels } from '../utils/i18nEngine';
 import { HomeScreenLayoutStyle } from './ModularSystemEngine';
+import { MarketSectionVisibility } from '../shared/marketSectionVisibility';
 
 interface SuperAppBentoHomeHubProps {
   activeMarketSection: MarketSectionType;
+  marketSectionVisibility?: MarketSectionVisibility;
   onSelectCategoryAndAdvance: (
     section: MarketSectionType,
     categoryId?: string,
@@ -60,6 +62,7 @@ interface SuperAppBentoHomeHubProps {
 }
 
 export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
+  marketSectionVisibility,
   onSelectCategoryAndAdvance,
   currentLang,
   onChangeLang,
@@ -86,6 +89,14 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
   const [activeMoreTab, setActiveMoreTab] = useState<MarketSectionType>('pg_hostels');
   const [activeHeroSlide, setActiveHeroSlide] = useState(0);
   const [isHeroPaused, setIsHeroPaused] = useState(false);
+
+  useEffect(() => {
+    if (!marketSectionVisibility || marketSectionVisibility[activeMoreTab]) return;
+    const next = (Object.keys(marketSectionVisibility) as MarketSectionType[]).find(
+      (section) => marketSectionVisibility[section]
+    );
+    if (next) setActiveMoreTab(next);
+  }, [activeMoreTab, marketSectionVisibility]);
 
   const heroSpotlightSlides: {
     id: string;
@@ -280,16 +291,20 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
     },
   ];
 
+  const visibleHeroSlides = heroSpotlightSlides.filter(
+    (slide) => !marketSectionVisibility || marketSectionVisibility[slide.section]
+  );
+
   // Auto-advance Spotlight & Platform Fee showcase one-by-one every 3.5 seconds
   useEffect(() => {
     if (isHeroPaused) return;
     const timer = window.setInterval(() => {
-      setActiveHeroSlide((prev) => (prev + 1) % heroSpotlightSlides.length);
+      setActiveHeroSlide((prev) => (prev + 1) % Math.max(visibleHeroSlides.length, 1));
     }, 3500);
     return () => window.clearInterval(timer);
-  }, [isHeroPaused, heroSpotlightSlides.length]);
+  }, [isHeroPaused, visibleHeroSlides.length]);
 
-  const currentHero = heroSpotlightSlides[activeHeroSlide] || heroSpotlightSlides[0];
+  const currentHero = visibleHeroSlides[activeHeroSlide] || visibleHeroSlides[0] || heroSpotlightSlides[0];
 
   const ui = getUILabels(currentLang);
 
@@ -584,7 +599,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               type="button"
               onClick={() =>
                 setActiveHeroSlide(
-                  (prev) => (prev - 1 + heroSpotlightSlides.length) % heroSpotlightSlides.length
+                  (prev) => (prev - 1 + Math.max(visibleHeroSlides.length, 1)) % Math.max(visibleHeroSlides.length, 1)
                 )
               }
               aria-label="Previous Spotlight"
@@ -593,12 +608,12 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               <ChevronLeft className="w-3 h-3" />
             </button>
             <span className="px-1.5 py-0.5 rounded-full bg-black/55 backdrop-blur-xs border border-white/20 text-[8.5px] font-black text-white">
-              {activeHeroSlide + 1}/{heroSpotlightSlides.length}
+              {activeHeroSlide + 1}/{visibleHeroSlides.length}
             </span>
             <button
               type="button"
               onClick={() =>
-                setActiveHeroSlide((prev) => (prev + 1) % heroSpotlightSlides.length)
+                setActiveHeroSlide((prev) => (prev + 1) % Math.max(visibleHeroSlides.length, 1))
               }
               aria-label="Next Spotlight"
               className="w-4.5 h-4.5 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
@@ -725,6 +740,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
           {/* Top Row: 2 Wide Featured Bento Cards */}
           <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-1.5 sm:mb-2.5 shrink-0">
             {/* Wide Card 1: PG's & Hostels */}
+            {(!marketSectionVisibility || marketSectionVisibility.pg_hostels) && (
             <button
               type="button"
               onClick={() => onSelectCategoryAndAdvance('pg_hostels', 'pg-students')}
@@ -745,8 +761,10 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
                 </span>
               </div>
             </button>
+            )}
 
             {/* Wide Card 2: Classes & Courses */}
+            {(!marketSectionVisibility || marketSectionVisibility.classes) && (
             <button
               type="button"
               onClick={() => onSelectCategoryAndAdvance('classes', 'class-software')}
@@ -767,6 +785,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
                 </span>
               </div>
             </button>
+            )}
           </div>
 
           {/* Rows 2 & 3: 4x2 Square Icon Cards Grid */}
@@ -774,6 +793,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
             {[
               {
                 id: 'bento-halls',
+                section: 'venues' as MarketSectionType,
                 label: 'Halls',
                 emoji: '🏛️',
                 badge: '',
@@ -782,6 +802,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               },
               {
                 id: 'bento-services',
+                section: 'services' as MarketSectionType,
                 label: 'Services',
                 emoji: '🛠️',
                 badge: 'LIVE',
@@ -790,6 +811,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               },
               {
                 id: 'bento-stay',
+                section: 'hotel_stay' as MarketSectionType,
                 label: 'Stay',
                 emoji: '🏨',
                 badge: '',
@@ -798,6 +820,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               },
               {
                 id: 'bento-movies',
+                section: 'movies' as MarketSectionType,
                 label: 'Movies',
                 emoji: '🎬',
                 badge: 'NEW',
@@ -806,6 +829,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               },
               {
                 id: 'bento-student-pg',
+                section: 'pg_hostels' as MarketSectionType,
                 label: 'Student PG',
                 emoji: '🎒',
                 badge: '',
@@ -814,6 +838,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               },
               {
                 id: 'bento-coding-ai',
+                section: 'classes' as MarketSectionType,
                 label: 'IT & AI',
                 emoji: '💻',
                 badge: 'HOT',
@@ -822,13 +847,14 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               },
               {
                 id: 'bento-coliving',
+                section: 'pg_hostels' as MarketSectionType,
                 label: 'Co-Living',
                 emoji: '🛋️',
                 badge: '',
                 bgTone: 'from-fuchsia-50 to-pink-100/80 dark:from-fuchsia-950/60 dark:to-pink-900/40',
                 onClick: () => onSelectCategoryAndAdvance('pg_hostels', 'pg-coliving'),
               },
-            ].map((item) => (
+            ].filter((item) => !marketSectionVisibility || marketSectionVisibility[item.section]).map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -962,7 +988,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
                 { id: 'services' as MarketSectionType, label: 'Services', emoji: '🛠️' },
                 { id: 'hotel_stay' as MarketSectionType, label: 'Stay & Hotels', emoji: '🏨' },
                 { id: 'movies' as MarketSectionType, label: 'Movies', emoji: '🎬' },
-              ].map((sec) => (
+              ].filter((sec) => !marketSectionVisibility || marketSectionVisibility[sec.id]).map((sec) => (
                 <button
                   key={sec.id}
                   type="button"

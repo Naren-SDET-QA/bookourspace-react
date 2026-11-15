@@ -84,6 +84,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
   const [isVerifyingQr, setIsVerifyingQr] = useState(false);
   const [qrVerified, setQrVerified] = useState(false);
   const [qrTxId, setQrTxId] = useState('');
+  const [upiUtrInput, setUpiUtrInput] = useState('');
   const [paymentIntentId, setPaymentIntentId] = useState('');
   const [paymentVerificationToken, setPaymentVerificationToken] = useState('');
   const [signedQrPassToken, setSignedQrPassToken] = useState('');
@@ -402,6 +403,8 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
           amount: totalBookingAmount,
           merchantVpa: providerVpa,
           planOrListing: listing.title,
+          purpose: 'booking',
+          listingId: listing.id,
         });
         if (intentRes.ok && intentRes.intentId) {
           activeIntentId = intentRes.intentId;
@@ -409,21 +412,28 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
         }
       }
 
-      const generatedUtr = `${Date.now()}${Math.floor(10 + Math.random() * 89)}`.slice(-12);
+      const cleanUtr = upiUtrInput.trim().replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9]{12,22}$/.test(cleanUtr)) {
+        setBookingConflictError('Enter the actual bank UTR after completing the UPI payment.');
+        return;
+      }
+      if (!activeIntentId) {
+        setBookingConflictError('Unable to start payment verification. No booking or payment was recorded.');
+        return;
+      }
       const verifyRes = await verifyServerUpiPayment({
-        intentId: activeIntentId || `INT-${Date.now()}`,
-        utrNumber: generatedUtr,
+        intentId: activeIntentId,
+        utrNumber: cleanUtr,
         amount: totalBookingAmount,
         merchantVpa: providerVpa,
-        simulateBankWebhookSettlement: true,
       });
 
       if (verifyRes.ok && verifyRes.verified) {
-        setQrTxId(`UTR-${generatedUtr}`);
+        setQrTxId(`UTR-${cleanUtr}`);
         setPaymentVerificationToken(verifyRes.paymentVerificationToken || '');
         setQrVerified(true);
       } else {
-        setQrTxId(`PENDING-UTR-${generatedUtr}`);
+        setQrTxId(`PENDING-UTR-${cleanUtr}`);
         setQrVerified(false);
         setBookingConflictError(
           verifyRes.message ||
@@ -535,7 +545,11 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
     setBookingConflictError(null);
     triggerGlobalGlobeLoader('Confirming Booking & Generating GST Invoice...', 650);
 
-    const finalTxId = qrVerified ? qrTxId : (paymentMode === 'pay_qr' ? `PENDING-RECON-${Date.now().toString().slice(-6)}` : undefined);
+    if (paymentMode === 'pay_qr' && !qrVerified) {
+      setBookingConflictError('Payment is not confirmed by a provider yet. You can choose pay later or wait for settlement verification.');
+      return;
+    }
+    const finalTxId = qrVerified ? qrTxId : undefined;
     const effectiveCheckOut = isRangeBooking ? selectedCheckoutDate : selectedBookingDate;
     const checkInDateTimeVal = isHotel ? `${selectedBookingDate}T${hotelCheckInTime}` : undefined;
     const checkOutDateTimeVal = isHotel ? `${effectiveCheckOut}T${hotelCheckOutTime}` : undefined;
@@ -574,9 +588,12 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
       exclusiveSlot: true,
     });
 
-    if (!atomicRes.ok && atomicRes.status === 409) {
+    if (!atomicRes.ok) {
       setBookingConflictError(
-        atomicRes.message || 'This date and time slot was just reserved by another user. Please pick another slot.'
+        atomicRes.message ||
+          (atomicRes.status === 409
+            ? 'This date and time slot was just reserved by another user. Please pick another slot.'
+            : 'The server could not confirm this booking. No confirmation was issued.')
       );
       return;
     }
@@ -633,10 +650,6 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
       customerName,
       customerPhone
     );
-
-    if (paymentMode === 'pay_qr' && !qrTxId) {
-      setQrTxId(finalTxId || `PENDING-RECON-${Date.now().toString().slice(-6)}`);
-    }
 
     setSubmitted(true);
   };
@@ -1528,6 +1541,14 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                         </div>
 
                         {/* Direct Open in UPI App Deep Link & Verify Button */}
+                        <input
+                          type="text"
+                          value={upiUtrInput}
+                          onChange={(event) => setUpiUtrInput(event.target.value.replace(/\s+/g, '').slice(0, 22))}
+                          placeholder="Enter actual bank UTR after payment"
+                          aria-label="UPI bank UTR"
+                          className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
+                        />
                         <div className="pt-1 flex items-center gap-2">
                           <a
                             href={upiUri}
@@ -1560,20 +1581,20 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                                 ? (currentLang === 'te' ? 'ధృవీకరించబడింది ✓' : 'Verified ✓')
                                 : isVerifyingQr 
                                 ? (currentLang === 'te' ? 'పరిశీలిస్తున్నాము...' : 'Verifying...') 
-                                : (currentLang === 'te' ? 'నేను చెల్లించాను' : 'Paid')}
+                                : (currentLang === 'te' ? 'UTR సమర్పించండి' : 'Submit UTR')}
                             </span>
                           </button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Escrow Guarantee Note */}
+                    {/* Payment verification status */}
                     <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-emerald-100 dark:border-emerald-900/60">
                       <span className="flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-400">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{currentLang === 'te' ? '100% సురక్షితమైన బుకింగ్ హామీ' : '100% Escrow Protected Booking'}</span>
+                        <span>{currentLang === 'te' ? 'ప్రొవైడర్ ధృవీకరణ తర్వాత చెల్లింపు ఖరారు అవుతుంది' : 'Payment confirmation requires provider verification'}</span>
                       </span>
-                      <span>{currentLang === 'te' ? 'QR చురుకుగా ఉంది' : 'QR Active'}</span>
+                      <span>{currentLang === 'te' ? 'ధృవీకరణ పెండింగ్‌లో ఉంది' : 'Verification pending'}</span>
                     </div>
 
                   </div>
