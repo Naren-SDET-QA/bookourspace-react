@@ -1875,6 +1875,12 @@ Task:
     url: process.env.VITE_SUPABASE_URL,
     projectId: process.env.VITE_SUPABASE_PROJECT_ID,
     developmentProjectId: process.env.VITE_SUPABASE_DEVELOPMENT_PROJECT_ID,
+    // A production deployment declares its dedicated target at runtime. This
+    // is the same public project reference the browser build receives; it is
+    // never a key or a secret.
+    productionProjectId:
+      process.env.BOS_PRODUCTION_SUPABASE_PROJECT_ID
+      || process.env.VITE_BOS_PRODUCTION_SUPABASE_PROJECT_ID,
     publishableKey: process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     anonKey: process.env.VITE_SUPABASE_ANON_KEY,
   });

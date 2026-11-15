@@ -79,6 +79,38 @@ export function isProfileImageStorageSource(value: string): boolean {
   return reference ? parseStorageObjectReference(reference)?.bucket === 'bos-private-profile-media' : false;
 }
 
+/** A private-bucket reference is only renderable by its authorized owner. */
+export function isPrivateStorageSource(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const reference = storageReferenceForSource(value.trim());
+  const bucket = reference ? parseStorageObjectReference(reference)?.bucket : undefined;
+  return bucket === 'bos-private-profile-media' || bucket === 'bos-private-documents';
+}
+
+/**
+ * A profile image value that may be handed to *another* user's browser.
+ * Private profile media is owner-only by policy, so its object path must never
+ * reach a public projection: callers get an empty string and render initials
+ * instead of a permanently broken `<img>`.
+ */
+export function publicProfileImageSource(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const source = value.trim();
+  if (!source) return '';
+  if (source.startsWith('storage://')) {
+    return parseStorageObjectReference(source)?.bucket === 'bos-public-media' ? source : '';
+  }
+  if (source.startsWith('/storage/v1/object/')) {
+    return isPublicImageStorageSource(source) ? source : '';
+  }
+  try {
+    const url = new URL(source);
+    return url.protocol === 'https:' ? source : '';
+  } catch {
+    return '';
+  }
+}
+
 const LOCAL_LISTING_ASSET = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 /** Public listing photos: original HTTPS images, local assets, and ready public Storage refs. */

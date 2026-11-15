@@ -71,6 +71,10 @@ spec:
               value: "${SUPABASE_PROJECT_ID}"
             - name: VITE_SUPABASE_PROJECT_ID
               value: "${SUPABASE_PROJECT_ID}"
+            # Public project reference for the browser bundle's production
+            # declaration. Never a key. Keep it equal to the project above.
+            - name: VITE_BOS_PRODUCTION_SUPABASE_PROJECT_ID
+              value: "${SUPABASE_PROJECT_ID}"
             - name: VITE_SUPABASE_URL
               value: "https://${SUPABASE_PROJECT_ID}.supabase.co"
             - name: SUPABASE_PUBLISHABLE_KEY

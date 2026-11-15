@@ -16,14 +16,20 @@
  * contacts Supabase, reads a key, or logs a value.
  */
 
-export const DEVELOPMENT_SUPABASE_PROJECT_REFS = [
-  'obkfgxjzlscungkhbyvq', // designated development project (ap-south-1 / Mumbai)
-  'ezrxykyocgbolpaebnqx', // legacy development project (eu-north-1 / Stockholm)
-  'sfoizxarbljhldmkgsma', // retired Mumbai project
-] as const;
+import {
+  isDevelopmentSupabaseProjectRef as isDevelopmentSupabaseProjectRefShared,
+  PRODUCTION_SUPABASE_PROJECT_ID_VAR,
+} from '../lib/supabaseProjectSeparation';
+
+// Kept as named exports for existing callers and audits.
+export {
+  DEVELOPMENT_SUPABASE_PROJECT_REFS,
+  PRODUCTION_SUPABASE_PROJECT_ID_VAR,
+  PRODUCTION_SUPABASE_VITE_PROJECT_ID_VAR,
+} from '../lib/supabaseProjectSeparation';
 
 /** The variable that makes a production Supabase target explicit. */
-export const PRODUCTION_SUPABASE_PROJECT_ID_VAR = 'BOS_PRODUCTION_SUPABASE_PROJECT_ID';
+export const PRODUCTION_SUPABASE_PROJECT_ID = PRODUCTION_SUPABASE_PROJECT_ID_VAR;
 
 export const SUPABASE_SEPARATION_ERRORS = {
   refRequired: 'PRODUCTION_SUPABASE_PROJECT_ID_REQUIRED',
@@ -57,7 +63,7 @@ function projectRefFromUrl(value: unknown): string {
 
 export function isDevelopmentSupabaseProjectRef(projectRef: unknown): boolean {
   const normalised = cleanProjectRef(projectRef);
-  return normalised !== '' && (DEVELOPMENT_SUPABASE_PROJECT_REFS as readonly string[]).includes(normalised);
+  return isDevelopmentSupabaseProjectRefShared(normalised);
 }
 
 /**

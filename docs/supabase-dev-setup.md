@@ -97,7 +97,10 @@ and no target is ever selected for you.
 | Key set but `VITE_SUPABASE_URL` missing | `MISSING_SUPABASE_URL`; disabled, no derived URL |
 | `VITE_SUPABASE_PROJECT_ID` without a URL | `MISSING_SUPABASE_URL`; the URL is never derived implicitly |
 | Valid URL + explicit project ID + matching development allowlist + key | That explicitly designated project is used; trailing slash stripped; callback URL derived |
-| Hosted project with no matching development allowlist | Rejected with `SUPABASE_DEVELOPMENT_PROJECT_NOT_ALLOWLISTED` or `SUPABASE_DEVELOPMENT_PROJECT_REFERENCE_MISMATCH` |
+| Hosted project with no matching development allowlist and no production declaration | Rejected with `SUPABASE_DEVELOPMENT_PROJECT_NOT_ALLOWLISTED` or `SUPABASE_DEVELOPMENT_PROJECT_REFERENCE_MISMATCH` |
+| Hosted project declared as the dedicated production target (`BOS_PRODUCTION_SUPABASE_PROJECT_ID` / build-time `VITE_BOS_PRODUCTION_SUPABASE_PROJECT_ID`) with the same URL and project ID and a public key | Accepted without a development allowlist; the declared ref must be explicit and must not be a designated development reference |
+| Production declaration that disagrees with the URL or project ID | `SUPABASE_PRODUCTION_PROJECT_REFERENCE_MISMATCH`, nothing used |
+| Production declaration naming a designated development reference | `SUPABASE_PRODUCTION_TARGET_IS_DEVELOPMENT`, nothing used |
 | Hosted URL without an explicit project ID | Rejected; project ID is not inferred for hosted targets |
 | URL or project id invalid | Disabled, project URL cleared, `INVALID_SUPABASE_URL` / `INVALID_SUPABASE_PROJECT_ID` |
 | URL and project id disagree | `SUPABASE_PROJECT_REFERENCE_MISMATCH`, nothing used |
@@ -108,11 +111,16 @@ and no target is ever selected for you.
 | `http://127.0.0.1:54321` | Accepted for a local Supabase stack |
 
 There is deliberately no implicit target and no fallback: an absent
-or invalid configuration leaves the client disabled. Hosted targets must be
-explicitly designated by the development allowlist. The resolver does not
-infer that a project is production from a hard-coded ref; a reviewer/operator
-must not designate an actual production project as development. Covered by
-`tests/supabase-config.test.mjs`.
+or invalid configuration leaves the client disabled. A hosted target has to
+state its role: either a development allowlist, or an explicit production
+declaration that matches the URL, project ID and key. The resolver does not
+infer that a project is production from a hard-coded ref, and a designated
+development reference can never be declared as production. This matters for
+images: every `storage://` listing photo is resolved to a short-lived signed
+URL by the browser Supabase client, so a disabled client silently replaces all
+owner-uploaded media with module fallbacks. Covered by
+`tests/supabase-config.test.mjs` and
+`tests/image-storage-configuration.test.mjs`.
 
 The App Builder React data path reads and writes `platform_config_versions`
 with the current Supabase Auth session and database RLS. It does not use a

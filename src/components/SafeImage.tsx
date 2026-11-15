@@ -110,16 +110,22 @@ export default function SafeImage({
   const [signedSource, setSignedSource] = useState('');
   const [signedSrcSet, setSignedSrcSet] = useState('');
   const refreshAttempted = useRef(false);
+  const signedSourceRef = useRef('');
   const sourceKeyRef = useRef(resetKey);
   sourceKeyRef.current = resetKey;
 
+  const applySignedSource = (source: string) => {
+    signedSourceRef.current = source;
+    setSignedSource(source);
+  };
+
   useEffect(() => {
     if (!isSupabaseStorageSource(cleanSource)) {
-      setSignedSource('');
+      applySignedSource('');
       setSignedSrcSet('');
       return;
     }
-    setSignedSource('');
+    applySignedSource('');
     setSignedSrcSet('');
     if (!isPublicImageStorageSource(cleanSource) && !isProfileImageStorageSource(cleanSource)) {
       setFallbackStage(1);
@@ -129,7 +135,7 @@ export default function SafeImage({
     void resolveResponsiveMediaSource(cleanSource)
       .then((resolved) => {
         if (!disposed && sourceKeyRef.current === resetKey) {
-          setSignedSource(resolved.src);
+          applySignedSource(resolved.src);
           setSignedSrcSet(resolved.srcSet || '');
         }
       })
@@ -142,19 +148,25 @@ export default function SafeImage({
     previousResetKey.current = resetKey;
     setFallbackStage(cleanSource ? 0 : 1);
     setLoaded(false);
-    setSignedSource('');
+    applySignedSource('');
     setSignedSrcSet('');
     refreshAttempted.current = false;
   }, [cleanSource, localFallback, resetKey]);
 
   const storageSource = isSupabaseStorageSource(cleanSource);
+  // A Storage source has no usable URL until it has been signed. Rendering the
+  // module fallback in the meantime made a still-loading image report
+  // `data-image-state="loaded"` and could hide a broken original, so the
+  // placeholder stays empty until there is a real URL to request.
   const resolvedSource = unavailableDemoSource
     ? localFallback
-    : fallbackStage === 0
-      ? storageSource ? signedSource || localFallback : cleanSource
-    : fallbackStage === 1
-      ? localFallback
-      : fallbackFor.general;
+    : fallbackStage !== 0
+      ? fallbackStage === 1
+        ? localFallback
+        : fallbackFor.general
+      : storageSource
+        ? signedSource || undefined
+        : cleanSource;
   const resolvedSrcSet = unavailableDemoSource ? undefined : fallbackStage === 0
     ? storageSource
       ? signedSrcSet || undefined
@@ -183,15 +195,21 @@ export default function SafeImage({
       }}
       onError={() => {
         setLoaded(false);
+        // One bounded re-sign for a Storage URL. If the refresh reproduces the
+        // same URL, retrying cannot succeed; go straight to the local
+        // fallback instead of leaving a permanently "loading" broken image.
         if (storageSource && (isPublicImageStorageSource(cleanSource) || isProfileImageStorageSource(cleanSource)) && !refreshAttempted.current) {
           refreshAttempted.current = true;
           void resolveResponsiveMediaSource(cleanSource, true)
             .then((resolved) => {
-              if (sourceKeyRef.current === resetKey) {
-                setSignedSource(resolved.src);
-                setSignedSrcSet(resolved.srcSet || '');
-                setFallbackStage(0);
+              if (sourceKeyRef.current !== resetKey) return;
+              if (!resolved.src || resolved.src === signedSourceRef.current) {
+                setFallbackStage(1);
+                return;
               }
+              applySignedSource(resolved.src);
+              setSignedSrcSet(resolved.srcSet || '');
+              setFallbackStage(0);
             })
             .catch(() => { if (sourceKeyRef.current === resetKey) setFallbackStage(1); });
           return;

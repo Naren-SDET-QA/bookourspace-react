@@ -9,15 +9,24 @@
 //      reference; opaque publishable keys cannot encode a project reference.
 //      Anything invalid fails
 //      closed with an empty project URL - it never switches to production.
-//   3. Hosted projects must be explicitly allowlisted as development. This is
-//      a deployment decision, not inferred from a hard-coded project ref.
-//      Local Supabase loopback remains available for local development.
+//   3. A hosted project must state what it is. A development target has to be
+//      explicitly allowlisted as development; a production target has to be
+//      explicitly declared as production and must never be one of the
+//      designated development references. Neither role is inferred from a
+//      hard-coded project ref. Local Supabase loopback remains available for
+//      local development.
 //   4. Only public (publishable/anon) keys are accepted. Service-role secrets,
 //      sb_secret_ keys and PostgreSQL connection strings are refused.
 //
 // This module is pure (no `import.meta.env`, no browser globals beyond atob),
 // so both the Vite client and the Express server resolve configuration the
 // same way and the behaviour is unit-testable.
+
+import {
+  isDevelopmentSupabaseProjectRef,
+  PRODUCTION_SUPABASE_PROJECT_ID_VAR,
+  PRODUCTION_SUPABASE_VITE_PROJECT_ID_VAR,
+} from './supabaseProjectSeparation';
 
 const PUBLISHABLE_KEY_PATTERN = /^sb_publishable_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{8}$/;
 
@@ -31,6 +40,12 @@ export interface SupabaseConfigInput {
   url?: string | null;
   projectId?: string | null;
   developmentProjectId?: string | null;
+  /**
+   * Explicit production project declaration. When it matches the URL project,
+   * the development allowlist is not required; production must not have to
+   * list its own dedicated project as a development target.
+   */
+  productionProjectId?: string | null;
   publishableKey?: string | null;
   anonKey?: string | null;
 }
@@ -190,6 +205,7 @@ export function resolveSupabaseConfig(input: SupabaseConfigInput = {}): Resolved
   const explicitUrl = clean(input.url);
   const explicitProjectId = clean(input.projectId);
   const developmentProjectId = clean(input.developmentProjectId);
+  const productionProjectId = clean(input.productionProjectId);
   const publishableKey = clean(input.publishableKey);
   const anonKey = clean(input.anonKey);
   const key = publishableKey || anonKey;
@@ -223,13 +239,43 @@ export function resolveSupabaseConfig(input: SupabaseConfigInput = {}): Resolved
       if (!explicitProjectId) {
         errors.push('MISSING_SUPABASE_PROJECT_ID: hosted configuration requires an explicit VITE_SUPABASE_PROJECT_ID.');
       }
-      if (!developmentProjectId) {
-        errors.push('SUPABASE_DEVELOPMENT_PROJECT_NOT_ALLOWLISTED: explicitly set VITE_SUPABASE_DEVELOPMENT_PROJECT_ID for this development target.');
-      } else if (developmentProjectId !== urlRef) {
-        errors.push('SUPABASE_DEVELOPMENT_PROJECT_REFERENCE_MISMATCH: the URL project is not the explicitly allowlisted development project.');
+
+      // A hosted project must declare exactly one role. A production
+      // deployment names its dedicated target explicitly; that declaration
+      // replaces the development allowlist, because production must not (and
+      // the runtime separation guard will not let it) list its own project as
+      // a development target.
+      const declaredProduction = productionProjectId !== '' && productionProjectId === urlRef;
+      const designatedDevelopment = developmentProjectId !== '' && developmentProjectId === urlRef;
+
+      if (productionProjectId && !declaredProduction) {
+        errors.push(
+          `SUPABASE_PRODUCTION_PROJECT_REFERENCE_MISMATCH: the declared production project "${productionProjectId}" is not the URL project "${urlRef}".`
+        );
       }
-      if (developmentProjectId && !PROJECT_ID_PATTERN.test(developmentProjectId)) {
-        errors.push('INVALID_SUPABASE_DEVELOPMENT_PROJECT_ID: the development allowlist value is not a valid project reference.');
+      if (productionProjectId && productionProjectId !== urlRef && !PROJECT_ID_PATTERN.test(productionProjectId)) {
+        errors.push('INVALID_SUPABASE_PRODUCTION_PROJECT_ID: the production declaration is not a valid project reference.');
+      }
+      if (declaredProduction && isDevelopmentSupabaseProjectRef(urlRef)) {
+        errors.push(
+          `SUPABASE_PRODUCTION_TARGET_IS_DEVELOPMENT: "${urlRef}" is designated for development and can never be the production target.`
+        );
+      }
+      if (declaredProduction && designatedDevelopment) {
+        errors.push(
+          `SUPABASE_PRODUCTION_TARGET_IS_DEVELOPMENT: "${urlRef}" cannot be both the development allowlist and the production target.`
+        );
+      }
+
+      if (developmentProjectId) {
+        if (developmentProjectId !== urlRef) {
+          errors.push('SUPABASE_DEVELOPMENT_PROJECT_REFERENCE_MISMATCH: the URL project is not the explicitly allowlisted development project.');
+        }
+        if (!PROJECT_ID_PATTERN.test(developmentProjectId)) {
+          errors.push('INVALID_SUPABASE_DEVELOPMENT_PROJECT_ID: the development allowlist value is not a valid project reference.');
+        }
+      } else if (!declaredProduction) {
+        errors.push('SUPABASE_DEVELOPMENT_PROJECT_NOT_ALLOWLISTED: explicitly set VITE_SUPABASE_DEVELOPMENT_PROJECT_ID for this development target, or declare the dedicated production project.');
       }
     } else if (urlRef === 'local' && explicitProjectId && explicitProjectId !== 'local') {
       errors.push('SUPABASE_PROJECT_REFERENCE_MISMATCH: a local Supabase URL must use project ID "local".');
@@ -298,6 +344,11 @@ export function resolveSupabaseEnvironment(env: SupabaseEnvironment = {}): Resol
     url: environmentValue(env, 'VITE_SUPABASE_URL'),
     projectId: environmentValue(env, 'VITE_SUPABASE_PROJECT_ID'),
     developmentProjectId: environmentValue(env, 'VITE_SUPABASE_DEVELOPMENT_PROJECT_ID'),
+    // The browser only receives VITE_-prefixed values; the server resolver may
+    // pass its own process environment through the same function.
+    productionProjectId:
+      environmentValue(env, PRODUCTION_SUPABASE_VITE_PROJECT_ID_VAR)
+      || environmentValue(env, PRODUCTION_SUPABASE_PROJECT_ID_VAR),
     publishableKey: environmentValue(env, 'VITE_SUPABASE_PUBLISHABLE_KEY'),
     anonKey: environmentValue(env, 'VITE_SUPABASE_ANON_KEY'),
   });
