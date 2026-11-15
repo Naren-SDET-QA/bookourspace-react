@@ -18,7 +18,6 @@ import SafeImage from './SafeImage';
 
 interface HomeTriangleExperienceProps {
   onClose: () => void;
-  onSwitchToOld: () => void;
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
 }
@@ -794,7 +793,7 @@ function ProviderDetailView({ provider, onBack }: { provider: Provider; onBack: 
 
 /* --------------------------------- Main --------------------------------- */
 
-export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false }: HomeTriangleExperienceProps) {
+export function HomeTriangleExperience({ onClose, inline = false }: HomeTriangleExperienceProps) {
   const [bottomTab, setBottomTab] = useState<'home' | 'orders' | 'account'>('home');
   const [view, setView] = useState<'home' | 'categories'>('home');
   const [query, setQuery] = useState('');
@@ -876,15 +875,16 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
           </div>
         </div>
       ) : (
-        <div className="flex shrink-0 items-center justify-center border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
+        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
           <div className="inline-flex items-center rounded-full border border-[#dddddd] bg-white p-1 shadow-sm">
-            <button type="button" onClick={onSwitchToOld} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold text-[#717171] transition hover:bg-[#f7f7f7]">
-              BookOurSpace Services 1
-            </button>
-            <button type="button" className="inline-flex h-9 items-center rounded-full bg-[#3b82f6] px-4 text-sm font-semibold text-white transition">
+            {/* Style 1 and Style 3 are disabled; Style 2 is the only Services experience. */}
+            <button type="button" aria-pressed={true} className="inline-flex h-9 items-center rounded-full bg-[#3b82f6] px-4 text-sm font-semibold text-white transition">
               BookOurSpace Services 2
             </button>
           </div>
+          <span className="rounded-full bg-[#ebebeb] px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#717171]">
+            Style 1 &amp; 3 disabled
+          </span>
         </div>
       )}
       <div className="mx-auto flex min-h-0 w-full max-w-[640px] flex-1 flex-col">

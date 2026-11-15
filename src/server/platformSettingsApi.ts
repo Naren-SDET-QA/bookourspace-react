@@ -612,7 +612,7 @@ export function registerPlatformSettingsApi(
       const allowed: Record<string, string[]> = {
         pg: ['style1', 'style2', 'style3'],
         stay: ['old', 'airbnb', 'style3'],
-        services: ['old', 'triangle', 'noddyy'],
+        services: ['triangle'],
         classes: ['cards', 'timetable', 'style3'],
         venues: ['showcase', 'agenda', 'style3'],
         movies: ['experience', 'classic', 'style3'],

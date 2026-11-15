@@ -89,6 +89,9 @@ function applyRouteStyleToSectionStyles(base: SectionStyles): SectionStyles {
   // deep link must not re-enable the retired layouts.
   if (section === 'pg') return { ...base, pg: 'style3' };
   if (section === 'classes') return { ...base, classes: 'style3' };
+  // Services ships only Style 2; a stale #services/style1 or /style3 deep link
+  // must not re-enable the retired layouts.
+  if (section === 'services') return { ...base, services: 'triangle' };
   if (section === 'venues' || section === 'halls') return { ...base, venues: 'agenda' };
   if (section === 'movies' || section === 'cinema') return { ...base, movies: style === 1 ? 'experience' : style === 2 ? 'classic' : 'style3' };
   return base;
@@ -570,6 +573,9 @@ function MarketplaceAppContent() {
         setActiveMarketSection('pg_hostels');
         setOpenSection('pg_hostels');
       } else if (hash === 'services' || hash.startsWith('services/')) {
+        if (routeStyleNumber) {
+          setSectionStylesState((previous) => ({ ...previous, services: 'triangle' }));
+        }
         setActiveMarketSection('services');
         setOpenSection('services');
       } else if (hash === 'stays' || hash === 'hotels' || hash.startsWith('stays/') || hash.startsWith('hotels/')) {

@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 105,
+  "migrationCount": 106,
   "migrations": [
     {
       "order": 2,
@@ -854,12 +854,20 @@
       "file": "supabase/migrations/20261112330000_movies_state_approval.sql",
       "bytes": 1108,
       "sha256": "6c8b554cd283cf79c541cc5ca8384dc9718c04e5df53c19086f9d27e46560531"
+    },
+    {
+      "order": 107,
+      "version": "20261112340000",
+      "name": "business_member_access",
+      "file": "supabase/migrations/20261112340000_business_member_access.sql",
+      "bytes": 4025,
+      "sha256": "e235da4a099f5b41be94c6fb1ffb9eb26d2f549cfd92e0dfc441bc499ed008be"
     }
   ],
   "review": {
-    "at": "2026-11-12T08:12:27.417Z",
-    "note": "Added Hotels & Stays admin production hardening: canonical category validation, admin query index, and regression coverage; no existing migration bytes changed.",
-    "migrationCount": 93,
+    "at": "2026-11-12T15:16:53.845Z",
+    "note": "Target corrected to obkfgxjzlscungkhbyvq (Mumbai, ap-south-1; supabase/backup/react-target.conf BOS_APPROVED_REF). Read-only verification 2026-11-12: hosted history 74 rows (00000000000000 + 73, latest 20261108150000), 75 public tables, 0 business_* tables, is_business_member() absent; 33 repository migrations pending (20261111190000..20261112340000) including business ownership phases 1-5, so 20261112340000_business_member_access.sql cannot be applied alone. No hosted write performed; applying requires explicit approval. No migration bytes changed.",
+    "migrationCount": 106,
     "baselineSha256": "f37bdbcaf1870a05fe8f45acbf2ec17f0cc99162cd7e60270d5f8d5fabe412c2"
   }
 }

@@ -32,7 +32,7 @@ import { ServiceBookingPanel } from './ServiceBookingPanel';
 import { ServiceOperationsWorkspace } from './ServiceOperationsWorkspace';
 import { ServiceCustomerBookings } from './ServiceCustomerBookings';
 import { useMarketplace } from '../context/MarketplaceContext';
-import { getServicesStyle, saveStylePreference, styleFromHash, type ServicesStyle } from '../lib/sectionStyleSettings';
+import { saveStylePreference, styleFromHash, type ServicesStyle } from '../lib/sectionStyleSettings';
 
 interface HomeServicesSectionProps {
   listings: MarketplaceListing[];
@@ -70,21 +70,16 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
   const { authUser, supabaseProfile } = useMarketplace();
   const viewerRole = ((supabaseProfile?.role || authUser?.role || 'customer') as 'customer' | 'provider' | 'admin');
   const canManageJobs = viewerRole === 'provider' || viewerRole === 'admin';
-  const [experienceTab, setExperienceTab] = useState<'old' | 'triangle' | 'noddyy'>(() => {
-    const routeStyle = styleFromHash('services');
-    if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1') return 'old';
-    if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') return 'triangle';
-    if (routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') return 'noddyy';
-    if (style) return style;
-    return getServicesStyle();
-  });
+  // Services ships only the Style 2 (triangle) experience. Style 1 and Style 3
+  // are disabled, so a stale #services/style1 or /style3 link cannot re-open them.
+  const [experienceTab, setExperienceTab] = useState<'old' | 'triangle' | 'noddyy'>('triangle');
 
   useEffect(() => {
     const onHash = () => {
       const routeStyle = styleFromHash('services');
-      if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1') setExperienceTab('old');
-      else if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') setExperienceTab('triangle');
-      else if (routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') setExperienceTab('noddyy');
+      if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') setExperienceTab('triangle');
+      else if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1'
+        || routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') setExperienceTab('triangle');
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -92,8 +87,8 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
 
   // Centrally published style changes apply without a reload.
   useEffect(() => {
-    if (!style || styleFromHash('services')) return;
-    setExperienceTab(style);
+    if (!style) return;
+    setExperienceTab('triangle');
   }, [style]);
   const owner = useOwnerContact('services');
 
@@ -158,9 +153,12 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       : owner.message;
 
   const switchTo = (tab: 'old' | 'triangle' | 'noddyy') => {
-    saveStylePreference('services', tab);
-    setExperienceTab(tab);
-    window.location.hash = `services/${tab}`;
+    // Style 1 and Style 3 are disabled for Services: every entry point lands on
+    // the single supported Style 2 experience.
+    if (tab !== 'triangle') return;
+    saveStylePreference('services', 'triangle');
+    setExperienceTab('triangle');
+    window.location.hash = 'services/triangle';
   };
 
   return (
@@ -174,38 +172,25 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       aria-modal={inline ? undefined : true}
       aria-labelledby="services-section-title"
     >
-      {/* Persistent experience switcher — always visible so the Noddyy
-          Helper-On-Demand clone is reachable from every services view. */}
-      <div className="flex shrink-0 items-center justify-center border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
+      {/* Services ships only Style 2. Style 1 and Style 3 are disabled, so the
+          switcher shows the single supported experience instead of dead tabs. */}
+      <div className="flex shrink-0 items-center justify-center gap-2 border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
         <div className="inline-flex items-center rounded-full border border-[#dddddd] bg-white p-1 shadow-sm">
-          {([
-            ['old', 'Style 1'],
-            ['triangle', 'Style 2'],
-            ['noddyy', 'Style 3'],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={experienceTab === value}
-              onClick={() => switchTo(value)}
-              className={`inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold transition ${
-                experienceTab === value
-                  ? 'bg-[#222222] text-white'
-                  : 'text-[#717171] hover:bg-[#f7f7f7]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+          <button
+            type="button"
+            aria-pressed={true}
+            className="inline-flex h-9 items-center rounded-full bg-[#222222] px-4 text-sm font-semibold text-white"
+          >
+            Style 2
+          </button>
         </div>
+        <span className="rounded-full bg-[#ebebeb] px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-[#717171]">
+          Style 1 &amp; 3 disabled
+        </span>
       </div>
 
       {experienceTab === 'triangle' ? (
-        <HomeTriangleExperience
-          inline={inline}
-          onClose={onClose}
-          onSwitchToOld={() => switchTo('old')}
-        />
+        <HomeTriangleExperience inline={inline} onClose={onClose} />
       ) : experienceTab === 'noddyy' ? (
         <NoddyyExperience
           inline={inline}

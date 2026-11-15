@@ -3409,20 +3409,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
                     <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace Services</span>
-                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
-                          {[['old', 'Style 1'], ['triangle', 'Style 2'], ['noddyy', 'Style 3']].map(([val, label]) => (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => {
-                            const next = { ...sectionStyles, services: val as SectionStyles['services'] };
-                            void commitSectionStyles(next);
-                          }}
-                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.services === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md bg-[#7c3aed] px-2.5 py-1 text-[11px] font-bold text-white">Style 2</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">Style 1 &amp; 3 disabled</span>
                     </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
                     <span className="flex items-center gap-1.5 text-[12px] font-bold text-slate-800 dark:text-slate-100"><Lock className="h-3.5 w-3.5 text-amber-600" /> BookOurSpace Classes</span>

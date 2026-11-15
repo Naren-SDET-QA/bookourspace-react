@@ -2,7 +2,7 @@
  * Admin-controlled per-section style selection.
  * PG       → BookOurSpace Style 1 (classic list) or Style 2
  * Stay     → BookOurSpace Stay 1 or Stay 2
- * Services → Old (listing page) or Triangle style (services app)
+ * Services → Triangle only (Style 2); Style 1 and Style 3 are disabled.
  * Persisted in localStorage and applied when each section opens.
  */
 
@@ -34,8 +34,8 @@ export function isStyle3Locked(section: keyof SectionStyles): boolean {
 }
 
 function applyStyleLocks(value: SectionStyles): SectionStyles {
-  // Halls ships only the Style 2 (agenda) experience.
-  return { ...value, pg: 'style3', classes: 'style3', venues: 'agenda' };
+  // Halls ships only Style 2 (agenda); Services only Style 2 (triangle).
+  return { ...value, pg: 'style3', classes: 'style3', venues: 'agenda', services: 'triangle' };
 }
 
 const VALID_VALUES: Record<keyof SectionStyles, readonly string[]> = {
@@ -68,6 +68,7 @@ export function loadStylePreferences(): Partial<SectionStyles> {
     if (parsed.pg) parsed.pg = 'style3';
     if (parsed.classes) parsed.classes = 'style3';
     if (parsed.venues) parsed.venues = 'agenda';
+    if (parsed.services) parsed.services = 'triangle';
     return parsed;
   } catch {
     return {};
@@ -78,7 +79,7 @@ export function loadStylePreferences(): Partial<SectionStyles> {
 export function saveStylePreference<K extends keyof SectionStyles>(section: K, value: SectionStyles[K]): void {
   try {
     if (typeof localStorage === 'undefined') return;
-    const next = { ...loadStylePreferences(), [section]: section === 'venues' ? 'agenda' : isStyle3Locked(section) ? 'style3' : value };
+    const next = { ...loadStylePreferences(), [section]: section === 'venues' ? 'agenda' : section === 'services' ? 'triangle' : isStyle3Locked(section) ? 'style3' : value };
     localStorage.setItem(PREFS_KEY, JSON.stringify(next));
     if (typeof window !== 'undefined') window.dispatchEvent(new Event(SECTION_STYLES_EVENT));
   } catch {
@@ -101,7 +102,7 @@ const DEFAULTS: SectionStyles = {
   // their first view for a fresh visitor.
   pg: 'style3',
   stay: 'old',
-  services: 'old',
+  services: 'triangle',
   classes: 'style3',
   venues: 'agenda',
   movies: 'experience',
@@ -206,7 +207,7 @@ export function getStayStyle(): StayStyle {
 }
 
 export function getServicesStyle(): ServicesStyle {
-  return loadSectionStyles().services;
+  return 'triangle';
 }
 
 export function getClassesStyle(): ClassesStyle {
