@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import SafeImage from './SafeImage';
+import { getStayStyle, styleFromHash } from '../lib/sectionStyleSettings';
 import {
   ArrowLeft,
   BedDouble,
@@ -26,24 +28,38 @@ import {
   fetchAuthorizedOwnerContact,
   fetchPlatformModuleFlags,
   subscribeToPlatformModuleFlags,
-  fetchStayAvailability,
-  fetchStayProperties,
+  fetchStayRoomTypesForListing,
   recordAuthorizedOwnerContact,
   STAY_PAGE_SIZE,
 } from '../lib/stayDiscoveryData';
-import type { StayAvailability, StayProperty } from '../lib/stayDiscoveryData';
+import type { StayProperty } from '../lib/stayDiscoveryData';
+import { EMPTY_STAY_FILTERS } from '../lib/stayFilters';
+import { searchStays as searchStayListings, toStayProperty } from '../lib/staySearchClient';
 import {
-  canBookStayOnline,
   canContactOwner,
+  buildProviderContactMessage,
   isValidListingContactId,
   resolveServicesModuleAccess,
   resolveStayScreenState,
   validateStaySearch,
 } from '../lib/servicesStayRules';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, fetchCurrentAuthSession } from '../lib/supabaseClient';
+import { AirbnbIndiaExperience } from './AirbnbIndiaExperience';
+import { StayCheckoutPanel } from './StayCheckoutPanel';
 
 interface HotelsStayExperienceProps {
   onClose: () => void;
+  /** Render in the page flow under the common header instead of as a full-screen dialog. */
+  inline?: boolean;
+  /** Opens the host listing wizard in the parent application. */
+  onStartHosting?: () => void;
+  /** Opens the application's Google sign-in modal. */
+  onSignIn?: () => void;
+  /** Header category selection, so the shared Stay ribbon controls the list. */
+  stayCategory?: string;
+  staySubcategory?: string;
+  /** City selected in the shared marketplace header. */
+  selectedCity?: string;
 }
 
 type ContactState = 'loading' | 'ready' | 'unavailable' | 'error';
@@ -76,6 +92,14 @@ function formatRupees(paise: number): string | null {
   }).format(paise / 100);
 }
 
+function formatINR(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
 function nightsBetween(checkIn: string, checkOut: string): number {
   if (!checkIn || !checkOut) return 0;
   const start = Date.parse(`${checkIn}T00:00:00Z`);
@@ -88,19 +112,6 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
-async function runLimited<T, R>(items: readonly T[], limit: number, action: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await action(items[index]);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
 function hasAmenity(property: StayProperty, amenity: string): boolean {
   return property.amenities.some((item) => item.toLowerCase().includes(amenity.toLowerCase())) ||
     property.roomTypes.some((room) => room.amenities.some((item) => item.toLowerCase().includes(amenity.toLowerCase())));
@@ -109,21 +120,13 @@ function hasAmenity(property: StayProperty, amenity: string): boolean {
 function PhotoFrame({ src, alt, className }: { src?: string; alt: string; className?: string }) {
   return (
     <div className={`relative overflow-hidden bg-[#f2f0ee] dark:bg-slate-800 ${className ?? ''}`}>
-      {!src && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[#a0a0a0]">
-          <BedDouble className="h-6 w-6" aria-hidden="true" />
-          <span className="text-[11px] font-medium">No photo provided</span>
-        </div>
-      )}
-      {src && (
-        <img
-          src={src}
-          alt={alt}
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover transition duration-300 ease-out group-hover:scale-[1.04]"
-          onError={(event) => event.currentTarget.remove()}
-        />
-      )}
+      <SafeImage
+        src={src}
+        alt={alt}
+        category="stays"
+        className="absolute inset-0 h-full w-full object-cover transition duration-300 ease-out group-hover:scale-[1.04]"
+        sizes="(max-width: 640px) 92vw, (max-width: 1024px) 48vw, 420px"
+      />
     </div>
   );
 }
@@ -221,7 +224,7 @@ function StaySearchForm({
         <button
           type="submit"
           disabled={busy}
-          className={`inline-flex items-center justify-center gap-2 bg-[#FF385C] font-semibold text-white transition hover:bg-[#E31C5F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF385C] disabled:cursor-not-allowed disabled:opacity-60 ${
+          className={`inline-flex items-center justify-center gap-2 bg-[#f97316] font-semibold text-white transition hover:bg-[#ea580c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f97316] disabled:cursor-not-allowed disabled:opacity-60 ${
             stacked ? 'h-12 w-full rounded-xl' : 'h-10 w-10 rounded-full sm:w-auto sm:px-5'
           }`}
         >
@@ -233,7 +236,7 @@ function StaySearchForm({
   );
 }
 
-export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
+export function HotelsStayExperience({ onClose, inline = false, onStartHosting, onSignIn, stayCategory, staySubcategory, selectedCity = 'All Cities' }: HotelsStayExperienceProps) {
   const today = useMemo(() => localDateInputValue(), []);
   const [moduleFlags, setModuleFlags] = useState<ModuleFlagRow[] | null>(null);
   const [moduleLoading, setModuleLoading] = useState(true);
@@ -267,8 +270,47 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
   const [contactMessage, setContactMessage] = useState('');
   const [contactBusy, setContactBusy] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [experienceTab, setExperienceTab] = useState<'old' | 'airbnb'>(() => {
+    const routeStyle = styleFromHash('stays') ?? styleFromHash('hotels');
+    if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'stay1') return 'old';
+    if (routeStyle === '2' || routeStyle === 'airbnb' || routeStyle === 'stay2') return 'airbnb';
+    return getStayStyle();
+  });
+
+  useEffect(() => {
+    const onHash = () => {
+      const routeStyle = styleFromHash('stays') ?? styleFromHash('hotels');
+      if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'stay1') setExperienceTab('old');
+      else if (routeStyle === '2' || routeStyle === 'airbnb' || routeStyle === 'stay2') setExperienceTab('airbnb');
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   const access: ModuleAccess = resolveServicesModuleAccess(moduleFlags, 'hotels');
+  const selectedStayCity = ['all', 'all cities', 'all locations'].includes(selectedCity.trim().toLowerCase()) ? '' : selectedCity;
+
+  const getStaySearchPage = async (
+    filters: { destination: string; checkIn?: string; checkOut?: string; guests?: number; includeUnavailable?: boolean },
+    page = 0,
+  ) => {
+    const result = await searchStayListings({
+      ...EMPTY_STAY_FILTERS,
+      destination: filters.destination,
+      checkIn: filters.checkIn || '',
+      checkOut: filters.checkOut || '',
+      guests: filters.guests ?? 2,
+      includeUnavailable: filters.includeUnavailable ?? false,
+    }, { page, pageSize: STAY_PAGE_SIZE });
+    if (!result.ok) throw new Error(result.error);
+    const rows = result.items.map(toStayProperty);
+    const nextAvailability = Object.fromEntries(result.items.flatMap((item) =>
+      item.roomTypes.flatMap((room) => typeof room.availableUnits === 'number'
+        ? [[room.id, room.availableUnits] as const]
+        : []),
+    ));
+    return { rows, hasMore: result.hasMore, total: result.total, availability: nextAvailability };
+  };
 
   const loadModules = async () => {
     setModuleLoading(true);
@@ -287,12 +329,14 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
     setLoading(true);
     setError(false);
     try {
-      const rows = await fetchStayProperties({ destination: city, page });
-      setProperties(rows);
+      const result = await getStaySearchPage({ destination: city }, page);
+      setProperties(result.rows);
+      setAvailability(result.availability);
       setCurrentPage(page);
-      setHasMore(rows.length === STAY_PAGE_SIZE);
+      setHasMore(result.hasMore);
     } catch {
       setProperties([]);
+      setAvailability({});
       setError(true);
     } finally {
       setLoading(false);
@@ -305,10 +349,17 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
     setPaginationError(false);
     try {
       const nextPage = currentPage + 1;
-      const rows = await fetchStayProperties({ destination, page: nextPage });
-      setProperties((current) => [...current, ...rows]);
+      const result = await getStaySearchPage({
+        destination,
+        checkIn: hasSearched ? checkIn : '',
+        checkOut: hasSearched ? checkOut : '',
+        guests,
+        includeUnavailable: !availableOnly,
+      }, nextPage);
+      setProperties((current) => [...current, ...result.rows]);
+      setAvailability((current) => ({ ...current, ...result.availability }));
       setCurrentPage(nextPage);
-      setHasMore(rows.length === STAY_PAGE_SIZE);
+      setHasMore(result.hasMore);
     } catch {
       setPaginationError(true);
     } finally {
@@ -328,10 +379,15 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
       setLoading(false);
       return;
     }
-    void loadProperties('');
-  }, [moduleFlags, access.enabled]);
+    setDestination(selectedStayCity);
+    setHasSearched(false);
+    setAvailability({});
+    setSelectedProperty(null);
+    void loadProperties(selectedStayCity);
+  }, [moduleFlags, access.enabled, selectedStayCity]);
 
   useEffect(() => {
+    if (experienceTab === 'airbnb') return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (menuOpen) setMenuOpen(false);
@@ -341,7 +397,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, selectedProperty, filtersOpen, menuOpen]);
+  }, [onClose, selectedProperty, filtersOpen, menuOpen, experienceTab]);
 
   const visibleProperties = useMemo(() => properties.filter((property) => {
     if (propertyType !== 'all' && property.propertyType !== propertyType) return false;
@@ -374,36 +430,70 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
     setAvailabilityError(false);
     setError(false);
     setLoading(true);
-    setAvailabilityLoading(false);
-    let matched: StayProperty[];
+    setAvailabilityLoading(Boolean(checkIn && checkOut));
     try {
-      matched = await fetchStayProperties({ destination });
-      setProperties(matched);
+      const result = await getStaySearchPage({
+        destination,
+        checkIn,
+        checkOut,
+        guests,
+        // Date searches default to available inventory only. The checkbox can
+        // explicitly request unavailable stays on a subsequent refresh.
+        includeUnavailable: false,
+      });
+      setProperties(result.rows);
+      setAvailability(result.availability);
       setCurrentPage(0);
-      setHasMore(matched.length === STAY_PAGE_SIZE);
+      setHasMore(result.hasMore);
+      setAvailableOnly(Boolean(checkIn && checkOut));
       setPaginationError(false);
     } catch {
       setProperties([]);
+      setAvailability({});
       setError(true);
+    } finally {
       setLoading(false);
-      return;
+      setAvailabilityLoading(false);
     }
-    setLoading(false);
-    const roomTypes = matched.flatMap((property) => property.roomTypes)
-      .filter((room) => room.maxAdults + room.maxChildren >= guests);
-    setAvailabilityLoading(true);
+  };
+
+  const changeAvailabilityFilter = async (checked: boolean) => {
+    setAvailableOnly(checked);
+    if (!hasSearched || !checkIn || !checkOut) return;
+    setLoading(true);
+    setAvailabilityError(false);
     try {
-      const results = await runLimited(roomTypes, 5, (room) => fetchStayAvailability(room.id, checkIn, checkOut));
-      setAvailability(Object.fromEntries(results.map((result: StayAvailability) => [result.roomTypeId, result.freeUnitCount])));
+      const result = await getStaySearchPage({
+        destination,
+        checkIn,
+        checkOut,
+        guests,
+        includeUnavailable: !checked,
+      });
+      setProperties(result.rows);
+      setAvailability(result.availability);
+      setCurrentPage(0);
+      setHasMore(result.hasMore);
     } catch {
+      setAvailableOnly(!checked);
       setAvailabilityError(true);
     } finally {
-      setAvailabilityLoading(false);
+      setLoading(false);
     }
   };
 
   const openPropertyDetails = async (property: StayProperty) => {
     setSelectedProperty(property);
+    if (property.roomTypes.length === 0) {
+      void fetchStayRoomTypesForListing(property.listingId).then((roomTypes) => {
+        setSelectedProperty((current) => current?.listingId === property.listingId
+          ? { ...current, roomTypes }
+          : current);
+      }).catch(() => {
+        // Keep the verified listing visible; the checkout panel independently
+        // reports inventory/availability errors and never creates a booking.
+      });
+    }
     setContactDetails(null);
     setContactMessage('');
     setContactState('loading');
@@ -413,6 +503,20 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
       return;
     }
     try {
+      // Prefer the server-verified authoritative session so a local signed test
+      // identity works without a hosted Google login.
+      const authoritative = await fetchCurrentAuthSession().catch(() => null);
+      if (authoritative?.authenticated) {
+        setIsAuthenticated(true);
+        const details = await fetchAuthorizedOwnerContact(property.listingId);
+        if (!details?.available || (!details.phone && !details.whatsapp)) {
+          setContactState('unavailable');
+          return;
+        }
+        setContactDetails(details);
+        setContactState('ready');
+        return;
+      }
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError) throw authError;
       const signedIn = Boolean(authData.user);
@@ -443,8 +547,20 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
       return;
     }
     const digits = phone.replace(/[^0-9+]/g, '');
+    if (!digits) {
+      setContactMessage('The verified contact number is invalid.');
+      return;
+    }
     if (channel === 'call') window.location.href = `tel:${digits}`;
-    else window.location.href = `https://wa.me/${digits.replace(/^\+/, '')}`;
+    else {
+      const message = buildProviderContactMessage({
+        listingTitle: selectedProperty.name,
+        dates: checkIn && checkOut ? `${checkIn} to ${checkOut}` : undefined,
+        guests,
+        kind: 'availability',
+      });
+      window.location.href = `https://wa.me/${digits.replace(/^\+/, '')}?text=${encodeURIComponent(message)}`;
+    }
   };
 
   const toggleAmenity = (amenity: string) => setRequiredAmenities((current) =>
@@ -456,30 +572,39 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
   );
 
   const selectedAvailableUnit = selectedProperty?.roomTypes.some((room) => (availability[room.id] ?? 0) > 0) ?? false;
-  const onlineBookingReady = canBookStayOnline(access, selectedAvailableUnit, false);
-  const selectedPrice = selectedProperty ? formatRupees(selectedProperty.basePricePaise) : null;
+  const selectedPrice = selectedProperty
+    ? selectedProperty.roomTypes.length
+      ? formatRupees(selectedProperty.basePricePaise)
+      : selectedProperty.listingPriceAmount !== undefined
+        ? formatINR(selectedProperty.listingPriceAmount)
+        : null
+    : null;
+
+  if (experienceTab === 'airbnb') {
+    return <AirbnbIndiaExperience inline={inline} selectedCity={selectedStayCity} externalCategory={stayCategory} externalSubcategory={staySubcategory} onClose={onClose} onSwitchToOld={() => { setExperienceTab('old'); window.location.hash = 'stays/old'; }} onStartHosting={onStartHosting} onSignIn={onSignIn} />;
+  }
 
   return (
-    <div className="fixed inset-0 z-[71] flex flex-col bg-white text-[#222222] dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="stays-title">
+    <div
+      className={
+        inline
+          ? 'w-full bg-white text-[#222222] dark:bg-slate-950 dark:text-slate-100'
+          : 'fixed inset-0 z-[71] flex flex-col bg-white text-[#222222] dark:bg-slate-950 dark:text-slate-100'
+      }
+      role={inline ? undefined : 'dialog'}
+      aria-modal={inline ? undefined : true}
+      aria-labelledby="stays-title"
+    >
+      {!inline && (
       <header className="shrink-0 border-b border-[#ebebeb] bg-white dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto flex h-16 max-w-[1760px] items-center gap-3 px-4 sm:h-20 sm:px-6 lg:px-10">
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#222222] transition hover:bg-[#f7f7f7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF385C] dark:text-slate-100 dark:hover:bg-slate-800"
-            aria-label="Back to marketplace"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#222222] transition hover:bg-[#f7f7f7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f97316] dark:text-slate-100 dark:hover:bg-slate-800"
+            aria-label="Back to all sections"
           >
             <ArrowLeft className="h-5 w-5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF385C]"
-            aria-label="BookOurSpace home"
-          >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF385C] text-sm font-black text-white">B</span>
-            <span className="hidden text-xl font-extrabold tracking-tight text-[#FF385C] sm:block">bookourspace</span>
           </button>
 
           <div className="mx-auto hidden w-full max-w-[850px] px-4 md:block">
@@ -504,7 +629,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
               onClick={() => setMenuOpen((open) => !open)}
               aria-expanded={menuOpen}
               aria-haspopup="menu"
-              className="flex h-10 items-center gap-2 rounded-full border border-[#dddddd] pr-2 pl-3 transition hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF385C] dark:border-slate-700"
+              className="flex h-10 items-center gap-2 rounded-full border border-[#dddddd] pr-2 pl-3 transition hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f97316] dark:border-slate-700"
             >
               <Menu className="h-4 w-4" aria-hidden="true" />
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#717171] text-[11px] font-bold text-white">BS</span>
@@ -571,11 +696,38 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
           </nav>
         )}
       </header>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1760px] px-4 pb-16 sm:px-6 lg:px-10">
+          {/* Inline section: the stay search lives in the content instead of a branded page header */}
+          {inline && (
+            <div className="pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#f97316] hover:underline"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All sections
+              </button>
+              <StaySearchForm
+                destination={destination}
+                onDestination={setDestination}
+                checkIn={checkIn}
+                onCheckIn={setCheckIn}
+                checkOut={checkOut}
+                onCheckOut={setCheckOut}
+                guests={guests}
+                onGuests={setGuests}
+                today={today}
+                onSubmit={searchStays}
+                busy={moduleLoading || !access.enabled || loading || availabilityLoading}
+              />
+            </div>
+          )}
+
           {validationMessage && (
-            <p role="alert" className="mt-4 rounded-xl border border-[#FF385C]/30 bg-[#FF385C]/5 px-4 py-3 text-sm font-medium text-[#c81e42]">
+            <p role="alert" className="mt-4 rounded-xl border border-[#f97316]/30 bg-[#f97316]/5 px-4 py-3 text-sm font-medium text-[#c2410c]">
               {validationMessage}
             </p>
           )}
@@ -630,7 +782,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                     {(activeFilterCount > 0 || availableOnly) && (
                       <button
                         type="button"
-                        onClick={() => { setMaxNightlyPrice(''); setRequiredAmenities([]); setAvailableOnly(false); }}
+                        onClick={() => { setMaxNightlyPrice(''); setRequiredAmenities([]); void changeAvailabilityFilter(false); }}
                         className="text-sm font-semibold underline"
                       >
                         Clear all
@@ -685,8 +837,8 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                           type="checkbox"
                           checked={availableOnly}
                           disabled={!hasSearched || availabilityLoading || availabilityError}
-                          onChange={(event) => setAvailableOnly(event.target.checked)}
-                          className="h-4 w-4 accent-[#FF385C]"
+                          onChange={(event) => void changeAvailabilityFilter(event.target.checked)}
+                          className="h-4 w-4 accent-[#f97316]"
                         />
                         Available for selected dates
                       </label>
@@ -748,9 +900,14 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                     const availableRooms = compatibleRooms.filter((room) => (availability[room.id] ?? 0) > 0);
                     const freeUnits = availableRooms.reduce((sum, room) => sum + (availability[room.id] ?? 0), 0);
                     const isKnownUnavailable = hasSearched && compatibleRooms.length > 0 && !availabilityError && !availabilityLoading && availableRooms.length === 0;
-                    const price = formatRupees(property.basePricePaise);
+                    const hasRoomInventory = property.roomTypes.length > 0;
+                    const price = hasRoomInventory
+                      ? formatRupees(property.basePricePaise)
+                      : property.listingPriceAmount !== undefined
+                        ? formatINR(property.listingPriceAmount)
+                        : null;
                     const isSaved = savedIds.includes(property.id);
-                    const total = price && nights ? formatRupees(property.basePricePaise * nights) : null;
+                    const total = hasRoomInventory && price && nights ? formatRupees(property.basePricePaise * nights) : null;
                     return (
                       <article key={property.id} className="group">
                         <div className="relative">
@@ -774,7 +931,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                             className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#222222]"
                           >
                             <Heart
-                              className={`h-6 w-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)] ${isSaved ? 'fill-[#FF385C] text-[#FF385C]' : 'fill-black/25 text-white'}`}
+                              className={`h-6 w-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)] ${isSaved ? 'fill-[#f97316] text-[#f97316]' : 'fill-black/25 text-white'}`}
                               aria-hidden="true"
                             />
                           </button>
@@ -802,7 +959,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                             {price ? (
                               <>
                                 <span className="font-semibold">{price}</span>
-                                <span className="text-[#717171] dark:text-slate-400">night</span>
+                                <span className="text-[#717171] dark:text-slate-400">{hasRoomInventory ? 'night' : property.listingPriceUnit || 'listed price'}</span>
                                 {total && (
                                   <>
                                     <span className="text-[#717171] dark:text-slate-400">·</span>
@@ -971,7 +1128,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                   <div className="py-6">
                     <h3 className="text-lg font-semibold">Contact the owner</h3>
                     <p className="mt-1 text-sm text-[#717171] dark:text-slate-400">
-                      Contact details appear only when the owner has consented and verified them.
+                      Contact details appear only when the owner has consented and verified them. Ask about your selected dates; payment is made at the property after the owner confirms.
                     </p>
                     {contactState === 'loading' && <p className="mt-3 text-sm text-[#717171]" aria-busy="true">Checking owner consent and verified contact details…</p>}
                     {contactState === 'unavailable' && <p className="mt-3 text-sm text-[#717171] dark:text-slate-400">Owner contact is unavailable for this listing. No unverified contact details are shown.</p>}
@@ -996,14 +1153,14 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                             onClick={() => void contactOwner('whatsapp')}
                             className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#222222] px-4 text-sm font-semibold transition hover:bg-[#f7f7f7] disabled:opacity-50 dark:border-white dark:hover:bg-slate-800"
                           >
-                            <MessageCircle className="h-4 w-4" aria-hidden="true" /> WhatsApp owner
+                            <MessageCircle className="h-4 w-4" aria-hidden="true" /> Request availability
                           </button>
                         )}
                       </div>
                     )}
                     {contactDetails?.disclaimer && <p className="mt-3 text-xs leading-5 text-[#717171] dark:text-slate-400">{contactDetails.disclaimer}</p>}
                     {contactDetails && !isAuthenticated && <p className="mt-3 text-xs text-[#717171] dark:text-slate-400">Sign in to record and open an owner contact request.</p>}
-                    <p className="mt-3 text-xs text-[#717171] dark:text-slate-400">Contacting an owner is an enquiry only. It does not reserve a room or confirm a booking.</p>
+                    <p className="mt-3 text-xs text-[#717171] dark:text-slate-400">WhatsApp opens a draft for you to review and send. This is an enquiry only: it does not reserve a room or confirm a booking. Pay at the property only after the owner confirms.</p>
                   </div>
                 </div>
 
@@ -1011,7 +1168,7 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                   <div className="rounded-2xl border border-[#dddddd] p-6 shadow-[0_6px_16px_rgba(0,0,0,0.12)] dark:border-slate-700">
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-[22px] font-semibold">{selectedPrice || 'Price not provided'}</span>
-                      {selectedPrice && <span className="text-[15px] text-[#717171] dark:text-slate-400">night</span>}
+                      {selectedPrice && <span className="text-[15px] text-[#717171] dark:text-slate-400">{selectedProperty?.roomTypes.length ? 'night' : selectedProperty?.listingPriceUnit || 'listed price'}</span>}
                     </div>
 
                     <div className="mt-4 overflow-hidden rounded-lg border border-[#b0b0b0] dark:border-slate-600">
@@ -1037,29 +1194,32 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                       </div>
                     </div>
 
-                    {hasSearched && nights > 0 ? (
+                    {hasSearched && nights > 0 && selectedProperty?.roomTypes.length ? (
                       <p className="mt-3 text-sm text-[#717171] dark:text-slate-400" role="status">
                         {selectedAvailableUnit ? 'A room is free for these dates.' : 'No room is free for these dates.'}
                       </p>
+                    ) : selectedProperty && selectedProperty.roomTypes.length === 0 ? (
+                      <p className="mt-3 text-sm text-[#717171] dark:text-slate-400" role="status">Room inventory is not published, so dates and availability cannot be confirmed here.</p>
                     ) : (
                       <p className="mt-3 text-sm text-[#717171] dark:text-slate-400">Choose dates and search to check live availability.</p>
                     )}
 
                     <button
                       type="button"
-                      disabled={!onlineBookingReady}
-                      aria-disabled={!onlineBookingReady}
-                      aria-describedby="stay-booking-disabled-reason"
-                      className="mt-4 h-12 w-full cursor-not-allowed rounded-lg bg-[#FF385C]/40 text-base font-semibold text-white"
+                      disabled={!canContactOwner(access, contactDetails, isAuthenticated, 'whatsapp') || contactBusy}
+                      aria-disabled={!canContactOwner(access, contactDetails, isAuthenticated, 'whatsapp') || contactBusy}
+                      aria-describedby="stay-request-policy"
+                      onClick={() => void contactOwner('whatsapp')}
+                      className="mt-4 h-12 w-full rounded-lg bg-[#f97316] text-base font-semibold text-white transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Reserve
+                      Request availability on WhatsApp
                     </button>
-                    <p id="stay-booking-disabled-reason" className="mt-2 text-center text-xs text-[#717171] dark:text-slate-400">
-                      Online booking is not enabled yet.
+                    <p id="stay-request-policy" className="mt-2 text-center text-xs text-[#717171] dark:text-slate-400">
+                      This opens a draft for you to review and send. It does not reserve a room. Pay at the property only after the owner confirms.
                     </p>
 
                     <div className="mt-5 space-y-2 border-t border-[#ebebeb] pt-4 text-sm dark:border-slate-800">
-                      {selectedPrice && nights > 0 ? (
+                      {selectedPrice && selectedProperty?.roomTypes.length && nights > 0 ? (
                         <>
                           <div className="flex items-center justify-between">
                             <span className="underline">{selectedPrice} × {plural(nights, 'night')}</span>
@@ -1071,12 +1231,20 @@ export function HotelsStayExperience({ onClose }: HotelsStayExperienceProps) {
                           </div>
                         </>
                       ) : (
-                        <p className="text-[#717171] dark:text-slate-400">Select dates to see a price breakdown.</p>
+                        <p className="text-[#717171] dark:text-slate-400">{selectedProperty?.roomTypes.length ? 'Select dates to see a price breakdown.' : 'A per-night total is unavailable without published room pricing and inventory.'}</p>
                       )}
                     </div>
 
+                    <StayCheckoutPanel
+                      property={selectedProperty}
+                      checkIn={checkIn}
+                      checkOut={checkOut}
+                      guests={guests}
+                      isAuthenticated={isAuthenticated}
+                    />
+
                     <div className="mt-4 rounded-xl bg-[#f7f7f7] p-3 text-xs leading-5 text-[#717171] dark:bg-slate-800 dark:text-slate-300">
-                      Date inventory can be checked, but this app does not yet connect a stay hold to verified payment and booking confirmation. No booking or payment will be started here.
+                      A reservation is only created after the server confirms a room for your dates. A UPI payment counts as paid only after the payment provider confirms settlement.
                     </div>
                   </div>
                 </aside>

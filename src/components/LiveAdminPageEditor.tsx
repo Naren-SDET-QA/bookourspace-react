@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { applyLivePageOverrides, buildStableDomKey } from '../lib/livePageOverrides';
+import SafeImage from './SafeImage';
+import UniversalMediaManager from './UniversalMediaManager';
 import {
   ShieldCheck,
   Edit3,
@@ -22,7 +25,6 @@ import {
   Trash2,
   MousePointerClick,
   Sparkles,
-  Upload,
   Globe,
   Lock,
   ExternalLink,
@@ -55,6 +57,8 @@ interface LiveAdminPageEditorProps {
   activePageId: CustomerPageId;
   onSelectPageId: (pageId: CustomerPageId) => void;
   isOpenExternal?: boolean;
+  /** Open directly in element-pick mode so every page element exposes an edit action. */
+  initialInspectMode?: boolean;
   onCloseExternal?: () => void;
   onConfigUpdated?: (activeConfig: LivePageEditorConfig, isDraftPreview: boolean) => void;
   onNotify?: (msg: string) => void;
@@ -82,6 +86,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   activePageId,
   onSelectPageId,
   isOpenExternal,
+  initialInspectMode = false,
   onCloseExternal,
   onConfigUpdated,
   onNotify,
@@ -129,6 +134,14 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
     }
   }, [isOpenExternal]);
 
+  useEffect(() => {
+    if (isOpenExternal && initialInspectMode && userRole === 'admin') {
+      setIsDrawerOpen(false);
+      setInspectMode(true);
+      notify('🎯 Edit mode: hover any element and click the ✏️ Edit badge (or the element) to change it.');
+    }
+  }, [isOpenExternal, initialInspectMode, userRole]);
+
   // Initial fetch from backend
   useEffect(() => {
     let mounted = true;
@@ -165,41 +178,49 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   useEffect(() => {
     const activeCfg =
       userRole === 'admin' && previewMode === 'draft' ? draftConfig : publishedConfig;
-    const overrides = activeCfg.domOverrides || {};
-    Object.values(overrides).forEach((ov) => {
-      if (ov.pageId !== activePageId) return;
-      try {
-        const el = document.querySelector<HTMLElement>(`[data-bos-dom-key="${ov.selectorKey}"]`);
-        if (!el) return;
-        if (ov.hidden !== undefined) {
-          el.style.display = ov.hidden ? 'none' : '';
-        }
-        if (ov.customBgColor) {
-          el.style.backgroundColor = ov.customBgColor;
-        }
-        if (ov.customTextColor) {
-          el.style.color = ov.customTextColor;
-        }
-        if (el.tagName === 'IMG' && ov.customImageUrl) {
-          (el as HTMLImageElement).src = ov.customImageUrl;
-        } else if (ov.customText && el.childNodes.length <= 2) {
-          el.textContent = ov.customText;
-        }
-      } catch {
-        // Ignore invalid selector
-      }
-    });
+    applyLivePageOverrides(activeCfg as LivePageEditorConfig, activePageId);
   }, [draftConfig, publishedConfig, previewMode, activePageId, userRole]);
 
   // Click-to-Select Page Element Inspector (Only active when Admin explicitly turns on Inspect Mode)
   useEffect(() => {
     if (userRole !== 'admin' || !inspectMode) return;
 
+    // A floating pencil badge makes the edit affordance visible on every
+    // hovered element, not just an outline.
+    const chip = document.createElement('div');
+    chip.id = 'bos-inline-edit-chip';
+    chip.textContent = '\u270F\uFE0F Edit';
+    chip.setAttribute('aria-hidden', 'true');
+    Object.assign(chip.style, {
+      position: 'fixed',
+      zIndex: '2147483000',
+      display: 'none',
+      pointerEvents: 'none',
+      padding: '2px 7px',
+      borderRadius: '999px',
+      background: '#f59e0b',
+      color: '#111827',
+      fontSize: '10px',
+      fontWeight: '900',
+      lineHeight: '16px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+    });
+    document.body.appendChild(chip);
+    const cursorStyle = document.createElement('style');
+    cursorStyle.id = 'bos-inline-edit-cursor';
+    cursorStyle.textContent = 'body[data-bos-inline-edit="1"] { cursor: crosshair; }';
+    document.head.appendChild(cursorStyle);
+    document.body.dataset.bosInlineEdit = '1';
+
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target || target.closest('[data-bos-live-editor-ui="true"]')) return;
       target.style.outline = '2px dashed #F59E0B';
       target.style.outlineOffset = '2px';
+      const rect = target.getBoundingClientRect();
+      chip.style.display = 'block';
+      chip.style.top = `${Math.max(2, rect.top + 3)}px`;
+      chip.style.left = `${Math.max(2, rect.right - 58)}px`;
     };
 
     const handleMouseOut = (e: MouseEvent) => {
@@ -207,6 +228,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       if (!target || target.closest('[data-bos-live-editor-ui="true"]')) return;
       target.style.outline = '';
       target.style.outlineOffset = '';
+      chip.style.display = 'none';
     };
 
     const handleClick = (e: MouseEvent) => {
@@ -217,11 +239,11 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       e.stopPropagation();
       target.style.outline = '';
 
-      let domKey = target.getAttribute('data-bos-dom-key');
-      if (!domKey) {
-        domKey = `el-${activePageId}-${target.tagName.toLowerCase()}-${Date.now().toString().slice(-4)}`;
-        target.setAttribute('data-bos-dom-key', domKey);
-      }
+      const existingKey = target.getAttribute('data-bos-dom-key');
+      const domKey = existingKey && !/^el-/.test(existingKey)
+        ? existingKey
+        : buildStableDomKey(activePageId, target);
+      target.setAttribute('data-bos-dom-key', domKey);
 
       const existing = draftConfig.domOverrides[domKey];
       const textSample = (target.textContent || '').trim().slice(0, 120);
@@ -259,6 +281,9 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       document.removeEventListener('mouseover', handleMouseOver, true);
       document.removeEventListener('mouseout', handleMouseOut, true);
       document.removeEventListener('click', handleClick, true);
+      chip.remove();
+      cursorStyle.remove();
+      delete document.body.dataset.bosInlineEdit;
     };
   }, [userRole, inspectMode, activePageId, draftConfig.domOverrides]);
 
@@ -282,25 +307,6 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
         [activePageId]: updater(prev.pages[activePageId]),
       },
     }));
-  };
-
-  const handleHeroImageUpload = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        updateCurrentPageDraft((p) => ({
-          ...p,
-          heroBanner: {
-            ...p.heroBanner,
-            visible: true,
-            imageUrl: reader.result as string,
-          },
-        }));
-        notify('🖼️ Banner image uploaded to draft!');
-      }
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleMoveSection = (index: number, direction: 'up' | 'down') => {
@@ -666,7 +672,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                         background: `linear-gradient(135deg, ${currentPageDraft.heroBanner.bgColorFrom}, ${currentPageDraft.heroBanner.bgColorTo})`,
                       }}
                     >
-                      <img
+                      <SafeImage category="general"
                         src={currentPageDraft.heroBanner.imageUrl}
                         alt="Hero preview"
                         className="w-12 h-12 rounded-lg object-cover shrink-0"
@@ -1075,7 +1081,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="font-bold block mb-1">Banner Image URL or Upload</label>
+                      <label className="font-bold block mb-1">Banner Image URL</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
@@ -1088,16 +1094,10 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
                           }
                           className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                         />
-                        <label className="px-3 py-2 rounded-xl bg-[#4338CA] text-white font-black cursor-pointer flex items-center gap-1 shrink-0">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Upload</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleHeroImageUpload(e.target.files?.[0])}
-                            className="hidden"
-                          />
-                        </label>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">Use an approved HTTPS object URL for a publishable banner. Inline file data is not stored in App Builder records.</p>
+                      <div className="mt-3">
+                        <UniversalMediaManager moduleKey={activePageId} parentType="live_builder_banner" title="Preview banner media" maxFiles={8} />
                       </div>
                     </div>
 

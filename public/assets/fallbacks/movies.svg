@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Movie poster illustration">
+  <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#312e81"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs>
+  <rect width="640" height="360" fill="url(#g)"/><rect x="220" y="36" width="200" height="288" rx="18" fill="#fff" stroke="#fbbf24" stroke-width="8"/>
+  <path d="m320 90 18 44 47 3-36 29 12 46-41-26-41 26 12-46-36-29 47-3z" fill="#f59e0b"/>
+  <path d="M254 255h132m-112 22h92" stroke="#c4b5fd" stroke-width="9" stroke-linecap="round"/><circle cx="126" cy="90" r="29" fill="#fbbf24" opacity=".9"/><circle cx="511" cy="276" r="20" fill="#fcd34d" opacity=".8"/>
+</svg>

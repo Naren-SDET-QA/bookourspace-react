@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Home service illustration">
+  <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#ecfdf5"/><stop offset="1" stop-color="#eef2ff"/></linearGradient></defs>
+  <rect width="640" height="360" fill="url(#g)"/><circle cx="320" cy="180" r="116" fill="#fff" stroke="#a7f3d0" stroke-width="10"/>
+  <path d="M266 214 385 95a47 47 0 0 1 60 60L326 274a42 42 0 0 1-60-60z" fill="#7c3aed"/>
+  <path d="m347 135 42 42m-142 47 33 33" stroke="#fbbf24" stroke-width="18" stroke-linecap="round"/>
+  <path d="M92 297h456" stroke="#c4b5fd" stroke-width="10" stroke-linecap="round"/><circle cx="156" cy="92" r="17" fill="#fbbf24"/><circle cx="500" cy="264" r="12" fill="#6ee7b7"/>
+</svg>

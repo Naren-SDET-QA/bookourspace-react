@@ -1,10 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
+import SafeImage from './SafeImage';
+import UniversalMediaManager from './UniversalMediaManager';
 import {
   Sparkles,
   Sun,
   Moon,
   Monitor,
-  Upload,
   Check,
   Eye,
   RotateCcw,
@@ -23,6 +24,7 @@ import {
   applyThemeSettingsToDocument,
 } from '../utils/adminEnterpriseStore';
 import { BOSBrandLogo } from './BOSBrandLogo';
+import { BOS_OFFICIAL_LOGO_STATIC } from './BOSOfficialLogo';
 
 interface AdminThemeManagementSectionProps {
   savedTheme: AdminThemeSettings;
@@ -110,10 +112,17 @@ const ENTERPRISE_THEME_PRESETS: {
   },
 ];
 
+// Two distinct, real choices. Each entry must point at a different asset: a
+// duplicate URL made both quick-select buttons render as selected and produced
+// duplicate React keys when the list was mapped.
 const BUILTIN_LOGO_EMBLEMS = [
   {
     label: 'Official BOS Globe Map-Pin Emblem',
-    url: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+    url: '/assets/optimized/brand-emblem-512.webp',
+  },
+  {
+    label: 'Official BookOurSpace Logo Lockup',
+    url: BOS_OFFICIAL_LOGO_STATIC,
   },
   {
     label: 'Classic Golden Pin Emblem',
@@ -141,7 +150,6 @@ export const AdminThemeManagementSection: React.FC<
     'admin' | 'provider' | 'customer'
   >('admin');
 
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Check role authorization
   const currentRolePerm = rolePerms.find((r) => r.role === activeEditorRole);
@@ -159,31 +167,9 @@ export const AdminThemeManagementSection: React.FC<
     draftTheme.brandLogoEmblemUrl !== savedTheme.brandLogoEmblemUrl ||
     draftTheme.brandTagline !== savedTheme.brandTagline ||
     draftTheme.showGlobeAnimation !== savedTheme.showGlobeAnimation ||
+    (draftTheme.brandLockupStyle || 'official') !== (savedTheme.brandLockupStyle || 'official') ||
     draftTheme.borderRadiusStyle !== savedTheme.borderRadiusStyle ||
     draftTheme.compactDensity !== savedTheme.compactDensity;
-
-  const handleUploadLogoFile = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = String(ev.target?.result || '');
-      if (!dataUrl) return;
-      const updated = {
-        ...draftTheme,
-        brandLogoEmblemUrl: dataUrl,
-      };
-      setDraftTheme(updated);
-      if (isLiveAppPreviewActive) {
-        applyThemeSettingsToDocument(updated);
-        window.dispatchEvent(
-          new CustomEvent('bos-theme-settings-updated', { detail: updated })
-        );
-      }
-      onNotify(`🖼️ Loaded custom brand logo "${file.name}" into Theme Preview!`);
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleToggleLiveDomPreview = () => {
     const nextPreview = !isLiveAppPreviewActive;
@@ -670,27 +656,14 @@ export const AdminThemeManagementSection: React.FC<
                   <span>4. Brand Logo Emblem, Tagline & 360° Globe Spin</span>
                 </label>
 
-                <input
-                  ref={logoFileInputRef}
-                  type="file"
-                  accept="image/*,.png,.jpg,.jpeg,.webp,.svg,.gif,.avif"
-                  onChange={(e) => handleUploadLogoFile(e.target.files)}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => logoFileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-xl bg-[#4338CA] text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>+ Upload Logo Image (All Formats)</span>
-                </button>
               </div>
+
+              <UniversalMediaManager moduleKey="branding" parentType="brand_logo" maxFiles={1} title="Preview a brand mark" />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                    Logo Emblem URL / Data URI
+                    Logo Emblem HTTPS URL
                   </label>
                   <input
                     type="text"
@@ -701,7 +674,7 @@ export const AdminThemeManagementSection: React.FC<
                         brandLogoEmblemUrl: e.target.value,
                       })
                     }
-                    placeholder="/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png"
+                    placeholder="/assets/optimized/brand-emblem-512.webp"
                     className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 font-medium text-xs"
                   />
                 </div>
@@ -744,7 +717,7 @@ export const AdminThemeManagementSection: React.FC<
                           : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
                       }`}
                     >
-                      <img
+                      <SafeImage category="general"
                         src={emb.url}
                         alt=""
                         className="w-4 h-4 rounded-full object-contain"
@@ -768,6 +741,36 @@ export const AdminThemeManagementSection: React.FC<
                   />
                   <span>360° Rotating Globe 'O'</span>
                 </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="font-bold text-slate-600 dark:text-slate-300 text-[11px] uppercase tracking-wider">
+                  Header lockup
+                </span>
+                {(
+                  [
+                    { id: 'official' as const, label: 'Official BookOurSpace logo' },
+                    { id: 'classic_bos_letters' as const, label: 'Classic BOS letter globe' },
+                  ]
+                ).map((lockup) => (
+                  <button
+                    key={lockup.id}
+                    type="button"
+                    onClick={() =>
+                      setDraftTheme({
+                        ...draftTheme,
+                        brandLockupStyle: lockup.id,
+                      })
+                    }
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer ${
+                      (draftTheme.brandLockupStyle || 'official') === lockup.id
+                        ? 'bg-indigo-100 dark:bg-indigo-950 border-indigo-500 text-indigo-900 dark:text-indigo-200'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    {lockup.label}
+                  </button>
+                ))}
               </div>
             </div>
 

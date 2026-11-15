@@ -1,4 +1,5 @@
 import React from 'react';
+import SafeImage from './SafeImage';
 import { 
   X, 
   Check, 
@@ -212,7 +213,7 @@ export const ClassCompareModal: React.FC<ClassCompareModalProps> = ({
                       {/* Course Header: Photo + Title + Faculty */}
                       <div className="pt-3 space-y-3">
                         <div className="relative h-36 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 cursor-pointer" onClick={() => onSelectListing(item)}>
-                          <img
+                          <SafeImage category="classes"
                             src={item.images[0] || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80'}
                             alt={itemTitle}
                             className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
@@ -240,7 +241,7 @@ export const ClassCompareModal: React.FC<ClassCompareModalProps> = ({
 
                         {/* Faculty Profile Lockup */}
                         <div className="p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center gap-2.5">
-                          <img
+                          <SafeImage category="classes"
                             src={item.providerAvatar}
                             alt={providerName}
                             className="w-10 h-10 rounded-full object-cover border-2 border-purple-500 shrink-0 bg-slate-200"

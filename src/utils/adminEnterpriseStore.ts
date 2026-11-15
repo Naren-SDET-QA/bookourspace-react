@@ -129,6 +129,8 @@ export interface AdminThemeSettings {
   brandLogoEmblemUrl: string;
   brandTagline: string;
   showGlobeAnimation: boolean;
+  /** official = current BookOurSpace lockup; classic_bos_letters = zip B [rotating O] S badge */
+  brandLockupStyle: 'official' | 'classic_bos_letters';
   borderRadiusStyle: 'rounded' | 'sharp' | 'pill';
   compactDensity: boolean;
   presetName: string;
@@ -339,9 +341,10 @@ export const DEFAULT_THEME_SETTINGS: AdminThemeSettings = {
   surfaceBackgroundLight: '#FDF6FA',
   surfaceBackgroundDark: '#020617',
   themeMode: 'light',
-  brandLogoEmblemUrl: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+  brandLogoEmblemUrl: '/assets/optimized/brand-emblem-512.webp',
   brandTagline: 'FIND • BOOK • ENJOY',
   showGlobeAnimation: true,
+  brandLockupStyle: 'official',
   borderRadiusStyle: 'rounded',
   compactDensity: false,
   presetName: 'BookOurSpace Signature Indigo & Saffron',
@@ -682,7 +685,7 @@ export const DEFAULT_CONTENT_SETTINGS: AdminContentSettings = {
     {
       id: 'MED-1',
       title: 'BOS Brand Emblem',
-      url: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+      url: '/assets/optimized/brand-emblem-512.webp',
       category: 'Branding',
       uploadedAt: '2026-10-28',
     },

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import { 
   X, 
   Calendar, 
@@ -108,7 +109,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         {/* Header */}
         <div className="bg-gradient-to-r from-[#4A148C] to-purple-800 text-white p-4 sm:p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
+            <SafeImage category="general"
               src={provider.avatar}
               alt={provider.name}
               className="w-11 h-11 rounded-2xl object-cover ring-2 ring-amber-400 bg-purple-900"

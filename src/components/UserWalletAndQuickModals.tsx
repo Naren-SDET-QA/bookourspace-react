@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SafeImage from './SafeImage';
 import {
   X,
   Wallet,
@@ -6,8 +7,6 @@ import {
   Headphones,
   Gift,
   HelpCircle,
-  ArrowUpRight,
-  ArrowDownLeft,
   ShieldCheck,
   Share2,
   Copy,
@@ -23,7 +22,7 @@ import { useMarketplace } from '../context/MarketplaceContext';
 import { MarketplaceListing } from '../types/marketplace';
 import { AppLanguage, getListingTitle } from '../utils/translations';
 import { downloadGSTInvoicePDF } from '../utils/gstInvoiceGenerator';
-import { triggerGlobalGlobeLoader } from './BOSBrandLogo';
+import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 
 export type QuickActionModalType =
   | null
@@ -43,76 +42,20 @@ export interface WalletLedgerEntry {
   status: 'Settled' | 'Active' | 'Verified';
 }
 
-const DEFAULT_LEDGER: WalletLedgerEntry[] = [
-  {
-    id: 'LDG-901',
-    date: '29 Oct 2026',
-    title: 'Referral & Partner Commission Credit (Code: BOS500)',
-    category: 'commission',
-    type: 'credit',
-    amount: 750,
-    status: 'Settled',
-  },
-  {
-    id: 'LDG-902',
-    date: '28 Oct 2026',
-    title: 'Pro Specialist Annual Subscription Renewal',
-    category: 'subscription',
-    type: 'debit',
-    amount: 499,
-    status: 'Active',
-  },
-  {
-    id: 'LDG-903',
-    date: '26 Oct 2026',
-    title: 'Booking Loyalty Cashback (Taj Krishna Suite Stay)',
-    category: 'booking_cashback',
-    type: 'credit',
-    amount: 340,
-    status: 'Verified',
-  },
-  {
-    id: 'LDG-904',
-    date: '22 Oct 2026',
-    title: 'UPI Instant Wallet Top-Up',
-    category: 'wallet_topup',
-    type: 'credit',
-    amount: 2000,
-    status: 'Settled',
-  },
-];
-
 export const UserWalletAndLedgerSection: React.FC<{
   currentLang?: AppLanguage;
 }> = ({ currentLang = 'en' }) => {
-  const { transactions, recordPayment } = useMarketplace();
-  const [ledger, setLedger] = useState<WalletLedgerEntry[]>(DEFAULT_LEDGER);
+  const { transactions } = useMarketplace();
   const [topUpAmount, setTopUpAmount] = useState(500);
-  const [topUpDone, setTopUpDone] = useState(false);
-
-  const walletBalance = ledger.reduce(
-    (acc, item) => (item.type === 'credit' ? acc + item.amount : acc - item.amount),
-    0
-  );
-  const commissionBalance = ledger
-    .filter((i) => i.category === 'commission' || i.category === 'booking_cashback')
-    .reduce((acc, i) => acc + i.amount, 0);
+  const [topUpMessage, setTopUpMessage] = useState<string | null>(null);
+  // Seed/localStorage marketplace_transactions are not a settlement ledger.
+  // GST PDFs are offered only for non-demo success rows that already carry an invoice number.
+  const verifiedReceipts = DEMO_DATA_ENABLED
+    ? []
+    : transactions.filter((tx) => tx.status === 'success' && Boolean(tx.invoiceNumber) && !String(tx.id).startsWith('tx-'));
 
   const handleAddFunds = () => {
-    triggerGlobalGlobeLoader('Adding Funds to BOS Wallet & Syncing Ledger...', 650);
-    const entry: WalletLedgerEntry = {
-      id: `LDG-${Date.now().toString().slice(-4)}`,
-      date: 'Just now',
-      title: 'Instant UPI Wallet Top-Up',
-      category: 'wallet_topup',
-      type: 'credit',
-      amount: topUpAmount,
-      status: 'Settled',
-    };
-    setLedger((prev) => [entry, ...prev]);
-    recordPayment('plan_subscription', topUpAmount, 'BOS Wallet Credit Top-Up', 'UPI');
-    setTopUpDone(true);
-    setTimeout(() => setTopUpDone(false), 3000);
+    setTopUpMessage('Wallet top-up is unavailable until a trusted payment and ledger service is configured. No funds were added.');
   };
 
   return (
@@ -125,10 +68,10 @@ export const UserWalletAndLedgerSection: React.FC<{
             <Wallet className="w-4 h-4 text-amber-300" />
           </div>
           <div className="text-xl font-black mt-1">
-            ₹{walletBalance.toLocaleString('en-IN')}
+            —
           </div>
           <div className="text-[10px] text-emerald-300 font-bold mt-0.5">
-            ✓ 256-Bit Protected Ledger
+            Balance unavailable
           </div>
         </div>
 
@@ -138,10 +81,10 @@ export const UserWalletAndLedgerSection: React.FC<{
             <Sparkles className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="text-xl font-black text-emerald-800 dark:text-emerald-200 mt-1">
-            ₹{commissionBalance.toLocaleString('en-IN')}
+            —
           </div>
           <div className="text-[10px] text-slate-500 font-bold mt-0.5">
-            Withdrawable to Bank / UPI
+            Verified commission data unavailable
           </div>
         </div>
 
@@ -151,10 +94,10 @@ export const UserWalletAndLedgerSection: React.FC<{
             <ShieldCheck className="w-4 h-4 text-amber-600" />
           </div>
           <div className="text-sm font-black text-slate-900 dark:text-white mt-1">
-            BOS Pro Specialist
+            Unavailable
           </div>
           <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-black mt-0.5">
-            ● ACTIVE (Valid till Dec 2027)
+            No trusted subscription status
           </div>
         </div>
       </div>
@@ -182,78 +125,103 @@ export const UserWalletAndLedgerSection: React.FC<{
           onClick={handleAddFunds}
           className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black cursor-pointer"
         >
-          {topUpDone ? '✓ Added to Wallet!' : `Add ₹${topUpAmount} via UPI`}
+          Add ₹{topUpAmount} via UPI
         </button>
       </div>
+      {topUpMessage && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">{topUpMessage}</p>}
 
       {/* Transaction History & Ledger */}
       <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
         <div className="text-[11px] font-black uppercase tracking-wider text-slate-500">
-          Transaction Ledger & GST Receipts ({ledger.length + transactions.length})
+          {verifiedReceipts.length > 0
+            ? `GST receipts (${verifiedReceipts.length})`
+            : 'Financial history unavailable'}
         </div>
-        {ledger.map((row) => (
-          <div
-            key={row.id}
-            className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  row.type === 'credit'
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
-                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
-                }`}
-              >
-                {row.type === 'credit' ? (
-                  <ArrowDownLeft className="w-4 h-4" />
-                ) : (
-                  <ArrowUpRight className="w-4 h-4" />
-                )}
-              </div>
+        {verifiedReceipts.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">No trusted financial ledger is connected. Wallet top-up remains unavailable. GST PDFs appear here after a verified marketplace payment.</p>
+        ) : (
+          verifiedReceipts.map((tx) => (
+            <div
+              key={tx.id}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs"
+            >
               <div className="min-w-0">
                 <div className="font-black text-slate-900 dark:text-white truncate">
-                  {row.title}
+                  {tx.description || tx.planName}
                 </div>
                 <div className="text-[10px] text-slate-500">
-                  {row.date} • {row.id} • {row.status}
+                  {tx.date} • {tx.invoiceNumber} • {tx.paymentMethod}
                 </div>
               </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-black text-slate-800 dark:text-slate-100">
+                  ₹{tx.amount.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadGSTInvoicePDF({
+                      invoiceNumber: tx.invoiceNumber || `BOS-GST-${tx.id}`,
+                      transactionId: tx.id,
+                      date: tx.date,
+                      customerName: 'BookOurSpace customer',
+                      customerPhone: '',
+                      planOrItemName: tx.planName || tx.description,
+                      baseAmount: Math.round(tx.amount / 1.18),
+                      totalAmount: tx.amount,
+                      paymentMethod: tx.paymentMethod || 'Verified payment',
+                    })
+                  }
+                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 cursor-pointer"
+                  title="Download GST Invoice PDF"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span
-                className={`font-black ${
-                  row.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'
-                }`}
-              >
-                {row.type === 'credit' ? '+' : '-'}₹{row.amount.toLocaleString('en-IN')}
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  downloadGSTInvoicePDF({
-                    invoiceNumber: `BOS-GST-${row.id}`,
-                    transactionId: `TXN-${row.id}`,
-                    date: row.date,
-                    customerName: 'Narendra Kumar',
-                    customerPhone: '+91 98765 43210',
-                    planOrItemName: row.title,
-                    baseAmount: Math.round(row.amount / 1.18),
-                    totalAmount: row.amount,
-                    paymentMethod: 'BOS Wallet / UPI',
-                  })
-                }
-                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 cursor-pointer"
-                title="Download GST Invoice PDF"
-              >
-                <Download className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
 };
+
+const SITE_FAQ = [
+  { q: 'How do I sign in?', a: 'Production BookOurSpace uses Google Sign-In only. New Google accounts receive a profile automatically. Email and password login is not offered.' },
+  { q: 'How do I search across PG, classes, halls, services, stays and movies?', a: 'Use the search bar in the header, or the location picker for city, area, village, mandal or PIN. Results stay inside the module you are browsing.' },
+  { q: 'How do bookings and payments work?', a: 'Book from a listing. Razorpay Checkout, UPI and Pay after service stay available where the module supports them. Unverified screenshots are never treated as paid.' },
+  { q: 'How do Movies work?', a: 'Movies shows theatre showtimes only. There are no seats, tickets, payments or refunds in Movies.' },
+  { q: 'How does Stay 2 differ from Stay 1?', a: 'Stay 2 is the default Hotels & Stays journey at #stays. Stay 1 remains at #stays/old.' },
+  { q: 'How do I download a GST invoice?', a: 'Open My Bookings and use GST PDF Invoice on a confirmed booking. A tax invoice prints only when GSTIN is configured and payment is verified.' },
+  { q: 'How does hourly hotel booking work?', a: 'Open Stay and use hourly filters where a hotel publishes 3h/6h/12h stays.' },
+  { q: 'Where are class batch dates?', a: 'On a class card, open the calendar to see start dates and assessments from the listing.' },
+  { q: 'What does the privacy banner store?', a: 'Essential keeps sign-in and bookings working. Allow campaign tags to keep UTM values on this device only. Native apps skip the cookie banner.' },
+];
+
+function SiteFaqList() {
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <div className="space-y-2 text-xs">
+      {SITE_FAQ.map((item, index) => {
+        const expanded = open === index;
+        return (
+          <div key={item.q} className="rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/70">
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setOpen(expanded ? null : index)}
+              className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left font-black text-slate-900 dark:text-white"
+            >
+              <span>{item.q}</span>
+              <span aria-hidden="true">{expanded ? '−' : '+'}</span>
+            </button>
+            {expanded && <p className="px-3 pb-3 leading-relaxed text-slate-600 dark:text-slate-300">{item.a}</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 interface QuickActionModalsProps {
   activeModal: QuickActionModalType;
@@ -335,6 +303,8 @@ export const QuickActionModals: React.FC<QuickActionModalsProps> = ({
           </div>
           <button
             type="button"
+            aria-label="Close dialog"
+            title="Close dialog"
             onClick={onClose}
             className="p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 cursor-pointer"
           >
@@ -364,7 +334,7 @@ export const QuickActionModals: React.FC<QuickActionModalsProps> = ({
                     }}
                     className="flex items-center gap-3 min-w-0 cursor-pointer"
                   >
-                    <img
+                    <SafeImage category="general"
                       src={item.images[0]}
                       alt={item.title}
                       className="w-14 h-14 rounded-xl object-cover shrink-0"
@@ -504,32 +474,7 @@ export const QuickActionModals: React.FC<QuickActionModalsProps> = ({
           </div>
         )}
 
-        {activeModal === 'help_centre' && (
-          <div className="space-y-2.5 text-xs">
-            {[
-              {
-                q: 'How do I download my formal GST Tax Invoice PDF?',
-                a: 'Open "My Bookings" in the bottom bar and click "📄 GST PDF Invoice" on any confirmed booking to print or download your invoice with GSTIN & QR validation.',
-              },
-              {
-                q: 'How does Hourly Hotel Booking work?',
-                a: 'Switch to the "Stay / Hotels" section and toggle "Hourly Booking" to filter hotels offering flexible 3h/6h/12h stays with custom check-in and check-out date-time selection.',
-              },
-              {
-                q: 'How do I view Course Batch Start Dates & Exam Dates?',
-                a: 'On any Class/Course card, click "📅 View Calendar" to inspect monthly start dates, assessment exams, off-days, and verified Student Success placement stats.',
-              },
-            ].map((faq, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1"
-              >
-                <div className="font-black text-slate-900 dark:text-white">{faq.q}</div>
-                <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{faq.a}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {activeModal === 'help_centre' && <SiteFaqList />}
       </div>
     </div>
   );

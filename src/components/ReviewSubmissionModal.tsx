@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SafeImage from './SafeImage';
 import { 
   X, 
   Star, 
@@ -306,7 +307,7 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
               {/* Provider Info Pill */}
               <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80">
                 <div className="flex items-center gap-3 min-w-0">
-                  <img
+                  <SafeImage category="general"
                     src={listing.providerAvatar}
                     alt={displayProviderName}
                     className="w-10 h-10 rounded-full object-cover ring-2 ring-amber-400 shrink-0"

@@ -1,4 +1,5 @@
 import React from 'react';
+import SafeImage from './SafeImage';
 import { 
   X, 
   ChevronRight
@@ -51,7 +52,7 @@ export const CompareFloatingBar: React.FC<CompareFloatingBarProps> = ({
                   key={item.id}
                   className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 pl-1.5 pr-2 py-1 rounded-xs text-xs font-bold text-slate-800 dark:text-slate-200 shadow-2xs group max-w-[130px] sm:max-w-[160px]"
                 >
-                  <img
+                  <SafeImage category="general"
                     src={item.images[0] || item.providerAvatar}
                     alt={title}
                     className="w-6 h-6 rounded-xs object-cover shrink-0 border border-slate-200"

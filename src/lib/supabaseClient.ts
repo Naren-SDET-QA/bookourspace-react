@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import {
   MarketplaceListing,
   Booking,
@@ -8,47 +9,49 @@ import {
   UserRole,
 } from '../types/marketplace';
 import { ensureListingPriceBreakdown } from '../data/seedData';
-import { resolveSupabaseConfig } from './supabaseConfig';
+import { resolveSupabaseEnvironment } from './supabaseConfig';
+import { NATIVE_AUTH_REDIRECT_URL } from '../mobile/nativeOAuthCallback';
 
-// Configuration is resolved (and validated) in src/lib/supabaseConfig.ts:
-//   - there is no implicit target: without VITE_SUPABASE_URL the client is
-//     disabled, so no live connection happens by accident;
-//   - an explicit target is validated and an invalid one fails closed
-//     instead of silently switching to production.
-// Never put a PostgreSQL password or service-role key in frontend variables.
-const resolvedSupabaseConfig = resolveSupabaseConfig({
-  url: import.meta.env.VITE_SUPABASE_URL,
-  projectId: import.meta.env.VITE_SUPABASE_PROJECT_ID,
-  developmentProjectId: import.meta.env.VITE_SUPABASE_DEVELOPMENT_PROJECT_ID,
-  publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-});
+// Browser and server share one strict resolver. It requires an explicit URL,
+// matching project ref, a local development allowlist, and a public key.
+// In particular, no project is inferred from an ID and the designated dev
+// project is not rejected merely because an older config once called it prod.
+const browserSupabaseConfig = resolveSupabaseEnvironment(
+  typeof import.meta !== 'undefined' ? import.meta.env : {},
+);
 
-export const SUPABASE_CONFIG_ERRORS: string[] = resolvedSupabaseConfig.errors;
-export const SUPABASE_PROJECT_ID = resolvedSupabaseConfig.projectId;
-export const SUPABASE_PROJECT_URL = resolvedSupabaseConfig.projectUrl;
-export const SUPABASE_AUTH_CALLBACK_URL = resolvedSupabaseConfig.authCallbackUrl;
+export const SUPABASE_CONFIG_ERRORS: string[] = browserSupabaseConfig.errors;
+export const SUPABASE_PROJECT_ID = browserSupabaseConfig.projectId;
+export const SUPABASE_PROJECT_URL = browserSupabaseConfig.projectUrl;
+export const SUPABASE_AUTH_CALLBACK_URL = browserSupabaseConfig.authCallbackUrl;
+const rawSupabaseUrl = browserSupabaseConfig.projectUrl;
+const rawPublishableKey = browserSupabaseConfig.publishableKey;
+
 if (SUPABASE_CONFIG_ERRORS.length > 0) {
-  console.error(
-    `[Supabase Configuration] ${SUPABASE_CONFIG_ERRORS.join(' ')} Live Supabase stays disabled; no other project is used.`
-  );
-} else if (!resolvedSupabaseConfig.isConfigured) {
-  console.warn(
-    '[Supabase Configuration] Live Supabase is disabled. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable it; no project is selected implicitly.'
-  );
+  console.error(`[Supabase Configuration] Browser client disabled: ${SUPABASE_CONFIG_ERRORS.join(' ')}`);
+} else if (!browserSupabaseConfig.isConfigured) {
+  console.warn('[Supabase Configuration] Live Supabase is disabled. No project is selected implicitly.');
 }
 
-const rawSupabaseUrl = SUPABASE_PROJECT_URL;
-const rawPublishableKey = resolvedSupabaseConfig.publishableKey;
+export const isSupabaseConfigured: boolean = browserSupabaseConfig.isConfigured;
 
-export const isSupabaseConfigured: boolean = resolvedSupabaseConfig.isConfigured;
+/**
+ * Whether server-side payment verification is available in this build.
+ * Kept false by default so the UI never claims a payment was verified
+ * unless the deployment explicitly enables the verified gateway.
+ */
+export const PAYMENT_VERIFICATION_AVAILABLE = false;
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(rawSupabaseUrl, rawPublishableKey, {
       auth: {
+        flowType: 'pkce',
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true,
+        // Native app callbacks arrive through Capacitor's appUrlOpen event and
+        // are exchanged explicitly, while the existing browser callback keeps
+        // Supabase's automatic URL detection.
+        detectSessionInUrl: !Capacitor.isNativePlatform(),
       },
     })
   : null;
@@ -60,6 +63,8 @@ export interface SupabaseProfile {
   phone?: string;
   role: UserRole;
   account_status?: string;
+  avatar_url?: string | null;
+  cover_url?: string | null;
 }
 
 /**
@@ -85,12 +90,9 @@ export async function getCurrentSupabaseSession(): Promise<Session | null> {
 // ============================================================================
 
 export async function signInWithEmailPassword(email: string, password: string) {
-  if (!supabase) {
-    throw new Error(
-      'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your environment variables.'
-    );
-  }
-  return supabase.auth.signInWithPassword({ email, password });
+  void email;
+  void password;
+  throw new Error('Password sign-in is disabled. Use Google Sign-In.');
 }
 
 export async function signUpWithEmailPassword(
@@ -100,52 +102,17 @@ export async function signUpWithEmailPassword(
   role: UserRole = 'customer',
   phone?: string
 ) {
-  if (!supabase) {
-    throw new Error(
-      'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your environment variables.'
-    );
-  }
-  const result = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-        role,
-        phone: phone || '',
-      },
-    },
-  });
-
-  if (result.data.user && result.data.session) {
-    await supabase.from('profiles').upsert(
-      {
-        id: result.data.user.id,
-        email: result.data.user.email,
-        full_name: fullName,
-        phone: phone || null,
-        role,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
-  }
-
-  return result;
+  void email;
+  void password;
+  void fullName;
+  void role;
+  void phone;
+  throw new Error('Email registration is disabled. Use Google Sign-In.');
 }
 
 export async function signInWithMagicLinkOtp(email: string) {
-  if (!supabase) {
-    throw new Error(
-      'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your environment variables.'
-    );
-  }
-  return supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: window.location.origin,
-    },
-  });
+  void email;
+  throw new Error('Email OTP sign-in is disabled. Use Google Sign-In.');
 }
 
 export async function signOutSupabase() {
@@ -159,7 +126,7 @@ export async function fetchRlsProfile(): Promise<SupabaseProfile | null> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, phone, role, account_status')
+    .select('id, email, full_name, phone, role, avatar_url, cover_url')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -170,53 +137,67 @@ export async function fetchRlsProfile(): Promise<SupabaseProfile | null> {
     full_name: data.full_name || user.user_metadata?.full_name || 'Marketplace User',
     phone: data.phone || user.user_metadata?.phone || '',
     role: (data.role as UserRole) || 'customer',
-    account_status: typeof data.account_status === 'string' ? data.account_status : undefined,
+    avatar_url: data.avatar_url || null,
+    cover_url: data.cover_url || null,
   };
 }
 
 export async function upsertRlsProfile(updates: {
   fullName?: string;
   phone?: string;
-  role?: UserRole;
-}): Promise<SupabaseProfile | null> {
+  bio?: string;
+}): Promise<{
+  /** The durable RLS-protected profile row. */
+  profile: SupabaseProfile | null;
+  /** Whether the Google/Supabase account metadata was updated. */
+  accountUpdated: boolean;
+}> {
   const user = await requireAuthenticatedUser();
-  if (!supabase || !user) return null;
+  if (!supabase || !user) return { profile: null, accountUpdated: false };
 
-  const nextRole = updates.role || (user.user_metadata?.role as UserRole) || 'customer';
   const nextName = updates.fullName ?? user.user_metadata?.full_name ?? 'Marketplace User';
   const nextPhone = updates.phone ?? user.user_metadata?.phone ?? '';
 
-  await supabase.auth.updateUser({
+  const accountUpdate = await supabase.auth.updateUser({
     data: {
       full_name: nextName,
       phone: nextPhone,
-      role: nextRole,
+      ...(updates.bio !== undefined ? { bio: updates.bio.slice(0, 240) } : {}),
     },
   });
+  const accountUpdated = !accountUpdate.error;
 
   const { data, error } = await supabase
     .from('profiles')
-    .upsert(
-      {
-        id: user.id,
-        email: user.email,
-        full_name: nextName,
-        phone: nextPhone || null,
-        role: nextRole,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    )
-    .select('id, email, full_name, phone, role')
+    .update({ full_name: nextName, phone: nextPhone || null, updated_at: new Date().toISOString() })
+    .eq('id', user.id)
+    .select('id, email, full_name, phone, role, avatar_url, cover_url')
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) return { profile: null, accountUpdated };
+  let profile = data;
+  if (!profile) {
+    const repaired = await supabase
+      .from('profiles')
+      .insert({
+        id: user.id,
+        full_name: nextName,
+        phone: nextPhone || null,
+      })
+      .select('id, email, full_name, phone, role, avatar_url, cover_url')
+      .maybeSingle();
+    if (repaired.error || !repaired.data) return { profile: null, accountUpdated };
+    profile = repaired.data;
+  }
   return {
-    id: data.id,
-    email: data.email || user.email || '',
-    full_name: data.full_name,
-    phone: data.phone || '',
-    role: data.role as UserRole,
+    accountUpdated,
+    profile: {
+      id: profile.id,
+      email: profile.email || user.email || '',
+      full_name: profile.full_name,
+      phone: profile.phone || '',
+      role: profile.role as UserRole,
+    },
   };
 }
 
@@ -304,9 +285,8 @@ export async function updateRlsListing(
     .from('listings')
     .update(updateRow)
     .eq('id', id)
-    // RLS is the authorization boundary: owners can update their own rows and
-    // public.is_admin() permits cross-provider admin edits. Do not duplicate
-    // that policy with a client-side owner filter.
+    // RLS decides whether this owner/admin may update the record. Requiring a
+    // returned id prevents a zero-row RLS result from appearing successful.
     .select('id')
     .maybeSingle();
 
@@ -317,10 +297,10 @@ export async function deleteRlsListing(id: string): Promise<boolean> {
   const user = await requireAuthenticatedUser();
   if (!supabase || !user) return false;
 
-  // Listing removal is a safe deactivation. Preserve references from existing
-  // bookings, payment records, reviews, and audit history.
   const { data, error } = await supabase
     .from('listings')
+    // Deactivate instead of deleting: bookings, reviews and audit history may
+    // still reference this listing. RLS remains the owner/admin boundary.
     .update({ status: 'expired', updated_at: new Date().toISOString() })
     .eq('id', id)
     .select('id')
@@ -443,6 +423,7 @@ export async function fetchRlsReviews(): Promise<Review[] | null> {
   return data.map((row: any) => ({
     ...(row.payload || {}),
     id: row.id,
+    userId: row.user_id,
     listingId: row.listing_id,
     customerName: row.customer_name,
     customerAvatar:
@@ -451,7 +432,9 @@ export async function fetchRlsReviews(): Promise<Review[] | null> {
     rating: Number(row.rating ?? 5),
     comment: row.comment,
     date: row.created_at ? new Date(row.created_at).toLocaleDateString() : 'Just now',
-    verifiedCustomer: true,
+    // The current schema has no server-owned verified-customer field. A value
+    // inside user-writable payload JSON is not proof of a verified purchase.
+    verifiedCustomer: false,
   }));
 }
 
@@ -476,51 +459,15 @@ export async function insertRlsReview(review: Review): Promise<boolean> {
 }
 
 export async function fetchRlsTransactions(): Promise<PaymentTransaction[] | null> {
-  const user = await requireAuthenticatedUser();
-  if (!supabase || !user) return null;
-
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-
-  if (error || !data) return null;
-
-  return data.map((row: any) => ({
-    id: row.id,
-    type: row.tx_type as PaymentTransaction['type'],
-    amount: Number(row.amount ?? 0),
-    description: row.description,
-    planName: row.plan_name,
-    status: (row.status as PaymentTransaction['status']) || 'success',
-    date: row.tx_date || new Date(row.created_at).toISOString().slice(0, 10),
-    invoiceNumber: row.invoice_number,
-    paymentMethod: row.payment_method,
-  }));
+  // The current client-writable transactions table has no immutable server
+  // settlement evidence. Do not surface its `success` status as payment proof.
+  return null;
 }
 
-export async function insertRlsTransaction(tx: PaymentTransaction): Promise<boolean> {
-  const user = await requireAuthenticatedUser();
-  if (!supabase || !user) return false;
-
-  const { error } = await supabase.from('transactions').upsert(
-    {
-      id: tx.id,
-      user_id: user.id,
-      tx_type: tx.type,
-      amount: tx.amount,
-      description: tx.description,
-      plan_name: tx.planName,
-      status: tx.status,
-      invoice_number: tx.invoiceNumber,
-      payment_method: tx.paymentMethod,
-      tx_date: tx.date,
-    },
-    { onConflict: 'id' }
-  );
-
-  return !error;
+export async function insertRlsTransaction(_tx: PaymentTransaction): Promise<boolean> {
+  // Financial records must be written by a trusted server/provider webhook.
+  // The current RLS table allows authenticated users to submit their own rows.
+  return false;
 }
 
 export async function fetchRlsFavorites(): Promise<string[] | null> {
@@ -633,10 +580,7 @@ export async function syncLocalAccountDataToSupabase(payload: {
     const ok = await syncRlsFavorite(favId, true);
     if (ok) syncedCount++;
   }
-  for (const tx of payload.transactions) {
-    const ok = await insertRlsTransaction(tx);
-    if (ok) syncedCount++;
-  }
+  // Deliberately do not migrate browser-supplied transactions into the ledger.
 
   // Also sync all active app module configurations stored in browser state
   const moduleKeysToSync = [
@@ -665,11 +609,18 @@ export async function syncLocalAccountDataToSupabase(payload: {
 /**
  * Real-time subscription to RLS-enabled tables so UI stays in sync across tabs/devices.
  */
+let rlsRealtimeChannelSequence = 0;
+
 export function subscribeToRlsChanges(onRefresh: () => void): () => void {
   if (!supabase) return () => {};
 
+  // A channel name is a realtime topic. Reusing one after subscribe() throws
+  // "cannot add postgres_changes callbacks ... after subscribe()", which can
+  // unmount the app when two components subscribe. Give every subscription its
+  // own topic.
+  rlsRealtimeChannelSequence += 1;
   const channel = supabase
-    .channel('bos-rls-realtime-sync')
+    .channel(`bos-rls-realtime-sync-${rlsRealtimeChannelSequence}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'listings' }, () => onRefresh())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => onRefresh())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'enquiries' }, () => onRefresh())
@@ -775,7 +726,8 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
  * for new users, existing user sign-in, role-based routing, and account blocking checks.
  */
 export async function authenticateWithGoogleServer(params: {
-  email: string;
+  accessToken?: string;
+  email?: string;
   name?: string;
   googleSub?: string;
   avatarUrl?: string;
@@ -793,21 +745,23 @@ export async function authenticateWithGoogleServer(params: {
   error?: string;
   message?: string;
 }> {
+  if (!params.accessToken?.trim()) {
+    return {
+      ok: false,
+      httpStatus: 401,
+      error: 'VERIFIED_GOOGLE_SESSION_REQUIRED',
+      message: 'Complete Google sign-in before requesting an application session.',
+    };
+  }
   try {
     const resp = await fetch('/api/auth/google/authenticate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${params.accessToken.trim()}`,
+      },
       body: JSON.stringify({
-        authProvider: 'google',
         supabaseProjectId: SUPABASE_PROJECT_ID,
-        email: params.email.trim().toLowerCase(),
-        name: params.name?.trim(),
-        googleSub: params.googleSub || `google-oauth2|${params.email.trim().toLowerCase()}`,
-        avatarUrl: params.avatarUrl,
-        phone: params.phone?.trim(),
-        city: params.city?.trim() || 'Hyderabad',
-        requestedRole: params.requestedRole || 'customer',
-        allowRoleChange: Boolean(params.allowRoleChange),
       }),
     });
     const data = await resp.json();
@@ -876,12 +830,12 @@ export async function signInWithSupabaseGoogleOAuth(requestedRole: UserRole = 'c
   supabaseAuthorizeUrl?: string;
   error?: string;
 }> {
-  const redirectTo = `${window.location.origin}/auth/callback?role=${encodeURIComponent(requestedRole)}`;
-  const directSupabaseAuthorizeUrl = SUPABASE_PROJECT_URL
-    ? `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-        redirectTo
-      )}&access_type=offline&prompt=select_account`
-    : '';
+  const redirectTo = Capacitor.isNativePlatform()
+    ? NATIVE_AUTH_REDIRECT_URL
+    : `${window.location.origin}/auth/callback?role=${encodeURIComponent(requestedRole)}`;
+  const directSupabaseAuthorizeUrl = `${SUPABASE_PROJECT_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
+    redirectTo
+  )}&access_type=offline&prompt=select_account`;
 
   if (supabase) {
     const { data, error } = await supabase.auth.signInWithOAuth({
@@ -974,7 +928,7 @@ export async function fetchCurrentAuthSession(): Promise<{
       };
     }
     if (resp.ok && data.ok && data.user) {
-      setStoredAuthoritativeSession(token, data.user);
+      setStoredAuthoritativeSession(data.sessionToken || token, data.user);
       return {
         ok: true,
         authenticated: true,
@@ -1018,10 +972,17 @@ export async function logoutAuthoritativeSession(): Promise<void> {
 // SERVER-AUTHORITATIVE ADMIN USER MANAGEMENT, NOTIFICATIONS & MODULES
 // ============================================================================
 
+async function buildAdminAuthorityHeaders(): Promise<Record<string, string>> {
+  const headers = buildAuthHeaders();
+  const session = await getCurrentSupabaseSession();
+  if (session?.access_token) headers['x-supabase-access-token'] = session.access_token;
+  return headers;
+}
+
 export async function fetchServerAdminUsers(): Promise<AuthoritativeGoogleUser[] | null> {
   try {
     const resp = await fetch('/api/admin/users', {
-      headers: buildAuthHeaders(),
+      headers: await buildAdminAuthorityHeaders(),
     });
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -1041,7 +1002,7 @@ export async function createServerAdminUser(payload: {
   try {
     const resp = await fetch('/api/admin/users', {
       method: 'POST',
-      headers: buildAuthHeaders(),
+      headers: await buildAdminAuthorityHeaders(),
       body: JSON.stringify(payload),
     });
     const data = await resp.json();
@@ -1053,13 +1014,14 @@ export async function createServerAdminUser(payload: {
 
 export async function updateServerAdminUserStatus(
   userId: string,
-  status: 'active' | 'suspended' | 'blocked' | 'pending_verification'
+  status: 'active' | 'suspended' | 'blocked' | 'pending_verification',
+  reason = `Admin Dashboard account status change to ${status}`,
 ): Promise<{ ok: boolean; user?: AuthoritativeGoogleUser; message?: string }> {
   try {
     const resp = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/status`, {
       method: 'PATCH',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify({ status }),
+      headers: await buildAdminAuthorityHeaders(),
+      body: JSON.stringify({ status, reason }),
     });
     const data = await resp.json();
     return { ok: resp.ok && Boolean(data.ok), user: data.user, message: data.message };
@@ -1070,13 +1032,14 @@ export async function updateServerAdminUserStatus(
 
 export async function updateServerAdminUserRole(
   userId: string,
-  role: UserRole
+  role: UserRole,
+  reason = `Admin Dashboard role change to ${role}`,
 ): Promise<{ ok: boolean; user?: AuthoritativeGoogleUser; message?: string }> {
   try {
     const resp = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
       method: 'PATCH',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify({ role }),
+      headers: await buildAdminAuthorityHeaders(),
+      body: JSON.stringify({ role, reason }),
     });
     const data = await resp.json();
     return { ok: resp.ok && Boolean(data.ok), user: data.user, message: data.message };
@@ -1087,13 +1050,14 @@ export async function updateServerAdminUserRole(
 
 export async function updateServerAdminUserVerify(
   userId: string,
-  verified?: boolean
+  verified?: boolean,
+  reason = `Admin Dashboard verification change to ${verified === true}`,
 ): Promise<{ ok: boolean; user?: AuthoritativeGoogleUser; message?: string }> {
   try {
     const resp = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/verify`, {
       method: 'PATCH',
-      headers: buildAuthHeaders(),
-      body: JSON.stringify({ verified }),
+      headers: await buildAdminAuthorityHeaders(),
+      body: JSON.stringify({ verified, reason }),
     });
     const data = await resp.json();
     return { ok: resp.ok && Boolean(data.ok), user: data.user, message: data.message };
@@ -1268,6 +1232,179 @@ export async function syncServerProviderListing(
   }
 }
 
+type ProviderListingsResponse = {
+  ok: boolean;
+  source?: string;
+  error?: string;
+  auditEventId?: string;
+  listing?: Record<string, any>;
+  listings?: Record<string, any>[];
+  providers?: Array<{ id: string; fullName: string; email: string }>;
+  registration?: Record<string, any> | null;
+  registrations?: Record<string, any>[];
+  profile?: { role: UserRole; accountStatus: string } | null;
+};
+
+async function requestProviderListings(
+  url: string,
+  method = 'GET',
+  body?: unknown,
+): Promise<{ ok: boolean; httpStatus: number; data: ProviderListingsResponse }> {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: buildAuthHeaders(),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const data = await response.json() as ProviderListingsResponse;
+    return { ok: response.ok && data.ok === true, httpStatus: response.status, data };
+  } catch {
+    return { ok: false, httpStatus: 0, data: { ok: false, error: 'NETWORK_ERROR' } };
+  }
+}
+
+export async function fetchServerProviderListings(admin = false) {
+  const response = await requestProviderListings(admin ? '/api/admin/provider/listings' : '/api/provider/listings');
+  return {
+    ...response,
+    listings: (response.data.listings || []).map((row) => ({
+      id: String(row.id || ''),
+      owner_id: String(row.ownerUserId || ''),
+      title: String(row.title || ''),
+      category_id: String(row.categoryId || ''),
+      subcategory: String(row.subcategory || ''),
+      entity_type: String(row.entityType || 'listing'),
+      price: Number(row.price || 0),
+      price_unit: String(row.priceUnit || 'quote'),
+      status: String(row.status || 'pending_approval'),
+      payload: row.payload && typeof row.payload === 'object' ? row.payload : {},
+      provider_availability_status: row.providerAvailabilityStatus || 'not_reported',
+      is_verified: row.isVerified === true,
+      created_at: String(row.createdAt || ''),
+      updated_at: String(row.updatedAt || ''),
+      provider_name: String(row.providerName || ''),
+    })),
+    source: response.data.source,
+    error: response.data.error,
+  };
+}
+
+export async function fetchServerProviderListingOwners() {
+  const response = await requestProviderListings('/api/admin/provider-listing-owners');
+  return { ...response, providers: response.data.providers || [] };
+}
+
+export async function fetchOwnProviderRegistration() {
+  const response = await requestProviderListings('/api/provider/registrations/me');
+  return { ...response, registration: response.data.registration || null, profile: response.data.profile || null };
+}
+
+export async function submitServerProviderRegistration(body: {
+  requestId: string;
+  providerType: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay';
+  businessName: string;
+  contactPhone: string;
+  city: string;
+  area: string;
+  serviceArea?: string;
+}) {
+  const response = await requestProviderListings('/api/provider/registrations', 'POST', body);
+  return { ...response, registration: response.data.registration || null };
+}
+
+export async function fetchAdminProviderRegistrations() {
+  const response = await requestProviderListings('/api/admin/provider-registrations');
+  return { ...response, registrations: response.data.registrations || [] };
+}
+
+export async function reviewServerProviderRegistration(
+  registrationId: string,
+  decision: 'approved' | 'rejected',
+  reviewNote = '',
+) {
+  const response = await requestProviderListings(
+    `/api/admin/provider-registrations/${encodeURIComponent(registrationId)}/review`,
+    'PATCH',
+    { decision, reviewNote },
+  );
+  return { ...response, registration: response.data.registration || null };
+}
+
+export async function reviewServerProviderListing(listingId: string, decision: 'active' | 'rejected') {
+  const response = await requestProviderListings(
+    `/api/admin/provider/listings/${encodeURIComponent(listingId)}/review`,
+    'PATCH',
+    { decision },
+  );
+  return { ...response, listing: response.data.listing };
+}
+
+export async function saveServerProviderListing(listingId: string | null, body: Record<string, unknown>) {
+  const response = await requestProviderListings(
+    listingId ? `/api/provider/listings/${encodeURIComponent(listingId)}` : '/api/provider/listings',
+    listingId ? 'PATCH' : 'POST',
+    body,
+  );
+  return { ...response, listing: response.data.listing };
+}
+
+export async function archiveServerProviderListing(listingId: string) {
+  return requestProviderListings(`/api/provider/listings/${encodeURIComponent(listingId)}`, 'DELETE');
+}
+
+export async function fetchServerMarketplaceListings(): Promise<{
+  source: string | null;
+  listings: MarketplaceListing[];
+}> {
+  try {
+    const response = await fetch('/api/marketplace/listings', { headers: { Accept: 'application/json' } });
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data?.listings)) return { source: data?.source || null, listings: [] };
+    const listings = data.listings
+      .filter((row: any) => row?.status === 'active' && row?.id && row?.categoryId && row?.subcategory)
+      .map((row: any) => {
+        const attributes = row.attributes && typeof row.attributes === 'object' ? row.attributes : {};
+        return {
+          ...attributes,
+          id: String(row.id),
+          title: String(row.title || ''),
+          description: typeof attributes.description === 'string' ? attributes.description : '',
+          categoryId: String(row.categoryId),
+          subcategory: String(row.subcategory),
+          entityType: String(row.entityType || 'service'),
+          price: Number(row.price || 0),
+          priceUnit: String(row.priceUnit || 'quote'),
+          currency: String(attributes.currency || '₹'),
+          providerId: '',
+          providerName: String(row.providerName || ''),
+          providerPhone: '',
+          providerEmail: '',
+          providerRating: undefined,
+          reviewCount: undefined,
+          isVerified: row.isVerified === true,
+          isFeatured: row.isFeatured === true,
+          status: 'active',
+          location: attributes.location && typeof attributes.location === 'object' ? attributes.location : {},
+          images: Array.isArray(attributes.images)
+            ? attributes.images.filter((url: unknown) =>
+                typeof url === 'string'
+                && (
+                  /^https:\/\//i.test(url)
+                  || (
+                    /^storage:\/\/bos-public-media\/[A-Za-z0-9][A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/i.test(url)
+                    && !/(^|\/)\.\.?(\/|$)|\/\/|\\|[?#]/.test(url)
+                  )
+                ))
+            : [],
+          customFieldValues: attributes.customFieldValues && typeof attributes.customFieldValues === 'object' ? attributes.customFieldValues : {},
+        } as MarketplaceListing;
+      });
+    return { source: String(data.source || ''), listings };
+  } catch {
+    return { source: null, listings: [] };
+  }
+}
+
 export async function syncServerAdminModule(
   moduleKey: string,
   payload: unknown
@@ -1352,9 +1489,12 @@ export async function holdAuthoritativeSeats(params: {
 }): Promise<{
   ok: boolean;
   status: number;
+  error?: string;
   conflictingSeats?: string[];
   lockToken?: string;
   expiresAt?: number;
+  showStartUtcIso?: string;
+  showStartIstLabel?: string;
   message?: string;
 }> {
   const sessionId = params.sessionId || getOrCreateClientSessionId();
@@ -1391,9 +1531,12 @@ export async function holdAuthoritativeSeats(params: {
     return {
       ok: resp.ok && Boolean(data.ok),
       status: resp.status,
+      error: data.error,
       conflictingSeats: data.conflictingSeats,
       lockToken: data.lockToken,
       expiresAt: data.expiresAt,
+      showStartUtcIso: data.showStartUtcIso,
+      showStartIstLabel: data.showStartIstLabel,
       message: data.message,
     };
   } catch (err: any) {
@@ -1453,15 +1596,22 @@ export async function createAuthoritativeBookingAtomic(params: {
   discountAmount?: number;
   promoCode?: string;
   totalAmount: number;
-  paymentMode?: 'pay_later' | 'pay_qr';
+  categoryId?: string;
+  vertical?: string;
+  paymentGateway?: 'direct_upi' | 'razorpay' | 'pay_later';
+  paymentMode?: 'pay_later' | 'pay_qr' | 'pay_razorpay';
   requireVerifiedPayment?: boolean;
   paymentIntentId?: string;
   paymentUtr?: string;
   paymentVerificationToken?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
   passCode?: string;
   notes?: string;
   sessionId?: string;
   exclusiveSlot?: boolean;
+  isDemo?: boolean;
 }): Promise<{
   ok: boolean;
   status: number;
@@ -1472,8 +1622,14 @@ export async function createAuthoritativeBookingAtomic(params: {
   booking?: {
     id: string;
     passCode: string;
+    barcodeId?: string;
     qrSignature: string;
     qrPassToken: string;
+    showStartUtcIso?: string;
+    showStartIstLabel?: string;
+    resentCount?: number;
+    vertical?: string;
+    paymentGateway?: string;
     paymentStatus: 'pay_later' | 'pending_verification' | 'verified' | 'refunded' | 'failed';
     status: string;
     expiresAtIso?: string;
@@ -1494,34 +1650,9 @@ export async function createAuthoritativeBookingAtomic(params: {
     });
     const data = await resp.json();
 
-    // If live Supabase is connected, also persist via the PostgreSQL atomic RPC
-    if (resp.ok && data.booking && supabase) {
-      try {
-        await supabase.rpc('create_booking_atomic', {
-          p_booking_id: data.booking.id,
-          p_idempotency_key: params.idempotencyKey,
-          p_listing_id: params.listingId,
-          p_listing_title: params.listingTitle,
-          p_provider_id: params.providerId,
-          p_customer_name: params.customerName,
-          p_customer_phone: params.customerPhone,
-          p_customer_address: params.customerAddress || 'Hyderabad',
-          p_scheduled_date: params.scheduledDate,
-          p_time_slot: params.timeSlot,
-          p_total_amount: params.totalAmount,
-          p_payment_status: data.booking.paymentStatus,
-          p_payment_utr: params.paymentUtr || null,
-          p_qr_signature: data.booking.qrSignature,
-          p_qr_pass_token: data.booking.qrPassToken,
-          p_seats: params.seats && params.seats.length > 0 ? params.seats : null,
-          p_show_time: params.showtime || null,
-          p_session_id: sessionId,
-          p_notes: params.notes || '',
-        });
-      } catch {
-        // Fallback to standard RLS table insert if RPC migration not yet run on external project
-      }
-    }
+    // Booking creation is owned by the authenticated server endpoint. A
+    // SECURITY DEFINER mirror RPC that accepts caller-supplied price, payment,
+    // and QR fields must never be invoked directly from a browser session.
 
     return {
       ok: resp.ok && Boolean(data.ok),
@@ -1547,12 +1678,24 @@ export async function createServerPaymentIntent(params: {
   merchantVpa: string;
   planOrListing: string;
   userId?: string;
+  listingId?: string;
+  categoryId?: string;
+  vertical?: string;
+  paymentGateway?: 'direct_upi' | 'razorpay';
+  dateIso?: string;
+  showtime?: string;
+  purpose?: string;
 }): Promise<{
   ok: boolean;
+  httpStatus?: number;
   intentId?: string;
   amount?: number;
   merchantVpa?: string;
+  vertical?: string;
+  paymentGateway?: string;
   status?: string;
+  error?: string;
+  message?: string;
 }> {
   try {
     const resp = await fetch('/api/payments/create-intent', {
@@ -1563,10 +1706,15 @@ export async function createServerPaymentIntent(params: {
     const data = await resp.json();
     return {
       ok: resp.ok && Boolean(data.ok),
+      httpStatus: resp.status,
       intentId: data.intentId,
       amount: data.amount,
       merchantVpa: data.merchantVpa,
+      vertical: data.vertical,
+      paymentGateway: data.paymentGateway,
       status: data.status,
+      error: data.error,
+      message: data.message,
     };
   } catch {
     return { ok: false };
@@ -1579,6 +1727,11 @@ export async function verifyServerUpiPayment(params: {
   gatewaySignature?: string;
   amount?: number;
   merchantVpa?: string;
+  listingId?: string;
+  categoryId?: string;
+  vertical?: string;
+  dateIso?: string;
+  showtime?: string;
   simulateBankWebhookSettlement?: boolean;
 }): Promise<{
   ok: boolean;
@@ -1603,6 +1756,9 @@ export async function verifyServerUpiPayment(params: {
           intentId: params.intentId,
           utrNumber: params.utrNumber,
           amount: params.amount,
+          listingId: params.listingId,
+          dateIso: params.dateIso,
+          showtime: params.showtime,
         }),
       });
       if (settleResp.ok) {
@@ -1630,6 +1786,9 @@ export async function verifyServerUpiPayment(params: {
         gatewaySignature,
         amount: params.amount,
         merchantVpa: params.merchantVpa,
+        listingId: params.listingId,
+        dateIso: params.dateIso,
+        showtime: params.showtime,
       }),
     });
     const data = await resp.json();
@@ -1658,6 +1817,7 @@ export async function verifyServerUpiPayment(params: {
 export async function verifyAuthoritativeQrPass(params: {
   passToken?: string;
   passCode?: string;
+  barcodeId?: string;
   signature?: string;
   markCheckedIn?: boolean;
 }): Promise<{
@@ -1665,6 +1825,8 @@ export async function verifyAuthoritativeQrPass(params: {
   httpStatus: number;
   verified: boolean;
   alreadyCheckedIn?: boolean;
+  barcodeId?: string;
+  verificationMethod?: string;
   error?: string;
   message?: string;
   booking?: any;
@@ -1681,6 +1843,8 @@ export async function verifyAuthoritativeQrPass(params: {
       httpStatus: resp.status,
       verified: Boolean(data.verified),
       alreadyCheckedIn: data.alreadyCheckedIn,
+      barcodeId: data.barcodeId,
+      verificationMethod: data.verificationMethod,
       error: data.error,
       message: data.message,
       booking: data.booking,
@@ -1693,6 +1857,17 @@ export async function verifyAuthoritativeQrPass(params: {
       message: err?.message || 'Failed to verify QR pass.',
     };
   }
+}
+
+export interface ShowtimeScheduleEntry {
+  showtime: string;
+  dateIso: string;
+  showStartUtcIso: string;
+  showStartIstLabel: string;
+  isPast: boolean;
+  isCancelled: boolean;
+  bookable: boolean;
+  statusReason: string;
 }
 
 export interface AuthoritativeCinemaScreenConfig {
@@ -1711,6 +1886,10 @@ export interface AuthoritativeCinemaScreenConfig {
   }>;
   wheelchairSeats: string[];
   showtimes: string[];
+  activeShowtimes?: string[];
+  cancelledShowtimes?: string[];
+  cancelledShows?: string[];
+  showtimeSchedule?: ShowtimeScheduleEntry[];
   cancellationAllowed: boolean;
   cancellationCutoffMinutes: number;
   refundPercent: number;
@@ -1719,8 +1898,46 @@ export interface AuthoritativeCinemaScreenConfig {
   updatedAt: string;
 }
 
-export async function fetchMoviesInventory(): Promise<{
+/** A customer's own movie tickets. The server scopes them by session identity. */
+export async function fetchMyMovieBookings(): Promise<{ ok: boolean; bookings: any[] }> {
+  try {
+    const resp = await fetch('/api/movies/my-bookings', { headers: buildAuthHeaders() });
+    const data = await resp.json();
+    return { ok: resp.ok && Boolean(data.ok), bookings: Array.isArray(data.bookings) ? data.bookings : [] };
+  } catch {
+    return { ok: false, bookings: [] };
+  }
+}
+
+/** Admin-only movie bookings, refunds, support tickets and audit logs. */
+export async function fetchMoviesBookingRecords(): Promise<{
   ok: boolean;
+  bookings: any[];
+  refunds: any[];
+  supportTickets: any[];
+  auditLogs: any[];
+}> {
+  try {
+    const resp = await fetch('/api/admin/movies/records', { headers: buildAuthHeaders() });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      bookings: Array.isArray(data.bookings) ? data.bookings : [],
+      refunds: Array.isArray(data.refunds) ? data.refunds : [],
+      supportTickets: Array.isArray(data.supportTickets) ? data.supportTickets : [],
+      auditLogs: Array.isArray(data.auditLogs) ? data.auditLogs : [],
+    };
+  } catch {
+    return { ok: false, bookings: [], refunds: [], supportTickets: [], auditLogs: [] };
+  }
+}
+
+export async function fetchMoviesInventory(dateIso?: string): Promise<{
+  ok: boolean;
+  serverTimeUtcIso?: string;
+  serverTimeIstLabel?: string;
+  currentDateIsoIst?: string;
+  realityAudit?: any;
   screens: AuthoritativeCinemaScreenConfig[];
   offers: Array<{ code: string; label: string; discountType: 'flat' | 'percent'; value: number; minAmount: number; maxDiscount: number }>;
   bookings: any[];
@@ -1729,12 +1946,17 @@ export async function fetchMoviesInventory(): Promise<{
   auditLogs: any[];
 }> {
   try {
-    const resp = await fetch('/api/movies/inventory', {
+    const qs = dateIso ? `?dateIso=${encodeURIComponent(dateIso)}` : '';
+    const resp = await fetch(`/api/movies/inventory${qs}`, {
       headers: buildAuthHeaders(),
     });
     const data = await resp.json();
     return {
       ok: resp.ok && Boolean(data.ok),
+      serverTimeUtcIso: data.serverTimeUtcIso,
+      serverTimeIstLabel: data.serverTimeIstLabel,
+      currentDateIsoIst: data.currentDateIsoIst,
+      realityAudit: data.realityAudit,
       screens: data.screens || [],
       offers: data.offers || [],
       bookings: data.bookings || [],
@@ -1755,6 +1977,124 @@ export async function fetchMoviesInventory(): Promise<{
   }
 }
 
+export async function fetchMoviesRealityAudit(): Promise<{
+  ok: boolean;
+  auditedAtUtc?: string;
+  auditedAtIst?: string;
+  timezone?: string;
+  demoBookingsBlocked?: boolean;
+  productionReadinessClaim?: string;
+  subsystems?: Record<string, { status: string; classification: string; evidence: string }>;
+}> {
+  try {
+    const resp = await fetch('/api/movies/reality-audit', {
+      headers: buildAuthHeaders(),
+    });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      ...data,
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function downloadBosMovieTicketPdf(params: {
+  bookingIdOrPassCode: string;
+  qrSignature?: string;
+  qrPassToken?: string;
+  customerPhone?: string;
+}): Promise<{ ok: boolean; status: number; filename?: string; message?: string }> {
+  try {
+    const qs = new URLSearchParams();
+    const sig =
+      params.qrSignature ||
+      (params.qrPassToken && params.qrPassToken.includes('.')
+        ? params.qrPassToken.split('.')[1]
+        : undefined);
+    if (sig) qs.set('sig', sig);
+    if (params.customerPhone) qs.set('phone', params.customerPhone);
+    const url = `/api/movies/bookings/${encodeURIComponent(params.bookingIdOrPassCode)}/ticket.pdf?${qs.toString()}`;
+    const resp = await fetch(url, {
+      headers: buildAuthHeaders(),
+    });
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      return {
+        ok: false,
+        status: resp.status,
+        message: errData.message || 'Failed to download PDF ticket.',
+      };
+    }
+    const blob = await resp.blob();
+    const filename = `BOS-Ticket-${params.bookingIdOrPassCode}.pdf`;
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objectUrl);
+    return { ok: true, status: 200, filename };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err?.message || 'PDF download failed.',
+    };
+  }
+}
+
+export async function resendBosMovieTicket(params: {
+  bookingIdOrPassCode: string;
+  email?: string;
+  phone?: string;
+  qrSignature?: string;
+}): Promise<{
+  ok: boolean;
+  status: number;
+  passCode?: string;
+  barcodeId?: string;
+  resentCount?: number;
+  resentAt?: string;
+  pdfDownloadUrl?: string;
+  message?: string;
+}> {
+  try {
+    const qs = params.qrSignature ? `?sig=${encodeURIComponent(params.qrSignature)}` : '';
+    const resp = await fetch(
+      `/api/movies/bookings/${encodeURIComponent(params.bookingIdOrPassCode)}/resend${qs}`,
+      {
+        method: 'POST',
+        headers: buildAuthHeaders(),
+        body: JSON.stringify({
+          email: params.email,
+          phone: params.phone,
+        }),
+      }
+    );
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      status: resp.status,
+      passCode: data.passCode,
+      barcodeId: data.barcodeId,
+      resentCount: data.resentCount,
+      resentAt: data.resentAt,
+      pdfDownloadUrl: data.pdfDownloadUrl,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err?.message || 'Failed to resend movie ticket.',
+    };
+  }
+}
+
 export async function updateCinemaScreenConfig(
   payload: Partial<AuthoritativeCinemaScreenConfig> & { id: string }
 ): Promise<{
@@ -1763,6 +2103,7 @@ export async function updateCinemaScreenConfig(
   screen?: AuthoritativeCinemaScreenConfig;
   error?: string;
   message?: string;
+  auditEventId?: string;
 }> {
   try {
     const resp = await fetch('/api/movies/screens', {
@@ -1777,6 +2118,7 @@ export async function updateCinemaScreenConfig(
       screen: data.screen,
       error: data.error,
       message: data.message,
+      auditEventId: data.auditEventId,
     };
   } catch (err: any) {
     return {
@@ -1791,29 +2133,43 @@ export async function cancelMovieBookingAtomic(params: {
   bookingIdOrPassCode: string;
   reason: string;
   customerPhone?: string;
+  cancelledByRole?: 'customer' | 'provider' | 'admin';
+  cancellationType?: 'customer_requested' | 'provider_cancelled' | 'provider_non_delivery';
+  idempotencyKey?: string;
 }): Promise<{
   ok: boolean;
   status: number;
+  idempotentReplay?: boolean;
   booking?: any;
   refund?: any;
+  quote?: CancellationQuoteResult;
   error?: string;
   message?: string;
 }> {
   try {
+    const headers: Record<string, string> = {};
+    if (params.idempotencyKey) {
+      headers['x-idempotency-key'] = params.idempotencyKey;
+    }
     const resp = await fetch(`/api/movies/bookings/${encodeURIComponent(params.bookingIdOrPassCode)}/cancel`, {
       method: 'POST',
-      headers: buildAuthHeaders(),
+      headers: buildAuthHeaders(headers),
       body: JSON.stringify({
         reason: params.reason,
         customerPhone: params.customerPhone,
+        cancelledByRole: params.cancelledByRole || 'customer',
+        cancellationType: params.cancellationType || 'customer_requested',
+        idempotencyKey: params.idempotencyKey,
       }),
     });
     const data = await resp.json();
     return {
       ok: resp.ok && Boolean(data.ok),
       status: resp.status,
+      idempotentReplay: data.idempotentReplay,
       booking: data.booking,
       refund: data.refund,
+      quote: data.quote,
       error: data.error,
       message: data.message,
     };
@@ -1822,6 +2178,356 @@ export async function cancelMovieBookingAtomic(params: {
       ok: false,
       status: 500,
       message: err?.message || 'Failed to cancel movie booking.',
+    };
+  }
+}
+
+export interface CancellationQuoteResult {
+  bookingId: string;
+  passCode?: string;
+  vertical: 'pg_hostels' | 'classes' | 'services' | 'venues' | 'hotel_stay' | 'movies';
+  listingId?: string;
+  listingTitle?: string;
+  originalAmount: number;
+  hoursUntilStart: number;
+  daysUntilStart: number;
+  cancelledByRole: 'customer' | 'provider' | 'admin';
+  cancellationType: 'customer_requested' | 'provider_cancelled' | 'provider_non_delivery';
+  cancellationAllowed: boolean;
+  refundPercent: number;
+  refundAmount: number;
+  cancellationFee: number;
+  policyTier: string;
+  policyLabel: string;
+  policyExplanation: string;
+  paymentGateway: 'direct_upi' | 'razorpay' | 'pay_later';
+  refundMethod: 'razorpay_verified' | 'upi_manual_reconciled' | 'none';
+  calculatedAtUtc: string;
+}
+
+export async function fetchBookingCancellationQuote(params: {
+  bookingId?: string;
+  vertical?: string;
+  categoryId?: string;
+  listingId?: string;
+  listingTitle?: string;
+  screenId?: string;
+  originalAmount?: number;
+  scheduledDate?: string;
+  checkInDate?: string;
+  timeSlot?: string;
+  showtime?: string;
+  hoursUntilStart?: number;
+  cancelledByRole?: 'customer' | 'provider' | 'admin';
+  cancellationType?: 'customer_requested' | 'provider_cancelled' | 'provider_non_delivery';
+  paymentGateway?: 'direct_upi' | 'razorpay' | 'pay_later';
+}): Promise<{
+  ok: boolean;
+  status: number;
+  quote?: CancellationQuoteResult;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const resp = await fetch('/api/bookings/cancellation-quote', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(params),
+    });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      status: resp.status,
+      quote: data.quote,
+      error: data.error,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err?.message || 'Failed to compute cancellation quote.',
+    };
+  }
+}
+
+export async function cancelBookingWithPolicyAtomic(params: {
+  bookingIdOrPassCode: string;
+  reason: string;
+  customerPhone?: string;
+  cancelledByRole?: 'customer' | 'provider' | 'admin';
+  cancellationType?: 'customer_requested' | 'provider_cancelled' | 'provider_non_delivery';
+  idempotencyKey?: string;
+  requireManualBankReconciliation?: boolean;
+}): Promise<{
+  ok: boolean;
+  status: number;
+  idempotentReplay?: boolean;
+  booking?: any;
+  refund?: any;
+  quote?: CancellationQuoteResult;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const headers: Record<string, string> = {};
+    if (params.idempotencyKey) {
+      headers['x-idempotency-key'] = params.idempotencyKey;
+    }
+    const resp = await fetch(`/api/bookings/${encodeURIComponent(params.bookingIdOrPassCode)}/cancel`, {
+      method: 'POST',
+      headers: buildAuthHeaders(headers),
+      body: JSON.stringify({
+        reason: params.reason,
+        customerPhone: params.customerPhone,
+        cancelledByRole: params.cancelledByRole || 'customer',
+        cancellationType: params.cancellationType || 'customer_requested',
+        idempotencyKey: params.idempotencyKey,
+        requireManualBankReconciliation: params.requireManualBankReconciliation,
+      }),
+    });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      status: resp.status,
+      idempotentReplay: data.idempotentReplay,
+      booking: data.booking,
+      refund: data.refund,
+      quote: data.quote,
+      error: data.error,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err?.message || 'Failed to cancel booking.',
+    };
+  }
+}
+
+export async function createRazorpayOrderServer(params: {
+  /** The booking this order settles. The server prices the order from it. */
+  bookingId: string;
+  amount: number;
+  listingId?: string;
+  listingTitle?: string;
+  categoryId?: string;
+  vertical?: string;
+  userId?: string;
+  dateIso?: string;
+  showtime?: string;
+  seats?: string[];
+}): Promise<{
+  ok: boolean;
+  httpStatus: number;
+  intentId?: string;
+  razorpayOrderId?: string;
+  amount?: number;
+  amountInPaise?: number;
+  currency?: string;
+  keyId?: string;
+  vertical?: string;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const resp = await fetch('/api/payments/razorpay/create-order', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(params),
+    });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      httpStatus: resp.status,
+      intentId: data.intentId,
+      razorpayOrderId: data.razorpayOrderId,
+      amount: data.amount,
+      amountInPaise: data.amountInPaise || data.amountPaise || Math.round((data.amount || 0) * 100),
+      currency: data.currency || 'INR',
+      keyId: data.keyId || data.razorpayKeyId,
+      vertical: data.vertical,
+      error: data.error,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      httpStatus: 500,
+      message: err?.message || 'Failed to create Razorpay order.',
+    };
+  }
+}
+
+export async function verifyRazorpayPaymentServer(params: {
+  intentId: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature?: string;
+}): Promise<{
+  ok: boolean;
+  httpStatus: number;
+  verified: boolean;
+  intentId?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  paymentVerificationToken?: string;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    // The Razorpay Checkout signature is verified server-side. The browser can
+    // never ask the server to mint one, and the provider webhook is never
+    // called from the client.
+    const razorpaySignature = params.razorpaySignature;
+
+    const resp = await fetch('/api/payments/razorpay/verify', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify({
+        intentId: params.intentId,
+        razorpay_order_id: params.razorpayOrderId,
+        razorpay_payment_id: params.razorpayPaymentId,
+        razorpay_signature: razorpaySignature,
+      }),
+    });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      httpStatus: resp.status,
+      verified: Boolean(data.verified),
+      intentId: data.intentId,
+      razorpayOrderId: data.razorpayOrderId,
+      razorpayPaymentId: data.razorpayPaymentId,
+      paymentVerificationToken: data.paymentVerificationToken,
+      error: data.error,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      httpStatus: 500,
+      verified: false,
+      message: err?.message || 'Razorpay verification failed.',
+    };
+  }
+}
+
+export interface RazorpayHistoryRecord {
+  id: string;
+  orderId: string;
+  paymentId: string;
+  amount: number;
+  currency?: string;
+  listingTitle?: string;
+  listingId?: string;
+  vertical?: string;
+  status: string;
+  verificationToken?: string;
+  createdAt: string;
+  date: string;
+}
+
+export async function fetchRazorpayPaymentHistory(userId?: string): Promise<{
+  ok: boolean;
+  transactions: RazorpayHistoryRecord[];
+  error?: string;
+}> {
+  try {
+    const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    const resp = await fetch(`/api/payments/razorpay/history${query}`, {
+      headers: buildAuthHeaders(),
+    });
+    if (!resp.ok) {
+      return { ok: false, transactions: [] };
+    }
+    const data = await resp.json();
+    return {
+      ok: true,
+      transactions: Array.isArray(data.transactions) ? data.transactions : Array.isArray(data.orders) ? data.orders.map((order: any) => ({
+        id: order.intentId || order.razorpayOrderId || '',
+        orderId: order.razorpayOrderId || order.intentId || '',
+        paymentId: '',
+        amount: Number(order.amount || 0),
+        currency: order.currency,
+        listingTitle: order.purpose || order.intentId || 'Payment',
+        listingId: order.listingId,
+        status: order.status || 'pending',
+        createdAt: order.createdAt || '',
+        date: order.createdAt || '',
+      })) : [],
+    };
+  } catch (err: any) {
+    return { ok: false, transactions: [], error: err?.message };
+  }
+}
+
+export async function checkRazorpayOrderStatusServer(orderOrIntentId: string): Promise<{
+  ok: boolean;
+  status: 'verified' | 'pending' | 'failed';
+  found?: boolean;
+  intentId?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  amount?: number;
+  message?: string;
+}> {
+  try {
+    const resp = await fetch(`/api/payments/razorpay/order-status/${encodeURIComponent(orderOrIntentId)}`, {
+      method: 'GET',
+      headers: buildAuthHeaders(),
+    });
+    if (!resp.ok) {
+      return { ok: false, status: 'pending', message: 'Failed to fetch status' };
+    }
+    const data = await resp.json();
+    return {
+      ok: Boolean(data.ok),
+      status: data.status || 'pending',
+      found: data.found,
+      intentId: data.intentId,
+      razorpayOrderId: data.razorpayOrderId,
+      razorpayPaymentId: data.razorpayPaymentId,
+      amount: data.amount,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return { ok: false, status: 'pending', message: err?.message || 'Error polling payment status' };
+  }
+}
+
+export async function reconcileManualUpiRefundServer(params: {
+  refundId: string;
+  refundUtr: string;
+  bankReconciliationSignature?: string;
+  simulateBankReconciliationWebhook?: boolean;
+}): Promise<{
+  ok: boolean;
+  status: number;
+  refund?: any;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const resp = await fetch(`/api/refunds/${encodeURIComponent(params.refundId)}/reconcile-manual`, {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: JSON.stringify(params),
+    });
+    const data = await resp.json();
+    return {
+      ok: resp.ok && Boolean(data.ok),
+      status: resp.status,
+      refund: data.refund,
+      error: data.error,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err?.message || 'Manual refund reconciliation failed.',
     };
   }
 }
@@ -1892,7 +2598,4 @@ export async function resolveMovieSupportTicket(params: {
     };
   }
 }
-
-
-
 

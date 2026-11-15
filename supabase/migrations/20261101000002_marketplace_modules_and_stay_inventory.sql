@@ -62,7 +62,7 @@ insert into public.platform_module_flags
   (module_key, is_enabled, allow_contact_owner, allow_online_booking, requires_owner_approval, notes)
 values
   ('services',      true,  true,  true,  true,  'Existing local-services marketplace'),
-  ('hotels',        true,  true,  true,  true,  'Airbnb-inspired stays'),
+  ('hotels',        true,  true,  true,  true,  'BookOurSpace Stay Style 2'),
   ('pg',            true,  true,  true,  true,  'Paying-guest accommodation'),
   ('function_hall', true,  true,  true,  true,  'Halls and venues'),
   ('classes',       true,  true,  false, false, 'Enquiries are not paid enrolments'),

@@ -1,0 +1,38 @@
+diff --git a/node_modules/@capacitor/geolocation/ios/Sources/GeolocationPlugin/GeolocationPlugin.swift b/node_modules/@capacitor/geolocation/ios/Sources/GeolocationPlugin/GeolocationPlugin.swift
+index 0716144..bb8a8dd 100644
+--- a/node_modules/@capacitor/geolocation/ios/Sources/GeolocationPlugin/GeolocationPlugin.swift
++++ b/node_modules/@capacitor/geolocation/ios/Sources/GeolocationPlugin/GeolocationPlugin.swift
+@@ -24,7 +24,6 @@ public class GeolocationPlugin: CAPPlugin, CAPBridgedPlugin {
+     private var locationInitialized: Bool = false
+ 
+     override public func load() {
+-        self.locationService = IONGLOCManagerWrapper()
+         self.callbackManager = .init(capacitorBridge: bridge)
+ 
+         NotificationCenter.default.addObserver(
+@@ -116,7 +115,17 @@ public class GeolocationPlugin: CAPPlugin, CAPBridgedPlugin {
+ }
+ 
+ private extension GeolocationPlugin {
++    func ensureLocationService() {
++        guard locationService == nil else { return }
++        // CLLocationManager.authorizationStatus may synchronously contact
++        // CoreLocation over XPC. Do not perform that work during Capacitor's
++        // main-thread plugin registration; initialize only after a caller
++        // explicitly requests a location permission or position.
++        locationService = IONGLOCManagerWrapper()
++    }
++
+     func shouldSetupBindings() {
++        ensureLocationService()
+         bindAuthorisationStatusPublisher()
+         bindLocationPublisher()
+     }
+@@ -187,6 +196,7 @@ private extension GeolocationPlugin {
+     }
+ 
+     func checkIfLocationServicesAreEnabled(_ call: CAPPluginCall? = nil) -> Bool {
++        ensureLocationService()
+         guard locationService?.areLocationServicesEnabled() == true else {
+             call.map { callbackManager?.sendError($0, error: .locationServicesDisabled) }
+                 ?? callbackManager?.sendError(.locationServicesDisabled)

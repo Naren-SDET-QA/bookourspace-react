@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import SafeImage from './SafeImage';
 import * as d3 from 'd3';
 import { 
   PlusCircle, 
@@ -13,13 +14,18 @@ import {
   XCircle,
   Image as ImageIcon,
   BarChart3,
-  TrendingUp
+  TrendingUp,
+  Hotel,
+  BedDouble,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { AppLanguage, getSubcategoryDisplayName, getPriceUnitDisplayName } from '../utils/translations';
 import { transliterateLatinToScript } from '../utils/i18nEngine';
 import { UniversalBarcode, StandaloneBarcodeVerifierHub, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
 import { CraftoPosterGenerator } from './CraftoPosterGenerator';
+import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
+import HostStayWorkspace from './HostStayWorkspace';
+import PgProviderWorkspace from './PgProviderWorkspace';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -57,7 +63,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
-  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card'>('listings');
+  const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory'>('listings');
 
   // D3 Chart Computations for Analytics & Performance Tab
   const d3Analytics = useMemo(() => {
@@ -145,7 +151,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       {/* Top Provider Hero Card */}
       <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-3xl p-5 sm:p-7 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <img
+          <SafeImage category="general"
             src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80"
             alt="provider"
             className="w-16 h-16 rounded-2xl object-cover ring-2 ring-emerald-400 bg-slate-800"
@@ -288,8 +294,27 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <LiveEditEntryButton
+          label={loc('Live Edit listings', 'లిస్టింగ్‌లను లైవ్ ఎడిట్ చేయండి', 'लिस्टिंग लाइव एडिट करें')}
+        />
+      </div>
+
       {/* Navigation Sub-Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-4 overflow-x-auto no-scrollbar">
+        <button
+          onClick={() => setActiveSubTab('pg_inventory')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'pg_inventory'
+              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+          data-testid="provider-pg-inventory-tab"
+        >
+          <BedDouble className="w-4 h-4 text-violet-600" />
+          <span>PG &amp; Hostel Inventory</span>
+        </button>
+
         <button
           onClick={() => setActiveSubTab('listings')}
           className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
@@ -384,6 +409,18 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
               'डिजिटल विजिटिंग कार्ड स्टूडियो'
             )}
           </span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('stays')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeSubTab === 'stays'
+              ? 'border-purple-600 text-purple-700 dark:text-purple-400'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Hotel className="w-4 h-4 text-purple-600" />
+          <span>Stay hosting</span>
         </button>
       </div>
 
@@ -607,6 +644,10 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
+      {activeSubTab === 'stays' && <HostStayWorkspace />}
+
+      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace />}
+
       {/* --- SUBTAB 1: MY LISTINGS --- */}
       {activeSubTab === 'listings' && (
         <div className="space-y-3">
@@ -622,7 +663,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
               }`}
             >
               <div className="flex items-start gap-3.5 min-w-0">
-                <img
+                <SafeImage category="general"
                   src={listing.images[0]}
                   alt="thumb"
                   className="w-16 h-16 rounded-2xl object-cover shrink-0 bg-slate-100"

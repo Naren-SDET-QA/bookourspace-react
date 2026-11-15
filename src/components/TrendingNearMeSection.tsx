@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import SafeImage from './SafeImage';
 import { 
   Flame, 
   Star, 
@@ -135,7 +136,7 @@ export const TrendingNearMeSection: React.FC<TrendingNearMeSectionProps> = ({
             >
               {/* Card Image Banner */}
               <div className="relative h-32 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <img
+                <SafeImage category="general"
                   src={item.images[0] || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=600&q=80'}
                   alt={displayTitle}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
