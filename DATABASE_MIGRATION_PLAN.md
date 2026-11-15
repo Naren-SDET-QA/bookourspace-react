@@ -7,6 +7,14 @@
 **Mode:** read-only investigation complete. **No hosted write, DDL, migration or configuration change has been performed.**
 **Approval required before any hosted write. Not granted yet.**
 
+> **Corrected 2026-11-12.** The target is **`obkfgxjzlscungkhbyvq`** (Mumbai,
+> `ap-south-1`), recorded as `BOS_APPROVED_REF` in
+> `supabase/backup/react-target.conf`. `ezrxykyocgbolpaebnqx` and
+> `sfoizxarbljhldmkgsma` are **rejected legacy refs** that the guard scripts
+> refuse by name. The 2026-11-04 record below is kept as history; see §15 for the
+> verified target state and the pending migration set. No hosted write has been
+> performed.
+
 ---
 
 ## 1. Verified state of the DEV project (read-only, 2026-11-04)
@@ -163,3 +171,67 @@ The authorized read-only project lookup is still denied: `get_project(ezr…nqx)
 The database URL environment variable is absent. The Keychain record `bos-production-backup` / `readonly` exists with a one-byte newline-only value. No connection, dump, restore, or production query was attempted. The reported 22-applied count remains unverified. The first migration beyond the historical 21-file plan at the 22-file checkpoint was `20261103240000_stay_checkout_pay_after_service_without_vpa.sql`; current local total is 29. The current ordered local list and dependencies are the exact manifest plus §13 above. Hosted drift, orphan rows, foreign-key preflight, and rollback targeting require authorized read-only catalog access.
 
 `supabase/tests/backup_production_readonly.sh` accepts the URL from its environment and enforces the exact ref, but does not automatically read Keychain and does not independently prove that the database role lacks write privileges. Before retrying, use a secure Keychain-to-process wrapper, verify role privileges without displaying the URL, then use the script's backup-only and project-reference guards. No code or hosted schema changes were made in response to this blocker.
+
+## 15. Verified target state and pending apply — 2026-11-12
+
+Read-only inspection of the approved target `obkfgxjzlscungkhbyvq` (Mumbai,
+`ap-south-1`) via `supabase/tests/compare_migration_history.sh` and direct
+read-only SQL (`default_transaction_read_only=on`, credential from the Keychain
+item `bos-production-backup`). **Nothing was written, applied or reset.**
+
+| Check | Repository | Target `obkfgxjzlscungkhbyvq` |
+|---|---|---|
+| Migration history | baseline marker + 106 migrations (sha256-pinned) | 74 rows: `00000000000000` + 73 migrations, latest `20261108150000` |
+| Pending migrations | — | **33** (`20261111190000` … `20261112340000`) |
+| Extra/renamed hosted rows | — | none |
+| Public tables | 124 (local dev cluster) | 75 |
+| `business*` tables | 8 | **0** |
+| `is_business_member()` | present | **absent** |
+| Baseline objects (`profiles`, `listings`, `bookings`, `stay_properties`, `service_bookings`, `is_admin()`, `is_active_user()`) | present | present |
+| Data volume | local fixtures | 7 profiles, 0 listings, 0 bookings, 0 stay properties, 0 service bookings |
+
+`compare_migration_history.sh` exits **4 (mismatch)** and prints "do not apply
+until reconciled".
+
+### Pending set (in order)
+
+`20261111190000` universal delivery tracking · `20261111192224` institute owner
+workspace · `20261111200000` dynamic service category builder · `20261111210000`
+service document storage access · `20261112010000`–`20261112050000` business
+ownership phases 1–5 · `20261112080846` admin stay production hardening ·
+`20261112100000` provider portal operations · `20261112130000`/`20261112140000`
+institute management + business scope · `20261112150000`–`20261112180000`
+business legacy/anon/admin fallbacks · `20261112190000` service booking guard
+search_path · `20261112200000` business function privileges · `20261112210000`
+payment legacy fallbacks · `20261112220000` duplicate transfer audit trigger ·
+`20261112230000`/`20261112240000` strict listing business assignment +
+privileges · `20261112250000` hotels alias · `20261112260000` admin stay RPC
+finalize · `20261112270000` institute member isolation · `20261112280000`/
+`20261112290000` strict record assignment + privileges · `20261112300000` payment
+claim triggers · `20261112310000` final security hardening · `20261112320000`
+service tracking privileges · `20261112330000` movies state approval ·
+`20261112340000` business member access.
+
+### Why nothing was applied
+
+Per-member access scopes (`20261112340000_business_member_access.sql`) depend on
+`public.businesses`, `public.business_members` and `public.is_business_member()`,
+which the target only gains from `20261112010000`–`20261112030000`. The 33 pending
+migrations must be applied in ascending order — the last one cannot be applied
+alone.
+
+### Requirements before an apply
+
+1. Explicit owner approval for this exact 33-migration set (none granted yet).
+2. A verified encrypted backup/restore point for `obkfgxjzlscungkhbyvq`
+   (`supabase/tests/backup_production_readonly.sh`, Keychain
+   `bos-production-backup`).
+3. Apply baseline + migrations in ascending version order, then re-run
+   `BOS_DEV_CONFIRM=obkfgxjzlscungkhbyvq bash supabase/tests/compare_migration_history.sh`
+   until it exits 0.
+4. Post-apply verification: `to_regclass('public.businesses')`,
+   `to_regclass('public.business_member_access')`, `is_business_member()`, and the
+   four access-scope RLS policies.
+
+The migration was applied only to the local development cluster
+(`127.0.0.1:55440/bookourspace_dev`) to verify the feature end to end.

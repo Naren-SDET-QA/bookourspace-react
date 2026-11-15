@@ -1,35 +1,54 @@
 # Supabase development environment setup
 
-Status: **read-only cloud metadata checks only; no cloud writes or migrations.**
-This document records the verified state of the repo, why the existing project
-cannot be used, and the exact steps needed before any cloud migration is applied.
+Status: **read-only checks only; no cloud writes or migrations.**
+This document records the verified state of the repo, the approved target
+project, and the exact steps needed before any cloud migration is applied.
+
+> **Corrected 2026-11-12.** Earlier revisions of this page stated that no
+> compatible BookOurSpace target existed. That was wrong. The approved target is
+> **`obkfgxjzlscungkhbyvq`** (Mumbai, ap-south-1), recorded in
+> `supabase/backup/react-target.conf` as `BOS_APPROVED_REF` and verified
+> read-only by `supabase/tests/compare_migration_history.sh`. The Supabase MCP
+> token attached to this workspace **cannot** see that project (403); inspection
+> uses the read-only backup credential in the Keychain item
+> `bos-production-backup` instead.
 
 ## 1. Verified current state
 
 | Item | Result |
 | --- | --- |
 | Supabase CLI | installed — `/Users/aa/.local/bin/supabase`, version **2.117.0** (update to 2.122.0 offered) |
-| `supabase/config.toml` | **absent** — the project has never been `supabase init`/`link`ed |
-| Linked project | **none** (`supabase/config.toml` and `supabase/.temp/project-ref` absent) |
-| `.env` / `.env.local` | **absent** — no `VITE_SUPABASE_URL`, no publishable key |
+| `supabase/config.toml` | **absent** — the CLI has not been `init`/`link`ed in this checkout |
+| Approved target | **`obkfgxjzlscungkhbyvq`** — `supabase/backup/react-target.conf` (`BOS_APPROVED_REF`), enforced by `supabase/tests/lib/bos_target_guard.sh` |
+| Target access | read-only through the Keychain item `bos-production-backup`; the connected Supabase account has **no** access (project read and SQL both return 403) |
+| `.env.local` | present — local development only (`BOS_LOCAL_DEV_AUTH`, `BOS_LISTINGS_DATABASE_URL` to `127.0.0.1:55440`); **no** `VITE_SUPABASE_*` values, so the hosted client is disabled |
 | Baseline schema | `supabase/schema_and_rls.sql` — **tracked**; creates the app tables (`profiles`, `listings`, `bookings`, …) |
-| Migrations | 6 files in `supabase/migrations/`, applied in filename order after the baseline |
+| Migrations | **baseline + 106** files in `supabase/migrations/`, applied in filename order after the baseline (`supabase/MIGRATION_MANIFEST.json`, sha256-pinned) |
+| Hosted migration history | **74 rows** (`00000000000000` baseline marker + 73 migrations), latest **`20261108150000`** |
+| Divergence | **33 migrations pending** on the target — `20261111190000` … `20261112340000` |
 | Docker / psql | both present (Docker available if a local stack is wanted) |
 
-## 2. Why `bookmyspace-dev` cannot be used
+## 2. Approved target vs. projects that must not be used
 
-`bookmyspace-dev` (`zykxneztahxbjduagutv`, ap-south-1, Postgres 17) was checked
-read-only with the Supabase MCP schema tools. It is a **different application**:
+**Approved target — `obkfgxjzlscungkhbyvq`** (`React`, Mumbai `ap-south-1`).
+Verified read-only on 2026-11-12: 75 public tables, the app baseline is present
+(`profiles`, `listings`, `bookings`, `stay_properties`, `service_bookings`,
+`is_admin()`, `is_active_user()`), data volume is effectively empty (7 profiles,
+0 listings, 0 bookings), and its migration history stops at `20261108150000`.
 
-- no `public.listings`, no `public.platform_module_flags`, no `stay_properties` / `stay_room_types` / `stay_units` / `stay_allocations`;
-- its migrations are an unrelated 2026 BookMySpace history (venues, `service_*`, `movie_*`, location schema);
-- this app's baseline would collide with existing tables and RLS.
+**`bookmyspace-dev` (`zykxneztahxbjduagutv`) must never be used.** Checked
+read-only: it is a **different application** — no `public.listings`, no
+`public.platform_module_flags`, no `stay_properties` / `stay_room_types` /
+`stay_units` / `stay_allocations`, no `public.businesses`; its history is an
+unrelated 2026 BookMySpace set (venues, `service_*`, `movie_*`, location schema)
+ending at `20261102090854`. This repository's baseline would collide with its
+tables and RLS. A hosted apply there would fail on the first statement
+(`42P01: relation "public.businesses" does not exist`).
 
-Do not point this repository at it.
-
-It is the only project visible to the connected Supabase account, so there is
-currently no verified compatible BookOurSpace development target. The project
-contains existing data and is not safe to repurpose for this migration.
+**Rejected by name** in `supabase/backup/react-target.conf`:
+`sfoizxarbljhldmkgsma` (previous Mumbai project, stale) and
+`ezrxykyocgbolpaebnqx` (legacy Stockholm project). The guard scripts refuse any
+ref other than `obkfgxjzlscungkhbyvq`.
 
 ## 3. Schema prerequisites for this application
 
@@ -138,10 +157,20 @@ exposure settings for `public`; RLS and the migration's SQL grants still apply.
 
 ## 5. Migration review and proposed order
 
-The current development target is unknown and unconfigured, so target-schema
-conflicts cannot yet be checked. A clean local PostgreSQL 17.11 run has already
-validated the baseline and six migration files; this does not establish that a
-cloud project's schema is empty or compatible.
+The target is `obkfgxjzlscungkhbyvq` and its schema has been compared read-only
+against this repository on 2026-11-12: **33 of the 106 migrations are not
+applied there**, starting at `20261111190000_universal_delivery_tracking.sql` and
+ending at `20261112340000_business_member_access.sql`. The pending set includes
+the entire business-ownership schema (`20261112010000` … `20261112050000`), so
+later migrations — including the per-member access scopes — **cannot be applied
+on their own**; they depend on `businesses`, `business_members`,
+`business_module_access` and `is_business_member()`.
+
+The table below still documents the original six-file review; `supabase/
+MIGRATION_MANIFEST.json` is the authoritative ordered inventory (baseline + 106,
+sha256-pinned) and `DATABASE_MIGRATION_PLAN.md` §15 records the pending hosted
+apply. A clean local PostgreSQL 17.11 run has validated the baseline plus all
+migrations; this does not establish that a cloud project's schema is compatible.
 
 | Order | File | Dependencies and effect | Main risk / rollback |
 | --- | --- | --- | --- |

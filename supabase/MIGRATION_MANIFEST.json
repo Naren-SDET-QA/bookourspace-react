@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 118,
+  "migrationCount": 119,
   "migrations": [
     {
       "order": 2,
@@ -868,8 +868,8 @@
       "version": "20261112330000",
       "name": "movies_state_approval",
       "file": "supabase/migrations/20261112330000_movies_state_approval.sql",
-      "bytes": 1264,
-      "sha256": "ace7408bcf1931b130ee5721ed1e2a7d43f2e71f536fdc9ceb9741ab5f12c957"
+      "bytes": 1108,
+      "sha256": "6c8b554cd283cf79c541cc5ca8384dc9718c04e5df53c19086f9d27e46560531"
     },
     {
       "order": 109,
@@ -958,6 +958,14 @@
       "file": "supabase/migrations/20261114120000_customer_audit_profile_cascade.sql",
       "bytes": 2537,
       "sha256": "a01a48ac923829da5af343dd49b6e57a3f3d389f39e6fe255fe2edc7ee86146b"
+    },
+    {
+      "order": 120,
+      "version": "20261115120000",
+      "name": "service_role_config_mirror_grants",
+      "file": "supabase/migrations/20261115120000_service_role_config_mirror_grants.sql",
+      "bytes": 1856,
+      "sha256": "4ba7e9e8281014fffb98bd464e8c4710cdbeca55c8eb0d10d41a8355d907d68c"
     }
   ],
   "review": {

@@ -66,6 +66,7 @@ test('legacy published defaults open PG and Classes as Style 3', () => {
   assert.equal(applied?.classes, 'style3');
   assert.equal(applied?.stay, 'old');
   assert.equal(applied?.venues, 'agenda');
+  assert.equal(applied?.services, 'triangle');
 });
 
 test('PG and Classes stay Style 3 while other sections keep their published choices', () => {
@@ -75,7 +76,8 @@ test('PG and Classes stay Style 3 while other sections keep their published choi
   assert.equal(applied?.pg, 'style3');
   assert.equal(applied?.classes, 'style3');
   assert.equal(applied?.stay, 'airbnb');
-  assert.equal(applied?.services, 'noddyy');
+  // Services ships only Style 2; Style 1 and Style 3 are disabled.
+  assert.equal(applied?.services, 'triangle');
   assert.equal(applied?.venues, 'agenda');
   assert.equal(applied?.movies, 'classic');
 });
@@ -86,7 +88,8 @@ test('Style 3 remains a first-class published choice', () => {
   }, 2);
   for (const key of ['pg', 'stay', 'classes', 'movies']) assert.equal(applied?.[key], 'style3');
   assert.equal(applied?.venues, 'agenda');
-  assert.equal(applied?.services, 'noddyy');
+  // Services ships only Style 2; Style 1 and Style 3 are disabled.
+  assert.equal(applied?.services, 'triangle');
 });
 
 

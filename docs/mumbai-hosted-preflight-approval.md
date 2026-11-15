@@ -2,6 +2,15 @@
 
 **Status:** read-only preflight completed on 2026-11-06. No hosted DDL, DML, Auth creation, backup, or Storage write was performed. This document prepares the owner decision; it does not authorize migration execution or backup.
 
+> **Target re-verified read-only (2026-11-12).** Same approved project —
+> `obkfgxjzlscungkhbyvq` (`React`, Mumbai, `ap-south-1`). The ledger below is
+> historical (53 entries as of 2026-11-06). Current hosted state: **74 history
+> rows** (`00000000000000` + 73 migrations, latest `20261108150000`), 75 public
+> tables, no `business*` tables, `is_business_member()` absent — so **33
+> repository migrations remain unapplied** (`20261111190000` …
+> `20261112340000`). Nothing was written, applied or reset. Current state:
+> `DATABASE_MIGRATION_PLAN.md` §15 and `docs/supabase-dev-setup.md`.
+
 > **Current reconciliation status (2026-11-07):** Use the “Final local migration reconciliation” addendum and the later “Final stays regression + migration parity checkpoint” at the end of this document as authoritative for current local files and tests. They supersede older counts, hashes, and blockers in the historical snapshots below. Per the latest owner-provided hosted read-only status, the ledger has 53 entries, 14 migrations are pending (`20261107121500_user_favorites_grants` was added by the latest checkpoint), and order 66 had a checksum mismatch. That earlier task selected and locally validated order 66, synchronized both repositories/manifests, and ran both guarded installer `--plan` commands successfully; the latest checkpoint re-pinned the manifest at 66 migrations and re-ran both plans. Hosted ledger/grants were not queried anew during this local verification; no hosted changes were made. The off-device recovery gap remains unresolved.
 
 ## Target and migration ledger
