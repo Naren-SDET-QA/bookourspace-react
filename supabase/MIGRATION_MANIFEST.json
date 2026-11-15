@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 76,
+  "migrationCount": 81,
   "migrations": [
     {
       "order": 2,
@@ -622,6 +622,46 @@
       "file": "supabase/migrations/20261111210000_service_document_storage_access.sql",
       "bytes": 1825,
       "sha256": "bc14451da077e9f5868f5a42f6a8ac8ce94ef194396c01bb498401754e88434e"
+    },
+    {
+      "order": 78,
+      "version": "20261112010000",
+      "name": "business_ownership_phase1",
+      "file": "supabase/migrations/20261112010000_business_ownership_phase1.sql",
+      "bytes": 18775,
+      "sha256": "19e1fca39ba55b438b84ae0b3507d4f122f7a4d8c31f985c03841367dc51f705"
+    },
+    {
+      "order": 79,
+      "version": "20261112020000",
+      "name": "business_ownership_phase2_backfill",
+      "file": "supabase/migrations/20261112020000_business_ownership_phase2_backfill.sql",
+      "bytes": 9871,
+      "sha256": "7cb229ee0dccd61589ecfbca9c5bb198868cae1aa1efb23b6934e66101ac7720"
+    },
+    {
+      "order": 80,
+      "version": "20261112030000",
+      "name": "business_ownership_phase3_rls",
+      "file": "supabase/migrations/20261112030000_business_ownership_phase3_rls.sql",
+      "bytes": 9734,
+      "sha256": "7dcaa48aa964122a7d72352f9908e6655c037c4cbcd017767f7e57d4c496bee1"
+    },
+    {
+      "order": 81,
+      "version": "20261112040000",
+      "name": "business_ownership_phase4_rls",
+      "file": "supabase/migrations/20261112040000_business_ownership_phase4_rls.sql",
+      "bytes": 3772,
+      "sha256": "ca1b51eff493674a2c8d5de0bf1148016d23ffbbffe8a621fd89c344945190f2"
+    },
+    {
+      "order": 82,
+      "version": "20261112050000",
+      "name": "business_ownership_phase5_transfer",
+      "file": "supabase/migrations/20261112050000_business_ownership_phase5_transfer.sql",
+      "bytes": 2209,
+      "sha256": "80d1e8cde339c718118c4c44c122c439d450d7f70c38d54fc5522a4103788147"
     }
   ],
   "review": {

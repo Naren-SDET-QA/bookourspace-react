@@ -29,6 +29,8 @@ import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/serve
 import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
+import { registerBusinessApi } from './src/server/businessApi';
+import { expectedModuleForPath, isModuleAllowedForMember, isProviderOnlyPath } from './src/modules/businessPermissions';
 import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
 import { ClassEnrollmentRepository } from './src/server/classEnrollmentRepository';
@@ -2412,6 +2414,91 @@ Task:
   // 1D. VERIFY ACTIVE SESSION & ENFORCE MID-SESSION ACCOUNT BLOCKING
   // Missing browser-facing API surface (marketplace, cancellation quotes,
   // refunds, Super Admin governance, SMS, Razorpay). Providers fail closed.
+  // Independent business context for every provider-owned API. The browser
+  // selects a business, but ownership and module access are re-derived from
+  // PostgreSQL on every request. Missing or suspended context is rejected.
+  app.use(['/api/provider', '/api/services/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
+    if (String(req.path || '').startsWith('/registrations')) return next();
+    const claims = verifySessionTokenFromRequest(req);
+    if (!claims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      return;
+    }
+    if (claims.role === 'admin') return next();
+    const providerOnlyPrefixes = ['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims'];
+    const providerOnly = providerOnlyPrefixes.some((prefix) => req.originalUrl.startsWith(prefix)) || isProviderOnlyPath(req.originalUrl);
+    if (claims.role === 'customer' && !providerOnly) return next();
+    if (!pgRuntimePool) {
+      res.status(503).json({ ok: false, error: 'BUSINESS_DATABASE_UNAVAILABLE' });
+      return;
+    }
+    const actorId = claims.supabaseUserId || claims.userId;
+    const businessId = String(req.header('x-business-id') || '').trim();
+    const expectedModule = expectedModuleForPath(req.originalUrl);
+    if (!/^[0-9a-f-]{36}$/i.test(businessId)) {
+      // F2 legacy fallback: a provider with no business rows at all keeps the
+      // pre-business owner-scoped workflow (there is nothing to revoke yet).
+      // A provider who does have a business must select it, so a missing or
+      // blank header stays 403 for them.
+      if (claims.role === 'provider') {
+        try {
+          const legacy = await pgRuntimePool.query(
+            `select exists (
+                      select 1 from public.business_members m
+                       where m.user_id = $1 and m.status = 'active'
+                    ) or exists (
+                      select 1 from public.businesses b where b.owner_user_id = $1
+                    ) as has_business`,
+            [actorId],
+          );
+          if (!legacy.rows[0]?.has_business) {
+            res.locals.businessContext = null;
+            next();
+            return;
+          }
+        } catch {
+          res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });
+          return;
+        }
+      }
+      res.status(403).json({ ok: false, error: 'BUSINESS_CONTEXT_REQUIRED' });
+      return;
+    }
+    try {
+      const { rows } = await pgRuntimePool.query(
+        `select b.id, b.module_type, b.approval_status, b.is_enabled,
+                m.role, a.enabled as module_enabled, a.approval_status as module_approval_status,
+                ma.allowed_modules as member_modules
+           from public.businesses b
+           join public.business_members m on m.business_id = b.id and m.user_id = $2 and m.status = 'active'
+           join public.business_module_access a on a.business_id = b.id and a.module_type = b.module_type
+           left join public.business_member_access ma on ma.business_id = b.id and ma.user_id = m.user_id
+          where b.id = $1
+          limit 1`,
+        [businessId, actorId],
+      );
+      const business = rows[0];
+      if (!business || business.approval_status !== 'approved' || business.is_enabled !== true || business.module_enabled !== true || business.module_approval_status !== 'approved') {
+        res.status(403).json({ ok: false, error: 'BUSINESS_ACCESS_DENIED' });
+        return;
+      }
+      // F3: the selected business must belong to the module the route serves.
+      if (expectedModule && String(business.module_type) !== expectedModule) {
+        res.status(403).json({ ok: false, error: 'BUSINESS_MODULE_MISMATCH' });
+        return;
+      }
+      // Member-level module scope (owner is never restrictable).
+      if (!isModuleAllowedForMember(business.role, business.member_modules, String(business.module_type))) {
+        res.status(403).json({ ok: false, error: 'BUSINESS_MODULE_FORBIDDEN' });
+        return;
+      }
+      res.locals.businessContext = business;
+      next();
+    } catch {
+      res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });
+    }
+  });
+
   registerPlatformApi(app, {
     verifySession: verifySessionTokenFromRequest,
     loadStore: loadAuthoritativeStore,
@@ -2729,7 +2816,17 @@ Task:
                from public.profiles p
               where p.account_status = 'active'
                 and (case when $1 = 'admin' then (p.is_super_admin is true or p.role = 'admin') else p.role = $1 end)
-              order by (p.is_super_admin is true) desc, p.created_at asc
+              order by
+                case when $1 = 'provider' then
+                  exists (
+                    select 1 from public.businesses b
+                     where b.owner_user_id = p.id
+                       and b.module_type = 'pg_hostels'
+                       and b.approval_status = 'approved'
+                  )::int
+                else 0 end desc,
+                (p.is_super_admin is true) desc,
+                p.created_at asc
               limit 1`,
             [role],
           );
@@ -4470,6 +4567,12 @@ Task:
   if (serviceBookingRepository) {
     registerServiceBookingApi(app, {
       repository: serviceBookingRepository,
+      verifySession: verifySessionTokenFromRequest,
+    });
+  }
+  if (pgRuntimePool) {
+    registerBusinessApi(app, {
+      pool: pgRuntimePool,
       verifySession: verifySessionTokenFromRequest,
     });
   }

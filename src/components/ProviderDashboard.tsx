@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import SafeImage from './SafeImage';
 import * as d3 from 'd3';
 import { 
@@ -28,6 +28,8 @@ import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
 import HostStayWorkspace from './HostStayWorkspace';
 import PgProviderWorkspace from './PgProviderWorkspace';
 import { PgOwnerDashboard } from './pg/PgOwnerDashboard';
+import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
+import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -66,6 +68,45 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   const totalViews = myListings.reduce((sum, l) => sum + l.viewsCount, 0);
 
   const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory' | 'pg_owner'>('pg_owner');
+  const [businesses, setBusinesses] = useState<BusinessMembership[]>([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  const [businessError, setBusinessError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    fetchBusinesses()
+      .then((rows) => {
+        if (!active) return;
+        setBusinesses(rows);
+        const preferred = rows.find((row) => row.module_type === 'pg_hostels' && row.approval_status === 'approved') || rows[0];
+        setSelectedBusinessId((current) => current || preferred?.id || '');
+        setBusinessError('');
+      })
+      .catch((caught) => {
+        if (active) setBusinessError(caught instanceof Error ? caught.message : 'BUSINESS_LIST_UNAVAILABLE');
+      });
+    return () => { active = false; };
+  }, []);
+
+  const selectedBusiness = businesses.find((row) => row.id === selectedBusinessId) || null;
+  useEffect(() => {
+    try {
+      if (selectedBusinessId) window.localStorage.setItem('bos_business_id_v1', selectedBusinessId);
+      else window.localStorage.removeItem('bos_business_id_v1');
+    } catch { /* storage is optional */ }
+  }, [selectedBusinessId]);
+  const businessScopedListings = useMemo(() => {
+    if (!selectedBusiness) return myListings;
+    return myListings.filter((listing) => {
+      const text = `${listing.categoryId || ''} ${listing.entityType || ''}`.toLowerCase();
+      if (selectedBusiness.module_type === 'pg_hostels') return text.includes('pg');
+      if (selectedBusiness.module_type === 'classes') return text.includes('class') || text.includes('course');
+      if (selectedBusiness.module_type === 'venues') return text.includes('venue');
+      if (selectedBusiness.module_type === 'hotel_stay') return text.includes('hotel') || text.includes('stay');
+      if (selectedBusiness.module_type === 'movies') return text.includes('movie');
+      return text.includes('service');
+    });
+  }, [myListings, selectedBusiness]);
 
   // D3 Chart Computations for Analytics & Performance Tab
   const d3Analytics = useMemo(() => {
@@ -301,6 +342,25 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           label={loc('Live Edit listings', 'లిస్టింగ్‌లను లైవ్ ఎడిట్ చేయండి', 'लिस्टिंग लाइव एडिट करें')}
         />
       </div>
+
+      {businesses.length > 0 && (
+        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-900 dark:bg-violet-950/20">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">Business</span>
+            {businesses.length > 1 ? (
+              <select value={selectedBusinessId} onChange={(event) => setSelectedBusinessId(event.target.value)} aria-label="Select business" className="min-h-9 max-w-full rounded-xl border border-violet-200 bg-white px-2 text-xs font-bold text-slate-800 dark:border-violet-800 dark:bg-slate-900 dark:text-slate-100">
+                {businesses.map((business) => <option key={business.id} value={business.id}>{business.name} · {BUSINESS_MODULE_LABELS[business.module_type]}</option>)}
+              </select>
+            ) : (
+              <span className="truncate text-xs font-black text-slate-800 dark:text-slate-100">{selectedBusiness?.name} · {selectedBusiness ? BUSINESS_MODULE_LABELS[selectedBusiness.module_type] : ''}</span>
+            )}
+            {selectedBusiness && <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${selectedBusiness.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{selectedBusiness.approval_status}</span>}
+          </div>
+          <span className="text-[10px] font-semibold text-violet-700/80 dark:text-violet-300/80">{selectedBusiness ? selectedBusiness.role : 'Provider account'}</span>
+        </section>
+      )}
+      {!businesses.length && !businessError && <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />}
+      {businessError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">Business context unavailable: {businessError}. Showing the legacy provider view.</p>}
 
       {/* Navigation Sub-Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-4 overflow-x-auto no-scrollbar">
@@ -659,15 +719,25 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
-      {activeSubTab === 'stays' && <HostStayWorkspace />}
+      {activeSubTab === 'stays' && <HostStayWorkspace businessId={selectedBusinessId || undefined} />}
 
-      {activeSubTab === 'pg_owner' && (
+      {activeSubTab === 'pg_owner' && selectedBusiness && selectedBusiness.approval_status !== 'approved' && (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-950/30">
+          <h3 className="text-sm font-black text-amber-900 dark:text-amber-100">Business access is {selectedBusiness.approval_status}</h3>
+          <p className="mt-1 text-xs font-semibold text-amber-800 dark:text-amber-200">This business cannot open protected listings, bookings or payments until a Super Admin approves or re-enables it.</p>
+        </section>
+      )}
+      {activeSubTab === 'pg_owner' && businesses.length > 0 && (!selectedBusiness || selectedBusiness.approval_status === 'approved') && (
         <PgOwnerDashboard
-          listings={myListings}
+          listings={businessScopedListings}
           bookings={bookings}
           enquiries={enquiries}
           onOpenPostWizard={onOpenPostWizard}
           profileName={supabaseProfile?.full_name}
+          businessName={selectedBusiness?.name}
+          businessId={selectedBusiness?.id}
+          businessStatus={selectedBusiness?.approval_status}
+          businessRole={selectedBusiness?.role}
         />
       )}
       {activeSubTab === 'pg_inventory' && <PgProviderWorkspace />}

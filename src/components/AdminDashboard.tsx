@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import SafeImage, { imageCategoryFor } from './SafeImage';
+import { BusinessAccessPanel } from './admin/BusinessAccessPanel';
 import { firstUsableListingImage } from '../lib/media/signedStorageUrl';
 import {
   Layers,
@@ -151,6 +152,7 @@ export type SuperAdminSectionId =
   | 'data_management'
   | 'announcements_status'
   | 'dashboard'
+  | 'business_access'
   | 'content_management'
   | 'listings_venues'
   | 'pg_hostels'
@@ -1424,6 +1426,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       badge: 'Live Notices',
       priority: true,
       icon: Megaphone,
+    },
+    {
+      id: 'business_access',
+      label: 'Business Access',
+      badge: 'Ownership',
+      priority: true,
+      icon: ShieldCheck,
     },
     {
       id: 'dashboard',
@@ -3234,6 +3243,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* =====================================================================
               SECTION 4: DASHBOARD OVERVIEW
              ===================================================================== */}
+          {activeSection === 'business_access' && <BusinessAccessPanel />}
           {activeSection === 'dashboard' && (
             <div className="space-y-5">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

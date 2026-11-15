@@ -317,7 +317,7 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     assert.equal(retry.data.registration.id, submitted.data.registration.id);
     const changedReplay = await request('POST', '/api/provider/registrations', applicantSession, { ...application, businessName: 'Different Business' });
     assert.equal(changedReplay.response.status, 409, 'idempotency key cannot be reused for changed registration data');
-    for (const providerType of ['pg_hostels', 'classes', 'venues', 'hotel_stay']) {
+    for (const providerType of ['pg_hostels', 'classes', 'venues', 'hotel_stay', 'movies']) {
       const additionalModule = await request('POST', '/api/provider/registrations', applicantSession, {
         ...application,
         requestId: randomUUID(),
@@ -327,8 +327,6 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
       assert.equal(additionalModule.response.status, 201, `${providerType} provider onboarding is accepted`);
       assert.equal(additionalModule.data.registration.providerType, providerType);
     }
-    const movies = await request('POST', '/api/provider/registrations', applicantSession, { ...application, requestId: randomUUID(), providerType: 'movies' });
-    assert.equal(movies.response.status, 400, 'Movies are excluded from provider onboarding');
 
     const otherUser = await request('GET', '/api/provider/registrations/me', providerBToken);
     assert.equal(otherUser.response.status, 200);

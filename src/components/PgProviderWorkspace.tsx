@@ -11,9 +11,9 @@ type ProviderPgListing = {
   entityType?: string;
 };
 
-async function loadProviderPgListings(): Promise<ProviderPgListing[]> {
+async function loadProviderPgListings(businessId?: string): Promise<ProviderPgListing[]> {
   const response = await fetch('/api/provider/listings', {
-    headers: { ...buildAuthHeaders(), Accept: 'application/json' },
+    headers: { ...buildAuthHeaders(), Accept: 'application/json', ...(businessId ? { 'x-business-id': businessId } : {}) },
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.ok || !Array.isArray(data.listings)) {
@@ -25,7 +25,7 @@ async function loadProviderPgListings(): Promise<ProviderPgListing[]> {
   });
 }
 
-export default function PgProviderWorkspace() {
+export default function PgProviderWorkspace({ businessId }: { businessId?: string }) {
   const [listings, setListings] = useState<ProviderPgListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -34,13 +34,13 @@ export default function PgProviderWorkspace() {
     setLoading(true);
     setError('');
     try {
-      setListings(await loadProviderPgListings());
+      setListings(await loadProviderPgListings(businessId));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'PG_PROVIDER_LISTINGS_UNAVAILABLE');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [businessId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 

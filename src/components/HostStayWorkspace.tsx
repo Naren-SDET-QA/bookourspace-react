@@ -14,8 +14,8 @@ type RoomType = { id: string; property_id: string; name: string; max_adults: num
 type HostBooking = { booking_id: string; status: string; check_in: string; check_out: string; total_paise: number | null; payment_status: string | null; property_name: string; room_type: string; unit_label: string };
 type HostDetail = { listing: HostListing; property: Property | null; roomTypes: RoomType[]; blocks: Array<{ id: string; unit_id: string; starts_on: string; ends_on: string; reason: string | null }>; media: Array<{ id: string; reference: string; display_order: number; alt_text: string; caption: string; isCover?: boolean }> };
 
-async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, { ...init, headers: buildAuthHeaders({ 'Content-Type': 'application/json', ...(init.headers as Record<string, string> || {}) }) });
+async function api<T>(path: string, init: RequestInit = {}, businessId?: string): Promise<T> {
+  const response = await fetch(path, { ...init, headers: buildAuthHeaders({ 'Content-Type': 'application/json', ...(businessId ? { 'x-business-id': businessId } : {}), ...(init.headers as Record<string, string> || {}) }) });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body?.ok === false) throw new Error(body?.error || `HTTP_${response.status}`);
   return body as T;
@@ -25,7 +25,7 @@ const emptyProperty = { name: '', propertyType: 'hotel', placeType: 'entire_home
 
 /** Database backed host inventory workspace. Every mutation is checked again
  * by the host API and PostgreSQL RLS, independently of this UI state. */
-export default function HostStayWorkspace() {
+export default function HostStayWorkspace({ businessId }: { businessId?: string }) {
   const [listings, setListings] = useState<HostListing[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<HostDetail | null>(null);

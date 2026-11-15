@@ -32,6 +32,8 @@ import {
 import type { Booking, Enquiry, MarketplaceListing } from '../../types/marketplace';
 import { PgMyBookingsPanel } from '../PgBookingPanel';
 import PgProviderWorkspace from '../PgProviderWorkspace';
+import { BusinessStaffPanel } from './BusinessStaffPanel';
+import { BusinessTransferPanel } from './BusinessTransferPanel';
 
 type Page =
   | 'dashboard' | 'dues' | 'collections' | 'expenses' | 'disputes'
@@ -130,6 +132,10 @@ export function PgOwnerDashboard({
   onOpenPostWizard,
   onRefresh,
   profileName,
+  businessName,
+  businessId,
+  businessStatus,
+  businessRole,
 }: {
   listings: MarketplaceListing[];
   bookings: Booking[];
@@ -137,6 +143,10 @@ export function PgOwnerDashboard({
   onOpenPostWizard?: () => void;
   onRefresh?: () => void;
   profileName?: string;
+  businessName?: string;
+  businessId?: string;
+  businessStatus?: string;
+  businessRole?: string;
 }) {
   const [page, setPage] = useState<Page>('dashboard');
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -207,6 +217,13 @@ export function PgOwnerDashboard({
           <div>
             <h2 className="text-xl font-black text-slate-900 dark:text-white">{meta.title}</h2>
             <p className="mt-0.5 text-[12px] text-slate-500">{meta.subtitle}</p>
+            {businessName && (
+              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                <span>{businessName}</span>
+                {businessStatus && <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${businessStatus === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{businessStatus}</span>}
+                {businessRole && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[9px] font-black uppercase text-violet-700">{businessRole}</span>}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {onRefresh && <button type="button" onClick={onRefresh} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-2.5 text-[11px] font-bold text-slate-600 dark:border-slate-700 dark:text-slate-300"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button>}
@@ -248,7 +265,7 @@ export function PgOwnerDashboard({
             </div>
           )}
 
-          {page === 'rooms' && <PgProviderWorkspace />}
+          {page === 'rooms' && <PgProviderWorkspace businessId={businessId} />}
           {page === 'bookings' && <PgMyBookingsPanel open />}
           {page === 'properties' && (
             pgListings.length ? <div className="space-y-2">{pgListings.map((listing) => <div key={listing.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800"><div className="min-w-0"><p className="truncate text-[13px] font-black">{listing.title}</p><p className="text-[10px] text-slate-500">{listing.location?.area || listing.location?.city || 'Location not set'} · {listing.isVerified ? 'Verified' : 'Not verified'}</p></div><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black dark:bg-slate-800">{listing.status.replace('_', ' ')}</span></div>)}</div> : <EmptyState icon={Building2} title="No properties yet" body="Add a PG listing and its property, rooms and beds will appear here." action={onOpenPostWizard && <button type="button" onClick={onOpenPostWizard} className="rounded-xl bg-blue-600 px-3 py-2 text-[11px] font-black text-white">Add property</button>} />
@@ -262,7 +279,7 @@ export function PgOwnerDashboard({
           {page === 'expenses' && <div className="grid grid-cols-2 gap-2">{stat('Spent this month', money(0), ReceiptText)}{stat('Against budget', money(0), Wallet, 'emerald')}{stat('Cost per occupied bed', '—', BedDouble)}{stat('Expense ratio', '—', BarChart3)}<div className="col-span-2"><EmptyState icon={ReceiptText} title="No expenses recorded" body="Track salaries, food, electricity and maintenance here." /></div></div>}
           {page === 'reports' && <div className="grid grid-cols-2 gap-2">{stat('Total beds', '0', BedDouble)}{stat('Occupied', '0', Users, 'emerald')}{stat('Contracted rent', money(0), IndianRupee)}{stat('Lost to vacancy', money(0), IndianRupee, 'amber')}<div className="col-span-2"><EmptyState icon={BarChart3} title="Reports are built per property" body="Add rooms and beds to see occupancy and revenue reports." /></div></div>}
           {page === 'tenants' && <EmptyState icon={Users} title="No tenants yet" body="Approved bookings and walk-in tenants will appear here." />}
-          {page === 'staff' && <EmptyState icon={UserCog} title="No staff on payroll" body="Add employees and run payroll from this section." />}
+          {page === 'staff' && <BusinessStaffPanel businessId={businessId} canInvite={businessRole === 'owner' || businessRole === 'manager'} />}
           {page === 'disputes' && <EmptyState icon={Scale} title="No open disputes" body="Tenant payment and deposit disputes will appear here with a clear record." />}
           {page === 'complaints' && <EmptyState icon={Wrench} title="No open complaints" body="Maintenance issues raised by residents will appear here." />}
           {page === 'requests' && <EmptyState icon={Inbox} title="Nothing waiting on you" body="Leave, late pass, guest visit and bed-change requests will appear here." />}
@@ -271,7 +288,7 @@ export function PgOwnerDashboard({
           {page === 'reviews' && <EmptyState icon={Star} title="No reviews yet" body="Reviews from tenants will appear here after their stay." />}
           {page === 'community' && <EmptyState icon={MessageSquare} title="No community posts" body="Your PG's private resident board will appear here." />}
           {page === 'billing' && <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800"><p className="text-[13px] font-black">BookOurSpace PG plan</p><p className="mt-1 text-[11px] text-slate-500">Plan and usage details are managed by BookOurSpace. Contact support for billing changes.</p></div>}
-          {page === 'settings' && <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800"><p className="text-[13px] font-black">Business details</p><p className="mt-1 text-[11px] text-slate-500">Update your PG business name, contact number, address and verification documents from your provider profile.</p><button type="button" onClick={() => go('properties')} className="mt-3 inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-2 text-[11px] font-black text-white">Go to properties <ArrowRight className="h-3.5 w-3.5" /></button></div>}
+          {page === 'settings' && <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800"><p className="text-[13px] font-black">Business details</p><p className="mt-1 text-[11px] text-slate-500">Update your PG business name, contact number, address and verification documents from your provider profile.</p><button type="button" onClick={() => go('properties')} className="mt-3 inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-2 text-[11px] font-black text-white">Go to properties <ArrowRight className="h-3.5 w-3.5" /></button><BusinessTransferPanel businessId={businessId} isOwner={businessRole === 'owner'} /></div>}
         </div>
       </div>
     </section>

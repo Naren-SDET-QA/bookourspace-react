@@ -44,7 +44,8 @@ function actorOrReject(
     });
     return null;
   }
-  return actor;
+  const businessId = response.locals.businessContext?.id;
+  return businessId ? { ...actor, businessId: String(businessId) } : actor;
 }
 
 function googleActorOrReject(

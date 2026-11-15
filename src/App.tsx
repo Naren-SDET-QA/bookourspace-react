@@ -56,6 +56,7 @@ import {
   Pencil
 } from 'lucide-react';
 
+import { BusinessInvitationAccept } from './components/business/BusinessInvitationAccept';
 import { MarketplaceProvider, useMarketplace } from './context/MarketplaceContext';
 import { MarketplaceListing, CustomerAction, EntityType, Booking } from './types/marketplace';
 import { ServiceProvider } from './types';
@@ -84,6 +85,21 @@ function applyRouteStyleToSectionStyles(base: SectionStyles): SectionStyles {
   if (typeof window === 'undefined') return base;
   const [section, raw = ''] = window.location.hash.replace('#', '').toLowerCase().split('/');
   const style = raw === '1' || raw === 'style1' ? 1 : raw === '2' || raw === 'style2' ? 2 : raw === '3' || raw === 'style3' ? 3 : 0;
+  // Stays and Services ship non-numeric style segments (#stays/airbnb,
+  // #services/triangle). Honour them explicitly so a deep link survives the
+  // later published-config merge, mirroring styleFromHash in the sections.
+  if (section === 'stays' || section === 'hotels') {
+    if (raw === 'old' || raw === '1' || raw === 'stay1') return { ...base, stay: 'old' };
+    if (raw === 'airbnb' || raw === '2' || raw === 'stay2') return { ...base, stay: 'airbnb' };
+    if (raw === 'style3' || raw === '3' || raw === 'stay3') return { ...base, stay: 'style3' };
+    return base;
+  }
+  if (section === 'services') {
+    if (raw === 'old' || raw === '1' || raw === 'services1') return { ...base, services: 'old' };
+    if (raw === 'triangle' || raw === '2' || raw === 'services2') return { ...base, services: 'triangle' };
+    if (raw === 'noddyy' || raw === '3' || raw === 'services3') return { ...base, services: 'noddyy' };
+    return base;
+  }
   if (!style) return base;
   // PG and Classes ship only Style 3; a stale #pg/style1 or #classes/style2
   // deep link must not re-enable the retired layouts.
@@ -551,9 +567,23 @@ function MarketplaceAppContent() {
       } else if (hash === 'services' || hash.startsWith('services/')) {
         setActiveMarketSection('services');
         setOpenSection('services');
+        const servicesRouteStyle = rawStyle === 'old' || rawStyle === '1' || rawStyle === 'services1' ? 'old'
+          : rawStyle === 'triangle' || rawStyle === '2' || rawStyle === 'services2' ? 'triangle'
+            : rawStyle === 'noddyy' || rawStyle === '3' || rawStyle === 'services3' ? 'noddyy'
+              : null;
+        if (servicesRouteStyle) {
+          setSectionStylesState((previous) => ({ ...previous, services: servicesRouteStyle }));
+        }
       } else if (hash === 'stays' || hash === 'hotels' || hash.startsWith('stays/') || hash.startsWith('hotels/')) {
         setActiveMarketSection('hotel_stay');
         setOpenSection('hotel_stay');
+        const stayRouteStyle = rawStyle === 'old' || rawStyle === '1' || rawStyle === 'stay1' ? 'old'
+          : rawStyle === 'airbnb' || rawStyle === '2' || rawStyle === 'stay2' ? 'airbnb'
+            : rawStyle === 'style3' || rawStyle === '3' || rawStyle === 'stay3' ? 'style3'
+              : null;
+        if (stayRouteStyle) {
+          setSectionStylesState((previous) => ({ ...previous, stay: stayRouteStyle }));
+        }
       } else if (hash === 'classes' || hash.startsWith('classes/')) {
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, classes: 'style3' }));
@@ -6438,6 +6468,7 @@ function MarketplaceAppContent() {
             setSelectedDetailListing(null);
             setChatListing(l);
           }}
+          onRequireSignIn={() => setIsAuthModalOpen(true)}
         />
       ) : null}
 
@@ -6870,6 +6901,7 @@ function SectionScreenFallback({ label }: { label: string }) {
 export default function App() {
   return (
     <MarketplaceProvider>
+      <BusinessInvitationAccept />
       <MarketplaceAppContent />
     </MarketplaceProvider>
   );

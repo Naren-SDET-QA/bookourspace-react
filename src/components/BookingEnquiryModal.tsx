@@ -41,6 +41,7 @@ import { generateBookingGSTReceiptPDF } from '../utils/gstInvoiceGenerator';
 import { triggerGlobalGlobeLoader } from './BOSBrandLogo';
 import { useOwnerContact } from '../lib/useOwnerContact';
 import { buildProviderContactMessage, canContactOwner } from '../lib/servicesStayRules';
+import { maskPhone } from './VerifiedPhoneReveal';
 import type { ServicesModuleKey } from '../lib/servicesStayRules';
 import {
   createAuthoritativeBookingAtomic,
@@ -905,7 +906,7 @@ export const BookingEnquiryModal: React.FC<BookingEnquiryModalProps> = ({
                   className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95"
                 >
                   <PhoneCall className="w-4 h-4" />
-                  <span>{currentLang === 'te' ? `కాల్ చేయండి (${listing.providerPhone})` : `Call Provider`}</span>
+                  <span>{currentLang === 'te' ? `కాల్ చేయండి (${maskPhone(listing.providerPhone)})` : `Call Provider`}</span>
                 </a>
 
                 <button
