@@ -993,11 +993,78 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
   };
 
+  /**
+   * Installs a server-issued session token that a local-development sign-in
+   * already verified, then resolves the profile through /api/auth/me.
+   */
+  const installLocalEmailOtpSession = async (
+    sessionToken: string,
+  ): Promise<
+    | { ok: true; user: AuthoritativeGoogleUser; redirectTarget: 'marketplace' | 'provider_portal' | 'admin_console' }
+    | { ok: false; error: string; message: string }
+  > => {
+    setStoredAuthoritativeSession(sessionToken, null);
+    setAuthUser(null);
+    setUserRoleState('customer');
+    const sessionRes = await fetchCurrentAuthSession();
+    if (sessionRes.blocked) {
+      setStoredAuthoritativeSession(null, null);
+      setIsAccountBlocked(true);
+      setBlockedReason(sessionRes.message || 'Your account is blocked.');
+      return { ok: false, error: 'ACCOUNT_BLOCKED', message: sessionRes.message || 'Your account is blocked.' };
+    }
+    if (!sessionRes.authenticated || !sessionRes.user) {
+      setStoredAuthoritativeSession(null, null);
+      return {
+        ok: false,
+        error: sessionRes.error || 'AUTH_SESSION_FAILED',
+        message: sessionRes.message || 'Sign-in could not be completed. Please try again.',
+      };
+    }
+    const user = sessionRes.user;
+    setIsAccountBlocked(false);
+    setBlockedReason(null);
+    setAuthUser(user);
+    setUserRoleState(user.role);
+    syncLocalProfileWithGoogleUser(user);
+    try {
+      localStorage.setItem('bos_entry_choice_v1', 'signed-in');
+    } catch {
+      // Private browsing can disable storage; the session token is still valid.
+    }
+    void refreshServerNotifications();
+    return { ok: true, user, redirectTarget: sessionRes.redirectTarget || 'marketplace' };
+  };
+
   const completeEmailOtpSignIn = async (
     email: string,
     token: string,
     options?: { verifyWithSupabase?: boolean },
   ) => {
+    // Local development has no Supabase project, so the API verifies the code
+    // and returns an already-authoritative server session token. Install it and
+    // resolve the profile through the same /api/auth/me call every other
+    // sign-in path uses.
+    if (!supabase && !options?.verifyWithSupabase) {
+      const probed = await verifyEmailOtpCode(email, token);
+      if (!probed.ok) {
+        return {
+          ok: false,
+          error: probed.error || 'EMAIL_OTP_INVALID',
+          message: probed.message || 'That code is invalid or has expired. Request a new code.',
+        };
+      }
+      if (!probed.localSessionToken) {
+        return {
+          ok: false,
+          error: 'SUPABASE_AUTH_NOT_CONFIGURED',
+          message: 'Email sign-in is unavailable until Supabase Auth is configured.',
+        };
+      }
+      const installed = await installLocalEmailOtpSession(probed.localSessionToken);
+      if (!installed.ok) return installed;
+      return { ok: true, user: installed.user, redirectTarget: installed.redirectTarget };
+    }
     if (!supabase) {
       return {
         ok: false,

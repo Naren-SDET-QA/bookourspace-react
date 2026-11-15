@@ -15,6 +15,8 @@ export interface EmailOtpRequestResponse {
   retryAfterSeconds?: number;
   cooldownSeconds?: number;
   expiresInSeconds?: number;
+  /** Local development only: the code that would otherwise have been emailed. */
+  devCode?: string;
 }
 
 export interface EmailOtpVerifyResponse {
@@ -23,6 +25,8 @@ export interface EmailOtpVerifyResponse {
   message?: string;
   accessToken?: string;
   refreshToken?: string;
+  /** Local development only: the server session token, already authoritative. */
+  localSessionToken?: string;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -64,6 +68,7 @@ export async function requestEmailOtp(emailInput: string): Promise<EmailOtpReque
       ok: true,
       cooldownSeconds: Number(data?.cooldownSeconds) || 60,
       expiresInSeconds: Number(data?.expiresInSeconds) || 600,
+      ...(typeof data?.devCode === 'string' ? { devCode: data.devCode } : {}),
     };
   } catch {
     return {
@@ -90,7 +95,20 @@ export async function verifyEmailOtpCode(emailInput: string, tokenInput: string)
       body: JSON.stringify({ email, token }),
     });
     const data = await readJson(response);
-    if (!response.ok || !data?.ok || !data?.accessToken || !data?.refreshToken) {
+    if (!response.ok || !data?.ok) {
+      return {
+        ok: false,
+        error: data?.error || 'EMAIL_OTP_INVALID',
+        message: data?.message || 'That code is invalid or has expired. Request a new code.',
+      };
+    }
+    // Local development has no Supabase session to install; the server already
+    // returned an authoritative application session token.
+    const localSessionToken = typeof data.localSessionToken === 'string' ? data.localSessionToken.trim() : '';
+    if (localSessionToken) {
+      return { ok: true, localSessionToken };
+    }
+    if (!data?.accessToken || !data?.refreshToken) {
       return {
         ok: false,
         error: data?.error || 'EMAIL_OTP_INVALID',

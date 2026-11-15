@@ -31,6 +31,7 @@ import { registerBusinessApi } from './src/server/businessApi';
 import { registerStayAdminApi } from './src/server/stayAdminApi';
 import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
 import { EmailOtpService } from './src/server/emailOtpAuth';
+import { DevEmailOtpService, isLoopbackConnectionString } from './src/server/devEmailOtpAuth';
 import { AuthAccessSettingsStore, registerAuthAccessSettingsApi } from './src/server/authAccessSettings';
 import {
   CustomerModuleAccessRepository,
@@ -2618,10 +2619,49 @@ Task:
     brandName: 'BookOurSpace',
     supportEmail: process.env.BOS_SUPPORT_EMAIL || 'support@bookourspace.in',
   });
+
+  // Local development has neither a Supabase service key nor a Resend key, so
+  // the hosted delivery path above stays unconfigured. Rather than disabling
+  // email sign-in, the same address -> code -> verify flow runs against the
+  // loopback database: the code is printed to the server console and the
+  // account is provisioned through the same `auth.users` trigger production
+  // uses. Hard-disabled in production.
+  const devEmailOtpConnectionString = String(process.env.BOS_LISTINGS_DATABASE_URL || '');
+  const devEmailOtpEnabled = !IS_PRODUCTION_RUNTIME
+    && !emailOtpService.configured
+    && String(process.env.BOS_LOCAL_DEV_AUTH || '') === '1'
+    && Boolean(pgRuntimePool)
+    // The local flow writes authentication rows, so it only ever runs against a
+    // loopback database even when an allowlisted remote target is configured
+    // for ordinary development repositories.
+    && isLoopbackConnectionString(devEmailOtpConnectionString);
+  const devEmailOtpService = devEmailOtpEnabled
+    ? new DevEmailOtpService({
+        connectionString: devEmailOtpConnectionString,
+        sessionTokenFor: (profile) =>
+          signSessionToken({
+            userId: String(profile.id),
+            supabaseUserId: String(profile.id),
+            email: String(profile.email || ''),
+            name: String(profile.full_name || profile.email || 'BookOurSpace User'),
+            role: 'customer',
+            authProvider: 'email',
+            issuedAt: Date.now(),
+            expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+          }),
+      })
+    : null;
+  const emailOtpConfigured = emailOtpService.configured || Boolean(devEmailOtpService);
   if (!emailOtpService.configured) {
-    console.warn(
-      `[email-otp] Email sign-in stays disabled until configured: missing ${emailOtpService.missingConfiguration().join(', ')}.`
-    );
+    if (devEmailOtpService) {
+      console.info(
+        '[email-otp] Resend/Supabase are not configured; using the local development code flow. Codes print to this console.'
+      );
+    } else {
+      console.warn(
+        `[email-otp] Email sign-in stays disabled until configured: missing ${emailOtpService.missingConfiguration().join(', ')}.`
+      );
+    }
   }
 
   const authAccessSettings = new AuthAccessSettingsStore({
@@ -2638,7 +2678,7 @@ Task:
     },
     isLocalAdminSession: (claims) => hasCurrentAdminSession(claims as SessionClaims | null),
     env: process.env,
-    emailOtpConfigured: () => emailOtpService.configured,
+    emailOtpConfigured: () => emailOtpConfigured,
     googleConfigured: Boolean(SUPABASE_PROJECT_URL && serverSupabaseConfig.publishableKey),
   });
 
@@ -2667,7 +2707,7 @@ Task:
     },
     isLocalAdminSession: (claims) => hasCurrentAdminSession(claims as SessionClaims | null),
     env: process.env,
-    emailOtpConfigured: () => emailOtpService.configured,
+    emailOtpConfigured: () => emailOtpConfigured,
     googleConfigured: Boolean(SUPABASE_PROJECT_URL && serverSupabaseConfig.publishableKey),
   });
 
@@ -2704,15 +2744,46 @@ Task:
       res.status(503).json({ ok: false, error: 'AUTH_CONFIG_UNAVAILABLE' });
       return;
     }
-    const result = await emailOtpService.requestCode(req.body?.email, String(req.ip || req.socket.remoteAddress || ''));
-    res.status(result.status).json({
-      ok: result.ok,
-      ...(result.ok
-        ? {
-            cooldownSeconds: result.cooldownSeconds,
-            expiresInSeconds: result.expiresInSeconds,
-          }
-        : { error: result.error, message: result.message, ...(result.retryAfterSeconds ? { retryAfterSeconds: result.retryAfterSeconds } : {}) }),
+    if (devEmailOtpService) {
+      const result = devEmailOtpService.requestCode(
+        req.body?.email,
+        String(req.ip || req.socket.remoteAddress || ''),
+      );
+      if (!result.ok) {
+        res.status(result.status).json({
+          ok: false,
+          error: result.error,
+          message: result.message,
+          ...(result.retryAfterSeconds ? { retryAfterSeconds: result.retryAfterSeconds } : {}),
+        });
+        return;
+      }
+      res.status(200).json({
+        ok: true,
+        cooldownSeconds: result.cooldownSeconds,
+        expiresInSeconds: result.expiresInSeconds,
+        ...(result.devCode ? { devCode: result.devCode } : {}),
+      });
+      return;
+    }
+
+    const result = await emailOtpService.requestCode(
+      req.body?.email,
+      String(req.ip || req.socket.remoteAddress || ''),
+    );
+    if (!result.ok) {
+      res.status(result.status).json({
+        ok: false,
+        error: result.error,
+        message: result.message,
+        ...(result.retryAfterSeconds ? { retryAfterSeconds: result.retryAfterSeconds } : {}),
+      });
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      cooldownSeconds: result.cooldownSeconds,
+      expiresInSeconds: result.expiresInSeconds,
     });
   });
 
@@ -2732,21 +2803,30 @@ Task:
       res.status(503).json({ ok: false, error: 'AUTH_CONFIG_UNAVAILABLE' });
       return;
     }
-    const result = await emailOtpService.verifyCode(
-      req.body?.email,
-      req.body?.token,
-      String(req.ip || req.socket.remoteAddress || ''),
-    );
+    const result = devEmailOtpService
+      ? await devEmailOtpService.verifyCode(
+          req.body?.email,
+          req.body?.token,
+          String(req.ip || req.socket.remoteAddress || ''),
+        )
+      : await emailOtpService.verifyCode(
+          req.body?.email,
+          req.body?.token,
+          String(req.ip || req.socket.remoteAddress || ''),
+        );
     if (!result.ok) {
       res.status(result.status).json({ ok: false, error: result.error, message: result.message });
       return;
     }
     // The Supabase tokens are returned once; the browser installs them in the
     // Supabase client, then exchanges them for the server application session.
+    // The local development flow has no Supabase client to install into, so it
+    // returns the server session token directly under a separate key.
     res.status(200).json({
       ok: true,
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
+      ...(devEmailOtpService
+        ? { localSessionToken: result.accessToken }
+        : { accessToken: result.accessToken, refreshToken: result.refreshToken }),
     });
   });
 

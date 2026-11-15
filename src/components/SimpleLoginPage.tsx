@@ -127,9 +127,10 @@ export function SimpleLoginPage({
     && config != null
     && config.emailOtpConfigured === false
     && isSupabaseConfigured;
-  const emailOtpAvailable = !authServiceUnavailable
+  const otpDeliveryReady = config?.emailOtpConfigured !== false || nativeSupabaseOtp;
+  const emailEntryAvailable = !authServiceUnavailable
     && config?.emailOtpEnabled !== false
-    && (config?.emailOtpConfigured !== false || nativeSupabaseOtp);
+    && otpDeliveryReady;
   const googleAvailable = !authServiceUnavailable && config?.googleLoginEnabled !== false && config?.googleConfigured !== false;
   const emailSetupMissing = !authServiceUnavailable && !nativeSupabaseOtp && config != null
     && config.emailOtpEnabled !== false && config.emailOtpConfigured === false;
@@ -193,7 +194,11 @@ export function SimpleLoginPage({
       setStep('code');
       setDigits(Array.from({ length: OTP_LENGTH }, () => ''));
       setCooldown(Math.min(120, result.cooldownSeconds || RESEND_SECONDS));
-      setInfo(`We emailed a ${OTP_LENGTH}-digit code to ${target}. It expires in 10 minutes.`);
+      setInfo(
+        result.devCode
+          ? `Local development code for ${target}: ${result.devCode}. It expires in 10 minutes.`
+          : `We emailed a ${OTP_LENGTH}-digit code to ${target}. It expires in 10 minutes.`,
+      );
       return true;
     } finally {
       setBusy(false);
@@ -335,7 +340,7 @@ export function SimpleLoginPage({
                 className="mt-6"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (!emailOtpAvailable) return;
+                  if (!emailEntryAvailable) return;
                   void sendCode();
                 }}
               >
@@ -355,7 +360,7 @@ export function SimpleLoginPage({
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="you@example.com"
-                    disabled={busy || !emailOtpAvailable}
+                    disabled={busy || !emailEntryAvailable}
                     aria-invalid={Boolean(error)}
                     className="h-12 w-full min-w-0 bg-transparent text-sm font-semibold text-[#111827] outline-none focus-visible:outline-none disabled:opacity-60"
                   />
@@ -363,7 +368,7 @@ export function SimpleLoginPage({
 
                 <button
                   type="submit"
-                  disabled={busy || !emailOtpAvailable}
+                  disabled={busy || !emailEntryAvailable}
                   className="mt-4 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#f97316] px-4 text-sm font-black text-white transition hover:bg-[#ea580c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f97316] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
@@ -400,7 +405,7 @@ export function SimpleLoginPage({
                   </button>
                 )}
 
-                {!googleAvailable && !emailOtpAvailable && (
+                {!googleAvailable && !emailEntryAvailable && (
                   <p className="mt-4 rounded-xl bg-[#fafafa] p-3 text-xs font-semibold text-[#6b7280]">
                     Sign-in is temporarily unavailable. Please try again later.
                   </p>
@@ -458,7 +463,7 @@ export function SimpleLoginPage({
                   <span className="font-semibold text-[#6b7280]">Didn&apos;t receive the code?</span>
                   <button
                     type="button"
-                    disabled={busy || cooldown > 0 || !emailOtpAvailable}
+                    disabled={busy || cooldown > 0 || !emailEntryAvailable}
                     onClick={() => void sendCode()}
                     className="font-black text-[#c2410c] transition hover:text-[#9a3412] disabled:cursor-not-allowed disabled:text-[#9ca3af]"
                   >
