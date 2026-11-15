@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "/Users/aa/.local/bin/graphify-mcp",
+      "args": ["--graph", "/Users/aa/Projects/bookourspace-aistudio/.worktrees/safe-main-integration/graphify-out/graph.json"]
+    }
+  }
+}
