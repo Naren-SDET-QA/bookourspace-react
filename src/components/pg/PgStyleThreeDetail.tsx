@@ -19,8 +19,9 @@ import {
   Wind,
 } from 'lucide-react';
 import SafeImage from '../SafeImage';
-import { BOS_CONTACT_PHONE, BOS_CALL_HREF, whatsappHref } from '../../lib/contactNumbers';
+import { BOS_CALL_HREF, whatsappHref } from '../../lib/contactNumbers';
 import { PgBookingPanel } from '../PgBookingPanel';
+import { VerifiedPhoneReveal } from '../VerifiedPhoneReveal';
 import { formatInr, pgGenderLabel, type PgCard } from '../../lib/sectionExperiences';
 
 type DetailTab = 'about' | 'owner';
@@ -36,6 +37,8 @@ interface PgStyleThreeDetailProps {
   contactNote: string;
   onCall: () => void;
   onWhatsapp: () => void;
+  /** Owner number once the authorised contact flow has released it. Masked until revealed. */
+  ownerPhone?: string;
 }
 
 const SECTION_LINKS: Array<[string, string]> = [
@@ -85,6 +88,7 @@ export function PgStyleThreeDetail({
   contactNote,
   onCall,
   onWhatsapp,
+  ownerPhone = '',
 }: PgStyleThreeDetailProps) {
   const [photoIndex, setPhotoIndex] = useState(0);
   const [showAllAmenities, setShowAllAmenities] = useState(false);
@@ -389,7 +393,12 @@ export function PgStyleThreeDetail({
             <section id="pg-style3-owner" ref={ownerSectionRef} className="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
               <h2 className="text-[11px] font-black uppercase tracking-wide text-slate-500">Owner &amp; Booking</h2>
               <p className="mt-1 text-[11px] font-black">{card.providerName || 'Owner details not listed'}</p>
-              <p className="text-[9px] text-slate-500">Owner contact uses BookOurSpace's authorised flow when available; otherwise the BookOurSpace desk number is shown.</p>
+              <p className="text-[9px] text-slate-500">Owner contact uses BookOurSpace's authorised flow. The number stays masked until you sign in and verify your email code.</p>
+              {ownerPhone && (
+                <div className="mt-2">
+                  <VerifiedPhoneReveal phone={ownerPhone} />
+                </div>
+              )}
               <div className="mt-2 grid grid-cols-2 gap-1.5">
                 {canCall ? (
                   <button
@@ -402,7 +411,7 @@ export function PgStyleThreeDetail({
                   </button>
                 ) : (
                   <a href={BOS_CALL_HREF} className="inline-flex min-h-9 items-center justify-center gap-1 rounded-xl bg-orange-600 px-2 text-[10px] font-black text-white">
-                    <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
+                    <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner
                   </a>
                 )}
                 {canWhatsapp ? (
@@ -416,7 +425,7 @@ export function PgStyleThreeDetail({
                   </button>
                 ) : (
                   <a href={fallbackWhatsapp} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center justify-center rounded-xl border border-orange-300 px-2 text-[10px] font-black text-orange-700 dark:border-orange-900 dark:text-orange-300">
-                    WhatsApp · {BOS_CONTACT_PHONE}
+                    WhatsApp
                   </a>
                 )}
               </div>
@@ -426,7 +435,7 @@ export function PgStyleThreeDetail({
                     ? 'Checking owner contact permissions…'
                     : (canCall || canWhatsapp
                       ? contactNote
-                      : 'Owner contact is unavailable right now, so the BookOurSpace desk number is shown.')}
+                      : 'Owner contact is unavailable right now. Sign in with a verified email to request it.')}
                 </p>
               )}
               <div className="mt-3">
@@ -458,9 +467,9 @@ export function PgStyleThreeDetail({
                 >
                   <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner
                 </button>
-              ) : (
-                <a href={BOS_CALL_HREF} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-orange-600 text-[11px] font-black text-white">
-                  <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner · {BOS_CONTACT_PHONE}
+                              ) : (
+                  <a href={BOS_CALL_HREF} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-orange-600 text-[11px] font-black text-white">
+                  <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner
                 </a>
               )}
             </div>
@@ -481,7 +490,7 @@ export function PgStyleThreeDetail({
             </button>
           ) : (
             <a href={BOS_CALL_HREF} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-orange-300 text-xs font-black text-orange-700 dark:border-orange-900 dark:text-orange-300">
-              <Phone className="h-4 w-4" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
+              <Phone className="h-4 w-4" aria-hidden="true" /> Call Owner
             </a>
           )}
           <button

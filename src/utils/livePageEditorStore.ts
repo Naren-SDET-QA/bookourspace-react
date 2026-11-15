@@ -31,6 +31,67 @@ async function callLocalLivePageApi<T>(path: string, init?: RequestInit): Promis
   return data as T;
 }
 
+/**
+ * The app signs in with its own BOS session token, not Supabase Auth, so the
+ * builder RPCs — which require a Supabase auth session — answer 401 and every
+ * admin edit silently fails to save. When a BOS session is present, writes go to
+ * the server API instead, which re-checks the Super Admin role in Postgres.
+ */
+function hasBosSessionToken(): boolean {
+  try {
+    return typeof window !== 'undefined' && Boolean(window.localStorage.getItem('bos_session_token_v1'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Module presentation (labels, headlines, PG block switches) is published
+ * through the module settings API, while pages and DOM overrides live in the
+ * Supabase config rows. Read both, or an admin switch would never reach a
+ * customer screen.
+ */
+type PublishedPlatformSlice = {
+  modules?: unknown;
+  sectionStyles?: unknown;
+  sectionStylesVersion?: number;
+  domOverrides?: unknown;
+  pages?: unknown;
+};
+
+/**
+ * Module visibility and the admin-chosen section styles live in the published
+ * live-page config API, not in the Supabase builder document. Merge both slices
+ * over whatever Supabase returned, or an admin's published choice never reaches
+ * customers.
+ */
+async function publishedPlatformSlice(): Promise<PublishedPlatformSlice> {
+  try {
+    const data = await callLocalLivePageApi<{ published?: PublishedPlatformSlice | null }>('');
+    const published = data?.published;
+    const slice: PublishedPlatformSlice = {};
+    if (published?.modules && typeof published.modules === 'object' && !Array.isArray(published.modules)) {
+      slice.modules = published.modules;
+    }
+    if (published?.sectionStyles && typeof published.sectionStyles === 'object' && !Array.isArray(published.sectionStyles)) {
+      slice.sectionStyles = published.sectionStyles;
+    }
+    if (typeof published?.sectionStylesVersion === 'number') {
+      slice.sectionStylesVersion = published.sectionStylesVersion;
+    }
+    if (published?.domOverrides && typeof published.domOverrides === 'object' && !Array.isArray(published.domOverrides)) {
+      slice.domOverrides = published.domOverrides;
+    }
+    if (published?.pages && typeof published.pages === 'object' && !Array.isArray(published.pages)) {
+      slice.pages = published.pages;
+    }
+    return slice;
+  } catch {
+    // Keep the Supabase-only config when the module API is unavailable.
+    return {};
+  }
+}
+
 function mergeLocalConfig(value: unknown): LivePageEditorConfig {
   const candidate = (value && typeof value === 'object' ? value : {}) as Partial<LivePageEditorConfig>;
   return {
@@ -117,6 +178,40 @@ export interface EditablePageLabelsAndButtons {
   promoRibbonLink: string;
 }
 
+/**
+ * The copy the admin edits in the page-field form. Section screens read this so
+ * a published heading, subheading or button label actually reaches visitors.
+ */
+export interface PageCopyOverrides {
+  heading?: string;
+  subheading?: string;
+  primaryButtonLabel?: string;
+  secondaryButtonLabel?: string;
+  promoRibbonText?: string;
+  promoRibbonLink?: string;
+}
+
+export function pageCopyFromPage(page?: SingleCustomerPageConfig | null): PageCopyOverrides {
+  if (!page) return {};
+  const labels = page.labelsAndButtons;
+  const template = DEFAULT_LIVE_PAGE_CONFIG.pages[page.pageId]?.labelsAndButtons;
+  /** Only copy the admin actually changed; untouched template text keeps the designed layout. */
+  const pick = (value: string | undefined, templateValue: string | undefined) => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return undefined;
+    if (templateValue !== undefined && trimmed === templateValue.trim()) return undefined;
+    return trimmed;
+  };
+  return {
+    heading: pick(labels?.pageHeadingTitle, template?.pageHeadingTitle),
+    subheading: pick(labels?.pageSubheading, template?.pageSubheading),
+    primaryButtonLabel: pick(labels?.primaryBookButtonLabel, template?.primaryBookButtonLabel),
+    secondaryButtonLabel: pick(labels?.secondaryEnquireButtonLabel, template?.secondaryEnquireButtonLabel),
+    promoRibbonText: pick(labels?.promoRibbonText, template?.promoRibbonText),
+    promoRibbonLink: pick(labels?.promoRibbonLink, template?.promoRibbonLink),
+  };
+}
+
 export interface EditableCategoryItemOverride {
   id: string;
   label: string;
@@ -136,7 +231,11 @@ export interface EditableFormOptionGroup {
 export interface InspectedDomElementOverride {
   selectorKey: string;
   tagName: string;
-  pageId: CustomerPageId;
+  /**
+   * Route key the override belongs to: a customer page id, or any other app
+   * surface the admin line-edited ('home', 'provider_portal', 'admin_console').
+   */
+  pageId: string;
   originalText: string;
   customText?: string;
   customImageUrl?: string;
@@ -822,7 +921,36 @@ export async function fetchLivePageConfigFromBackend(): Promise<{
     details: row.summary,
     versionId: `v1.${row.version_number}.0`,
   }));
-  const published = publishedRow ? toConfig(publishedRow) : DEFAULT_LIVE_PAGE_CONFIG;
+  const supabasePublished = publishedRow ? toConfig(publishedRow) : DEFAULT_LIVE_PAGE_CONFIG;
+  const platformSlice = await publishedPlatformSlice();
+  // Admin line edits are published through the server API; keep them on top of
+  // whatever the builder document carries so guests see the edited text.
+  // Page-field edits (headings, subheadings, button labels) are published through
+  // the server API, so their copy has to win over the builder document's defaults.
+  const serverPages = (platformSlice.pages || {}) as Partial<Record<CustomerPageId, SingleCustomerPageConfig>>;
+  const pages = { ...supabasePublished.pages } as LivePageEditorConfig['pages'];
+  for (const key of Object.keys(serverPages) as CustomerPageId[]) {
+    const base = pages[key];
+    const incoming = serverPages[key];
+    if (!base || !incoming) continue;
+    pages[key] = {
+      ...base,
+      pageName: incoming.pageName || base.pageName,
+      icon: incoming.icon || base.icon,
+      heroBanner: { ...base.heroBanner, ...(incoming.heroBanner || {}) },
+      labelsAndButtons: { ...base.labelsAndButtons, ...(incoming.labelsAndButtons || {}) },
+      colors: { ...base.colors, ...(incoming.colors || {}) },
+    };
+  }
+  const published = {
+    ...supabasePublished,
+    ...platformSlice,
+    pages,
+    domOverrides: {
+      ...(supabasePublished.domOverrides || {}),
+      ...((platformSlice.domOverrides as Record<string, unknown> | undefined) || {}),
+    } as LivePageEditorConfig['domOverrides'],
+  };
   const draft = draftRow ? toConfig(draftRow) : published;
   safeWriteLocal(STORAGE_KEYS.PUBLISHED, published);
   safeWriteLocal(STORAGE_KEYS.DRAFT, draft);
@@ -841,7 +969,7 @@ export async function saveLivePageDraftToBackend(
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  if (!supabase || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
+  if (!supabase || hasBosSessionToken() || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
     const data = await callLocalLivePageApi<{ ok?: boolean; draft?: unknown; versions?: unknown[]; auditLogs?: unknown[] }>('/draft', {
       method: 'POST',
       body: JSON.stringify({ config: draftConfig, summary: `${pageId}: ${summary}`.slice(0, 500) }),
@@ -918,7 +1046,7 @@ export async function publishLivePageConfigToBackend(
   versions: LivePageVersionSnapshot[];
   auditLogs: LivePageAuditEntry[];
 }> {
-  if (!supabase || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
+  if (!supabase || hasBosSessionToken() || (import.meta as any).env?.VITE_BOS_LIVE_PAGE_LOCAL === '1') {
     const data = await callLocalLivePageApi<{ ok?: boolean; published?: unknown; versions?: unknown[]; auditLogs?: unknown[] }>('/publish', {
       method: 'POST',
       body: JSON.stringify({ config: configToPublish, summary: `${pageId}: ${summary}`.slice(0, 500) }),

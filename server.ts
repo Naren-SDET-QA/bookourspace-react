@@ -30,6 +30,7 @@ import { registerStayHostApi } from './src/server/stayHostApi';
 import { registerBusinessApi } from './src/server/businessApi';
 import { registerStayAdminApi } from './src/server/stayAdminApi';
 import { registerDevDemoSessionApi } from './src/server/devDemoSessionApi';
+import { registerLocalProviderPreviewApi } from './src/server/localProviderPreviewApi';
 import { EmailOtpService } from './src/server/emailOtpAuth';
 import { AuthAccessSettingsStore, registerAuthAccessSettingsApi } from './src/server/authAccessSettings';
 import {
@@ -3124,6 +3125,13 @@ Task:
   // Local demo identities for the seeded stays database. Hard-disabled in
   // production and limited to the two seeded accounts.
   registerDevDemoSessionApi(app, {
+    signSession: signSessionToken,
+    env: process.env,
+  });
+
+  // Provider-only session for verifying a production bundle locally; registered
+  // only under explicit loopback preview flags (see the module for the gates).
+  registerLocalProviderPreviewApi(app, {
     signSession: signSessionToken,
     env: process.env,
   });

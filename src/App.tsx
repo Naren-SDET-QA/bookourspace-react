@@ -139,6 +139,7 @@ function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
 
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
 import { fetchAuthAccessConfig, type AuthAccessConfig } from './lib/authAccessClient';
+import { startGoogleSignInPopup } from './lib/googleSignIn';
 import { isCustomerModuleKey, moduleKeyForSection, sectionForModuleKey, type CustomerModuleKey } from './lib/customerModuleMeta';
 import { accessScopeFrom, actionGranted, permissionGranted, type AccessScope } from './lib/businessAccess';
 import { supabase } from './lib/supabaseClient';
@@ -214,9 +215,9 @@ import {
   localizeAreaName
 } from './utils/i18nEngine';
 import { BOSGlobeLoadingScreen } from './components/BOSBrandLogo';
+import { BOSMarketplaceFooter } from './components/BOSMarketplaceFooter';
 const PublishedBuilderRegion = lazy(() => import('./components/builder/PublishedBuilderRegion').then((module) => ({ default: module.PublishedBuilderRegion })));
 import { SelfHealingBoundary } from './components/SelfHealingBoundary';
-import { SectionStyleTabs } from './components/sectionStyle/SectionStyleTabs';
 import { StyleThreeList } from './components/sectionStyle/StyleThreeList';
 const UserModularTemplateBar = lazy(() => import('./components/ModularSystemEngine').then((module) => ({ default: module.UserModularTemplateBar })));
 const DynamicAdminFeaturesShowcase = lazy(() => import('./components/ModularSystemEngine').then((module) => ({ default: module.DynamicAdminFeaturesShowcase })));
@@ -262,6 +263,7 @@ import {
   EditablePageSectionItem,
   fetchLivePageConfigFromBackend,
   loadPublishedLivePageConfig,
+  pageCopyFromPage,
 } from './utils/livePageEditorStore';
 
 // Popular cities list
@@ -514,6 +516,19 @@ function MarketplaceAppContent() {
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
   const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile, customerModules, customerModuleGrants, customerModulesChecked } = useMarketplace();
+  // Customer sign-in entry: signed-out customers always get the redesigned
+  // full-page login (`#login`). The older Supabase modal stays as the signed-in
+  // account/profile panel, so it is no longer the customer's first contact with
+  // authentication.
+  const openCustomerSignIn = React.useCallback(() => {
+    if (supabaseUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setIsLoginPageOpen(true);
+    void fetchAuthAccessConfig({ force: true }).then(setAuthAccessConfig).catch(() => {});
+  }, [supabaseUser]);
+
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
   const [instituteAccessChecked, setInstituteAccessChecked] = useState(false);
@@ -754,6 +769,65 @@ function MarketplaceAppContent() {
     return () => window.removeEventListener('hashchange', applySectionHash);
   }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess, customerAccessScope, customerModulesChecked]);
 
+  // Default landing: the customer marketplace opens on the PG section (Style 3)
+  // instead of the legacy home grid. Writing the section hash reuses the same
+  // router a shared #pg link uses, so module grants and the published style
+  // apply exactly as they do for that link. Only a visit with no hash is
+  // redirected, once, so closing PGs or opening any other section is never
+  // overridden afterwards.
+  const landingDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (landingDefaultAppliedRef.current) return;
+    if (!authoritativeSessionChecked || entryExperience !== 'ready' || activeView !== 'marketplace') return;
+    landingDefaultAppliedRef.current = true;
+    if (window.location.hash.replace('#', '').trim()) return;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#pg`);
+    window.dispatchEvent(new Event('hashchange'));
+  }, [authoritativeSessionChecked, entryExperience, activeView]);
+
+  // Cold load of a protected deep link (/ #provider, /#admin) can reach the hash
+  // router before the persisted session and the entry gate have settled, so the
+  // router bails and no later hashchange arrives to retry. Re-apply the hash
+  // once both are ready. The same authority checks as the router apply: a hash
+  // is unauthenticated input and never grants a role.
+  useEffect(() => {
+    if (!authoritativeSessionChecked || entryExperience !== 'ready') return;
+    const hash = window.location.hash.replace('#', '').toLowerCase();
+    if (!hash) return;
+
+    if (hash === 'admin' || hash.startsWith('admin/')) {
+      if (isAdminSession && activeView !== 'admin_console') {
+        setUserRole('admin');
+        setActiveView('admin_console');
+        setOpenSection(null);
+      }
+      return;
+    }
+
+    const providerDeepLink = hash === 'provider' || hash === 'provider_portal'
+      || hash === 'provider_portal1' || hash.startsWith('provider/');
+    if (!providerDeepLink) return;
+
+    const mayOpenProvider = Boolean(authUser) && (
+      authUser?.role === 'provider'
+      || authUser?.role === 'admin'
+      || (authUser?.role === 'customer' && instituteAccessChecked && hasInstituteAccess)
+    );
+    if (mayOpenProvider && activeView !== 'provider_portal') {
+      setUserRole('provider');
+      setActiveView('provider_portal');
+      setOpenSection(null);
+    }
+  }, [
+    authoritativeSessionChecked,
+    entryExperience,
+    authUser,
+    isAdminSession,
+    instituteAccessChecked,
+    hasInstituteAccess,
+    activeView,
+  ]);
+
   // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
   useEffect(() => {
     const applyVenueHash = () => {
@@ -804,7 +878,7 @@ function MarketplaceAppContent() {
     const bootAction = bootWindow.__bosBootEntryAction;
     delete bootWindow.__bosBootEntryAction;
     if (bootAction === 'guest') setEntryExperience('ready');
-    if (bootAction === 'google') setIsAuthModalOpen(true);
+    if (bootAction === 'google') openCustomerSignIn();
     const applyQuickModule = (section: string) => {
       if (!['pg_hostels', 'classes', 'venues', 'services', 'hotel_stay', 'movies'].includes(section)) return;
       setActiveMarketSection(section as MarketSectionType);
@@ -823,7 +897,7 @@ function MarketplaceAppContent() {
     const handleBootEntryChoice = (event: Event) => {
       const action = (event as CustomEvent<{ action?: 'guest' | 'google' }>).detail?.action;
       if (action === 'guest') setEntryExperience('ready');
-      if (action === 'google') setIsAuthModalOpen(true);
+      if (action === 'google') openCustomerSignIn();
     };
     window.addEventListener('bos-boot-entry-choice', handleBootEntryChoice);
     const handleQuickModule = (event: Event) => {
@@ -860,7 +934,7 @@ function MarketplaceAppContent() {
         }, window.location.origin);
         window.close();
       } else {
-        setIsAuthModalOpen(true);
+        openCustomerSignIn();
       }
     }
     const handleOAuthRedirect = (e: Event) => {
@@ -1016,6 +1090,9 @@ function MarketplaceAppContent() {
   );
   const [isLivePageEditorOpen, setIsLivePageEditorOpen] = useState<boolean>(false);
   const [adminInlineEdit, setAdminInlineEdit] = useState<boolean>(false);
+  // Every surface the admin can line-edit gets its own override bucket, so an
+  // edit on the home page can never rewrite the same text inside a section.
+  const [inlineEditRouteKey, setInlineEditRouteKey] = useState<string>('home');
   const [adminSection, setAdminSection] = useState<SuperAdminSectionId>('dashboard');
   const [sectionStyles, setSectionStylesState] = useState<SectionStyles>(() => loadSectionStyles());
   const [isUniversalBuilderOpen, setIsUniversalBuilderOpen] = useState<boolean>(false);
@@ -1079,7 +1156,7 @@ function MarketplaceAppContent() {
     let scheduled: number | undefined;
     const apply = () => {
       try {
-        applyLivePageOverrides(livePageConfig, activeMarketSection);
+        applyLivePageOverrides(livePageConfig, inlineEditRouteKey);
       } catch { /* never break rendering for an override */ }
     };
     apply();
@@ -1093,7 +1170,7 @@ function MarketplaceAppContent() {
       window.clearTimeout(scheduled);
       observer.disconnect();
     };
-  }, [livePageConfig, activeMarketSection, activeView]);
+  }, [livePageConfig, activeMarketSection, activeView, inlineEditRouteKey]);
 
   const currentLivePage =
     livePageConfig.pages[activeMarketSection] || livePageConfig.pages.pg_hostels;
@@ -1358,6 +1435,13 @@ function MarketplaceAppContent() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
+
+  // Customer Google sign-in runs the same PKCE OAuth the account modal used, so
+  // the redesigned login screen never opens the legacy modal first.
+  const startCustomerGoogleSignIn = React.useCallback(async () => {
+    const result = await startGoogleSignInPopup();
+    if (!result.ok) showToast(result.error || 'Google sign-in could not start. Please try again.');
+  }, [showToast]);
 
   const handleSelectLocation = (loc: SelectedLocation) => {
     setSelectedLocationLabel(loc.label ?? loc.city);
@@ -2078,6 +2162,25 @@ function MarketplaceAppContent() {
       ? 'movies'
       : null;
 
+  // The override bucket for admin line edits must follow the screen the admin is
+  // actually looking at, including surfaces the page builder does not model.
+  useEffect(() => {
+    if (activeView === 'admin_console') {
+      setInlineEditRouteKey('admin_console');
+      return;
+    }
+    if (activeView === 'provider_portal') {
+      setInlineEditRouteKey('provider_portal');
+      return;
+    }
+    if (activeSectionExperience) {
+      setInlineEditRouteKey(activeSectionExperience);
+      return;
+    }
+    const hashSegment = (window.location.hash || '').replace('#', '').toLowerCase().split('/')[0];
+    setInlineEditRouteKey(hashSegment === 'venues' || hashSegment === 'halls' ? 'venues' : 'home');
+  }, [activeView, activeSectionExperience]);
+
   // Exactly one curated, bookable demo card per module (demo mode only).
   const demoCardSection: DemoSectionKey | null =
     activeSectionExperience === 'pg_hostels' ? 'pg'
@@ -2332,7 +2435,7 @@ function MarketplaceAppContent() {
             activeView={activeView}
             comparedCount={comparedListingIds.length}
             onOpenCompareModal={() => setIsCompareModalOpen(true)}
-            onOpenGoogleSignIn={() => setIsAuthModalOpen(true)}
+            onOpenGoogleSignIn={openCustomerSignIn}
             onExitAdminConsole={() => setActiveView('marketplace')}
             externalLoginModalOpen={false}
             selectedArea={selectedArea}
@@ -2442,7 +2545,7 @@ function MarketplaceAppContent() {
                 window.alert('The local demo account could not be started.');
               }
             }}
-            onGoogleSignIn={() => setIsAuthModalOpen(true)}
+            onGoogleSignIn={() => { void startCustomerGoogleSignIn(); }}
             onEmailSignIn={() => {
               setIsLoginPageOpen(true);
               void fetchAuthAccessConfig({ force: true }).then(setAuthAccessConfig).catch(() => {});
@@ -2451,6 +2554,21 @@ function MarketplaceAppContent() {
             onContinueAsGuest={() => {
               try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
               setEntryExperience('ready');
+            }}
+            onSelectService={(service) => {
+              // A shortcut on the sign-in screen opens that module as a guest;
+              // browsing never requires an account.
+              try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
+              setEntryExperience('ready');
+              const sectionByService: Record<string, MarketSectionType> = {
+                Movies: 'movies',
+                Classes: 'classes',
+                'Function Halls': 'venues',
+                Hotels: 'hotel_stay',
+                PG: 'pg_hostels',
+              };
+              const section = sectionByService[service];
+              if (section) setOpenSection(section);
             }}
           />
         </Suspense>
@@ -3122,6 +3240,8 @@ function MarketplaceAppContent() {
                     selectedCity={sharedSelectedCity}
                     moduleLabel={modulePresentation.pg?.values.label}
                     moduleHeadline={modulePresentation.pg?.values.headline}
+                    pageCopy={pageCopyFromPage(livePageConfig.pages.pg_hostels)}
+                    blocks={modulePresentation.pg?.values.blocks}
                     onClose={() => {
                       setIsPGSectionOpen(false);
                       clearSectionHash();
@@ -3139,6 +3259,7 @@ function MarketplaceAppContent() {
                     <ClassesTimingsExperience
                       inline
                       style={sectionStyles.classes}
+                      pageCopy={pageCopyFromPage(livePageConfig.pages.classes)}
                       listings={locationFilteredListings}
                       onClose={() => {
                         setIsClassesTimingsOpen(false);
@@ -3158,6 +3279,7 @@ function MarketplaceAppContent() {
                     initialCategoryId={selectedCategory === 'all' ? undefined : selectedCategory}
                     moduleLabel={modulePresentation.services?.values.label}
                     moduleHeadline={modulePresentation.services?.values.headline}
+                    pageCopy={pageCopyFromPage(livePageConfig.pages.services)}
                     onClose={() => {
                       setIsHomeServicesOpen(false);
                       clearSectionHash();
@@ -3174,11 +3296,12 @@ function MarketplaceAppContent() {
                   <HotelsStayExperience
                     inline
                     style={sectionStyles.stay}
+                    pageCopy={pageCopyFromPage(livePageConfig.pages.hotel_stay)}
                     stayCategory={selectedCategory}
                     staySubcategory={selectedSubcategory}
                     selectedCity={sharedSelectedCity}
                     onStartHosting={() => setIsPostWizardOpen(true)}
-                    onSignIn={() => setIsAuthModalOpen(true)}
+                    onSignIn={openCustomerSignIn}
                     onClose={() => {
                       setIsHotelsStayExperienceOpen(false);
                       clearSectionHash();
@@ -3192,7 +3315,7 @@ function MarketplaceAppContent() {
 
               {activeSectionExperience === 'movies' && (
                 <Suspense fallback={<SectionScreenFallback label="Loading movies…" />}>
-                  <MoviesShowtimes inline selectedCity={sharedSelectedCity} style={sectionStyles.movies} />
+                  <MoviesShowtimes inline selectedCity={sharedSelectedCity} style={sectionStyles.movies} pageCopy={pageCopyFromPage(livePageConfig.pages.movies)} />
                 </Suspense>
               )}
             </section>
@@ -3217,6 +3340,9 @@ function MarketplaceAppContent() {
               <ProviderDashboard
                 currentLang={currentLang}
                 onChangeLang={setCurrentLang}
+                onSignOut={async () => {
+                  await logoutGoogleSession();
+                }}
                 initialWorkspace={hasInstituteAccess ? 'institute' : 'pg'}
                 onSwitchToMarketplace={() => {
                   setActiveView('marketplace');
@@ -3279,7 +3405,7 @@ function MarketplaceAppContent() {
                     setActiveView('marketplace');
                     setIsLivePageEditorOpen(true);
                   }}
-                  className="rounded-xl bg-teal-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-teal-700"
+                  className="rounded-xl bg-brand-teal-deep px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-brand-teal-hover"
                 >
                   Live Page Editor
                 </button>
@@ -3294,7 +3420,7 @@ function MarketplaceAppContent() {
                   <button
                     type="button"
                     aria-pressed="true"
-                    className="rounded-lg bg-teal-600 px-3 py-1 text-[11px] font-bold text-white"
+                    className="rounded-lg bg-brand-teal-deep px-3 py-1 text-[11px] font-bold text-white"
                   >
                     Admin Console
                   </button>
@@ -3317,7 +3443,7 @@ function MarketplaceAppContent() {
                     }}
                     className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[11px] font-black transition ${
                       adminSection === tab.id
-                        ? 'bg-teal-600 text-white shadow-sm'
+                        ? 'bg-brand-teal-deep text-white shadow-sm'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                     }`}
                   >
@@ -3417,7 +3543,7 @@ function MarketplaceAppContent() {
                       setUserRole('admin');
                       setActiveView('admin_console');
                     }}
-                    className="px-3.5 py-2 rounded-xl bg-[#0B8F76] hover:bg-[#087A66] text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-brand-teal-deep hover:bg-brand-teal-hover text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
                   >
                     <ShieldCheck className="w-3.5 h-3.5 text-[#FFE500]" />
                     <span>Open Admin Review Queue ({pendingAdminListings.length})</span>
@@ -3428,12 +3554,12 @@ function MarketplaceAppContent() {
 
             {/* AUTHORIZED ADMIN LIVE PAGE EDITOR RIBBON (ONLY SHOWN WHEN ADMIN IS LOGGED IN) */}
             {userRole === 'admin' && (
-              <div className="bg-gradient-to-r from-slate-950 via-[#0B1526] to-[#0B1526] text-white rounded-2xl p-3 sm:px-4 border border-teal-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs">
+              <div className="bg-gradient-to-r from-brand-navy via-brand-navy-soft to-brand-navy text-white rounded-2xl p-3 sm:px-4 border border-brand-teal-deep/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase shrink-0">
                     OTA Live Editor • {livePageConfig.versionId}
                   </span>
-                  <span className="text-xs font-bold text-teal-100 truncate">
+                  <span className="text-xs font-bold text-brand-teal-tint truncate">
                     Editing Customer Page: <strong>{currentLivePage.icon} {currentLivePage.pageName}</strong> — Customize text, banners, section order, colors, categories & forms across Web, Android & iOS.
                   </span>
                 </div>
@@ -5193,7 +5319,7 @@ function MarketplaceAppContent() {
 
                 <button
                   type="button"
-                  onClick={() => setIsAuthModalOpen(true)}
+                  onClick={openCustomerSignIn}
                   className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-black flex items-center gap-1.5 shrink-0 shadow-2xs hover:bg-slate-50 cursor-pointer"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -5675,7 +5801,7 @@ function MarketplaceAppContent() {
             {activeMarketSection === 'movies' && (
               <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading movies…</p>}>
                 <SelfHealingBoundary moduleId="district_movies_section" moduleName="BookOurSpace Movies Section">
-                  <MoviesShowtimes inline selectedCity={sharedSelectedCity} style={sectionStyles.movies} />
+                  <MoviesShowtimes inline selectedCity={sharedSelectedCity} style={sectionStyles.movies} pageCopy={pageCopyFromPage(livePageConfig.pages.movies)} />
                 </SelfHealingBoundary>
               </Suspense>
             )}
@@ -5940,6 +6066,7 @@ function MarketplaceAppContent() {
                       onOpenRunningBatches={(l) => setRunningBatchesListing(l)}
                       isCompared={comparedListingIds.includes(listing.id)}
                       onToggleCompare={handleToggleCompare}
+                      onOpenSignIn={openCustomerSignIn}
                     />
                   ))}
                 </div>
@@ -6064,36 +6191,15 @@ function MarketplaceAppContent() {
         /></Suspense>}
       </div>
 
-      {/* DESKTOP / SECONDARY LINKS FOOTER */}
-      <footer className="mt-10 pb-24 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-5 text-xs text-slate-500 transition-colors">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-[#4338CA] text-[#FFE500] flex items-center justify-center font-black text-[10px]">
-              <span>BOS</span>
-            </div>
-            <span className="font-extrabold text-slate-900 dark:text-white">
-              {ui.brandName} — {ui.pgs}, {ui.classes}, {ui.functionHalls}, {ui.services}, {ui.stay} & {ui.movies}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs font-semibold">
-            <button onClick={() => setIsVoiceRegisterOpen(true)} className="hover:text-[#4338CA] cursor-pointer">
-              🎙️ {t.voiceJoin}
-            </button>
-            <button onClick={() => setIsPostWizardOpen(true)} className="hover:text-[#4338CA] cursor-pointer">
-              {ui.postFree}
-            </button>
-            <button onClick={() => setActiveView('provider_portal')} className="hover:text-[#4338CA] cursor-pointer">
-              {ui.providerHub}
-            </button>
-            {userRole === 'admin' && (
-              <button onClick={() => setActiveView('admin_console')} className="hover:text-[#4338CA] cursor-pointer">
-                {ui.adminConsole} {pendingAdminListings.length > 0 ? `(${pendingAdminListings.length})` : ''}
-              </button>
-            )}
-          </div>
-        </div>
-      </footer>
+      <BOSMarketplaceFooter
+        onOpenSection={(section) => setOpenSection(section)}
+        onPostFree={() => setIsPostWizardOpen(true)}
+        onProviderHub={() => setActiveView('provider_portal')}
+        onVoiceJoin={() => setIsVoiceRegisterOpen(true)}
+        isAdmin={userRole === 'admin'}
+        onAdminConsole={() => setActiveView('admin_console')}
+        pendingAdminListings={pendingAdminListings.length}
+      />
             </>
           )}
         </>
@@ -6119,7 +6225,7 @@ function MarketplaceAppContent() {
               reviews={reviews}
               onSignIn={() => {
                 try { sessionStorage.setItem('bos_profile_after_auth', 'profile'); } catch {}
-                setIsAuthModalOpen(true);
+                openCustomerSignIn();
               }}
               onSelectLanguage={(language) => {
                 setCurrentLang(language);
@@ -6248,7 +6354,7 @@ function MarketplaceAppContent() {
             onClick={() => {
               if (!authUser) {
                 try { sessionStorage.setItem('bos_profile_after_auth', 'bookings'); } catch {}
-                setIsAuthModalOpen(true);
+                openCustomerSignIn();
                 return;
               }
               setActiveBottomTab('bookings');
@@ -6291,7 +6397,7 @@ function MarketplaceAppContent() {
             onClick={() => {
               if (!authUser) {
                 try { sessionStorage.setItem('bos_profile_after_auth', 'favorites'); } catch {}
-                setIsAuthModalOpen(true);
+                openCustomerSignIn();
                 return;
               }
               setActiveBottomTab('favorites');
@@ -6635,6 +6741,7 @@ function MarketplaceAppContent() {
         <ListingDetailModal
           listing={selectedDetailListing}
           currentLang={currentLang}
+          onOpenSignIn={openCustomerSignIn}
           onClose={() => setSelectedDetailListing(null)}
           onBookNow={(l) => {
             setSelectedDetailListing(null);
@@ -6822,7 +6929,7 @@ function MarketplaceAppContent() {
       )}
 
       {/* ADMIN INLINE EDIT: one tap puts the live page into element-pick mode. */}
-      {isAdminSession && activeView !== 'admin_console' && !isLivePageEditorOpen && (
+            {isAdminSession && !isLivePageEditorOpen && (
         <button
           type="button"
           data-testid="admin-inline-edit"
@@ -6844,6 +6951,7 @@ function MarketplaceAppContent() {
           <LiveAdminPageEditor
             userRole={userRole}
             activePageId={activeMarketSection}
+            overridePageKey={inlineEditRouteKey}
             onSelectPageId={(pageId) => {
               setActiveMarketSection(pageId);
               setSelectedCategory('all');
@@ -6933,16 +7041,27 @@ function MarketplaceAppContent() {
               window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#stays`);
             }
           }}
-          onGoogle={() => {
-            setIsLoginPageOpen(false);
-            setIsAuthModalOpen(true);
-          }}
+          onGoogle={() => { void startCustomerGoogleSignIn(); }}
           config={authAccessConfig}
           onContinueAsGuest={() => {
             try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
             setEntryExperience('ready');
             setIsLoginPageOpen(false);
             showToast('Browsing as guest. Sign in when you are ready to book or save.');
+          }}
+          onSelectService={(service) => {
+            try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
+            setEntryExperience('ready');
+            setIsLoginPageOpen(false);
+            const sectionByService: Record<string, MarketSectionType> = {
+              Movies: 'movies',
+              Classes: 'classes',
+              'Function Halls': 'venues',
+              Hotels: 'hotel_stay',
+              PG: 'pg_hostels',
+            };
+            const section = sectionByService[service];
+            if (section) setOpenSection(section);
           }}
           onSignedIn={({ isNewUser, redirectTarget }) => {
             try { localStorage.setItem('bos_entry_choice_v1', 'signed-in'); } catch { /* ignore storage failures */ }

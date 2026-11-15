@@ -692,7 +692,7 @@ export function AdminUserPermissions() {
             type="button"
             disabled={busy}
             onClick={() => void saveCustomer()}
-            className="flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#0B8F76] px-3 text-xs font-black text-white transition hover:bg-[#3730a3] disabled:opacity-50"
+            className="flex min-h-[38px] items-center gap-1.5 rounded-xl bg-brand-teal-deep px-3 text-xs font-black text-white transition hover:bg-[#3730a3] disabled:opacity-50"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Save permissions
           </button>
@@ -757,7 +757,7 @@ export function AdminUserPermissions() {
                   run: runCopy,
                 });
               }}
-              className="flex min-h-[38px] items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+              className="flex min-h-[38px] items-center gap-1.5 rounded-xl border border-brand-teal-tint bg-brand-teal-soft px-3 text-xs font-black text-brand-teal-deep transition hover:bg-brand-teal-tint disabled:opacity-50 dark:border-brand-teal-deep dark:bg-brand-navy/30 dark:text-brand-teal-light"
             >
               <Copy className="h-4 w-4" aria-hidden="true" /> Copy
             </button>
@@ -876,7 +876,7 @@ export function AdminUserPermissions() {
             type="button"
             disabled={busy}
             onClick={() => void saveMember()}
-            className="flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#0B8F76] px-3 text-xs font-black text-white transition hover:bg-[#3730a3] disabled:opacity-50"
+            className="flex min-h-[38px] items-center gap-1.5 rounded-xl bg-brand-teal-deep px-3 text-xs font-black text-white transition hover:bg-[#3730a3] disabled:opacity-50"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Save permissions
           </button>
@@ -925,7 +925,7 @@ export function AdminUserPermissions() {
                   run: runCopy,
                 });
               }}
-              className="flex min-h-[38px] items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+              className="flex min-h-[38px] items-center gap-1.5 rounded-xl border border-brand-teal-tint bg-brand-teal-soft px-3 text-xs font-black text-brand-teal-deep transition hover:bg-brand-teal-tint disabled:opacity-50 dark:border-brand-teal-deep dark:bg-brand-navy/30 dark:text-brand-teal-light"
             >
               <Copy className="h-4 w-4" aria-hidden="true" /> Copy
             </button>
@@ -941,7 +941,7 @@ export function AdminUserPermissions() {
         <div>
           <span className="text-[10px] font-black uppercase tracking-wider text-[#f97316]">Access control</span>
           <h3 className="mt-1 flex items-center gap-2 text-base font-black text-slate-900 dark:text-white sm:text-lg">
-            <KeyRound className="h-4 w-4 text-[#0B8F76]" aria-hidden="true" /> User Permissions
+            <KeyRound className="h-4 w-4 text-brand-teal-deep" aria-hidden="true" /> User Permissions
           </h3>
           <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-500 dark:text-slate-400">
             Grant modules, sections and actions per account. Customer grants and business-member grants are independent;
@@ -1048,7 +1048,7 @@ export function AdminUserPermissions() {
                     onClick={() => setSelectedCustomer(customer)}
                     className={`w-full rounded-xl border p-2.5 text-left transition ${
                       selectedCustomer?.id === customer.id
-                        ? 'border-[#0B8F76] bg-teal-50/70 dark:bg-indigo-950/20'
+                        ? 'border-brand-teal-deep bg-brand-teal-soft/70 dark:bg-brand-navy/20'
                         : 'border-slate-200 bg-slate-50/60 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-slate-800'
                     }`}
                   >
@@ -1100,7 +1100,7 @@ export function AdminUserPermissions() {
                     onClick={() => setSelectedMember(member)}
                     className={`w-full rounded-xl border p-2.5 text-left transition ${
                       selectedMember?.user_id === member.user_id
-                        ? 'border-[#0B8F76] bg-teal-50/70 dark:bg-indigo-950/20'
+                        ? 'border-brand-teal-deep bg-brand-teal-soft/70 dark:bg-brand-navy/20'
                         : 'border-slate-200 bg-slate-50/60 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-slate-800'
                     }`}
                   >
@@ -1200,7 +1200,7 @@ export function AdminUserPermissions() {
                 disabled={busy}
                 onClick={() => void confirmation.run()}
                 className={`flex min-h-[36px] items-center gap-1.5 rounded-xl px-3 text-xs font-black text-white disabled:opacity-50 ${
-                  confirmation.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0B8F76] hover:bg-[#3730a3]'
+                  confirmation.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-brand-teal-deep hover:bg-[#3730a3]'
                 }`}
               >
                 {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}

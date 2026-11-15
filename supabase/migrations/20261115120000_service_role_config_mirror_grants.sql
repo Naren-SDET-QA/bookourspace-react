@@ -1,0 +1,33 @@
+-- Server-side App Builder config mirror — minimum privileges.
+--
+-- public.platform_config_versions revokes every privilege from public, anon and
+-- authenticated, which also removes what service_role inherited from PUBLIC, so
+-- the server's service key cannot append the published document.
+--
+-- What the mirror actually does (src/server/platformSettingsApi.ts):
+--   1. GET  platform_config_versions?select=version_number,created_by&...  -> SELECT
+--   2. POST platform_config_versions (append one published row)            -> INSERT
+--
+-- Deliberately NOT granted:
+--   * UPDATE            — the mirror only appends; it never rewrites a row.
+--   * DELETE/TRUNCATE   — never used by the mirror.
+--   * sequence usage    — id is `uuid default gen_random_uuid()` and
+--                         version_number is supplied explicitly, so no sequence
+--                         is touched.
+--   * platform_builder_audit / app_builder_audit_events insert — the AFTER INSERT
+--     trigger public.record_app_builder_audit_event() is SECURITY DEFINER, so it
+--     writes the audit row as the function owner, not as service_role.
+--   * EXECUTE on the builder RPCs — save/publish/rollback_* are SECURITY INVOKER
+--     and expect auth.uid(), which a server-side service key does not provide;
+--     the mirror writes the row directly instead.
+--   * RLS policies — service_role bypasses RLS in Supabase; every policy on this
+--     table targets anon/authenticated only.
+
+grant select, insert on table public.platform_config_versions to service_role;
+
+-- Inspection query for the hosted project (run in the SQL editor to confirm):
+--   select grantee, privilege_type
+--     from information_schema.role_table_grants
+--    where table_schema = 'public'
+--      and table_name = 'platform_config_versions'
+--    order by grantee, privilege_type;

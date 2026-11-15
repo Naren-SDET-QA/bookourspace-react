@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import SafeImage, { imageCategoryFor } from './SafeImage';
+import { VerifiedPhoneReveal } from './VerifiedPhoneReveal';
 import { 
   Star, 
   MapPin, 
@@ -63,6 +64,8 @@ interface ListingCardProps {
   onToggleCompare?: (listing: MarketplaceListing) => void;
   currentLang?: AppLanguage;
   selectedDateRange?: { startDate: string; endDate: string };
+  /** Opens the existing sign-in surface when a signed-out visitor asks for the number. */
+  onOpenSignIn?: () => void;
 }
 
 export const ListingCard: React.FC<ListingCardProps> = ({
@@ -75,6 +78,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
   onToggleCompare,
   currentLang = 'en',
   selectedDateRange,
+  onOpenSignIn,
 }) => {
   const { updateListing, favoriteIds, toggleFavorite } = useMarketplace();
   const t = translations[currentLang] || translations.en;
@@ -1324,14 +1328,18 @@ export const ListingCard: React.FC<ListingCardProps> = ({
                 </span>
               </label>
 
-              <a
-                href={`tel:${listing.providerPhone}`}
+              {/* The number stays masked until the customer signs in and verifies
+                  their email code, using the same gate as the listing detail. */}
+              <div
                 onClick={(e) => e.stopPropagation()}
-                className="text-[11px] font-black text-[#2874F0] hover:underline flex items-center gap-1"
+                className="min-w-0 text-right [&_button]:text-[11px] [&_button]:px-2 [&_button]:py-1 [&_span]:text-[10px]"
               >
-                <Phone className="w-3 h-3 text-[#2874F0]" />
-                <span>{ui.callOwner}</span>
-              </a>
+                <VerifiedPhoneReveal
+                  phone={listing.providerPhone}
+                  currentLang={currentLang}
+                  onOpenSignIn={onOpenSignIn}
+                />
+              </div>
             </div>
           )}
 

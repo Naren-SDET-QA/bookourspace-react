@@ -43,6 +43,7 @@ import { DEMO_PG_LISTINGS } from '../data/demoPgListings';
 import { PgStyleThreeCards } from './pg/PgStyleThreeCards';
 import { PgStyleThreeDetail } from './pg/PgStyleThreeDetail';
 import { PgBookingPanel } from './PgBookingPanel';
+import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 interface PGSectionExperienceProps {
   listings: MarketplaceListing[];
@@ -50,6 +51,14 @@ interface PGSectionExperienceProps {
   /** Published admin label (live-page config). Falls back to the built-in copy. */
   moduleLabel?: string;
   moduleHeadline?: string;
+  /** Admin-authored heading, subheading and button copy from the page-field form. */
+  pageCopy?: PageCopyOverrides;
+  /**
+   * Admin block switches from the published presentation config. Any missing
+   * key keeps its block visible, so a stale or partial config cannot blank the
+   * screen.
+   */
+  blocks?: Record<string, boolean>;
   onClose: () => void;
   selectedCity?: string;
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
@@ -120,7 +129,13 @@ function DetailList({ title, rows }: { title: string; rows: Array<{ label: strin
   );
 }
 
-export function PGSectionExperience({ listings, isLoading = false, moduleLabel, moduleHeadline, onClose, inline = false, selectedCity, style, selectedCategory = 'all', selectedSubcategory = 'all' }: PGSectionExperienceProps) {
+export function PGSectionExperience({ listings, isLoading = false, moduleLabel, moduleHeadline, pageCopy, blocks, onClose, inline = false, selectedCity, style, selectedCategory = 'all', selectedSubcategory = 'all' }: PGSectionExperienceProps) {
+  // Admin-controlled visibility. Only an explicit `false` hides a block.
+  const showHero = blocks?.showHero !== false;
+  const showSearch = blocks?.showSearch !== false;
+  const showFilters = blocks?.showFilters !== false;
+  const showCardBadges = blocks?.showCardBadges !== false;
+  const showContact = blocks?.showContact !== false;
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [gender, setGender] = useState<PgGenderFilter>('all');
@@ -143,7 +158,17 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
   const [selected, setSelected] = useState<PgCard | null>(null);
   const [style3StartTab, setStyle3StartTab] = useState<'about' | 'owner'>('about');
   // PG is locked to Style 3 by product decision.
-  const [experienceTab] = useState<'old' | 'pgdekho' | 'style3'>('style3');
+  // All three PG presentations exist, but the choice belongs to the admin:
+  //   style3  — the compact two-up cards and full detail sheet (default)
+  //   style1  — the classic PGListingCard list
+  //   style2  — the PG Dekho style browser
+  // The published section style arrives as `style`, and customers never get a
+  // switcher of their own.
+  const [experienceTab, setExperienceTab] = useState<'old' | 'pgdekho' | 'style3'>('style3');
+  useEffect(() => {
+    setExperienceTab(style === 'style1' ? 'old' : style === 'style2' ? 'pgdekho' : 'style3');
+    setSelected(null);
+  }, [style]);
   const owner = useOwnerContact('pg');
 
   useEffect(() => {
@@ -267,9 +292,7 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
 
   if (experienceTab === 'pgdekho') {
     return (
-      <>
-        <PgDekhoExperience inline={inline} showTabBar={false} listings={allListings} selectedCity={selectedCity} onClose={onClose} onSwitchToOld={() => undefined} />
-      </>
+      <PgDekhoExperience inline={inline} showTabBar={false} listings={allListings} selectedCity={selectedCity} onClose={onClose} onSwitchToOld={() => undefined} />
     );
   }
 
@@ -317,15 +340,15 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 pt-8 sm:px-6">
         <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-purple-50 to-white p-6 sm:p-9 dark:from-violet-950/40 dark:via-purple-950/30 dark:to-slate-950">
-          <h1 id="pg-section-title" className="text-3xl font-black tracking-tight sm:text-4xl">
-            {moduleHeadline || 'Find a PG that fits your month.'}
+          <h1 id="pg-section-title" className={showHero ? 'text-3xl font-black tracking-tight sm:text-4xl' : 'sr-only'}>
+            {pageCopy?.heading || moduleHeadline || 'Find a PG that fits your month.'}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-            Search by locality, then filter by rent, sharing and food. Every card shows only what the owner listed — no
-            brokerage claims, no invented ratings.
+          <p className={showHero ? 'mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300' : 'hidden'}>
+            {pageCopy?.subheading ||
+              'Search by locality, then filter by rent, sharing and food. Every card shows only what the owner listed — no brokerage claims, no invented ratings.'}
           </p>
 
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className={showSearch ? 'mt-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900' : 'hidden'}>
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
               <label className="flex min-h-12 items-center gap-2 rounded-xl px-3 lg:w-[170px]">
                 <MapPin className="h-4 w-4 shrink-0 text-violet-700" aria-hidden="true" />
@@ -388,7 +411,7 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
           </div>
         </div>
 
-        <div className="mt-7 flex flex-wrap items-center gap-2">
+        <div className={showFilters ? 'mt-7 flex flex-wrap items-center gap-2' : 'hidden'}>
           <button
             type="button"
             onClick={() => setFiltersOpen((open) => !open)}
@@ -409,7 +432,7 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
           )}
         </div>
 
-        {filtersOpen && (
+        {filtersOpen && showFilters && (
           <section className="mt-4 grid gap-6 rounded-2xl border border-slate-200 p-5 sm:grid-cols-2 dark:border-slate-800" aria-label="PG filters">
             <div>
               <h2 className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Monthly rent</h2>
@@ -511,6 +534,8 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
           {experienceTab === 'style3' && state === 'results' && (
             <PgStyleThreeCards
               cards={visible}
+              showBadges={showCardBadges}
+              showContact={showContact}
               onOpen={(card) => openDetails(card)}
               onCall={(card) => openDetails(card, 'owner')}
             />
@@ -689,6 +714,7 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
           contactNote={contactNote}
           onCall={() => void owner.contact('call')}
           onWhatsapp={() => void owner.contact('whatsapp')}
+          ownerPhone={canCall ? (owner.details?.phone || '') : ''}
         />
       )}
     </div>

@@ -35,6 +35,7 @@ import { useMarketplace } from '../context/MarketplaceContext';
 import { getServicesStyle, saveStylePreference, styleFromHash, type ServicesStyle } from '../lib/sectionStyleSettings';
 import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
 import { categoryConfigForListing, serviceCategoryIconEmoji } from '../lib/serviceCatalog';
+import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 interface HomeServicesSectionProps {
   listings: MarketplaceListing[];
@@ -43,6 +44,8 @@ interface HomeServicesSectionProps {
   /** Published admin label (live-page config). Falls back to the built-in copy. */
   moduleLabel?: string;
   moduleHeadline?: string;
+  /** Admin-authored heading, subheading and button copy from the page-field form. */
+  pageCopy?: PageCopyOverrides;
   onClose: () => void;
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
@@ -56,7 +59,7 @@ const PRICE_BANDS: Array<{ label: string; value: number }> = [
   { label: 'Under ₹5,000', value: 5000 },
 ];
 
-export function HomeServicesSection({ listings, isLoading = false, initialCategoryId, moduleLabel, moduleHeadline, onClose, inline = false, style }: HomeServicesSectionProps) {
+export function HomeServicesSection({ listings, isLoading = false, initialCategoryId, moduleLabel, moduleHeadline, pageCopy, onClose, inline = false, style }: HomeServicesSectionProps) {
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState(initialCategoryId && initialCategoryId !== 'all' ? initialCategoryId : 'all');
@@ -202,31 +205,8 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       aria-modal={inline ? undefined : true}
       aria-labelledby="services-section-title"
     >
-      {/* Persistent experience switcher — always visible so the Noddyy
-          Helper-On-Demand clone is reachable from every services view. */}
-      <div className="flex shrink-0 items-center justify-center border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
-        <div className="inline-flex items-center rounded-full border border-[#dddddd] bg-white p-1 shadow-sm">
-          {([
-            ['old', 'Style 1'],
-            ['triangle', 'Style 2'],
-            ['noddyy', 'Style 3'],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={experienceTab === value}
-              onClick={() => switchTo(value)}
-              className={`inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold transition ${
-                experienceTab === value
-                  ? 'bg-[#222222] text-white'
-                  : 'text-[#717171] hover:bg-[#f7f7f7]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* No customer-side style switcher: the admin decides which services
+          presentation every visitor sees. */}
 
       {experienceTab === 'triangle' ? (
         <HomeTriangleExperience
@@ -285,11 +265,11 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 pt-8 sm:px-6">
         <div className="rounded-3xl bg-gradient-to-br from-orange-50 via-amber-50 to-white p-6 sm:p-9 dark:from-orange-950/40 dark:via-amber-950/20 dark:to-slate-950">
           <h1 id="services-section-title" className="text-3xl font-black tracking-tight sm:text-4xl">
-            {moduleHeadline || 'Hire a professional for the job at hand.'}
+            {pageCopy?.heading || moduleHeadline || 'Hire a professional for the job at hand.'}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-            Pick a category or search by service and locality. Prices show only where providers listed them; everything else
-            asks for a quote from the provider.
+            {pageCopy?.subheading ||
+              'Pick a category or search by service and locality. Prices show only where providers listed them; everything else asks for a quote from the provider.'}
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">

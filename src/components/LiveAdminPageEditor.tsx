@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { applyLivePageOverrides, buildStableDomKey } from '../lib/livePageOverrides';
 import SafeImage from './SafeImage';
 import UniversalMediaManager from './UniversalMediaManager';
@@ -58,6 +58,8 @@ import {
 interface LiveAdminPageEditorProps {
   userRole: 'customer' | 'provider' | 'admin';
   activePageId: CustomerPageId;
+  /** Route key used for element-level line edits; defaults to activePageId. */
+  overridePageKey?: string;
   onSelectPageId: (pageId: CustomerPageId) => void;
   isOpenExternal?: boolean;
   /** Open directly in element-pick mode so every page element exposes an edit action. */
@@ -87,6 +89,7 @@ const CUSTOMER_PAGES_META: { id: CustomerPageId; label: string; icon: string }[]
 export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   userRole,
   activePageId,
+  overridePageKey,
   onSelectPageId,
   isOpenExternal,
   initialInspectMode = false,
@@ -121,6 +124,9 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [editorToast, setEditorToast] = useState<string | null>(null);
   const [changeSummaryInput, setChangeSummaryInput] = useState<string>('');
+  // Snapshot of the last config persisted to the database, so the auto-save
+  // effect only fires for real edits.
+  const lastSavedSnapshot = useRef<string>('');
 
   // New Category & Form Option inputs
   const [newCategoryLabel, setNewCategoryLabel] = useState('');
@@ -160,6 +166,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
         setDraftConfig(res.draft);
         setVersions(res.versions);
         setAuditLogs(res.auditLogs);
+        lastSavedSnapshot.current = JSON.stringify(res.draft);
       })
       .catch(() => {
         if (mounted) setEditorToast('Central App Builder storage is unavailable. No remote configuration was loaded.');
@@ -168,6 +175,34 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       mounted = false;
     };
   }, []);
+
+  // Live edit persistence: every change is written to the database after a short
+  // idle window, so the edit survives a closed tab and never needs a separate
+  // Publish click to be stored.
+  useEffect(() => {
+    if (userRole !== 'admin') return;
+    const snapshot = JSON.stringify(draftConfig);
+    if (!lastSavedSnapshot.current) {
+      lastSavedSnapshot.current = snapshot;
+      return;
+    }
+    if (snapshot === lastSavedSnapshot.current) return;
+    const timer = window.setTimeout(() => {
+      setIsSaving(true);
+      void publishLivePageConfigToBackend(draftConfig, activePageId, 'Live edit auto-save')
+        .then((res) => {
+          lastSavedSnapshot.current = JSON.stringify(res.published);
+          setPublishedConfig(res.published);
+          setDraftConfig(res.published);
+          setVersions(res.versions);
+          setAuditLogs(res.auditLogs);
+          notify('✅ Live edit saved to the database');
+        })
+        .catch(() => notify('⚠️ Live edit could not be saved to the database'))
+        .finally(() => setIsSaving(false));
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [draftConfig, activePageId]);
 
   // Broadcast active config to parent App whenever draft/published or previewMode changes
   useEffect(() => {
@@ -247,10 +282,11 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       e.stopPropagation();
       target.style.outline = '';
 
+      const overrideKey = overridePageKey || activePageId;
       const existingKey = target.getAttribute('data-bos-dom-key');
       const domKey = existingKey && !/^el-/.test(existingKey)
         ? existingKey
-        : buildStableDomKey(activePageId, target);
+        : buildStableDomKey(overrideKey, target);
       target.setAttribute('data-bos-dom-key', domKey);
 
       const existing = draftConfig.domOverrides[domKey];
@@ -260,7 +296,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       const nextOverride: InspectedDomElementOverride = existing || {
         selectorKey: domKey,
         tagName: target.tagName,
-        pageId: activePageId,
+        pageId: overrideKey,
         originalText: textSample || target.tagName,
         customText: textSample,
         customImageUrl: imgSrc,
@@ -293,7 +329,7 @@ export const LiveAdminPageEditor: React.FC<LiveAdminPageEditorProps> = ({
       cursorStyle.remove();
       delete document.body.dataset.bosInlineEdit;
     };
-  }, [userRole, inspectMode, activePageId, draftConfig.domOverrides]);
+  }, [userRole, inspectMode, activePageId, overridePageKey, draftConfig.domOverrides]);
 
   // Security guard: Never render editor controls for non-admin users
   if (userRole !== 'admin') {

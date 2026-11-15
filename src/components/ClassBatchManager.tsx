@@ -103,6 +103,10 @@ export function ClassBatchManager() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Batch endpoints answer 403 for a business on another module (PG, stays,
+  // venues). This console only exists inside a classes workspace, so it stays
+  // out of the way instead of printing a module error on that screen.
+  const [notApplicable, setNotApplicable] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -110,6 +114,11 @@ export function ClassBatchManager() {
       fetchProviderCourses(),
       fetchProviderClassBatches(),
     ]);
+    if ((!courseResult.ok && courseResult.status === 403) || (!batchResult.ok && batchResult.status === 403)) {
+      setNotApplicable(true);
+      setLoading(false);
+      return;
+    }
     if (courseResult.ok && courseResult.data) {
       const courseListings = courseResult.data.courses;
       setCourses(courseListings);
@@ -198,6 +207,8 @@ export function ClassBatchManager() {
   };
 
   const activeCourses = useMemo(() => courses.filter((course) => course.status !== 'archived'), [courses]);
+
+  if (notApplicable) return null;
 
   return (
     <section

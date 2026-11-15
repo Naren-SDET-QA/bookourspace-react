@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { allIndianLanguages, type AppLanguage } from '../utils/translations';
+import { BRAND_TOKENS } from '../theme/tokens';
 
 /** A single actionable item surfaced in the top-bar bell. */
 export interface ProviderNotification {
@@ -81,13 +82,18 @@ const NAV_GROUPS: Array<{ label: string; keys: ProviderPortalModule[] }> = [
 
 /** Navy rail, teal primary, light canvas — shared by every provider module. */
 export const PROVIDER_TOKENS = {
-  rail: '#0B1526',
-  railHover: '#132238',
-  primary: '#12C2A0',
-  primaryInk: '#04241C',
-  canvas: '#F4F7FB',
-  border: '#E3E9F2',
+  rail: BRAND_TOKENS.navy,
+  railHover: BRAND_TOKENS.navySoft,
+  primary: BRAND_TOKENS.teal,
+  primaryInk: BRAND_TOKENS.ink,
+  canvas: BRAND_TOKENS.canvas,
+  border: BRAND_TOKENS.border,
 } as const;
+
+/** Brand focus ring for controls on light surfaces (the browser default is blue). */
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900';
+/** Same ring, offset against the navy rail. */
+const FOCUS_RING_ON_NAVY = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal focus-visible:ring-offset-2 focus-visible:ring-offset-brand-navy';
 
 /**
  * One metric tile. The provider dashboard composes four of these into the
@@ -100,12 +106,12 @@ export function ProviderStatCard({ icon: Icon, label, value, tone = 'teal' }: {
   tone?: 'teal' | 'violet' | 'amber' | 'sky';
 }) {
   const tones: Record<string, string> = {
-    teal: 'bg-[#12C2A0]/12 text-[#0B8F76] dark:bg-[#12C2A0]/15 dark:text-[#5FE3CB]',
-    violet: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300',
+    teal: 'bg-brand-teal/12 text-brand-teal-deep dark:bg-brand-teal/15 dark:text-brand-teal-light',
+    violet: 'bg-brand-teal-tint text-brand-teal-deep dark:bg-brand-navy dark:text-brand-teal-light',
     amber: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
     sky: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300',
   };
-  return <div data-testid="provider-stat-card" className="flex items-center gap-3 rounded-2xl border border-[#E3E9F2] bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] dark:border-slate-800 dark:bg-slate-900">
+  return <div data-testid="provider-stat-card" className="flex items-center gap-3 rounded-2xl border border-brand-border bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] dark:border-slate-800 dark:bg-slate-900">
     <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${tones[tone]}`}><Icon className="h-5 w-5" aria-hidden="true" /></span>
     <div className="min-w-0">
       <p className="truncate text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p>
@@ -162,7 +168,7 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
       onClick={() => navigate(item.key)}
       title={collapsed ? item.label : undefined}
       aria-current={active ? 'page' : undefined}
-      className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition ${active ? 'shadow-sm' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}
+      className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition ${FOCUS_RING_ON_NAVY} ${active ? 'shadow-sm' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}
       style={active ? { backgroundColor: PROVIDER_TOKENS.primary, color: PROVIDER_TOKENS.primaryInk } : undefined}
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -195,7 +201,7 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
       <div className="border-t border-white/10 p-3">
         {!collapsed && (
           <>
-            <div className="mb-3 rounded-xl p-3" style={{ background: 'linear-gradient(135deg, #12C2A0 0%, #0B8F76 100%)', color: PROVIDER_TOKENS.primaryInk }}>
+            <div className="mb-3 rounded-xl p-3" style={{ background: `linear-gradient(135deg, ${BRAND_TOKENS.teal} 0%, ${BRAND_TOKENS.tealDeep} 100%)`, color: PROVIDER_TOKENS.primaryInk }}>
               <p className="text-xs font-black">Your changes are live</p>
               <p className="mt-0.5 text-[10px] leading-4 opacity-80">Updates reflect immediately in the app</p>
             </div>
@@ -205,20 +211,20 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
             </div>
           </>
         )}
-        <button type="button" onClick={() => setCollapsed((value) => !value)} className="hidden min-h-10 w-full items-center justify-center rounded-xl text-white/60 hover:bg-white/10 hover:text-white md:flex" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}</button>
+        <button type="button" onClick={() => setCollapsed((value) => !value)} className={`hidden min-h-10 w-full items-center justify-center rounded-xl text-white/60 hover:bg-white/10 hover:text-white md:flex ${FOCUS_RING_ON_NAVY}`} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}</button>
         {!collapsed && <p className="mt-2 px-1 text-[10px] text-white/30">Provider portal · v1.0</p>}
       </div>
     </aside>
   );
 
-  return <div className="min-h-[680px] overflow-x-clip rounded-2xl border border-[#E3E9F2] bg-[#F4F7FB] text-slate-900 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
+  return <div className="min-h-[680px] overflow-x-clip rounded-2xl border border-brand-border bg-brand-canvas text-slate-900 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
     <div className="flex min-h-[680px]">
       <div className="hidden md:block"><Sidebar /></div>
       {mobileOpen && <div className="fixed inset-0 z-50 flex md:hidden"><button type="button" className="flex-1 bg-black/40" aria-label="Close navigation" onClick={() => setMobileOpen(false)} /><div className="h-full"><Sidebar /></div></div>}
       <div className="min-w-0 flex-1">
-        <header ref={headerRef} className="sticky top-0 z-20 border-b border-[#E3E9F2] bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
+        <header ref={headerRef} className="sticky top-0 z-20 border-b border-brand-border bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
           <div className="flex h-[64px] items-center gap-3 px-3 sm:px-5">
-            <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#E3E9F2] md:hidden dark:border-slate-700" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu className="h-5 w-5" /></button>
+            <button type="button" className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-border md:hidden dark:border-slate-700 ${FOCUS_RING}`} onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu className="h-5 w-5" /></button>
             <label className="relative flex min-w-0 flex-1 items-center sm:max-w-sm">
               <span className="sr-only">Search provider sections</span>
               <Search className="pointer-events-none absolute left-3 h-4 w-4 text-slate-400" aria-hidden="true" />
@@ -226,12 +232,12 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search anything…"
-                className="h-10 w-full min-w-0 rounded-xl border border-[#E3E9F2] bg-[#F7F9FC] pl-9 pr-8 text-sm text-slate-700 outline-none transition focus:border-[#12C2A0] focus:ring-2 focus:ring-[#12C2A0]/25 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                className="h-10 w-full min-w-0 rounded-xl border border-brand-border bg-[#F7F9FC] pl-9 pr-8 text-sm text-slate-700 outline-none transition focus:border-brand-teal focus:ring-2 focus:ring-brand-teal/25 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
               />
               {query && <button type="button" onClick={() => setQuery('')} className="absolute right-2 grid h-6 w-6 place-items-center rounded-lg text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800" aria-label="Clear search"><X className="h-3.5 w-3.5" /></button>}
             </label>
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {onOpenMarketplace && <button type="button" onClick={onOpenMarketplace} className="hidden min-h-10 items-center gap-2 rounded-xl border border-[#E3E9F2] bg-white px-3 text-xs font-bold text-slate-700 transition hover:border-[#12C2A0] hover:text-[#0B8F76] sm:inline-flex dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+              {onOpenMarketplace && <button type="button" onClick={onOpenMarketplace} className={`hidden min-h-10 items-center gap-2 rounded-xl border border-brand-border bg-white px-3 text-xs font-bold text-slate-700 transition hover:border-brand-teal hover:text-brand-teal-deep sm:inline-flex dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 ${FOCUS_RING}`}>
                 <ExternalLink className="h-4 w-4" aria-hidden="true" />View app
               </button>}
 
@@ -242,14 +248,14 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
                     onClick={() => setPanel((value) => value === 'language' ? null : 'language')}
                     aria-haspopup="menu"
                     aria-expanded={panel === 'language'}
-                    className="hidden min-h-10 items-center gap-2 rounded-xl border border-[#E3E9F2] bg-white px-3 text-xs font-bold text-slate-700 transition hover:border-[#12C2A0] hover:text-[#0B8F76] sm:inline-flex dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                    className={`hidden min-h-10 items-center gap-2 rounded-xl border border-brand-border bg-white px-3 text-xs font-bold text-slate-700 transition hover:border-brand-teal hover:text-brand-teal-deep sm:inline-flex dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 ${FOCUS_RING}`}
                   >
                     <Globe className="h-4 w-4" aria-hidden="true" />
                     <span className="max-w-[92px] truncate">{activeLanguage.englishName}</span>
                     <ChevronDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
                   </button>
                   {panel === 'language' && (
-                    <div role="menu" aria-label="Language" className="absolute right-0 top-full z-30 mt-2 max-h-72 w-56 overflow-y-auto rounded-2xl border border-[#E3E9F2] bg-white p-1.5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                    <div role="menu" aria-label="Language" className="absolute right-0 top-full z-30 mt-2 max-h-72 w-56 overflow-y-auto rounded-2xl border border-brand-border bg-white p-1.5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
                       {allIndianLanguages.map((language) => {
                         const active = language.code === currentLang;
                         return <button
@@ -258,7 +264,7 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
                           role="menuitemradio"
                           aria-checked={active}
                           onClick={() => { onChangeLanguage(language.code as AppLanguage); setPanel(null); }}
-                          className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${active ? 'bg-[#12C2A0]/12 text-[#0B8F76]' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+                          className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${active ? 'bg-brand-teal/12 text-brand-teal-deep' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
                         >
                           <span className="truncate">{language.label}</span>
                           <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">{language.englishName}</span>
@@ -276,7 +282,7 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
                   aria-haspopup="menu"
                   aria-expanded={panel === 'notifications'}
                   aria-label={notificationCount ? `${notificationCount} notifications` : 'Notifications'}
-                  className="relative grid h-10 w-10 place-items-center rounded-full border border-[#E3E9F2] bg-white text-slate-500 transition hover:border-[#12C2A0] hover:text-[#0B8F76] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                  className={`relative grid h-10 w-10 place-items-center rounded-full border border-brand-border bg-white text-slate-500 transition hover:border-brand-teal hover:text-brand-teal-deep dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 ${FOCUS_RING}`}
                 >
                   <Bell className="h-4 w-4" />
                   {notificationCount > 0 && (
@@ -284,8 +290,8 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
                   )}
                 </button>
                 {panel === 'notifications' && (
-                  <div role="menu" aria-label="Notifications" className="absolute right-0 top-full z-30 mt-2 w-[300px] overflow-hidden rounded-2xl border border-[#E3E9F2] bg-white shadow-lg dark:border-slate-800 dark:bg-slate-900">
-                    <div className="flex items-center justify-between border-b border-[#E3E9F2] px-4 py-2.5 dark:border-slate-800">
+                  <div role="menu" aria-label="Notifications" className="absolute right-0 top-full z-30 mt-2 w-[300px] overflow-hidden rounded-2xl border border-brand-border bg-white shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between border-b border-brand-border px-4 py-2.5 dark:border-slate-800">
                       <p className="text-xs font-black text-slate-900 dark:text-white">Notifications</p>
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{notificationCount} open</span>
                     </div>
@@ -336,7 +342,7 @@ export default function ProviderPortalShell({ activeModule, onNavigate, role, ti
               {subtitle && <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400 sm:text-sm">{subtitle}</p>}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="hidden items-center gap-1.5 rounded-full border border-[#12C2A0]/30 bg-[#12C2A0]/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-[#0B8F76] sm:inline-flex dark:text-[#5FE3CB]">
+              <span className="hidden items-center gap-1.5 rounded-full border border-brand-teal/30 bg-brand-teal/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-brand-teal-deep sm:inline-flex dark:text-brand-teal-light">
                 <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: PROVIDER_TOKENS.primary }} />Live data
               </span>
             </div>

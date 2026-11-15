@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Clock, Film, Loader2, MapPin, Pencil, RotateCcw, Search, ShieldCheck, X } from 'lucide-react';
-import { SectionStyleTabs } from './sectionStyle/SectionStyleTabs';
 import { saveStylePreference } from '../lib/sectionStyleSettings';
 import { StyleThreeList } from './sectionStyle/StyleThreeList';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { LastUpdated } from './ui/LastUpdated';
+import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 interface ShowtimeScreen {
   id: string;
@@ -33,6 +33,8 @@ interface MoviesShowtimesProps {
   inline?: boolean;
   onClose?: () => void;
   style?: 'experience' | 'classic' | 'style3';
+  /** Admin-authored heading and subheading from the page-field form. */
+  pageCopy?: PageCopyOverrides;
 }
 
 const ALL = 'All cities';
@@ -44,7 +46,7 @@ const ALL = 'All cities';
  * deliberately no seat selection, booking, payment, ticket or refund surface
  * here; the legacy booking engine stays in the codebase but is not rendered.
  */
-export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, onClose, style = 'experience' }: MoviesShowtimesProps) {
+export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, onClose, style = 'experience', pageCopy }: MoviesShowtimesProps) {
   const [activeStyle, setActiveStyle] = useState<'experience' | 'classic' | 'style3'>(style);
   useEffect(() => { setActiveStyle(style); }, [style]);
   const changeStyle = (value: 1 | 2 | 3) => {
@@ -217,21 +219,14 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
           )}
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white"><Film className="h-4 w-4" /></span>
           <div className="min-w-0 flex-1">
-            <h1 className="text-[15px] font-black text-slate-900 sm:text-lg">Movies & showtimes</h1>
-            <p className="text-[10.5px] text-slate-500">Movies → nearby theatres → real timings. No online booking for Movies.</p>
+            <h1 className="text-[15px] font-black text-slate-900 sm:text-lg">{pageCopy?.heading || 'Movies & showtimes'}</h1>
+            <p className="text-[10.5px] text-slate-500">{pageCopy?.subheading || 'Movies → nearby theatres → real timings. No online booking for Movies.'}</p>
           </div>
           <button type="button" onClick={() => void load()} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-[11px] font-bold text-slate-700" aria-label="Refresh showtimes">
             <RotateCcw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
       </header>
-
-      <SectionStyleTabs
-        active={activeStyle === 'experience' ? 1 : activeStyle === 'classic' ? 2 : 3}
-        onChange={changeStyle}
-        label="Movies display style"
-        className="border-b border-slate-200 bg-white"
-      />
 
       <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:px-5">
         <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="Location filters">

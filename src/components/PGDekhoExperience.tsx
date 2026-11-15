@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SafeImage from './SafeImage';
+import { BOS_CALL_HREF, whatsappHref } from '../lib/contactNumbers';
+import { copyText } from '../lib/clipboard';
+import { useMarketplace } from '../context/MarketplaceContext';
 import {
   ArrowLeft,
   ArrowRight,
@@ -583,8 +586,21 @@ function ContactModal({ listing, onClose }: { listing: PgDekhoListing; onClose: 
           </div>
         )}
         <div className="mt-3 flex gap-2">
-          <button type="button" className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#2563eb] text-[12px] font-bold text-[#2563eb]"><Phone className="h-3.5 w-3.5" /> Call</button>
-          <button type="button" className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#2563eb] text-[12px] font-bold text-[#2563eb]"><Mail className="h-3.5 w-3.5" /> WhatsApp</button>
+          <a
+            href={BOS_CALL_HREF}
+            aria-label={`Call BookOurSpace about ${listing.name}`}
+            className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#2563eb] text-[12px] font-bold text-[#2563eb]"
+          >
+            <Phone className="h-3.5 w-3.5" /> Call
+          </a>
+          <a
+            href={whatsappHref(`Hi BookOurSpace, I am interested in ${listing.name}.`)}
+            target="_blank"
+            rel="noreferrer"
+            className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#2563eb] text-[12px] font-bold text-[#2563eb]"
+          >
+            <Mail className="h-3.5 w-3.5" /> WhatsApp
+          </a>
         </div>
       </div>
     </div>
@@ -826,6 +842,8 @@ const TAB_TARGETS: Record<string, string> = {
 };
 
 function DetailPage({ listing, onBack, onContact }: { listing: PgDekhoListing; onBack: () => void; onContact: () => void }) {
+  const { favoriteIds, toggleFavorite } = useMarketplace();
+  const [sharedNotice, setSharedNotice] = useState('');
   const [tab, setTab] = useState('Property Details');
   const goTab = (t: string) => {
     setTab(t);
@@ -851,7 +869,15 @@ function DetailPage({ listing, onBack, onContact }: { listing: PgDekhoListing; o
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <div className="relative overflow-hidden rounded-xl">
             <SafeImage category="pg" src={images[0]} alt={listing.name} className="aspect-[16/10] w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0'; }} />
-            <button type="button" aria-label="View all photos" className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold text-white">View all photos</button>
+            <a
+              href={images[0] || '#'}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open the full photo for ${listing.name}`}
+              className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold text-white"
+            >
+              View all photos
+            </a>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-rows-2">
             {images.slice(1, 5).map((src, i) => (
@@ -871,8 +897,25 @@ function DetailPage({ listing, onBack, onContact }: { listing: PgDekhoListing; o
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="button" className="inline-flex h-9 items-center gap-1 rounded-full border border-[#e5e7eb] bg-white px-3 text-[12px] font-semibold"><Share2 className="h-3.5 w-3.5" /> Share</button>
-            <button type="button" className="inline-flex h-9 items-center gap-1 rounded-full border border-[#e5e7eb] bg-white px-3 text-[12px] font-semibold"><Heart className="h-3.5 w-3.5" /> Save</button>
+            <button
+              type="button"
+              onClick={async () => {
+                const shared = await copyText(`${listing.name} — ${addressOf(listing)}\n${window.location.href}`);
+                setSharedNotice(shared ? 'Link copied' : 'Copy the link from the address bar');
+                window.setTimeout(() => setSharedNotice(''), 2500);
+              }}
+              className="inline-flex h-9 items-center gap-1 rounded-full border border-[#e5e7eb] bg-white px-3 text-[12px] font-semibold"
+            >
+              <Share2 className="h-3.5 w-3.5" /> {sharedNotice || 'Share'}
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleFavorite(listing.id)}
+              aria-pressed={favoriteIds.includes(listing.id)}
+              className="inline-flex h-9 items-center gap-1 rounded-full border border-[#e5e7eb] bg-white px-3 text-[12px] font-semibold"
+            >
+              <Heart className={`h-3.5 w-3.5 ${favoriteIds.includes(listing.id) ? 'fill-rose-500 text-rose-500' : ''}`} /> {favoriteIds.includes(listing.id) ? 'Saved' : 'Save'}
+            </button>
           </div>
         </div>
 
@@ -963,7 +1006,7 @@ function DetailPage({ listing, onBack, onContact }: { listing: PgDekhoListing; o
             <div className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
               <div className="flex items-center justify-between">
                 <div><h2 className="text-[14px] font-extrabold">Show some love!</h2><p className="text-[11px] text-[#64748b]">Let us know how good this PG is.</p></div>
-                <button type="button" className="rounded-lg bg-[#2563eb] px-3 py-1.5 text-[12px] font-bold text-white">Write a Review</button>
+                <button type="button" onClick={() => goTab('Reviews')} className="rounded-lg bg-[#2563eb] px-3 py-1.5 text-[12px] font-bold text-white">Write a Review</button>
               </div>
             </div>
           </div>
@@ -1074,8 +1117,8 @@ export function PgDekhoExperience({ onClose, onSwitchToOld, inline = false, list
               <span className="rounded-lg bg-white px-2 py-1"><BookOurSpaceLogo className="text-lg" /></span>
             </button>
             <div className="ml-auto flex items-center gap-2">
-              <button type="button" className="hidden rounded-full border border-white/70 px-3 py-1.5 text-[12px] font-bold text-white sm:block">List Your PG</button>
-              <button type="button" className="rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-[#2563eb]">Login</button>
+              <a href="#provider_portal" className="hidden rounded-full border border-white/70 px-3 py-1.5 text-[12px] font-bold text-white sm:block">List Your PG</a>
+              <a href="#login" className="rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-[#2563eb]">Login</a>
             </div>
           </div>
         </header>

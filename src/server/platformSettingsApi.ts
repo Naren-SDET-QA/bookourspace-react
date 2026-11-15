@@ -23,6 +23,8 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 export interface LivePageVersion {
+  /** Result of mirroring the published document into the Supabase config table. */
+  mirror?: { ok: boolean; reason?: string };
   versionId: string;
   versionNumber: number;
   publishedAt: string | null;
@@ -185,9 +187,84 @@ export class PlatformSettingsRepository {
         `select public.platform_live_page_publish($1,$2) as result`,
         [actor.id, target],
       );
-      return mapVersion(rows[0].result);
+      const mapped = mapVersion(rows[0].result);
+      // Mirror into the Supabase builder document so both stores agree. A mirror
+      // failure never fails the publish itself — the Postgres row is already live.
+      const mirror = await this.mirrorToSupabaseBuilderDocument(actor, record(rows[0].result.config), mapped.summary);
+      return { ...mapped, mirror };
     } catch (error) {
       throw this.translate(error);
+    }
+  }
+
+  /**
+   * Append the published configuration to public.platform_config_versions with
+   * the server-only service key, which is the same document the web client reads.
+   */
+  private async mirrorToSupabaseBuilderDocument(
+    actor: BuilderActor,
+    config: Record<string, unknown>,
+    summary: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const projectUrl = String(this.environment.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+    const secret = String(this.environment.SUPABASE_SECRET_KEY || this.environment.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+    if (!projectUrl || !secret || Object.keys(config).length === 0) {
+      logSafeError(
+        'supabase-config-mirror',
+        `skipped url=${projectUrl ? 1 : 0} key=${secret ? 1 : 0} fields=${Object.keys(config).length}`,
+        new Error('MIRROR_NOT_CONFIGURED'),
+      );
+      return { ok: false, reason: 'MIRROR_NOT_CONFIGURED' };
+    }
+    const table = `${projectUrl}/rest/v1/platform_config_versions`;
+    const headers = {
+      apikey: secret,
+      authorization: `Bearer ${secret}`,
+      'content-type': 'application/json',
+    };
+    const insertRow = (versionNumber: number, createdBy: string) => fetch(table, {
+      method: 'POST',
+      headers: { ...headers, prefer: 'return=minimal' },
+      body: JSON.stringify({
+        config_key: 'global',
+        version_number: versionNumber,
+        status: 'published',
+        config,
+        summary: (summary || 'Admin publish').slice(0, 500),
+        created_by: createdBy,
+        published_at: new Date().toISOString(),
+      }),
+    });
+    try {
+      const latest = await fetch(`${table}?select=version_number,created_by&config_key=eq.global&order=version_number.desc&limit=1`, {
+        headers,
+        cache: 'no-store',
+      });
+      if (!latest.ok) return { ok: false, reason: `MIRROR_READ_HTTP_${latest.status}` };
+      const rows = (await latest.json().catch(() => [])) as Array<{ version_number?: number; created_by?: string }>;
+      let nextVersion = Number(rows[0]?.version_number || 0) + 1;
+      const previousAuthor = typeof rows[0]?.created_by === 'string' ? rows[0].created_by : null;
+      let insert = await insertRow(nextVersion, actor.id);
+      if (!insert.ok) {
+        const detail = await insert.text().catch(() => '');
+        if (insert.status === 409 || detail.includes('23505')) {
+          // Another publish mirrored the same version number first.
+          nextVersion += 1;
+          insert = await insertRow(nextVersion, actor.id);
+        } else if (detail.includes('23503') && previousAuthor) {
+          // This server's admin id is not an auth.users row in the hosted project;
+          // attribute the mirrored version to the previous hosted author.
+          insert = await insertRow(nextVersion, previousAuthor);
+        }
+        if (!insert.ok) {
+          logSafeError('supabase-config-mirror', `insert rejected ${insert.status}`, new Error(detail.slice(0, 200)));
+          return { ok: false, reason: `MIRROR_WRITE_HTTP_${insert.status}` };
+        }
+      }
+      return { ok: true, reason: `v${nextVersion}` };
+    } catch (error) {
+      logSafeError('supabase-config-mirror', 'mirror request', error);
+      return { ok: false, reason: 'MIRROR_REQUEST_FAILED' };
     }
   }
 
@@ -539,6 +616,7 @@ export function registerPlatformSettingsApi(
         auditLogs: state.auditLogs,
         versionId: version.versionId,
         publishedAt: version.publishedAt,
+        mirror: version.mirror ?? null,
       });
     } catch (error) {
       sendError(response, error);

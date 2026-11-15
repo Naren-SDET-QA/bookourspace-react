@@ -1,0 +1,25 @@
+/*
+ * Brand tokens shared by the admin console and the provider portal.
+ *
+ * Values must stay in sync with src/theme/tokens.ts — that module is the same
+ * palette for inline styles and SVG attributes, which cannot use CSS classes.
+ */
+@theme {
+  --color-brand-teal: #12c2a0;
+  --color-brand-teal-deep: #0b8f76;
+  --color-brand-teal-hover: #087a66;
+  /* Light fills: tint for chips and badges, soft for panels. */
+  --color-brand-teal-tint: #cdefe7;
+  --color-brand-teal-soft: #ecfbf6;
+  /* Teal text that must stay legible on navy surfaces. */
+  --color-brand-teal-light: #5fe3cb;
+  --color-brand-ink: #04241c;
+  --color-brand-navy: #0b1526;
+  --color-brand-navy-soft: #132238;
+  --color-brand-canvas: #f4f7fb;
+  --color-brand-border: #e3e9f2;
+  /* Orange/coral call-to-action used by the customer sign-in screen. */
+  --color-brand-orange: #f97316;
+  --color-brand-orange-deep: #c2410c;
+  --color-brand-coral: #fb7185;
+}

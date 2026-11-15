@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabaseClient';
+import { resolveSupabaseEnvironment } from './supabaseConfig';
 
 export interface EmailOtpRequestResponse {
   ok: boolean;
@@ -30,6 +31,36 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function isValidEmailAddress(value: string): boolean {
   const email = value.trim();
   return email.length <= 254 && EMAIL_PATTERN.test(email);
+}
+
+let cachedEmailProvider: { at: number; enabled: boolean } | null = null;
+
+/**
+ * Whether the hosted Supabase project accepts email sign-in at all.
+ *
+ * The server-side Resend path is the primary delivery route; this only gates the
+ * browser's Supabase-native fallback. GoTrue reports its providers on the public
+ * `/auth/v1/settings` endpoint, so the login screen can state the truth instead
+ * of offering a button whose request is certain to fail.
+ */
+export async function isSupabaseEmailProviderEnabled(): Promise<boolean> {
+  const now = Date.now();
+  if (cachedEmailProvider && now - cachedEmailProvider.at < 5 * 60_000) return cachedEmailProvider.enabled;
+  const config = resolveSupabaseEnvironment(typeof import.meta !== 'undefined' ? import.meta.env : {});
+  if (!config.isConfigured || !config.projectUrl || !config.publishableKey) return false;
+  try {
+    const response = await fetch(`${config.projectUrl}/auth/v1/settings`, {
+      headers: { apikey: config.publishableKey },
+      cache: 'no-store',
+    });
+    if (!response.ok) return false;
+    const settings = await response.json().catch(() => null);
+    const enabled = settings?.external?.email === true;
+    cachedEmailProvider = { at: now, enabled };
+    return enabled;
+  } catch {
+    return false;
+  }
 }
 
 async function readJson(response: Response): Promise<any> {

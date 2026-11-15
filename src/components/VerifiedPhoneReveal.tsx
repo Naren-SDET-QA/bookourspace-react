@@ -63,7 +63,14 @@ export function VerifiedPhoneReveal({
   const beginReveal = () => {
     setError('');
     if (!authUser) {
-      onOpenSignIn?.();
+      if (onOpenSignIn) {
+        onOpenSignIn();
+        return;
+      }
+      // No sign-in handler was wired by the caller: fall back to the app's own
+      // sign-in route so this button always does something visible.
+      setError(te ? 'నంబర్ చూడాలంటే సైన్ ఇన్ చేయండి.' : 'Sign in to view the owner number.');
+      if (typeof window !== 'undefined') window.location.hash = '#login';
       return;
     }
     if (!signedInEmail || !isValidEmailAddress(signedInEmail)) {

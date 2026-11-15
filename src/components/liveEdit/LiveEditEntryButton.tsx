@@ -30,7 +30,7 @@ export function LiveEditEntryButton({
         onClick={() => setOpen(true)}
         className={
           className ||
-          'inline-flex min-h-10 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-xs font-black text-indigo-800 transition hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200 dark:hover:bg-indigo-900/60'
+          'inline-flex min-h-10 items-center gap-2 rounded-xl border border-brand-teal-tint bg-brand-teal-soft px-3 text-xs font-black text-brand-teal-deep transition hover:bg-brand-teal-tint dark:border-brand-teal-deep dark:bg-brand-navy/50 dark:text-brand-teal-light dark:hover:bg-brand-navy'
         }
       >
         <PencilLine className="h-3.5 w-3.5" />

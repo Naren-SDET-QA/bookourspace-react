@@ -27,7 +27,7 @@ import StaysOwnerAdminDashboard, { stayOwnerSections, type StayOwnerSection } fr
 import ServicesProviderDashboard, { serviceSections, type ServiceView } from './ServicesProviderDashboard';
 import ProviderPortalShell, { ProviderStatCard, PROVIDER_MODULE_LABELS, type ProviderPortalModule } from './ProviderPortalShell';
 import { accessScopeFrom, grantedSections, moduleGranted } from '../lib/businessAccess';
-import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership } from '../lib/businessClient';
+import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership, type BusinessModule } from '../lib/businessClient';
 import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
 import { BusinessStaffPanel } from './pg/BusinessStaffPanel';
 
@@ -37,9 +37,42 @@ interface ProviderDashboardProps {
   onOpenChatWithCustomer: (customerId: string, customerName: string, listingTitle: string) => void;
   onSwitchToAdminReview?: () => void;
   onSwitchToMarketplace?: () => void;
+  /** Ends the signed-in session from the owner console. */
+  onSignOut?: () => void;
   currentLang?: AppLanguage;
   onChangeLang?: (lang: AppLanguage) => void;
   initialWorkspace?: 'pg' | 'institute';
+}
+
+/**
+ * Shown instead of a module workspace when the account holds no business on that
+ * module. The workspace would otherwise answer BUSINESS_CONTEXT_REQUIRED or
+ * BUSINESS_MODULE_MISMATCH, which hides the screen behind an error.
+ */
+function MissingModuleBusiness({
+  heading,
+  description,
+  module,
+  onCreated,
+}: {
+  heading: string;
+  description: string;
+  module: BusinessModule;
+  onCreated: (business: BusinessMembership) => void;
+}) {
+  const moduleLabel = BUSINESS_MODULE_LABELS[module];
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-3xl font-black tracking-tight text-slate-950 dark:text-white">{heading}</h2>
+        <p className="mt-1 text-base text-slate-500 dark:text-slate-400">{description}</p>
+      </div>
+      <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        This account has no {moduleLabel} business yet. Pick “{moduleLabel}” as the module when you create one — each business keeps its own listings, staff and bookings.
+      </p>
+      <BusinessCreatePanel onCreated={onCreated} defaultModule={module} />
+    </div>
+  );
 }
 
 export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
@@ -48,6 +81,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   onOpenChatWithCustomer,
   onSwitchToAdminReview,
   onSwitchToMarketplace,
+  onSignOut,
   currentLang = 'en',
   onChangeLang,
   initialWorkspace = 'pg',
@@ -73,13 +107,30 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         if (!active) return;
         setBusinesses(rows);
         const preferred = rows.find((row) => row.module_type === 'pg_hostels' && row.approval_status === 'approved') || rows[0];
-        setSelectedBusinessId((current) => current || preferred?.id || '');
+        // A stored id can belong to another account (or to a business this
+        // provider no longer holds), so only keep it when it is still theirs.
+        setSelectedBusinessId((current) => (current && rows.some((row) => row.id === current) ? current : preferred?.id || ''));
       })
       .catch((cause) => { if (active) setBusinessError(cause instanceof Error ? cause.message : 'BUSINESS_LIST_UNAVAILABLE'); });
     return () => { active = false; };
   }, []);
 
   const selectedBusiness = businesses.find((row) => row.id === selectedBusinessId) || null;
+
+  // The PG workspace only serves pg_hostels businesses; handing it a Stays or
+  // Services business makes every protected call fail closed with
+  // BUSINESS_MODULE_MISMATCH, which used to replace the screen with an error.
+  const pgBusinesses = businesses.filter((row) => row.module_type === 'pg_hostels');
+  const activePgBusiness = pgBusinesses.find((row) => row.id === selectedBusinessId) || pgBusinesses[0] || null;
+
+  // The stays, services and institute workspaces read the selected business too.
+  // Each tab therefore only ever runs against a business of its own module.
+  const staysBusinesses = businesses.filter((row) => row.module_type === 'hotel_stay');
+  const activeStaysBusiness = staysBusinesses.find((row) => row.id === selectedBusinessId) || staysBusinesses[0] || null;
+  const servicesBusinesses = businesses.filter((row) => row.module_type === 'services');
+  const activeServicesBusiness = servicesBusinesses.find((row) => row.id === selectedBusinessId) || servicesBusinesses[0] || null;
+  const instituteBusinesses = businesses.filter((row) => row.module_type === 'classes');
+  const activeInstituteBusiness = instituteBusinesses.find((row) => row.id === selectedBusinessId) || instituteBusinesses[0] || null;
 
   useEffect(() => {
     try {
@@ -180,6 +231,16 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
     const next = (Object.keys(BUSINESS_MODULE_FOR_TAB) as ProviderWorkspaceTab[]).find(tabAllowed);
     setActiveSubTab(next || 'listings');
   }, [activeSubTab, selectedBusiness?.allowed_modules?.join(',')]);
+
+  // Opening a module tab selects that module's business, so the workspace never
+  // asks the server for data under another module's business.
+  useEffect(() => {
+    const moduleType = BUSINESS_MODULE_FOR_TAB[activeSubTab];
+    if (!moduleType || !businesses.length) return;
+    if (selectedBusiness?.module_type === moduleType) return;
+    const target = businesses.find((row) => row.module_type === moduleType);
+    if (target && target.id !== selectedBusinessId) setSelectedBusinessId(target.id);
+  }, [activeSubTab, businesses, selectedBusiness?.module_type, selectedBusinessId]);
 
   const navigatePortalModule = (module: ProviderPortalModule) => {
     const mapping: Record<ProviderPortalModule, ProviderWorkspaceTab> = {
@@ -322,7 +383,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           {onSwitchToAdminReview && (
             <button
               onClick={onSwitchToAdminReview}
-              className="px-4 py-2.5 rounded-xl bg-[#4338CA] hover:bg-indigo-800 text-white text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md cursor-pointer"
+              className="px-4 py-2.5 rounded-xl bg-[#4338CA] hover:bg-brand-teal-hover text-white text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4 text-[#FFE500]" />
               <span>
@@ -339,14 +400,14 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
       {!businesses.length && !businessError && <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />}
       {businesses.length > 0 && (
-        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#CDEFE7] bg-[#ECFBF6] p-3 dark:border-violet-900 dark:bg-violet-950/20">
+        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-teal-tint bg-brand-teal-soft p-3 dark:border-brand-teal-deep dark:bg-brand-navy/20">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-[10px] font-black uppercase tracking-wide text-[#0B8F76] dark:text-[#5FE3CB]">Business</span>
+            <span className="text-[10px] font-black uppercase tracking-wide text-brand-teal-deep dark:text-brand-teal-light">Business</span>
             {/* The business selector lives above the KPI cards so the active
                 business is visible before any dashboard metric. */}
             <BusinessContextBar memberships={businesses} activeBusinessId={selectedBusinessId} onSelect={setSelectedBusinessId} />
           </div>
-          <span className="text-[10px] font-semibold text-[#0B8F76]/80 dark:text-[#5FE3CB]/80">{selectedBusiness?.role || 'Provider account'}</span>
+          <span className="text-[10px] font-semibold text-brand-teal-deep/80 dark:text-brand-teal-light/80">{selectedBusiness?.role || 'Provider account'}</span>
         </section>
       )}
       {businessError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">Business context unavailable: {businessError}. Showing the legacy provider view.</p>}
@@ -386,7 +447,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                 onSelect();
                 requestAnimationFrame(() => document.getElementById('provider-workspace-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
               }}
-              className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition ${active ? 'border-[#0B8F76] bg-[#0B8F76] text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
+              className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition ${active ? 'border-brand-teal-deep bg-brand-teal-deep text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="whitespace-nowrap">{label}</span>
@@ -399,7 +460,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       {/* --- SUBTAB: ANALYTICS & PERFORMANCE (D3 CHARTS) --- */}
       {activeSubTab === 'analytics' && (
         <div className="space-y-5 animate-in fade-in duration-200">
-          <div className="bg-gradient-to-r from-[#0B1526] via-[#132238] to-[#0B1526] text-white rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-[#12C2A0]/25">
+          <div className="bg-gradient-to-r from-brand-navy via-brand-navy-soft to-brand-navy text-white rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-brand-teal/25">
             <div>
               <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950">
                 D3.js Powered Business Growth Intelligence
@@ -454,7 +515,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                     Daily unique impressions across all active provider cards
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 text-xs font-black">
+                <span className="px-2.5 py-1 rounded-full bg-brand-teal-soft dark:bg-brand-navy/60 text-brand-teal-deep dark:text-brand-teal-light text-xs font-black">
                   {totalViews.toLocaleString()} Total Views
                 </span>
               </div>
@@ -574,7 +635,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                   Responding within 5 minutes increases booking confirmation by 3.4×
                 </p>
               </div>
-              <span className="px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 text-xs font-black">
+              <span className="px-3 py-1 rounded-full bg-brand-teal-soft dark:bg-brand-navy/70 text-brand-teal-deep dark:text-brand-teal-light text-xs font-black">
                 ⚡ 85% Answered Under 15 Mins
               </span>
             </div>
@@ -616,15 +677,43 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
-      {activeSubTab === 'stays' && <StaysOwnerAdminDashboard role={supabaseProfile?.role} section={activeStaySection} onSectionChange={setStaySection} sections={(staySectionKeys as StayOwnerSection[] | null) || undefined} />}
+      {activeSubTab === 'stays' && (activeStaysBusiness
+        ? <StaysOwnerAdminDashboard role={supabaseProfile?.role} section={activeStaySection} onSectionChange={setStaySection} sections={(staySectionKeys as StayOwnerSection[] | null) || undefined} />
+        : <MissingModuleBusiness
+            heading="Stays"
+            description="A stays business holds your properties, rooms, rates and reservations."
+            module="hotel_stay"
+            onCreated={(business) => { setBusinesses((current) => [...current, business]); setSelectedBusinessId(business.id); }}
+          />)}
 
-      {activeSubTab === 'services' && <ServicesProviderDashboard role={supabaseProfile?.role} section={activeServiceSection} onSectionChange={setServiceSection} />}
+      {activeSubTab === 'services' && (activeServicesBusiness
+        ? <ServicesProviderDashboard role={supabaseProfile?.role} section={activeServiceSection} onSectionChange={setServiceSection} />
+        : <MissingModuleBusiness
+            heading="Home services"
+            description="A services business holds your service listings, workers and job bookings."
+            module="services"
+            onCreated={(business) => { setBusinesses((current) => [...current, business]); setSelectedBusinessId(business.id); }}
+          />)}
 
-      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace businessId={selectedBusinessId || undefined} businessRole={selectedBusiness?.role} businesses={businesses} onSelectBusiness={setSelectedBusinessId} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} />}
+      {activeSubTab === 'pg_inventory' && (activePgBusiness
+        ? <PgProviderWorkspace businessId={activePgBusiness.id} businessRole={activePgBusiness.role} businesses={pgBusinesses} onSelectBusiness={setSelectedBusinessId} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} onSignOut={onSignOut} />
+        : <MissingModuleBusiness
+            heading="PG inventory"
+            description="A PG business holds your hostels, rooms, beds and residents."
+            module="pg_hostels"
+            onCreated={(business) => { setBusinesses((current) => [...current, business]); setSelectedBusinessId(business.id); }}
+          />)}
 
       {activeSubTab === 'team' && <BusinessStaffPanel businessId={selectedBusinessId || undefined} canInvite={['owner', 'manager'].includes(String(selectedBusiness?.role || ''))} />}
 
-      {activeSubTab === 'institute' && <InstituteOwnerDashboard onSwitchToMarketplace={onSwitchToMarketplace} />}
+      {activeSubTab === 'institute' && (activeInstituteBusiness
+        ? <InstituteOwnerDashboard onSwitchToMarketplace={onSwitchToMarketplace} />
+        : <MissingModuleBusiness
+            heading="Institute"
+            description="An institute business holds your courses, batches, faculty and enrollments."
+            module="classes"
+            onCreated={(business) => { setBusinesses((current) => [...current, business]); setSelectedBusinessId(business.id); }}
+          />)}
 
       {/* --- SUBTAB 1: MY LISTINGS --- */}
       {activeSubTab === 'listings' && (
@@ -683,7 +772,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                       </span>
                     )}
 
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-teal-tint text-brand-teal-deep dark:bg-brand-navy dark:text-brand-teal-light">
                       {getSubcategoryDisplayName(listing.subcategory, currentLang)}
                     </span>
 
@@ -742,7 +831,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                 {listing.status === 'pending_approval' && onSwitchToAdminReview ? (
                   <button
                     onClick={onSwitchToAdminReview}
-                    className="px-3.5 py-2 rounded-xl bg-[#4338CA] hover:bg-indigo-800 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-[#4338CA] hover:bg-brand-teal-hover text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <ShieldCheck className="w-3.5 h-3.5 text-[#FFE500]" />
                     <span>
@@ -799,7 +888,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
               >
                 <div className="space-y-1 max-w-xl">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] font-bold bg-brand-teal-tint text-brand-teal-deep dark:bg-brand-navy dark:text-brand-teal-light px-2 py-0.5 rounded-full">
                       {loc('Lead from:', 'కస్టమర్:', 'ग्राहक:')} {enq.customerName}
                     </span>
                     <span className="text-[11px] text-slate-400">{enq.timestamp}</span>
@@ -818,7 +907,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => onOpenChatWithCustomer(enq.customerId, enq.customerName, enq.listingTitle)}
-                    className="py-2 px-3.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    className="py-2 px-3.5 rounded-xl bg-brand-teal-hover hover:bg-brand-teal-hover text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                     <span>{loc('Open Live Chat', 'లైవ్ చాట్ తెరవండి', 'लाइव चैट खोलें')}</span>
@@ -922,7 +1011,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
                   )}
                 </div>
 
-                <div className="text-3xl font-black text-purple-900 dark:text-purple-300 tabular-nums">
+                <div className="text-3xl font-black text-brand-teal-deep dark:text-brand-teal-light tabular-nums">
                   ₹{plan.price}
                   <span className="text-xs font-normal text-slate-400">/{loc(plan.billingPeriod)}</span>
                 </div>
@@ -939,7 +1028,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
               <button
                 onClick={() => onOpenPaymentModal(plan.name, plan.price)}
-                className="w-full py-3 bg-[#4A148C] hover:bg-purple-900 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-colors cursor-pointer"
+                className="w-full py-3 bg-[#4A148C] hover:bg-brand-teal-hover text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-colors cursor-pointer"
               >
                 {loc(`Upgrade to ${plan.name}`, `${plan.name} కు అప్‌గ్రేడ్ చేయండి`, `${plan.name} में अपग्रेड करें`)}
               </button>

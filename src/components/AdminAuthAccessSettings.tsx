@@ -25,7 +25,7 @@ function ToggleRow({
 }) {
   return (
     <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 dark:border-slate-700 dark:bg-slate-800/50">
-      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[#4A148C] shadow-xs dark:bg-slate-900 dark:text-purple-300">
+      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[#4A148C] shadow-xs dark:bg-slate-900 dark:text-brand-teal-light">
         {icon}
       </div>
       <div className="min-w-0 flex-1">

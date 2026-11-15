@@ -1,4 +1,5 @@
 import { buildAuthHeaders } from './supabaseClient';
+import { providerContextHeaders } from './providerBusinessContext';
 
 export type ProviderPortalOverview = {
   ok: boolean;
@@ -20,8 +21,24 @@ export class ProviderOperationsError extends Error {
   constructor(readonly code: string, readonly status: number) { super(code); this.name = 'ProviderOperationsError'; }
 }
 
+/**
+ * The server scopes this overview to one business and refuses an unscoped or
+ * cross-module request, so every call carries the business the provider portal
+ * currently has selected (persisted across reloads by the provider dashboard).
+ */
+function selectedBusinessId(): string {
+  try {
+    return String(window.localStorage.getItem('bos_business_id_v1') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: buildAuthHeaders(), credentials: 'include' });
+  const response = await fetch(path, {
+    headers: providerContextHeaders(selectedBusinessId(), buildAuthHeaders()),
+    credentials: 'include',
+  });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body?.ok === false) throw new ProviderOperationsError(String(body?.error || `HTTP_${response.status}`), response.status);
   return body as T;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { BRAND_TOKENS } from '../theme/tokens';
 import {
   TrendingUp,
   BarChart3,
@@ -223,7 +224,7 @@ interface AdminAnalyticsPerformanceModuleProps {
   onOpenBillingEngine?: () => void;
 }
 
-const MODULE_COLORS = ['#0B8F76', '#10B981', '#9333EA', '#F59E0B', '#0EA5E9', '#E11D48'];
+const MODULE_COLORS = [BRAND_TOKENS.tealDeep, '#10B981', '#9333EA', '#F59E0B', '#0EA5E9', '#E11D48'];
 
 export const AdminAnalyticsPerformanceModule: React.FC<
   AdminAnalyticsPerformanceModuleProps
@@ -325,11 +326,11 @@ export const AdminAnalyticsPerformanceModule: React.FC<
       {/* Header & Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
         <div>
-          <span className="text-[10px] font-black uppercase tracking-wider text-teal-700 dark:text-teal-500">
+          <span className="text-[10px] font-black uppercase tracking-wider text-brand-teal-deep dark:text-brand-teal-light">
             Recharts + D3.js • Enterprise Intelligence & Velocity Engine
           </span>
           <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-teal-700" />
+            <TrendingUp className="w-5 h-5 text-brand-teal-deep" />
             <span>Analytics & Performance Across All Marketplace Modules</span>
           </h3>
           <p className="text-xs text-slate-500">
@@ -366,7 +367,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
                 onClick={() => setTimeframe(t.id)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-black cursor-pointer transition ${
                   timeframe === t.id
-                    ? 'bg-[#0B8F76] text-white'
+                    ? 'bg-brand-teal-deep text-white'
                     : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -390,11 +391,11 @@ export const AdminAnalyticsPerformanceModule: React.FC<
 
       {/* D3-Computed Executive KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-teal-50/70 dark:bg-indigo-950/30 border border-teal-200 dark:border-teal-900">
-          <span className="text-[10px] font-black uppercase text-teal-700 dark:text-teal-300">
+        <div className="p-4 rounded-2xl bg-brand-teal-soft/70 dark:bg-brand-navy/30 border border-brand-teal-tint dark:border-brand-teal-deep">
+          <span className="text-[10px] font-black uppercase text-brand-teal-deep dark:text-brand-teal-light">
             Avg Daily Bookings (Peak {d3Stats.maxDailyBookings}/day)
           </span>
-          <div className="text-2xl font-black text-teal-900 dark:text-white mt-1">
+          <div className="text-2xl font-black text-brand-teal-deep dark:text-white mt-1">
             {d3Stats.meanBookings} / day
           </div>
           <div className="text-[11px] font-bold text-emerald-600 mt-0.5">
@@ -414,14 +415,14 @@ export const AdminAnalyticsPerformanceModule: React.FC<
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900">
-          <span className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-300">
+        <div className="p-4 rounded-2xl bg-brand-teal-soft/70 dark:bg-brand-navy/30 border border-brand-teal-tint dark:border-brand-teal-deep">
+          <span className="text-[10px] font-black uppercase text-brand-teal-deep dark:text-brand-teal-light">
             Platform Commission ({paymentSettings.platformCommissionPercent}%)
           </span>
-          <div className="text-2xl font-black text-purple-800 dark:text-purple-300 mt-1">
+          <div className="text-2xl font-black text-brand-teal-deep dark:text-brand-teal-light mt-1">
             ₹{d3Stats.totalWindowComm.toLocaleString('en-IN')}
           </div>
-          <div className="text-[11px] font-bold text-purple-600 mt-0.5">
+          <div className="text-[11px] font-bold text-brand-teal-deep mt-0.5">
             + {paymentSettings.gstPercent}% GST auto-invoiced
           </div>
         </div>
@@ -452,7 +453,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
                 Daily confirmed bookings vs new customer & provider registrations
               </p>
             </div>
-            <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-black">
+            <span className="px-2 py-0.5 rounded-full bg-brand-teal-tint text-brand-teal-deep text-[10px] font-black">
               Live Stream
             </span>
           </div>
@@ -462,8 +463,8 @@ export const AdminAnalyticsPerformanceModule: React.FC<
               <AreaChart data={dailySeries}>
                 <defs>
                   <linearGradient id="colorBookings" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0B8F76" stopOpacity={0.45} />
-                    <stop offset="95%" stopColor="#0B8F76" stopOpacity={0.02} />
+                    <stop offset="5%" stopColor={BRAND_TOKENS.tealDeep} stopOpacity={0.45} />
+                    <stop offset="95%" stopColor={BRAND_TOKENS.tealDeep} stopOpacity={0.02} />
                   </linearGradient>
                   <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#10B981" stopOpacity={0.45} />
@@ -479,7 +480,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
                   type="monotone"
                   dataKey="bookings"
                   name="Daily Bookings"
-                  stroke="#0B8F76"
+                  stroke={BRAND_TOKENS.tealDeep}
                   strokeWidth={2.5}
                   fillOpacity={1}
                   fill="url(#colorBookings)"
@@ -573,7 +574,7 @@ export const AdminAnalyticsPerformanceModule: React.FC<
               <Bar
                 dataKey="bookings"
                 name="Total Bookings"
-                fill="#0B8F76"
+                fill={BRAND_TOKENS.tealDeep}
                 radius={[6, 6, 0, 0]}
               />
               <Bar
@@ -825,7 +826,7 @@ export const AutomatedBillingEnginePanel: React.FC<
     <div className="space-y-4">
       <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950" role="status">Billing controls are read-only. This panel has no verified payment, email-dispatch or settlement backend.</p>
       {/* Engine Configuration & Trigger Banner */}
-      <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-950 text-white p-4 sm:p-5 rounded-2xl border border-emerald-700/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-emerald-950 via-brand-navy-soft to-slate-950 text-white p-4 sm:p-5 rounded-2xl border border-emerald-700/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[10px] font-black uppercase">
             <RefreshCw className="w-3 h-3" />
@@ -946,7 +947,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                   <div className="font-bold text-slate-900 dark:text-white">
                     {rec.providerName}
                   </div>
-                  <div className="text-[10px] text-teal-700 dark:text-teal-500 font-semibold">
+                  <div className="text-[10px] text-brand-teal-deep dark:text-brand-teal-light font-semibold">
                     ✉️ {rec.providerEmail}
                   </div>
                 </td>
@@ -954,7 +955,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
                       rec.billingType === 'platform_commission'
-                        ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                        ? 'bg-brand-teal-tint text-brand-teal-deep dark:bg-brand-navy dark:text-brand-teal-light'
                         : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
                     }`}
                   >
@@ -1004,7 +1005,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                         : rec.paymentStatus === 'overdue'
                         ? 'bg-rose-100 text-rose-800 border-rose-300'
                         : rec.paymentStatus === 'invoice_sent'
-                        ? 'bg-teal-100 text-teal-800 border-teal-300'
+                        ? 'bg-brand-teal-tint text-brand-teal-deep border-brand-teal-tint'
                         : 'bg-amber-100 text-amber-800 border-amber-300'
                     }`}
                   >
@@ -1020,7 +1021,7 @@ export const AutomatedBillingEnginePanel: React.FC<
                       type="button"
                       onClick={() => handleResendInvoiceEmail(rec)}
                       disabled={!FINANCIAL_ADMIN_MUTATIONS_READY}
-                      className="px-2 py-1 rounded-lg bg-teal-50 dark:bg-indigo-950 text-teal-700 dark:text-teal-300 font-bold text-[10px] hover:bg-teal-100 cursor-not-allowed disabled:opacity-40"
+                      className="px-2 py-1 rounded-lg bg-brand-teal-soft dark:bg-brand-navy text-brand-teal-deep dark:text-brand-teal-light font-bold text-[10px] hover:bg-brand-teal-tint cursor-not-allowed disabled:opacity-40"
                       title="Send / Resend Automated Invoice Email"
                     >
                       ✉️ Email

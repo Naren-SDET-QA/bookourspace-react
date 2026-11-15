@@ -1,6 +1,6 @@
 import React from 'react';
-import { Compass, Mail, ShieldCheck } from 'lucide-react';
 import BOSOfficialLogo from './BOSOfficialLogo';
+import CustomerLoginExperience from './CustomerLoginExperience';
 import { DEMO_DATA_ENABLED } from '../lib/demoDataPolicy';
 
 type EntryExperienceProps = {
@@ -10,16 +10,9 @@ type EntryExperienceProps = {
   onContinueAsGuest: () => void;
   guestLoginEnabled?: boolean;
   onDemoSignIn?: (role: 'guest' | 'host') => void;
+  /** Opens the chosen service in the marketplace behind the entry screen. */
+  onSelectService?: (service: string) => void;
 };
-
-const GOOGLE_G = () => (
-  <svg aria-hidden="true" viewBox="0 0 48 48" className="h-[18px] w-[18px] shrink-0">
-    <path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.6c3.9-3.6 6.1-8.9 6.1-15Z" />
-    <path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.1c-1.8 1.2-4.1 1.9-6.9 1.9-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20 20 0 0 0 24 44Z" />
-    <path fill="#FBBC05" d="M12.6 27.5a12 12 0 0 1 0-7.1v-5.3H5.8a20 20 0 0 0 0 17.7l6.8-5.3Z" />
-    <path fill="#EA4335" d="M24 12c3 0 5.7 1 7.8 3l5.8-5.8A19.4 19.4 0 0 0 24 4 20 20 0 0 0 5.8 15.1l6.8 5.3C14.2 15.6 18.7 12 24 12Z" />
-  </svg>
-);
 
 /**
  * Shared Flutter-matched entry experience for web and the Capacitor shells.
@@ -34,12 +27,56 @@ const GOOGLE_G = () => (
 export default function BookOurSpaceEntryExperience({
   mode,
   onGoogleSignIn,
-  onEmailSignIn,
+  onEmailSignIn: _onEmailSignIn,
   onContinueAsGuest,
   guestLoginEnabled = false,
   onDemoSignIn,
+  onSelectService,
 }: EntryExperienceProps) {
   const loading = mode === 'loading';
+
+  // The welcome step is the customer sign-in surface. Email and mobile live in
+  // its own tabs, so the legacy email-page callback is no longer a separate
+  // step; Google and Guest still route through App's existing handlers.
+  if (!loading) {
+    return (
+      <div data-testid="bookourspace-welcome" className="contents">
+        <CustomerLoginExperience
+          onGoogle={onGoogleSignIn}
+          onGuest={onContinueAsGuest}
+          guestLoginEnabled={guestLoginEnabled}
+          onSelectService={onSelectService}
+        />
+        {DEMO_DATA_ENABLED && onDemoSignIn && (
+          // Anchored to the top-left corner: this local-only switcher must never
+          // sit on top of the sign-in card it is meant to bypass.
+          <div
+            data-testid="bos-demo-signin"
+            className="fixed left-2 top-2 z-[260] w-[min(78vw,300px)] rounded-2xl border border-white/20 bg-brand-navy/95 p-2.5 text-white shadow-xl sm:left-3 sm:top-3"
+          >
+            <p className="text-[10px] font-black uppercase tracking-wide text-brand-teal-light">Local demo database</p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => onDemoSignIn('guest')}
+                className="min-h-9 flex-1 rounded-xl border border-white/25 px-3 text-[11px] font-black text-white transition hover:bg-white/10"
+              >
+                Demo guest
+              </button>
+              <button
+                type="button"
+                onClick={() => onDemoSignIn('host')}
+                className="min-h-9 flex-1 rounded-xl border border-white/25 px-3 text-[11px] font-black text-white transition hover:bg-white/10"
+              >
+                Demo host
+              </button>
+            </div>
+            <p className="mt-1.5 text-[9px] font-semibold text-white/60">Seed accounts only. Not available in production.</p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <main
@@ -66,91 +103,10 @@ export default function BookOurSpaceEntryExperience({
           </div>
         </div>
 
-        {loading ? (
-          <div className="bos-entry-loading">
-            <p className="bos-entry-caption">Getting things ready…</p>
-            <div className="bos-entry-progress" aria-hidden="true"><span /></div>
-          </div>
-        ) : (
-          <div className="bos-entry-content">
-            <h1 className="sr-only">Sign in to BookOurSpace</h1>
-            <p className="bos-entry-subtitle">Sign in to continue booking spaces.</p>
-            <p id="bos-entry-access-note" className="bos-entry-helper">
-              New Google accounts get a profile automatically. Access levels are assigned securely.
-            </p>
-
-            <div className="bos-entry-actions">
-              {onEmailSignIn && (
-                <button
-                  type="button"
-                  data-testid="entry-email-sign-in"
-                  onClick={(event) => {
-                    event.currentTarget.focus();
-                    onEmailSignIn();
-                  }}
-                  className="bos-entry-email"
-                >
-                  <Mail className="h-5 w-5 shrink-0" aria-hidden="true" />
-                  <span>Continue with email code</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                data-testid="entry-google-sign-in"
-                onClick={(event) => {
-                  // Safari/WebKit does not focus a button on click, so without
-                  // this the auth dialog has no opener to return focus to.
-                  event.currentTarget.focus();
-                  onGoogleSignIn();
-                }}
-                aria-describedby="bos-entry-access-note"
-                className="bos-entry-google"
-              >
-                <span className="bos-entry-google-icon"><GOOGLE_G /></span>
-                <span>Continue with Google</span>
-              </button>
-
-              {guestLoginEnabled && (
-                <>
-                  <div className="bos-entry-divider" role="separator" aria-label="or">
-                    <span>OR</span>
-                  </div>
-
-                  <button
-                    type="button"
-                    data-testid="entry-continue-guest"
-                    onClick={onContinueAsGuest}
-                    className="bos-entry-guest"
-                  >
-                    <Compass className="h-5 w-5 shrink-0" aria-hidden="true" />
-                    <span>Explore Spaces as Guest</span>
-                  </button>
-                </>
-              )}
-            </div>
-
-            <p className="bos-entry-trust">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#5EEAD4]" aria-hidden="true" />
-              <span>Google-verified sign-in. Browse first; sign in when you’re ready to book or save favorites.</span>
-            </p>
-
-            {DEMO_DATA_ENABLED && onDemoSignIn && (
-              <div className="bos-entry-demo">
-                <p className="bos-entry-demo-title">Local demo database</p>
-                <div className="bos-entry-demo-actions">
-                  <button type="button" onClick={() => onDemoSignIn('guest')} className="bos-entry-demo-button">
-                    Demo guest
-                  </button>
-                  <button type="button" onClick={() => onDemoSignIn('host')} className="bos-entry-demo-button">
-                    Demo host
-                  </button>
-                </div>
-                <p className="bos-entry-demo-note">Seed accounts only. Not available in production.</p>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="bos-entry-loading">
+          <p className="bos-entry-caption">Getting things ready…</p>
+          <div className="bos-entry-progress" aria-hidden="true"><span /></div>
+        </div>
       </section>
     </main>
   );

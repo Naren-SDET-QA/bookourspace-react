@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import SafeImage from './SafeImage';
 import { getStayStyle, saveStylePreference, styleFromHash, type StayStyle } from '../lib/sectionStyleSettings';
-import { SectionStyleTabs, type SectionStyleNumber } from './sectionStyle/SectionStyleTabs';
 import { StyleThreeList } from './sectionStyle/StyleThreeList';
 import {
   ArrowLeft,
@@ -50,6 +49,7 @@ import { useMarketplace } from '../context/MarketplaceContext';
 import { patchStayCheckoutDraft, readStayCheckoutDraft } from '../lib/stayCheckoutDraft';
 import { AirbnbIndiaExperience } from './AirbnbIndiaExperience';
 import { StayCheckoutPanel } from './StayCheckoutPanel';
+import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 interface HotelsStayExperienceProps {
   onClose: () => void;
@@ -66,6 +66,8 @@ interface HotelsStayExperienceProps {
   selectedCity?: string;
   /** Centrally published Style 1/2/3 choice. */
   style?: StayStyle;
+  /** Admin-authored heading and subheading from the page-field form. */
+  pageCopy?: PageCopyOverrides;
 }
 
 type ContactState = 'loading' | 'ready' | 'unavailable' | 'error';
@@ -242,7 +244,7 @@ function StaySearchForm({
   );
 }
 
-export function HotelsStayExperience({ onClose, inline = false, onStartHosting, onSignIn, stayCategory, staySubcategory, selectedCity = 'All Cities', style }: HotelsStayExperienceProps) {
+export function HotelsStayExperience({ onClose, inline = false, onStartHosting, onSignIn, stayCategory, staySubcategory, selectedCity = 'All Cities', style, pageCopy }: HotelsStayExperienceProps) {
   const today = useMemo(() => localDateInputValue(), []);
   const [moduleFlags, setModuleFlags] = useState<ModuleFlagRow[] | null>(null);
   const [moduleLoading, setModuleLoading] = useState(true);
@@ -656,17 +658,9 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
         : null
     : null;
 
-  const changeStayStyle = (value: SectionStyleNumber) => {
-    const next = value === 1 ? 'old' : value === 2 ? 'airbnb' : 'style3';
-    saveStylePreference('stay', next);
-    setExperienceTab(next);
-    window.location.hash = `stays/${next === 'old' ? 'style1' : next === 'airbnb' ? 'style2' : 'style3'}`;
-  };
-
   if (experienceTab === 'airbnb') {
     return (
       <>
-        <SectionStyleTabs active={2} onChange={changeStayStyle} label="Stay display style" className="border-b border-[#ebebeb] bg-white" />
         <AirbnbIndiaExperience inline={inline} selectedCity={selectedStayCity} externalCategory={stayCategory} externalSubcategory={staySubcategory} onClose={onClose} onSwitchToOld={() => { setExperienceTab('old'); window.location.hash = 'stays/old'; }} onStartHosting={onStartHosting} onSignIn={onSignIn} />
       </>
     );
@@ -786,13 +780,6 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
       </header>
       )}
 
-      <SectionStyleTabs
-        active={experienceTab === 'old' ? 1 : 3}
-        onChange={changeStayStyle}
-        label="Stay display style"
-        className="border-b border-[#ebebeb] bg-white"
-      />
-
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1760px] px-4 pb-16 sm:px-6 lg:px-10">
           {/* Inline section: the stay search lives in the content instead of a branded page header */}
@@ -848,12 +835,16 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
               <div className="flex flex-wrap items-end justify-between gap-3 py-6">
                 <div>
                   <h1 id="stays-title" className="text-[22px] font-semibold leading-tight sm:text-[26px]">
-                    {destination.trim() ? `Stays in ${destination.trim()}` : 'Available stays'}
+                    {destination.trim()
+                      ? `Stays in ${destination.trim()}`
+                      : pageCopy?.heading || 'Available stays'}
                   </h1>
                   <p className="mt-1 text-sm text-[#717171] dark:text-slate-400">
-                    {hasSearched
-                      ? `${plural(visibleProperties.length, 'place')} for ${plural(guests, 'guest')}${nights ? ` · ${plural(nights, 'night')}` : ''}`
-                      : `${plural(visibleProperties.length, 'place')} across BookOurSpace`}
+                    {!hasSearched && pageCopy?.subheading
+                      ? pageCopy.subheading
+                      : hasSearched
+                        ? `${plural(visibleProperties.length, 'place')} for ${plural(guests, 'guest')}${nights ? ` · ${plural(nights, 'night')}` : ''}`
+                        : `${plural(visibleProperties.length, 'place')} across BookOurSpace`}
                   </p>
                 </div>
                 <button

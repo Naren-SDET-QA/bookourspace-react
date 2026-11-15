@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { LockKeyhole, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { ModuleFlagRow } from '../server/moduleGate';
 import { CONFIGURED_MODULE_IDS, MODULE_REGISTRY, resolveModuleConfig } from '../modules/registry';
+import type { ModuleConfigValues } from '../modules/registry';
 import { evaluateModuleHealth, healthSummary } from '../server/moduleHealth';
 import {
   fetchLivePageConfig,
@@ -84,10 +85,10 @@ export function AdminPlatformModuleSettings() {
   };
 
   return (
-    <section className="rounded-3xl border border-teal-200 bg-white p-5 shadow-sm dark:border-teal-900 dark:bg-slate-900" aria-labelledby="admin-platform-modules-title">
+    <section className="rounded-3xl border border-brand-teal-tint bg-white p-5 shadow-sm dark:border-brand-teal-deep dark:bg-slate-900" aria-labelledby="admin-platform-modules-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300">Database-backed controls</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-teal-deep dark:text-brand-teal-light">Database-backed controls</p>
           <h3 id="admin-platform-modules-title" className="mt-1 text-lg font-black">Platform availability</h3>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600 dark:text-slate-300">Visibility and owner-contact settings use the existing Supabase module table and RLS. Online booking remains locked until its complete server-side workflow is ready.</p>
         </div>
@@ -138,7 +139,7 @@ export function AdminPlatformModuleSettings() {
  * platform_module_flags — visibility stays with the table above.
  */
 function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
-  const [values, setValues] = useState<Record<string, { label?: string; headline?: string }>>({});
+  const [values, setValues] = useState<Record<string, ModuleConfigValues>>({});
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -153,7 +154,7 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
     void (async () => {
       try {
         const config = await fetchLivePageConfig();
-        if (!cancelled) setValues(readModulesSlice(config.published) as Record<string, { label?: string; headline?: string }>);
+        if (!cancelled) setValues(readModulesSlice(config.published));
       } catch {
         // Defaults stay in place; the health list already reports the failure.
       }
@@ -184,7 +185,7 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
     <div className="mt-6 space-y-4 border-t border-slate-200 pt-5 dark:border-slate-800">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300">Diagnostics</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-teal-deep dark:text-brand-teal-light">Diagnostics</p>
           <h4 className="text-sm font-black">Module health</h4>
         </div>
         <p className="text-[11px] font-semibold text-slate-500" role="status">
@@ -214,8 +215,8 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
       </ul>
 
       <div>
-        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300">Presentation</p>
-        <h4 className="text-sm font-black">Section labels &amp; headlines</h4>
+        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-teal-deep dark:text-brand-teal-light">Presentation</p>
+        <h4 className="text-sm font-black">Section labels, headlines &amp; visible blocks</h4>
         <p className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
           Stored in the existing live-page configuration with draft, publish and version history. Invalid values fall back to
           the module defaults rather than blank a screen.
@@ -248,6 +249,34 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
                   className="mt-1 min-h-9 w-full rounded-lg border border-slate-300 px-2 text-xs font-medium dark:border-slate-700 dark:bg-slate-950"
                 />
               </label>
+              {module.config.fields.some((field) => field.key.startsWith('show')) && (
+                <div className="sm:col-span-2">
+                  <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">What customers see</p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {module.config.fields
+                      .filter((field) => field.key.startsWith('show'))
+                      .map((field) => {
+                        const shown = String(values[id]?.[field.key] ?? 'show') !== 'hide';
+                        return (
+                          <button
+                            key={field.key}
+                            type="button"
+                            aria-pressed={shown}
+                            onClick={() =>
+                              setValues((current) => ({
+                                ...current,
+                                [id]: { ...current[id], [field.key]: shown ? 'hide' : 'show' },
+                              }))
+                            }
+                            className={`min-h-8 rounded-lg px-2.5 text-[11px] font-bold transition ${shown ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                          >
+                            {field.label}: {shown ? 'Shown' : 'Hidden'}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -260,7 +289,7 @@ function ModuleDiagnostics({ flags }: { flags: ModuleFlagRow[] | null }) {
         <button type="button" onClick={() => void persist('draft')} disabled={busy} className="min-h-10 rounded-xl border border-slate-300 px-4 text-xs font-bold disabled:opacity-50 dark:border-slate-700">
           Save draft
         </button>
-        <button type="button" onClick={() => void persist('publish')} disabled={busy} className="min-h-10 rounded-xl bg-teal-700 px-4 text-xs font-bold text-white disabled:opacity-50">
+        <button type="button" onClick={() => void persist('publish')} disabled={busy} className="min-h-10 rounded-xl bg-brand-teal-hover px-4 text-xs font-bold text-white disabled:opacity-50">
           Publish to customers
         </button>
         <button

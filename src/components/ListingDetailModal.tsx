@@ -36,12 +36,15 @@ import {
 import { UniversalBarcode, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
 import { LastUpdated } from './ui/LastUpdated';
 import { CopyButton } from './ui/CopyButton';
+import { copyText } from '../lib/clipboard';
 
 interface ListingDetailModalProps {
   listing: MarketplaceListing | null;
   onClose: () => void;
   onBookNow: (listing: MarketplaceListing) => void;
   onEnquire: (listing: MarketplaceListing) => void;
+  /** Opens the sign-in modal from the masked owner number. */
+  onOpenSignIn?: () => void;
   currentLang?: AppLanguage;
 }
 
@@ -50,11 +53,13 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   onClose,
   onBookNow,
   onEnquire,
+  onOpenSignIn,
   currentLang = 'en',
 }) => {
   const { reviews, addReview } = useMarketplace();
   const [activeImageIdx, setActiveImageIdx] = useState(0);
   const [justShared, setJustShared] = useState(false);
+  const [shareError, setShareError] = useState(false);
 
   // Review submission state
   const [newRating, setNewRating] = useState(5);
@@ -154,13 +159,15 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       }
     }
 
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
-        setJustShared(true);
-        setTimeout(() => setJustShared(false), 2500);
-      }
-    } catch {}
+    const copied = await copyText(`${shareText}\n${shareUrl}`);
+    if (copied) {
+      setJustShared(true);
+      setTimeout(() => setJustShared(false), 2500);
+      return;
+    }
+    // Never fail silently: tell the customer what to do instead.
+    setShareError(true);
+    setTimeout(() => setShareError(false), 5000);
   };
 
   const handleDirectCall = () => {
@@ -199,6 +206,13 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
               {justShared ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
               <span>{justShared ? (currentLang === 'te' ? 'కాపీ అయింది!' : 'Copied!') : (currentLang === 'te' ? 'షేర్ చేయండి' : 'Share')}</span>
             </button>
+            {shareError && (
+              <span role="status" className="text-[10px] font-bold leading-tight text-rose-600 dark:text-rose-300">
+                {currentLang === 'te'
+                  ? 'షేర్ చేయలేకపోయాం — చిరునామా లింక్‌ను కాపీ చేయండి.'
+                  : 'Sharing is blocked here — copy the link from the address bar.'}
+              </span>
+            )}
 
             <button
               onClick={onClose}
@@ -828,6 +842,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                 <VerifiedPhoneReveal
                   phone={listing.providerPhone}
                   currentLang={currentLang}
+                  onOpenSignIn={onOpenSignIn}
                   onRevealed={() => setPhoneRevealed(true)}
                 />
               ) : hasProviderContact ? (

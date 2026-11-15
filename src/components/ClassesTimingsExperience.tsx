@@ -46,6 +46,7 @@ import { ClassesStyleThreeDetail } from './classes/ClassesStyleThreeDetail';
 import type { MarketplaceListing } from '../types/marketplace';
 import { canContactOwner } from '../lib/servicesStayRules';
 import { useOwnerContact } from '../lib/useOwnerContact';
+import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 interface ClassesTimingsExperienceProps {
   onClose: () => void;
@@ -54,6 +55,8 @@ interface ClassesTimingsExperienceProps {
   inline?: boolean;
   /** 'cards' keeps the course-card grid; 'timetable' renders a weekly schedule; 'style3' is the compact list. */
   style?: 'cards' | 'timetable' | 'style3';
+  /** Admin-authored heading and subheading from the page-field form. */
+  pageCopy?: PageCopyOverrides;
 }
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -741,7 +744,7 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
   };
 }
 
-export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
+export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards', pageCopy }: ClassesTimingsExperienceProps) {
   // Classes are locked to Style 3 by product decision.
   const [activeStyle] = useState<'cards' | 'timetable' | 'style3'>('style3');
   useEffect(() => { /* Style 1 and Style 2 are disabled for Classes. */ }, [style]);
@@ -870,9 +873,9 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
           </button>
           <div className="min-w-0 flex-1">
             <h1 id="classes-title" className="truncate text-[15px] font-black text-[#1e1b4b] sm:text-[17px]">
-              Classes & Training
+              {pageCopy?.heading || 'Classes & Training'}
             </h1>
-            <p className="truncate text-[10.5px] text-[#64748b]">Courses · Institutes · Expert Faculty</p>
+            <p className="truncate text-[10.5px] text-[#64748b]">{pageCopy?.subheading || 'Courses · Institutes · Expert Faculty'}</p>
           </div>
           <button type="button" onClick={() => setShowMyClasses(true)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#ece8fb] px-3 text-[11.5px] font-bold text-[#4c1d95] transition hover:bg-[#f5f3ff]">
             <CalendarDays className="h-3.5 w-3.5" /> My classes

@@ -25,10 +25,10 @@ export function AdminAdPerformanceChart({ ads }: { ads: AdminAdCampaign[] }) {
   }));
 
   return (
-    <section className="space-y-3 rounded-2xl border border-teal-200 bg-gradient-to-br from-indigo-50/50 via-white to-purple-50/40 p-4 dark:border-teal-900/60 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 sm:p-5" aria-labelledby="admin-ad-performance-title">
+    <section className="space-y-3 rounded-2xl border border-brand-teal-tint bg-gradient-to-br from-brand-teal-soft/50 via-white to-brand-teal-soft/40 p-4 dark:border-brand-teal-deep/60 dark:from-slate-900 dark:via-slate-900 dark:to-brand-navy/30 sm:p-5" aria-labelledby="admin-ad-performance-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-black uppercase text-teal-700 dark:bg-indigo-950 dark:text-teal-300">
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand-teal-tint px-2 py-0.5 text-[10px] font-black uppercase text-brand-teal-deep dark:bg-brand-navy dark:text-brand-teal-light">
             <BarChart3 className="h-3 w-3" aria-hidden="true" /> Recharts Visual Analytics
           </span>
           <h4 id="admin-ad-performance-title" className="mt-0.5 text-sm font-black text-slate-900 dark:text-white">
@@ -36,7 +36,7 @@ export function AdminAdPerformanceChart({ ads }: { ads: AdminAdCampaign[] }) {
           </h4>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold" aria-label="Chart legend">
-          <span className="inline-flex items-center gap-1 text-teal-700"><span className="inline-block h-2.5 w-2.5 rounded-xs bg-teal-600" /> Impressions</span>
+          <span className="inline-flex items-center gap-1 text-brand-teal-deep"><span className="inline-block h-2.5 w-2.5 rounded-xs bg-brand-teal-deep" /> Impressions</span>
           <span className="inline-flex items-center gap-1 text-emerald-600"><span className="inline-block h-2.5 w-2.5 rounded-xs bg-emerald-500" /> Clicks</span>
           <span className="inline-flex items-center gap-1 text-amber-600"><span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" /> Conversion Rate (%)</span>
         </div>

@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Building2 } from 'lucide-react';
 import { createBusiness, BUSINESS_MODULE_LABELS, type BusinessMembership, type BusinessModule } from '../../lib/businessClient';
 
-export function BusinessCreatePanel({ onCreated }: { onCreated: (business: BusinessMembership) => void }) {
+export function BusinessCreatePanel({ onCreated, defaultModule = 'pg_hostels' }: { onCreated: (business: BusinessMembership) => void; defaultModule?: BusinessModule }) {
   const [name, setName] = useState('');
-  const [moduleType, setModuleType] = useState<BusinessModule>('pg_hostels');
+  const [moduleType, setModuleType] = useState<BusinessModule>(defaultModule);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');

@@ -86,5 +86,19 @@ export default defineConfig(() => {
         ignored: ['**/.local/**', '**/test-results/**', '**/playwright-report/**', '**/android/**', '**/ios/**'],
       },
     },
+    preview: {
+      // `vite preview` serves the built app on its own, but the app calls
+      // same-origin /api routes that live in the separate API server. Without
+      // this proxy the preview answers /api with index.html, so listings,
+      // builder pages and the auth config all come back empty and the app
+      // falls back to its degraded layout. Point BOS_PREVIEW_API_URL elsewhere
+      // when the API runs on another port.
+      proxy: {
+        '/api': {
+          target: process.env.BOS_PREVIEW_API_URL || 'http://127.0.0.1:4183',
+          changeOrigin: false,
+        },
+      },
+    },
   };
 });

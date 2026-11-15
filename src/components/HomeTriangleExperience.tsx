@@ -15,6 +15,7 @@ import {
 
 import { HelperJourney } from './HelperJourney';
 import SafeImage from './SafeImage';
+import { BOS_CALL_HREF, whatsappHref } from '../lib/contactNumbers';
 
 interface HomeTriangleExperienceProps {
   onClose: () => void;
@@ -521,7 +522,7 @@ function CategoryGrid({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-function BannerCarousel({ index, setIndex }: { index: number; setIndex: (i: number) => void }) {
+function BannerCarousel({ index, setIndex, onBook }: { index: number; setIndex: (i: number) => void; onBook: () => void }) {
   const banner = BANNERS[index];
   return (
     <div>
@@ -531,7 +532,7 @@ function BannerCarousel({ index, setIndex }: { index: number; setIndex: (i: numb
         <div className="absolute inset-0 flex flex-col items-start justify-center gap-2 p-5">
           <h3 className="max-w-[60%] text-[22px] font-extrabold leading-[1.1] text-white drop-shadow">{banner.title}</h3>
           <span className="rounded bg-white/25 px-2 py-1 text-[11px] font-semibold text-white backdrop-blur">{banner.pill}</span>
-          <button type="button" className="mt-1 rounded-md bg-white px-4 py-2 text-[13px] font-bold text-[#111827] shadow">
+          <button type="button" onClick={onBook} className="mt-1 rounded-md bg-white px-4 py-2 text-[13px] font-bold text-[#111827] shadow">
             Book Now
           </button>
         </div>
@@ -704,7 +705,13 @@ function ProviderListView({
               </div>
               <div className="mt-2.5 flex gap-2">
                 <button type="button" onClick={() => onSelectProvider(p)} className="flex-1 rounded-lg bg-[#3b82f6] py-2 text-[12.5px] font-semibold text-white">View details</button>
-                <button type="button" className="rounded-lg border border-[#3b82f6] px-3 py-2 text-[12.5px] font-semibold text-[#3b82f6]">Call</button>
+                <a
+                  href={BOS_CALL_HREF}
+                  aria-label={`Call about ${p.title}`}
+                  className="inline-flex items-center justify-center rounded-lg border border-[#3b82f6] px-3 py-2 text-[12.5px] font-semibold text-[#3b82f6]"
+                >
+                  Call
+                </a>
               </div>
             </article>
           ))}
@@ -775,14 +782,25 @@ function ProviderDetailView({ provider, onBack }: { provider: Provider; onBack: 
             </span>
           </div>
           <div className="mt-3.5 flex flex-wrap gap-2">
-            <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-full bg-[#3b82f6] px-4 text-[13px] font-bold text-white">
+            <a
+              href={BOS_CALL_HREF}
+              aria-label={`Call BookOurSpace about ${provider.title} from ${provider.name}`}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full bg-[#3b82f6] px-4 text-[13px] font-bold text-white"
+            >
               <Phone className="h-4 w-4" aria-hidden="true" /> Call provider
-            </button>
-            <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[#3b82f6] px-4 text-[13px] font-bold text-[#2563eb]">
+            </a>
+            <a
+              href={whatsappHref(`Hi BookOurSpace, I am interested in ${provider.title} from ${provider.name} (${provider.locality}).`)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[#3b82f6] px-4 text-[13px] font-bold text-[#2563eb]"
+            >
               <MessageCircle className="h-4 w-4" aria-hidden="true" /> Message on WhatsApp
-            </button>
+            </a>
           </div>
-          <p className="mt-3 text-[11px] leading-5 text-[#64748b]">Provider contact is unavailable until this service is enabled.</p>
+          <p className="mt-3 text-[11px] leading-5 text-[#64748b]">
+            Calls and WhatsApp reach BookOurSpace, which connects you to this provider. The provider's own number is shared by the team after you agree scope and price.
+          </p>
           <p className="mt-3 rounded-xl border border-[#e5e7eb] p-3 text-[11px] leading-5 text-[#64748b]">
             Booking and payment are disabled for home services. Agree timing, scope and price with the provider; BookOurSpace does not take payment here.
           </p>
@@ -881,7 +899,16 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
             <button type="button" onClick={onSwitchToOld} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold text-[#717171] transition hover:bg-[#f7f7f7]">
               BookOurSpace Services 1
             </button>
-            <button type="button" className="inline-flex h-9 items-center rounded-full bg-[#3b82f6] px-4 text-sm font-semibold text-white transition">
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setSelectedSub(null);
+                setView('home');
+              }}
+              aria-current="true"
+              className="inline-flex h-9 items-center rounded-full bg-[#3b82f6] px-4 text-sm font-semibold text-white transition"
+            >
               BookOurSpace Services 2
             </button>
           </div>
@@ -900,7 +927,15 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
               <CategoryGrid onOpen={openCategory} />
 
               <div className="mt-6">
-                <BannerCarousel index={bannerIndex} setIndex={setBannerIndex} />
+                <BannerCarousel
+                  index={bannerIndex}
+                  setIndex={setBannerIndex}
+                  onBook={() => {
+                    setQuery('');
+                    setSelectedSub(null);
+                    setView('categories');
+                  }}
+                />
               </div>
 
               <div className="mt-7">
@@ -933,7 +968,16 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
                 </div>
                 <div className="-mx-4 mt-3 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {VILLAGE_SERVICES.map((item) => (
-                    <button key={item.id} type="button" className="flex w-[92px] shrink-0 flex-col items-center gap-1.5 rounded-xl border border-[#e5e7eb] bg-white p-2.5 text-center">
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveCategory('village');
+                        setView('categories');
+                      }}
+                      aria-label={`Open ${item.label} village services`}
+                      className="flex w-[92px] shrink-0 flex-col items-center gap-1.5 rounded-xl border border-[#e5e7eb] bg-white p-2.5 text-center"
+                    >
                       <span className="text-[28px]" aria-hidden="true">{item.emoji}</span>
                       <span className="text-[11px] font-medium leading-[14px] text-[#1f2937]">{item.label}</span>
                     </button>

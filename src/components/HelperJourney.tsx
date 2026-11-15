@@ -590,8 +590,13 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
             </div>
           </div>
 
-          <button type="button" className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#7c3aed] bg-white py-3 text-[13px] font-bold text-[#5b21b6]">
-            <MapPin className="h-4 w-4" /> Add Multiple Locations
+          <button
+            type="button"
+            onClick={() => setLocations((current) => (current === 'multiple' ? 'single' : 'multiple'))}
+            aria-pressed={locations === 'multiple'}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#7c3aed] bg-white py-3 text-[13px] font-bold text-[#5b21b6]"
+          >
+            <MapPin className="h-4 w-4" /> {locations === 'multiple' ? 'Using Multiple Locations' : 'Add Multiple Locations'}
           </button>
 
           <div className="mt-4 space-y-2.5">

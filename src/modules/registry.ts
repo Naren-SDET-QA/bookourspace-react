@@ -31,7 +31,8 @@ export type ModuleScreenId =
 export type ModuleLayout = 'grid' | 'list';
 
 export interface ModuleConfigField {
-  key: 'label' | 'headline' | 'heroImage' | 'layout' | 'maxCategories';
+  /** `show*` keys are boolean presentation switches stored as 'show' | 'hide'. */
+  key: 'label' | 'headline' | 'heroImage' | 'layout' | 'maxCategories' | (string & {});
   label: string;
   type: 'text' | 'url' | 'select' | 'number';
   maxLength?: number;
@@ -80,6 +81,19 @@ const PRESENTATION_FIELDS: readonly ModuleConfigField[] = [
   { key: 'maxCategories', label: 'Categories shown', type: 'number', min: 1, max: 50 },
 ];
 
+/**
+ * PG screen blocks an admin may hide. Each one is a plain show/hide value in
+ * the existing published presentation document, so no new table or migration
+ * is needed and a bad value can only fall back to "shown".
+ */
+const PG_BLOCK_FIELDS: readonly ModuleConfigField[] = [
+  { key: 'showHero', label: 'Hero heading', type: 'select', options: ['show', 'hide'] },
+  { key: 'showSearch', label: 'Search bar', type: 'select', options: ['show', 'hide'] },
+  { key: 'showFilters', label: 'Filter panel', type: 'select', options: ['show', 'hide'] },
+  { key: 'showCardBadges', label: 'Card badges', type: 'select', options: ['show', 'hide'] },
+  { key: 'showContact', label: 'Contact buttons', type: 'select', options: ['show', 'hide'] },
+];
+
 const ADMIN_CONFIG_PERMISSIONS: ModulePermissions = {
   view: 'public',
   contactOwner: 'module_flag_and_signed_in',
@@ -122,7 +136,7 @@ export const MODULE_REGISTRY: readonly ModuleContract[] = [
     screens: ['pg'],
     dataServices: ['marketplace listings (existing store)', 'fetchAuthorizedOwnerContact'],
     dependsOn: ['platform_module_flags', 'listings'],
-    config: { fields: PRESENTATION_FIELDS },
+    config: { fields: [...PRESENTATION_FIELDS, ...PG_BLOCK_FIELDS] },
     permissions: ADMIN_CONFIG_PERMISSIONS,
     healthChecks: [
       { id: 'flags', label: 'Module flags reachable', severity: 'blocking' },
@@ -229,6 +243,8 @@ export interface ResolvedModuleConfigValues {
   heroImage: string;
   layout: string;
   maxCategories: number;
+  /** `show*` presentation switches. A missing key means "shown". */
+  blocks: Record<string, boolean>;
 }
 
 export interface ModuleConfigResolution {
@@ -257,7 +273,7 @@ export function resolveModuleConfig(
   const module = getModule(id);
   if (!module) {
     return {
-      values: { label: '', headline: '', heroImage: '', layout: 'grid', maxCategories: 12 },
+      values: { label: '', headline: '', heroImage: '', layout: 'grid', maxCategories: 12, blocks: {} },
       issues: [`Unknown module "${id}".`],
       usedDefaults: true,
     };
@@ -270,6 +286,7 @@ export function resolveModuleConfig(
     heroImage: String(defaultFor(module, 'heroImage')) as string,
     layout: String(defaultFor(module, 'layout')) as string,
     maxCategories: Number(defaultFor(module, 'maxCategories')),
+    blocks: {} as Record<string, boolean>,
   };
   let usedDefaults = false;
 
@@ -303,6 +320,10 @@ export function resolveModuleConfig(
       if (!field.options?.includes(text)) {
         issues.push(`${field.label} must be one of ${field.options?.join(', ')}.`);
         usedDefaults = true;
+        continue;
+      }
+      if (field.key.startsWith('show')) {
+        values.blocks[field.key] = text !== 'hide';
         continue;
       }
       values.layout = text;
