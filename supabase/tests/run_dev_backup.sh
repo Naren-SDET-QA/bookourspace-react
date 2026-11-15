@@ -135,7 +135,17 @@ SQL
     return 6
   fi
 
-  if ! PGSSLMODE=disable pg_restore --no-owner --no-acl --exit-on-error \
+  # Supabase's hosted database carries the supabase_vault extension and vault
+  # schema. The disposable local cluster has no such extension; exclude only those
+  # managed objects so the public/auth schema and data can still be restore-verified.
+  if ! pg_restore -l "$dir/backup.dump" 2>/dev/null \
+        | awk '!/supabase_vault/ && !/SCHEMA - vault/ && !/TABLE DATA vault /' \
+        > "$restore_root/restore.toc"; then
+    echo "FAILED: could not prepare a filtered restore TOC" >&2
+    return 6
+  fi
+
+  if ! PGSSLMODE=disable pg_restore --no-owner --no-acl --exit-on-error -L "$restore_root/restore.toc" \
         -d "postgres://postgres@127.0.0.1:$restore_port/bos_restore" \
         "$dir/backup.dump" > "$restore_root/restore.log" 2>&1; then
     echo "FAILED: pg_restore --exit-on-error; last lines:" >&2
@@ -402,7 +412,7 @@ trap 'if [ -n "${TARGET_DIR:-}" ]; then rm -f -- "$TARGET_DIR/backup.dump"; fi' 
 # Identity preflight: prove the connection is usable read-only before dumping.
 # Errors are suppressed so a malformed URL can never echo credentials.
 echo "=== 0. identity / read-only preflight ==="
-if ! IDENTITY_ROW="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DATABASE_URL" -tAc "select current_database() || ' | user=' || current_user || ' | server=' || current_setting('server_version')" 2>/dev/null)"; then
+if ! IDENTITY_ROW="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$BOS_LIBPQ_DSN" -tAc "select current_database() || ' | user=' || current_user || ' | server=' || current_setting('server_version')" 2>/dev/null)"; then
   echo "FAILED: cannot verify database identity or read-only permission; no dump was taken." >&2
   exit 3
 fi

@@ -6,7 +6,7 @@
 export interface DemoDataEnvironment {
   DEV?: boolean;
   VITE_ENABLE_DEMO_DATA?: string;
-  /** Set only by the AI Studio cloud build. */
+  /** Explicit, operator-set opt-in for a hosted preview build. */
   VITE_AI_STUDIO_DEMO?: string;
 }
 

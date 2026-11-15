@@ -4,16 +4,10 @@ import path from 'node:path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
-  // AI Studio runs the production build from /app/applet without a database.
-  // Enable the clearly-labelled demo fixtures for that cloud preview only; a
-  // Cloud Run/normal production build never receives these defines.
-  const aiStudioBuild = process.cwd().startsWith('/app/applet')
-    || process.env.AI_STUDIO === 'true'
-    || process.env.BUILD_TARGET === 'ai-studio';
-  const aiStudioDefines = aiStudioBuild ? {
-    'import.meta.env.VITE_ENABLE_DEMO_DATA': JSON.stringify('true'),
-    'import.meta.env.VITE_AI_STUDIO_DEMO': JSON.stringify('true'),
-  } : {};
+  // Demo fixtures are never injected by the build. Every build — including the
+  // Google AI Studio /app/applet preview — serves real data unless an operator
+  // explicitly opts in through VITE_ENABLE_DEMO_DATA (development) or
+  // VITE_ENABLE_DEMO_DATA plus VITE_AI_STUDIO_DEMO (hosted preview).
   // Keep the normal localhost server out of Vite's shared node_modules/.vite
   // cache. Playwright, previews, and another dev server can otherwise rewrite
   // the optimized Leaflet bundle while a lazy section is importing it, which
@@ -22,7 +16,6 @@ export default defineConfig(() => {
   const viteCacheDir = process.env.BOS_VITE_CACHE_DIR
     || path.join(process.cwd(), '.local', `vite-cache-${process.env.PORT || '3000'}`);
   return {
-    define: aiStudioDefines,
     plugins: [react(), tailwindcss()],
     // Isolate Playwright's optimized dependency cache from the user's regular
     // dev server so concurrent Vite processes cannot invalidate each other's

@@ -11,7 +11,8 @@ import {
   manageSupabaseUserAccess,
   listSupabaseUserProfiles,
 } from './src/server/supabaseGoogleIdentity';
-import { assertProductionPersistenceReady } from './src/server/persistencePolicy';
+import { assertPostgresConnectionTarget, assertProductionPersistenceReady } from './src/server/persistencePolicy';
+import { assertProductionSupabaseEnvironment } from './src/server/supabaseProductionGuard';
 import { closeSharedPostgresPool, initializePostgresRuntime } from './src/server/postgresPool';
 import { registerPlatformApi } from './src/server/platformApi';
 import { registerMoviesShowtimesApi } from './src/server/moviesShowtimesApi';
@@ -41,6 +42,7 @@ import { PlatformBuilderRepository, registerPlatformBuilderApi } from './src/ser
 import { VenueBookingRepository } from './src/server/venueBookingRepository';
 import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
 import { registerMediaValidationApi } from './src/server/mediaValidationApi';
+import { registerPrivateMediaSignApi } from './src/server/privateMediaSignApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
 import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
 import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
@@ -280,12 +282,8 @@ function saveServerStore(data: ServerStoreData): boolean {
 }
 
 async function startServer() {
-  // Prevent production from silently using the local JSON compatibility
-  // stores. A verified transactional PostgreSQL adapter is still required.
-  assertProductionPersistenceReady();
-
   // Google AI Studio previews do not provide the production PostgreSQL pool.
-  // In that preview only, allow the UI/server to boot in read-only demo mode;
+  // In that preview only, allow the UI/server to boot as a read-only frontend preview;
   // Cloud Run production still fails closed and readiness reports 503.
   // Never allow this preview fallback on Cloud Run (K_SERVICE is set there).
   const aiStudioPreview = !process.env.K_SERVICE && (
@@ -293,26 +291,44 @@ async function startServer() {
     || process.cwd().startsWith('/app/applet')
     || process.env.AI_STUDIO === 'true'
   );
-  const hasConfiguredPostgresTarget = Boolean(
+
+  // Prevent production from silently using the local JSON compatibility
+  // stores. A verified transactional PostgreSQL adapter is still required.
+  if (!aiStudioPreview) {
+    assertProductionPersistenceReady();
+  }
+
+  let hasConfiguredPostgresTarget = Boolean(
     String(process.env.BOS_LISTINGS_DATABASE_URL || process.env.BOS_PG_URL || '').trim(),
   );
   let pgRuntimePool: Awaited<ReturnType<typeof initializePostgresRuntime>> | undefined;
   if (process.env.NODE_ENV === 'production' || hasConfiguredPostgresTarget) {
     try {
-      pgRuntimePool = await initializePostgresRuntime();
+      if (aiStudioPreview && hasConfiguredPostgresTarget) {
+        assertPostgresConnectionTarget(
+          String(process.env.BOS_LISTINGS_DATABASE_URL || '').trim(),
+          process.env,
+        );
+      }
+      if (!aiStudioPreview || hasConfiguredPostgresTarget) {
+        pgRuntimePool = await initializePostgresRuntime();
+      }
     } catch (error) {
       if (!aiStudioPreview) throw error;
-      console.warn('[ai-studio] PostgreSQL is unavailable; starting in demo mode without server persistence.');
-      // Repository factories read these later. Clearing them here prevents an
-      // unreachable configured URL from failing startup a second time.
-      delete process.env.BOS_LISTINGS_DATABASE_URL;
-      delete process.env.BOS_PG_URL;
+      const safeReason = error instanceof Error
+        ? String(error.message || 'DATABASE_UNAVAILABLE').split(':')[0].replace(/[^A-Z0-9_]/g, '').slice(0, 64)
+        : 'DATABASE_UNAVAILABLE';
+      console.warn(`[ai-studio] PostgreSQL is unavailable (${safeReason || 'UNKNOWN'}); starting a frontend-only preview without server persistence.`);
+      // The configured target is preserved deliberately. Clearing it would
+      // silently discard operator configuration and hide a real outage; the
+      // preview simply runs without a pool, and every database-backed route
+      // reports the failure instead of falling back to demo inventory.
       pgRuntimePool = undefined;
     }
   }
 
   const configuredHmacSecret = (process.env.BOS_SERVER_HMAC_SECRET || '').trim();
-  if (process.env.NODE_ENV === 'production' && !configuredHmacSecret) {
+  if (process.env.NODE_ENV === 'production' && !aiStudioPreview && !configuredHmacSecret) {
     throw new Error('BOS_SERVER_HMAC_SECRET_REQUIRED');
   }
   const SERVER_HMAC_SECRET = configuredHmacSecret || crypto.randomBytes(32).toString('hex');
@@ -397,7 +413,7 @@ async function startServer() {
 
   // Production has no JSON fallback for any marketplace domain, so every
   // domain repository must be attached before the listener opens.
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' && (!aiStudioPreview || Boolean(pgRuntimePool))) {
     const missingRepositories = [
       ['stay_search', pgRuntimePool],
       ['listings', providerListingRepository],
@@ -417,10 +433,18 @@ async function startServer() {
   app.use(apiNoStoreByDefault);
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    if (aiStudioPreview) {
+      // Google AI Studio embeds its cloud preview inside an outer studio iframe.
+      res.setHeader(
+        'Content-Security-Policy',
+        "frame-ancestors 'self' https://aistudio.google.com https://*.scf.usercontent.goog https://*.googleusercontent.com",
+      );
+    } else {
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    }
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
     res.setHeader('X-DNS-Prefetch-Control', 'off');
     if (process.env.NODE_ENV === 'production') {
       const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol;
@@ -1876,6 +1900,13 @@ Task:
     publishableKey: serverSupabaseConfig.publishableKey,
     // Server-only. Never expose this value in Vite-prefixed variables or logs.
     serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    pool: pgRuntimePool || null,
+  });
+  registerPrivateMediaSignApi(app, {
+    projectUrl: SUPABASE_PROJECT_URL,
+    serverSecretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    verifySession: verifySessionTokenFromRequest,
+    pool: pgRuntimePool || null,
   });
   registerAccountClosureApi(app, {
     projectUrl: SUPABASE_PROJECT_URL,
@@ -5606,7 +5637,11 @@ Task:
   });
 
   // Vite dev middleware or production static serving
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(__dirname, 'dist');
+  const useVitePreviewMiddleware =
+    process.env.NODE_ENV !== 'production'
+    || (aiStudioPreview && !fs.existsSync(path.join(distPath, 'index.html')));
+  if (useVitePreviewMiddleware) {
     const { createServer: createViteServer } = await import('vite');
     // HMR must never fight for a fixed port: honour DISABLE_HMR (tests, CI) and
     // allow an explicit port so parallel runs cannot collide with another process.
@@ -5622,7 +5657,6 @@ Task:
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath, {
       setHeaders: (response, filePath) => {
         const relativePath = path.relative(distPath, filePath).split(path.sep).join('/');
@@ -5660,7 +5694,7 @@ Task:
     res.status(500).json({ ok: false, error: 'INTERNAL_ERROR', message: 'The request could not be completed. Nothing was charged.' });
   });
 
-  if (process.env.NODE_ENV === 'production' && process.env.BOS_POSTGRES_LOCAL_TEST_MODE !== 'true') {
+  if (process.env.NODE_ENV === 'production' && !aiStudioPreview && process.env.BOS_POSTGRES_LOCAL_TEST_MODE !== 'true') {
     const appUrl = String(process.env.APP_URL || '').trim();
     if (!appUrl) {
       throw new Error('PRODUCTION_APP_URL_REQUIRED');
@@ -5675,6 +5709,20 @@ Task:
       throw new Error('PRODUCTION_APP_URL_HTTPS_REQUIRED');
     }
   }
+
+  if (!aiStudioPreview) {
+    // Production must target a dedicated production Supabase project. An
+    // undeclared target, or one that names the development project, fails
+    // closed here — after the persistence and APP_URL gates, and before the
+    // listener opens — instead of deploying against development data.
+    assertProductionSupabaseEnvironment();
+  }
+
+  httpServer.on('error', (error: any) => {
+    const code = String(error?.code || 'UNKNOWN').replace(/[^A-Z0-9_]/gi, '').slice(0, 40) || 'UNKNOWN';
+    console.error(`[server] HTTP listener failed on 0.0.0.0:${PORT}:`, code);
+    process.exit(1);
+  });
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`BookOurSpace Full-Stack Server running on http://0.0.0.0:${PORT}`);
@@ -5709,4 +5757,10 @@ Task:
   }
 }
 
-startServer();
+startServer().catch((error: any) => {
+  const safeReason = String(error?.message || 'STARTUP_FAILED')
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted-db-url]')
+    .replace(/password=\S+/gi, 'password=[redacted]');
+  console.error('[server] startup failed:', safeReason);
+  process.exit(1);
+});

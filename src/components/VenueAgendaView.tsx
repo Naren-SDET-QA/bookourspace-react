@@ -1,6 +1,8 @@
 import React from 'react';
 import { ArrowRight, MapPin, Star } from 'lucide-react';
 import type { MarketplaceListing } from '../types/marketplace';
+import SafeImage from './SafeImage';
+import { listingImageSources } from '../lib/media/signedStorageUrl';
 
 /**
  * Agenda-style Venues discovery. This is intentionally a different design from
@@ -26,7 +28,7 @@ export function VenueAgendaView({
       </div>
       <ol className="space-y-2.5">
         {listings.map((listing, index) => {
-          const photo = (listing as any).images?.[0] || (listing as any).imageUrl || (listing as any).photo;
+          const photo = listingImageSources((listing as any).images, listing, (listing as any).imageUrl, (listing as any).photo)[0] || '';
           const price = Number((listing as any).priceFromPaise ?? (listing as any).pricePaise ?? 0);
           const rating = Number((listing as any).rating ?? 0);
           const area = [(listing as any).area, (listing as any).city].filter(Boolean).join(', ');
@@ -39,7 +41,7 @@ export function VenueAgendaView({
               >
                 <span className="relative block h-20 w-20 overflow-hidden rounded-xl bg-slate-100 sm:h-24 sm:w-full dark:bg-slate-800">
                   {photo ? (
-                    <img src={String(photo)} alt={listing.title} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+                    <SafeImage category="venues" src={String(photo)} alt={listing.title} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center text-2xl" aria-hidden="true">🏛️</span>
                   )}

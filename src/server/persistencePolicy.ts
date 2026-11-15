@@ -74,8 +74,22 @@ function isExplicitDevelopmentRemoteTarget(
     .toLowerCase();
   const hostname = parsed.hostname.toLowerCase();
   const directSupabaseHost = projectId ? `db.${projectId}.supabase.co` : '';
+  let decodedUsername = '';
+  try {
+    decodedUsername = decodeURIComponent(parsed.username || '').trim().toLowerCase();
+  } catch {
+    decodedUsername = String(parsed.username || '').trim().toLowerCase();
+  }
+  const allowlistedSupabasePooler =
+    projectId !== ''
+    && /^[a-z0-9-]+\.pooler\.supabase\.com$/.test(hostname)
+    && decodedUsername === `postgres.${projectId}`;
 
-  return hostname === directSupabaseHost || (configuredHost !== '' && hostname === configuredHost);
+  return (
+    hostname === directSupabaseHost
+    || allowlistedSupabasePooler
+    || (configuredHost !== '' && hostname === configuredHost)
+  );
 }
 
 /**

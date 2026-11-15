@@ -102,6 +102,39 @@ test('development accepts only the allowlisted Supabase project over TLS', () =>
   assert.equal(policy.mode, 'postgres');
   assert.equal(policy.postgres, true);
 
+  const poolerUrl =
+    'postgresql://postgres.obkfgxjzlscungkhbyvq:placeholder@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+  const poolerPolicy = assertProductionPersistenceReady({
+    NODE_ENV: 'development',
+    BOS_LISTINGS_DATABASE_URL: poolerUrl,
+    BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+    BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+  });
+  assert.equal(poolerPolicy.mode, 'postgres');
+  assert.equal(poolerPolicy.postgres, true);
+
+  assert.throws(
+    () =>
+      assertProductionPersistenceReady({
+        NODE_ENV: 'development',
+        BOS_LISTINGS_DATABASE_URL: poolerUrl.replace('postgres.obkfgxjzlscungkhbyvq', 'postgres.otherproject'),
+        BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+        BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+      }),
+    /BOS_DEVELOPMENT_POSTGRES_TARGET_NOT_ALLOWLISTED/,
+  );
+
+  assert.throws(
+    () =>
+      assertProductionPersistenceReady({
+        NODE_ENV: 'development',
+        BOS_LISTINGS_DATABASE_URL: poolerUrl.replace('sslmode=verify-full', 'sslmode=disable'),
+        BOS_ALLOW_REMOTE_DEVELOPMENT_DATABASE: '1',
+        BOS_DEVELOPMENT_DATABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
+      }),
+    /BOS_DEVELOPMENT_POSTGRES_TLS_REQUIRED/,
+  );
+
   assert.throws(
     () =>
       assertProductionPersistenceReady({

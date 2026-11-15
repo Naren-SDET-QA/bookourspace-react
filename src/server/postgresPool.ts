@@ -1,5 +1,52 @@
-import { Pool } from 'pg';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Pool, type PoolClient } from 'pg';
 import { assertPostgresConnectionTarget } from './persistencePolicy';
+
+const SUPABASE_ROOT_CA_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../supabase/certs/supabase-root-ca.crt',
+);
+
+/**
+ * Ensures strict Supabase TLS (`require`/`verify-ca`/`verify-full`) resolves
+ * the bundled Supabase Root CA when `sslrootcert` is omitted or points to a
+ * relative path outside the current working directory. Never relaxes TLS.
+ */
+export function resolvePostgresTlsConnectionString(connectionString: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(connectionString);
+  } catch {
+    return connectionString;
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const isSupabaseHost =
+    hostname.endsWith('.supabase.co') || hostname.endsWith('.pooler.supabase.com');
+  const sslMode = String(parsed.searchParams.get('sslmode') || '').toLowerCase();
+  if (!isSupabaseHost || !['require', 'verify-ca', 'verify-full'].includes(sslMode)) {
+    return connectionString;
+  }
+
+  const configuredRootCert = String(parsed.searchParams.get('sslrootcert') || '').trim();
+  if (configuredRootCert) {
+    const resolvedConfigured = path.isAbsolute(configuredRootCert)
+      ? configuredRootCert
+      : path.resolve(process.cwd(), configuredRootCert);
+    if (fs.existsSync(resolvedConfigured)) {
+      if (resolvedConfigured === configuredRootCert) return connectionString;
+      parsed.searchParams.set('sslrootcert', resolvedConfigured);
+      return parsed.toString();
+    }
+  }
+
+  if (fs.existsSync(SUPABASE_ROOT_CA_PATH)) {
+    parsed.searchParams.set('sslrootcert', SUPABASE_ROOT_CA_PATH);
+    return parsed.toString();
+  }
+  return connectionString;
+}
 
 /**
  * One PostgreSQL pool for the marketplace domains that share the canonical
@@ -44,7 +91,9 @@ export function getSharedPostgresPool(
   connectionString: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): Pool {
-  const normalised = assertPostgresConnectionTarget(connectionString, environment);
+  const normalised = resolvePostgresTlsConnectionString(
+    assertPostgresConnectionTarget(connectionString, environment),
+  );
   if (sharedPool && sharedConnectionString === normalised && !closed) return sharedPool;
   if (sharedPool && !closed) {
     // A different database was configured. The old pool is released.
@@ -163,16 +212,18 @@ export async function initializePostgresRuntime(
     }
   }
 
-  const code = String((lastError as any)?.code || '');
+  const rawCode = String((lastError as any)?.code || '');
+  const safeCode = rawCode.replace(/[^A-Z0-9_]/gi, '').slice(0, 48);
   await pool.end().catch(() => undefined);
   if (pool === sharedPool) {
     sharedPool = null;
     sharedConnectionString = '';
     closed = true;
   }
-  if (['28P01', '28000'].includes(code)) throw new Error('BOS_LISTINGS_DATABASE_AUTHENTICATION_FAILED');
-  if (code === '53300') throw new Error('BOS_LISTINGS_DATABASE_POOL_EXHAUSTED');
-  if (['42P01', '42703', '42883'].includes(code)) throw new Error('BOS_STAYS_SCHEMA_OUTDATED');
+  if (['28P01', '28000'].includes(rawCode)) throw new Error('BOS_LISTINGS_DATABASE_AUTHENTICATION_FAILED');
+  if (rawCode === '53300') throw new Error('BOS_LISTINGS_DATABASE_POOL_EXHAUSTED');
+  if (['42P01', '42703', '42883'].includes(rawCode)) throw new Error('BOS_STAYS_SCHEMA_OUTDATED');
+  console.error('[postgres] startup connectivity check failed:', safeCode || 'UNKNOWN');
   throw new Error('BOS_LISTINGS_DATABASE_UNAVAILABLE');
 }
 
@@ -184,4 +235,65 @@ export async function closeSharedPostgresPool(): Promise<void> {
   sharedConnectionString = '';
   closed = true;
   await pool.end().catch(() => undefined);
+}
+
+/**
+ * Resolves ordered `'storage://bos-public-media/...'` references for already
+ * selected active public listings using a read-only server transaction. Keeps
+ * `anon` column grants on `public.media_assets` restricted while resolving
+ * ready media only for verified public listings.
+ */
+export async function loadApprovedPublicListingMedia(
+  client: PoolClient,
+  listingIds: string[],
+  options: { requireStayApproved?: boolean } = {},
+): Promise<Map<string, string[]>> {
+  const uniqueIds = [...new Set(listingIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  const mediaByListingId = new Map<string, string[]>();
+  if (uniqueIds.length === 0) return mediaByListingId;
+
+  const stayGate = options.requireStayApproved
+    ? `and l.is_verified is true and l.verified_by is not null and l.payload->>'stayLifecycle' = 'approved'`
+    : '';
+
+  await client.query('BEGIN READ ONLY');
+  try {
+    const { rows } = await client.query(
+      `select asset.parent_id as listing_id,
+              jsonb_agg(
+                'storage://' || asset.bucket_id || '/' || asset.object_path
+                order by asset.display_order, asset.created_at, asset.id
+              ) as images
+         from public.media_assets asset
+         join public.listings l
+           on l.id = asset.parent_id
+          and l.owner_id = asset.owner_id
+        where l.id = any($1::text[])
+          and l.status = 'active'
+          ${stayGate}
+          and asset.parent_type = 'provider_listing'
+          and asset.bucket_id = 'bos-public-media'
+          and asset.privacy = 'public'
+          and asset.processing_status = 'ready'
+        group by asset.parent_id`,
+      [uniqueIds],
+    );
+    await client.query('COMMIT');
+    for (const row of rows) {
+      if (row?.listing_id && Array.isArray(row.images)) {
+        mediaByListingId.set(
+          String(row.listing_id),
+          row.images.filter((ref: unknown): ref is string => typeof ref === 'string'),
+        );
+      }
+    }
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Preserve the original read failure.
+    }
+    throw error;
+  }
+  return mediaByListingId;
 }

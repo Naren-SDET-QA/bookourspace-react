@@ -50,7 +50,7 @@ test('production marketplace listings fail closed without PostgreSQL', async () 
 
 test('/api/health fails closed when PostgreSQL is not attached', async () => {
   const port = String(18000 + Math.floor(Math.random() * 1000));
-  const child = spawn('npx', ['tsx', 'server.ts'], {
+  const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
     cwd: new URL('..', import.meta.url),
     env: {
       PATH: process.env.PATH,
@@ -100,7 +100,7 @@ test('/api/health fails closed when PostgreSQL is not attached', async () => {
 test('production Node refuses to listen without PostgreSQL or HTTPS APP_URL', async () => {
   const hmac = 'a'.repeat(64);
   async function spawnServer(env) {
-    const child = spawn('npx', ['tsx', 'server.ts'], {
+    const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.ts'], {
       cwd: new URL('..', import.meta.url),
       env: {
         PATH: process.env.PATH,

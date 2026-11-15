@@ -6,34 +6,56 @@ const MAX_CACHED_URLS = 300;
 const VARIANT_CACHE_MS = 5 * 60 * 1000;
 const MAX_RESPONSIVE_VARIANTS = 8;
 const ALLOWED_BUCKETS = new Set(['bos-public-media', 'bos-private-documents', 'bos-private-profile-media']);
+const INVALID_STORAGE_PATH_CHARACTER = /[?#\\/\u0000-\u001f\u007f]/;
 
 export interface StorageObjectReference {
   bucket: 'bos-public-media' | 'bos-private-documents' | 'bos-private-profile-media';
   path: string;
 }
 
-/** Canonical persisted form: storage://<approved-bucket>/<object-path>. */
-export function parseStorageObjectReference(value: string): StorageObjectReference | null {
-  const match = /^storage:\/\/([^/]+)\/(.+)$/.exec(value);
-  if (!match) return null;
+function decodeStoragePath(rawPath: string): string | null {
+  const rawSegments = rawPath.split('/');
+  if (!rawSegments.length || rawSegments.some((segment) => !segment)) return null;
   try {
-    const bucket = match[1].toLowerCase();
-    if (!ALLOWED_BUCKETS.has(bucket) || /[?#\\\u0000-\u001f\u007f]/.test(match[2])) return null;
-    const rawSegments = match[2].split('/');
-    if (!rawSegments.length || rawSegments.some((segment) => !segment)) return null;
     const segments = rawSegments.map((segment) => decodeURIComponent(segment));
-    if (segments.some((segment) => segment === '.' || segment === '..' || /[\\/\u0000-\u001f\u007f]/.test(segment))) return null;
+    if (segments.some((segment) => segment === '.' || segment === '..' || INVALID_STORAGE_PATH_CHARACTER.test(segment))) return null;
     const path = segments.join('/');
-    if (path.length > 512) return null;
-    return { bucket: bucket as StorageObjectReference['bucket'], path };
+    return path.length > 512 ? null : path;
   } catch {
     return null;
   }
 }
 
+function canonicalStorageReference(bucketValue: string, rawPath: string): string | null {
+  let bucket: string;
+  try {
+    bucket = decodeURIComponent(bucketValue).toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!ALLOWED_BUCKETS.has(bucket)) return null;
+  const path = decodeStoragePath(rawPath);
+  if (!path) return null;
+  return `storage://${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+/** Canonical persisted form: storage://<approved-bucket>/<object-path>. */
+export function parseStorageObjectReference(value: string): StorageObjectReference | null {
+  const match = /^storage:\/\/([^/]+)\/(.+)$/.exec(value);
+  if (!match) return null;
+  const canonical = canonicalStorageReference(match[1], match[2]);
+  if (!canonical) return null;
+  const canonicalMatch = /^storage:\/\/([^/]+)\/(.+)$/.exec(canonical);
+  if (!canonicalMatch) return null;
+  return {
+    bucket: canonicalMatch[1] as StorageObjectReference['bucket'],
+    path: canonicalMatch[2].split('/').map((segment) => decodeURIComponent(segment)).join('/'),
+  };
+}
+
 /** Identifies a Supabase Storage object URL without trusting its host. */
 export function isSupabaseStorageSource(value: string): boolean {
-  if (value.startsWith('storage://')) return true;
+  if (value.startsWith('storage://')) return parseStorageObjectReference(value) !== null;
   try {
     const url = value.startsWith('/')
       ? new URL(value, SUPABASE_PROJECT_URL)
@@ -45,7 +67,10 @@ export function isSupabaseStorageSource(value: string): boolean {
 }
 
 export function storageReferenceForSource(value: string, projectUrl = SUPABASE_PROJECT_URL): string | null {
-  if (value.startsWith('storage://')) return parseStorageObjectReference(value) ? value : null;
+  if (value.startsWith('storage://')) {
+    const match = /^storage:\/\/([^/]+)\/(.+)$/.exec(value);
+    return match ? canonicalStorageReference(match[1], match[2]) : null;
+  }
   let url: URL;
   let configuredOrigin: string;
   try {
@@ -58,14 +83,7 @@ export function storageReferenceForSource(value: string, projectUrl = SUPABASE_P
   const match = url.pathname.match(/^\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/)
     || url.pathname.match(/^\/storage\/v1\/object\/([^/]+)\/(.+)$/);
   if (!match) return null;
-  try {
-    const bucket = decodeURIComponent(match[1]);
-    const path = match[2].split('/').map((segment) => decodeURIComponent(segment)).join('/');
-    const reference = `storage://${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
-    return parseStorageObjectReference(reference) ? reference : null;
-  } catch {
-    return null;
-  }
+  return canonicalStorageReference(match[1], match[2]);
 }
 
 /** Only the listing-media bucket is valid in an image element. */
@@ -77,6 +95,57 @@ export function isPublicImageStorageSource(value: string): boolean {
 export function isProfileImageStorageSource(value: string): boolean {
   const reference = storageReferenceForSource(value);
   return reference ? parseStorageObjectReference(reference)?.bucket === 'bos-private-profile-media' : false;
+}
+
+function storageBucketFromPathOrRef(value: string): string {
+  const reference = storageReferenceForSource(value);
+  if (reference) return parseStorageObjectReference(reference)?.bucket || '';
+  if (value.startsWith('storage://')) return '';
+  try {
+    const url = value.startsWith('/') ? new URL(value, 'https://storage.invalid') : new URL(value);
+    const match = url.pathname.match(/^\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\//i)
+      || url.pathname.match(/^\/storage\/v1\/object\/([^/]+)\//i);
+    return match ? decodeURIComponent(match[1]).toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** A private-bucket reference is only renderable by its authorized owner. */
+export function isPrivateStorageSource(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const bucket = storageBucketFromPathOrRef(value.trim());
+  return bucket === 'bos-private-profile-media' || bucket === 'bos-private-documents';
+}
+
+/**
+ * A profile image value that may be handed to *another* user's browser.
+ * Private profile media is owner-only by policy, so its object path must never
+ * reach a public projection: callers get an empty string and render initials
+ * instead of a permanently broken `<img>`.
+ */
+export function publicProfileImageSource(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const source = value.trim();
+  if (!source) return '';
+  if (source.startsWith('storage://')) {
+    return parseStorageObjectReference(source)?.bucket === 'bos-public-media' ? source : '';
+  }
+  if (source.startsWith('/storage/v1/object/')) {
+    return isPublicImageStorageSource(source) ? source : '';
+  }
+  try {
+    const url = new URL(source);
+    if (url.protocol !== 'https:') return '';
+    if (/^\/storage\/v1\/object\//i.test(url.pathname)) {
+      return storageBucketFromPathOrRef(source) === 'bos-public-media' && isPublicImageStorageSource(source)
+        ? source
+        : '';
+    }
+    return source;
+  } catch {
+    return '';
+  }
 }
 
 const LOCAL_LISTING_ASSET = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -173,8 +242,14 @@ type SignedUrlStorage = {
   from: (bucket: string) => { createSignedUrl: (path: string, expiresIn: number) => Promise<{ data: { signedUrl: string } | null; error: Error | null }> };
 };
 
+type PrivateSignFallback = (reference: string) => Promise<string | null>;
+
 /** Per-runtime cache and in-flight request deduplication; never persists signed URLs. */
-export function createSignedStorageUrlResolver(storage: SignedUrlStorage, now: () => number = Date.now) {
+export function createSignedStorageUrlResolver(
+  storage: SignedUrlStorage,
+  now: () => number = Date.now,
+  privateSignFallback?: PrivateSignFallback,
+) {
   const cache = new Map<string, { url: string; expiresAt: number }>();
   const pending = new Map<string, Promise<string>>();
 
@@ -187,16 +262,21 @@ export function createSignedStorageUrlResolver(storage: SignedUrlStorage, now: (
     if (forceRefresh) cache.delete(key);
     const existing = pending.get(key);
     if (existing) return existing;
+    const isPrivateBucket = parsed.bucket === 'bos-private-profile-media' || parsed.bucket === 'bos-private-documents';
     const request = storage.from(parsed.bucket).createSignedUrl(parsed.path, MEDIA_URL_TTL_SECONDS)
-      .then(({ data, error }) => {
-        if (error || !data?.signedUrl) throw new Error('MEDIA_SIGNED_URL_UNAVAILABLE');
+      .then(async ({ data, error }) => {
+        let signedUrl = !error && data?.signedUrl ? data.signedUrl : '';
+        if (!signedUrl && isPrivateBucket && privateSignFallback) {
+          signedUrl = (await privateSignFallback(reference).catch(() => null)) || '';
+        }
+        if (!signedUrl) throw new Error('MEDIA_SIGNED_URL_UNAVAILABLE');
         cache.delete(key);
-        cache.set(key, { url: data.signedUrl, expiresAt: now() + MEDIA_URL_TTL_SECONDS * 1000 });
+        cache.set(key, { url: signedUrl, expiresAt: now() + MEDIA_URL_TTL_SECONDS * 1000 });
         if (cache.size > MAX_CACHED_URLS) {
           const oldestKey = cache.keys().next().value as string | undefined;
           if (oldestKey) cache.delete(oldestKey);
         }
-        return data.signedUrl;
+        return signedUrl;
       })
       .finally(() => pending.delete(key));
     pending.set(key, request);
@@ -211,7 +291,36 @@ export function createSignedStorageUrlResolver(storage: SignedUrlStorage, now: (
   return resolve;
 }
 
-const resolveSignedStorageUrl = supabase ? createSignedStorageUrlResolver(supabase.storage) : null;
+async function requestServerPrivateSignedUrl(reference: string): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  let token = '';
+  try {
+    token = window.localStorage.getItem('bos_session_token_v1') || '';
+  } catch {
+    return null;
+  }
+  if (!token) return null;
+  try {
+    const response = await fetch('/api/media/private-sign', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-bos-session-token': token,
+      },
+      body: JSON.stringify({ reference }),
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+    const body = await response.json().catch(() => ({} as Record<string, unknown>));
+    return typeof body?.signedUrl === 'string' && body.signedUrl ? body.signedUrl : null;
+  } catch {
+    return null;
+  }
+}
+
+const resolveSignedStorageUrl = supabase
+  ? createSignedStorageUrlResolver(supabase.storage, Date.now, requestServerPrivateSignedUrl)
+  : null;
 
 export interface ResponsiveMediaSource {
   src: string;
@@ -259,8 +368,9 @@ export function createResponsiveMediaResolver(
   storage: SignedUrlStorage,
   lookupVariants: VariantLookup,
   now: () => number = Date.now,
+  privateSignFallback?: PrivateSignFallback,
 ) {
-  const resolve = createSignedStorageUrlResolver(storage, now);
+  const resolve = createSignedStorageUrlResolver(storage, now, privateSignFallback);
   const variantCache = new Map<string, { variants: MediaVariantDescriptor[]; expiresAt: number }>();
   const variantPending = new Map<string, Promise<MediaVariantDescriptor[]>>();
 
@@ -331,7 +441,7 @@ async function lookupReadyImageVariants(bucket: string, objectPath: string): Pro
 }
 
 const resolveResponsiveMedia = supabase
-  ? createResponsiveMediaResolver(supabase.storage, lookupReadyImageVariants)
+  ? createResponsiveMediaResolver(supabase.storage, lookupReadyImageVariants, Date.now, requestServerPrivateSignedUrl)
   : null;
 
 export async function resolveMediaSource(source: string, forceRefresh = false): Promise<string> {
