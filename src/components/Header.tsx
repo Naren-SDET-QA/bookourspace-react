@@ -210,7 +210,7 @@ export const Header: React.FC<HeaderProps> = ({
             title={userName}
           >
             <img
-              src="/public/assets/aistudio/image_13d09e7d.png"
+              src="/assets/aistudio/image_13d09e7d.png"
               alt={userName}
               referrerPolicy="no-referrer"
               className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover bg-purple-900"

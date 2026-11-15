@@ -99,7 +99,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <div className="relative">
             <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full ring-4 ring-purple-600/30 overflow-hidden shadow-lg bg-purple-900">
               <img
-                src={userProfile.avatar || '/public/assets/aistudio/image_13d09e7d.png'}
+                src={userProfile.avatar || '/assets/aistudio/image_13d09e7d.png'}
                 alt={userProfile.name}
                 className="w-full h-full object-cover"
                 onError={(e) => {

@@ -113,7 +113,7 @@ const ENTERPRISE_THEME_PRESETS: {
 const BUILTIN_LOGO_EMBLEMS = [
   {
     label: 'Official BOS Globe Map-Pin Emblem',
-    url: '/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png',
+    url: '/assets/aistudio/image_c82d47dd.png',
   },
   {
     label: 'Classic Golden Pin Emblem',
@@ -701,7 +701,7 @@ export const AdminThemeManagementSection: React.FC<
                         brandLogoEmblemUrl: e.target.value,
                       })
                     }
-                    placeholder="/assets/aistudio/Blue-letter_logo_with_orange_map-pin_emblem_14d3b883.png"
+                    placeholder="/assets/aistudio/image_c82d47dd.png"
                     className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 font-medium text-xs"
                   />
                 </div>

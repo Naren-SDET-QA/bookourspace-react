@@ -59,6 +59,10 @@ insert into auth.users (id, email) values
   ('44444444-4444-4444-4444-444444444444', 'admin@bookourspace.in');
 update public.profiles set role = 'provider'
  where id = '11111111-1111-1111-1111-111111111111';
+-- Test fixture authority is provisioned explicitly by the local database
+-- owner. Never infer an Admin role from this account's email address.
+update public.profiles set role = 'admin'
+ where id = '44444444-4444-4444-4444-444444444444';
 
 insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
 values ('listing-fixture-001',

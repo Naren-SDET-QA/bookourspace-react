@@ -22,6 +22,7 @@ import {
 import { MarketplaceListing } from '../types/marketplace';
 import { MarketSectionType, servicesCategories, hotelStayCategories, moviesCategories } from '../data/servicesStayMoviesData';
 import { pg29Categories, PGCategoryInfo } from '../data/pgHostelData';
+import { isSubcategoryEnabled } from '../lib/subcategoryFlags';
 import { classCategories, ClassCategoryInfo } from '../data/classesData';
 import { venue12Categories, VenueCategoryInfo } from '../data/venueData';
 import {
@@ -208,7 +209,13 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
   // Subcategory / Stream chips for the right-hand Stream Explorer
   const activeStreamChips = React.useMemo(() => {
     if (activeCategoryObj) {
-      return activeCategoryObj.subcategories.map((sub: any) => ({
+      const disabled: string[] = (activeCategoryObj as any).disabledSubcategories ?? [];
+      return activeCategoryObj.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !disabled.includes(name) && isSubcategoryEnabled(name);
+        })
+        .map((sub: any) => ({
         en: typeof sub === 'string' ? sub : sub.en,
         label:
           currentLang === 'te'
@@ -227,7 +234,13 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
     const chips: { en: string; label: string; emoji: string; catId: string }[] = [];
     const seen = new Set<string>();
     sectionCategories.forEach((cat) => {
-      cat.subcategories.slice(0, 2).forEach((sub: any) => {
+      cat.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !((cat as any).disabledSubcategories ?? []).includes(name) && isSubcategoryEnabled(name);
+        })
+        .slice(0, 2)
+        .forEach((sub: any) => {
         const en = typeof sub === 'string' ? sub : sub.en;
         if (!seen.has(en)) {
           seen.add(en);

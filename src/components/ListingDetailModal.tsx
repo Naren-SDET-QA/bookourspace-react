@@ -67,6 +67,14 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   if (!listing) return null;
 
   const listingReviews = reviews.filter(r => r.listingId === listing.id);
+  const isMovieListing = listing.categoryId.startsWith('movie-') || listing.customFieldValues?.sectionType === 'movies';
+  const isRequestableRangeListing = listing.categoryId.startsWith('hotel-') || listing.categoryId.startsWith('venue-') ||
+    listing.customFieldValues?.sectionType === 'hotel_stay' || listing.customFieldValues?.sectionType === 'venues' || listing.entityType === 'event';
+  const primaryActionLabel = isMovieListing
+    ? (translations[currentLang] || translations.en).bookNow
+    : isRequestableRangeListing
+      ? currentLang === 'te' ? 'అందుబాటును అడగండి' : 'Request availability'
+      : currentLang === 'te' ? 'ప్రొవైడర్‌ను సంప్రదించండి' : 'Contact provider';
 
   // Dynamic projection calculations
   const currentRating = listing.providerRating ?? 5.0;
@@ -1020,7 +1028,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
             className="flex-1 py-3 rounded-2xl bg-[#4A148C] hover:bg-purple-900 active:scale-95 text-white text-xs sm:text-sm font-black shadow-lg shadow-purple-950/20 flex items-center justify-center gap-2 transition-all"
           >
             <Calendar className="w-4 h-4 text-amber-300" />
-            <span>{t.bookNow}</span>
+            <span>{primaryActionLabel}</span>
           </button>
         </div>
       </div>

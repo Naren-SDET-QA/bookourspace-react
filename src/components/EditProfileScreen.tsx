@@ -26,7 +26,7 @@ interface EditProfileScreenProps {
 }
 
 const presetAvatars = [
-  '/public/assets/aistudio/image_13d09e7d.png',
+  '/assets/aistudio/image_13d09e7d.png',
   'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&w=250&q=80',
   'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=250&q=80',
   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=250&q=80',

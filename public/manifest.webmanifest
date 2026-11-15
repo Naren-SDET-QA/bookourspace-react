@@ -1,0 +1,14 @@
+{
+  "name": "BookOurSpace — Stays, Services & Venues",
+  "short_name": "BookOurSpace",
+  "description": "Book stays, home services, classes, function halls and more across India.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "lang": "en-IN",
+  "categories": ["travel", "shopping", "lifestyle"],
+  "icons": []
+}

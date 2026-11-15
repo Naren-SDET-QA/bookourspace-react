@@ -142,7 +142,7 @@ const DEFAULT_TEMPLATES: ModularTemplateConfig[] = [
 const TEMPLATES_STORAGE_KEY = 'bos_modular_templates_v8';
 const SPOTLIGHT_SUBCATEGORIES_MODULES_KEY = 'bos_spotlight_subcategories_all6_v1';
 const SEARCH_DATE_RANGE_MODULES_KEY = 'bos_search_date_range_all6_v1';
-const HOME_SCREEN_STYLE_STORAGE_KEY = 'bos_home_screen_style_v1';
+const HOME_SCREEN_STYLE_STORAGE_KEY = 'bos_home_screen_style_v2';
 
 export type HomeScreenLayoutStyle = 'bento_landing_hub' | 'classic_marketplace';
 
@@ -152,9 +152,11 @@ export function loadHomeScreenLayoutStyle(): HomeScreenLayoutStyle {
     if (raw === 'classic_marketplace' || raw === 'bento_landing_hub') {
       return raw;
     }
-    return 'bento_landing_hub';
+    // Landing page opens on the marketplace layout so the common header
+    // (location + search + 6 section cards) is always the first thing shown.
+    return 'classic_marketplace';
   } catch {
-    return 'bento_landing_hub';
+    return 'classic_marketplace';
   }
 }
 

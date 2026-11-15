@@ -47,6 +47,7 @@ import {
 import { venue12Categories, VenueCategoryInfo } from '../data/venueData';
 import { classCategories, classDeliveryModes, classTimingSlots, ClassCategoryInfo } from '../data/classesData';
 import { pg29Categories, PGCategoryInfo } from '../data/pgHostelData';
+import { isSubcategoryEnabled, SUBCATEGORY_FLAGS_EVENT } from '../lib/subcategoryFlags';
 import {
   MarketSectionType,
   servicesCategories,
@@ -102,11 +103,14 @@ interface CraftoTopServicesBarProps {
   activeView?: 'marketplace' | 'provider_portal' | 'admin_console';
   comparedCount?: number;
   onOpenCompareModal?: () => void;
+  onOpenGoogleSignIn?: () => void;
   externalLoginModalOpen?: boolean;
   onExternalLoginModalClose?: () => void;
   selectedArea?: string;
   onSelectArea?: (area: string) => void;
   popularAreas?: string[];
+  selectedLocationLabel?: string;
+  onOpenLocationSelector?: () => void;
   unreadNotificationsCount?: number;
   onOpenNotifications?: () => void;
   darkMode?: boolean;
@@ -151,10 +155,13 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   activeView = 'marketplace',
   comparedCount = 0,
   onOpenCompareModal,
+  onOpenGoogleSignIn,
   externalLoginModalOpen = false,
   onExternalLoginModalClose,
   selectedArea = 'all',
   onSelectArea,
+  selectedLocationLabel,
+  onOpenLocationSelector,
   popularAreas = [
     'All Areas in City',
     'Madhapur',
@@ -271,6 +278,19 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
       window.removeEventListener('bos-dynamic-schema-updated', syncSpotlightSubcatToggle);
       window.removeEventListener('bos-live-page-config-updated', syncSpotlightSubcatToggle);
     };
+  }, []);
+
+  React.useEffect(() => {
+    const syncDisabledSubcategories = () => {
+      try {
+        const saved = localStorage.getItem('bos_disabled_spotlight_subcategories_v1');
+        setDisabledSubcategoryKeys(saved ? JSON.parse(saved) : []);
+      } catch {
+        setDisabledSubcategoryKeys([]);
+      }
+    };
+    window.addEventListener(SUBCATEGORY_FLAGS_EVENT, syncDisabledSubcategories);
+    return () => window.removeEventListener(SUBCATEGORY_FLAGS_EVENT, syncDisabledSubcategories);
   }, []);
 
   const handleToggleSpotlightSubcategoriesBar = (nextState?: boolean) => {
@@ -418,15 +438,21 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
       activeHotelCat ||
       activeMovieCat;
     if (activeCatObj) {
-      return activeCatObj.subcategories.map((sub: any, idx: number) => ({
-        en: typeof sub === 'string' ? sub : sub.en,
-        te: typeof sub === 'string' ? sub : sub.te,
-        hi: typeof sub === 'string' ? sub : sub.hi,
-        catId: activeCatObj.id,
-        catEmoji: activeCatObj.emoji,
-        catName: getCategoryTitle(activeCatObj),
-        isSpotlight: idx < 3,
-      }));
+      const disabled: string[] = (activeCatObj as any).disabledSubcategories ?? [];
+      return activeCatObj.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !disabled.includes(name) && isSubcategoryEnabled(name);
+        })
+        .map((sub: any, idx: number) => ({
+          en: typeof sub === 'string' ? sub : sub.en,
+          te: typeof sub === 'string' ? sub : sub.te,
+          hi: typeof sub === 'string' ? sub : sub.hi,
+          catId: activeCatObj.id,
+          catEmoji: activeCatObj.emoji,
+          catName: getCategoryTitle(activeCatObj),
+          isSpotlight: idx < 3,
+        }));
     }
 
     // When "All" category is selected, surface top high-demand subcategories across displayed categories
@@ -442,7 +468,13 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
     const seen = new Set<string>();
 
     displayedCategories.forEach((cat, catIdx) => {
-      cat.subcategories.slice(0, 2).forEach((sub: any, subIdx: number) => {
+      cat.subcategories
+        .filter((sub: any) => {
+          const name = typeof sub === 'string' ? sub : sub.en;
+          return !((cat as any).disabledSubcategories ?? []).includes(name) && isSubcategoryEnabled(name);
+        })
+        .slice(0, 2)
+        .forEach((sub: any, subIdx: number) => {
         const en = typeof sub === 'string' ? sub : sub.en;
         if (!seen.has(en)) {
           seen.add(en);
@@ -471,7 +503,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
   ]);
 
   return (
-    <header className="w-full relative z-30 transition-colors duration-200 bg-gradient-to-b from-[#F5F3FF] via-[#FFFFFF] to-[#F8FAFC] dark:from-[#0E0B29] dark:via-[#120F33] dark:to-[#0A0C20] text-[#0F172A] dark:text-white border-b border-indigo-100/80 dark:border-indigo-950/80 shadow-[0_4px_20px_-4px_rgba(79,70,229,0.08)]">
+    <header className="w-full relative z-40 md:sticky md:top-0 transition-colors duration-200 bg-gradient-to-b from-[#F5F3FF] via-[#FFFFFF] to-[#F8FAFC] dark:from-[#0E0B29] dark:via-[#120F33] dark:to-[#0A0C20] text-[#0F172A] dark:text-white border-b border-indigo-100/80 dark:border-indigo-950/80 shadow-[0_4px_20px_-4px_rgba(79,70,229,0.08)]">
       {/* Decorative Top Wave / Skyline Accent Strip matching Light & Dark screenshots */}
       <div className="h-1.5 w-full bg-gradient-to-r from-[#4338CA] via-[#7C3AED] to-[#F97316]" />
 
@@ -544,6 +576,31 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 </span>
               </button>
 
+              {onOpenGoogleSignIn && authUser && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSignIn}
+                  aria-label={`Signed in as ${authUser.email}. Open account profile`}
+                  title={authUser.email}
+                  className="h-7 sm:h-9 max-w-[150px] sm:max-w-[220px] px-2 sm:px-3 rounded-full bg-white dark:bg-[#17133A] border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-[9px] sm:text-[11px] font-black flex items-center justify-center gap-1 sm:gap-1.5 shadow-2xs shrink-0 cursor-pointer"
+                >
+                  <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{authUser.name || authUser.email}</span>
+                </button>
+              )}
+
+              {!authUser && onOpenGoogleSignIn && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSignIn}
+                  aria-label="Continue with Google"
+                  className="h-7 sm:h-9 px-2 sm:px-3 rounded-full bg-white dark:bg-[#17133A] hover:bg-indigo-50 dark:hover:bg-indigo-950 border border-indigo-200 dark:border-indigo-700 text-[#4338CA] dark:text-indigo-300 text-[9px] sm:text-[11px] font-black flex items-center justify-center gap-1 sm:gap-1.5 shadow-2xs transition shrink-0 cursor-pointer whitespace-nowrap"
+                >
+                  <Globe className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#4285F4]" aria-hidden="true" />
+                  <span>Continue with Google</span>
+                </button>
+              )}
+
               {/* Dark / Light Mode Toggle */}
               {onToggleDarkMode && (
                 <button
@@ -598,27 +655,18 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 items-center">
             {/* Location Bar Pill matching reference screenshots without overlapping select arrow */}
             <div className="lg:col-span-5 flex items-center justify-between gap-2 bg-white dark:bg-[#17133A]/95 border border-slate-200/90 dark:border-indigo-500/30 rounded-full px-3 sm:px-3.5 py-1.5 sm:py-2 shadow-[0_2px_10px_rgba(15,23,42,0.04)]">
-              <div className="relative flex items-center gap-1 min-w-0 max-w-[140px] sm:max-w-[210px]">
+              <div className="relative flex items-center gap-1 min-w-0 max-w-[150px] sm:max-w-[230px]">
                 <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#6D28D9] dark:text-purple-400 fill-[#6D28D9]/15 shrink-0" />
-                <select
-                  value={selectedArea}
-                  onChange={(e) => onSelectArea?.(e.target.value)}
-                  aria-label="Select City or Locality in Hyderabad"
-                  className="w-full appearance-none bg-transparent text-slate-900 dark:text-white font-extrabold text-xs sm:text-sm outline-hidden cursor-pointer truncate pr-4"
+                <button
+                  type="button"
+                  onClick={() => onOpenLocationSelector?.()}
+                  aria-label="Select city or locality"
+                  className="w-full min-w-0 flex items-center gap-1 bg-transparent text-slate-900 dark:text-white font-extrabold text-xs sm:text-sm outline-hidden cursor-pointer truncate pr-4 text-left"
                 >
-                  <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                    Hyderabad
-                  </option>
-                  {popularAreas.map((area) => (
-                    <option
-                      key={area}
-                      value={area}
-                      className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                    >
-                      {area === 'All Areas in City' ? 'Hyderabad' : area}
-                    </option>
-                  ))}
-                </select>
+                  <span className="truncate">
+                    {selectedLocationLabel || (selectedArea && selectedArea !== 'all' ? selectedArea : 'Hyderabad')}
+                  </span>
+                </button>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 pointer-events-none absolute right-0" />
               </div>
 
@@ -626,10 +674,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  const nextArea = selectedArea === 'Madhapur' ? 'Hitech City' : 'Madhapur';
-                  onSelectArea?.(nextArea);
-                }}
+                onClick={() => onOpenLocationSelector?.()}
                 className="flex items-center gap-1 text-[11px] sm:text-xs font-extrabold text-[#6D28D9] dark:text-purple-300 hover:text-[#4C1D95] dark:hover:text-purple-200 shrink-0 cursor-pointer"
               >
                 <LocateFixed className="w-3.5 h-3.5 text-[#6D28D9] dark:text-purple-400 shrink-0" />
@@ -855,12 +900,16 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   type="button"
                   onClick={() => {
                     setShowHamburgerMenu(false);
-                    setShowLoginModal(true);
+                    if (!authUser && onOpenGoogleSignIn) {
+                      onOpenGoogleSignIn();
+                    } else {
+                      setShowLoginModal(true);
+                    }
                   }}
                   className="px-2.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-[#5B21B6] dark:text-indigo-300 font-black text-xs flex items-center gap-1 cursor-pointer"
                 >
                   <UserCheck className="w-3.5 h-3.5" />
-                  <span>Profile</span>
+                  <span>{authUser ? 'Profile' : 'Sign In'}</span>
                 </button>
 
                 {onOpenCompareModal && (
@@ -926,11 +975,11 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                   key={tab.id}
                   type="button"
                   onClick={() => {
-                    if (activeMarketSection !== tab.id) {
-                      onSelectMarketSection(tab.id);
-                      onSelectCategory('all');
-                      onSelectSubcategory('all');
-                    }
+                    // Always (re)enter the section so its screen loads below the header,
+                    // even when this card is already the active section.
+                    onSelectMarketSection(tab.id);
+                    onSelectCategory('all');
+                    onSelectSubcategory('all');
                   }}
                   className={`group py-1.5 sm:py-2.5 px-0.5 sm:px-3 rounded-2xl transition-all duration-200 flex flex-col items-center justify-center gap-1 cursor-pointer border min-w-0 overflow-hidden ${
                     isActive
@@ -1017,6 +1066,17 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
             )}
 
             <div className="space-y-3">
+              {!authUser && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSignIn}
+                  className="w-full py-3 px-4 rounded-xl bg-[#4338CA] hover:bg-indigo-800 text-white text-sm font-black flex items-center justify-center gap-2.5 shadow-md transition-colors cursor-pointer"
+                >
+                  <Globe className="w-4 h-4 text-white" aria-hidden="true" />
+                  <span>Continue with Google</span>
+                </button>
+              )}
+
               {/* Google OAuth Popup Button + Verified Badge */}
               <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -1226,7 +1286,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
         </div>
       )}
 
-      {/* 2. HORIZONTAL CATEGORY PILLS STRIP (`All PGs`, `Students PGs`, `Working Professionals`, `Boys`, `Girls`, `Co-Living`, + More Checklist) */}
+      {/* 2. HORIZONTAL CATEGORY PILLS STRIP */}
       <div className="bg-transparent relative">
         <div className="max-w-7xl mx-auto px-2.5 sm:px-6 pb-2 pt-0.5">
           <div className="flex items-center justify-between gap-2">

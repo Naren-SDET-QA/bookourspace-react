@@ -20,7 +20,6 @@ import {
   fetchGoogleOAuthConfig,
   signInWithSupabaseGoogleOAuth,
 } from '../lib/supabaseClient';
-import { UserRole } from '../types/marketplace';
 import { useMarketplace } from '../context/MarketplaceContext';
 
 interface SupabaseAuthModalProps {
@@ -43,21 +42,17 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     authUser,
     isAccountBlocked,
     blockedReason,
-    loginWithGoogle,
     logoutGoogleSession,
     updateUserProfile,
     syncAccountData,
-    userRole,
     bookings,
     enquiries,
     favoriteIds,
     transactions,
   } = useMarketplace();
 
-  const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [role, setRole] = useState<UserRole>('customer');
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -69,8 +64,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     if (authUser) {
       setFullName(authUser.name || 'Marketplace User');
       setPhone(authUser.phone || '');
-      setRole(authUser.role || userRole);
-      setEmail(authUser.email || '');
     } else if (currentUser) {
       setFullName(
         supabaseProfile?.full_name ||
@@ -80,39 +73,46 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       setPhone(
         supabaseProfile?.phone || currentUser.user_metadata?.phone || ''
       );
-      setRole(
-        supabaseProfile?.role ||
-          (currentUser.user_metadata?.role as UserRole) ||
-          userRole
-      );
-      setEmail(currentUser.email || '');
     }
-  }, [authUser, currentUser, supabaseProfile, userRole]);
+  }, [authUser, currentUser, supabaseProfile]);
 
   useEffect(() => {
     if (!isOpen) return;
+    const callbackParams = new URLSearchParams(window.location.search);
+    const callbackError = callbackParams.get('error_description') || callbackParams.get('error');
+    if (callbackError) {
+      setErrorMsg(callbackError.replace(/[+_]/g, ' '));
+      for (const key of ['code', 'state', 'error', 'error_description']) callbackParams.delete(key);
+      const query = callbackParams.toString();
+      window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }
     const handleOAuthEvent = (e: Event) => {
       const custom = e as CustomEvent;
       if (custom.detail?.user) {
         const u = custom.detail.user;
-        const target = custom.detail.redirectTarget as
-          | 'marketplace'
-          | 'provider_portal'
-          | 'admin_console'
-          | undefined;
         onAuthSuccess?.(
           custom.detail.isNewUser
             ? `Google account registered & signed in (${u.role.toUpperCase()})`
             : `Signed in with Google (${u.role.toUpperCase()})`
         );
-        if (target && onNavigateView) {
-          onNavigateView(target);
-        }
+        // OAuth always returns to Home. Server-assigned permissions remain
+        // available from the account profile and protected routes.
+        onNavigateView?.('marketplace');
         onClose();
       }
     };
+    const handleOAuthError = (e: Event) => {
+      const message = (e as CustomEvent<{ message?: string }>).detail?.message;
+      setLoading(false);
+      setInfoMsg(null);
+      setErrorMsg(message || 'Google sign-in could not be completed. Please try again.');
+    };
     window.addEventListener('bos-google-oauth-redirect', handleOAuthEvent);
-    return () => window.removeEventListener('bos-google-oauth-redirect', handleOAuthEvent);
+    window.addEventListener('bos-google-oauth-error', handleOAuthError);
+    return () => {
+      window.removeEventListener('bos-google-oauth-redirect', handleOAuthEvent);
+      window.removeEventListener('bos-google-oauth-error', handleOAuthError);
+    };
   }, [isOpen, onAuthSuccess, onNavigateView, onClose]);
 
   if (!isOpen) return null;
@@ -121,38 +121,34 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     setErrorMsg(null);
     setInfoMsg(null);
     setLoading(true);
+    // Open synchronously inside the click gesture so browser popup blockers
+    // do not discard user activation while the OAuth URL is being requested.
+    const popup = window.open(
+      'about:blank',
+      'bos_google_oauth_popup',
+      'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
+    );
     try {
-      if (isSupabaseConfigured) {
-        const supaRes = await signInWithSupabaseGoogleOAuth(role);
-        if (supaRes.ok && supaRes.url) {
-          const popup = window.open(
-            supaRes.url,
-            'bos_google_oauth_popup',
-            'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
-          );
-          if (popup) {
-            setInfoMsg('Complete Google sign-in in the popup window...');
-            setLoading(false);
-            return;
-          }
-        }
+      let oauth = isSupabaseConfigured
+        ? await signInWithSupabaseGoogleOAuth('customer')
+        : { ok: false as const };
+      if (!oauth.ok || !oauth.url) {
+        oauth = await fetchGoogleOAuthConfig('customer');
       }
-
-      const cfg = await fetchGoogleOAuthConfig(role);
-      if (cfg.ok && cfg.url) {
-        const popup = window.open(
-          cfg.url,
-          'bos_google_oauth_popup',
-          'width=540,height=680,menubar=no,toolbar=no,location=yes,status=no'
-        );
-        if (popup) {
-          setInfoMsg('Complete Google sign-in in the popup window...');
-          setLoading(false);
-          return;
-        }
+      if (!oauth.ok || !oauth.url) {
+        popup?.close();
+        setErrorMsg(oauth.error || 'Secure Google sign-in is unavailable. Please try again later.');
+        return;
       }
-      setErrorMsg('Popup blocked or unavailable. Use the Google Account form below to continue.');
+      if (popup) {
+        popup.location.replace(oauth.url);
+        setInfoMsg('Complete Google sign-in in the popup window...');
+      } else {
+        // Full-page OAuth is the fallback when the browser blocks popups.
+        window.location.assign(oauth.url);
+      }
     } catch (err: any) {
+      popup?.close();
       setErrorMsg(err?.message || 'Could not launch Google OAuth popup.');
     } finally {
       setLoading(false);
@@ -161,56 +157,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
 
   const handleGoogleDirectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg(null);
-    setInfoMsg(null);
-
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !normalizedEmail.includes('@')) {
-      setErrorMsg('Please enter a valid Google email address.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await loginWithGoogle({
-        email: normalizedEmail,
-        name: fullName.trim() || undefined,
-        phone: phone.trim() || undefined,
-        requestedRole: 'customer',
-        allowRoleChange: false,
-      });
-
-      if (!result.ok) {
-        setErrorMsg(
-          result.message ||
-            'Google authentication failed. Check if your account is active.'
-        );
-        return;
-      }
-
-      const signedUser = result.user;
-      const target =
-        result.redirectTarget ||
-        (signedUser?.role === 'admin'
-          ? 'admin_console'
-          : signedUser?.role === 'provider'
-          ? 'provider_portal'
-          : 'marketplace');
-
-      onAuthSuccess?.(
-        result.isNewUser
-          ? `Welcome ${signedUser?.name}! Google account auto-registered (${signedUser?.role.toUpperCase()})`
-          : `Welcome back ${signedUser?.name}! Signed in with Google (${signedUser?.role.toUpperCase()})`
-      );
-      if (onNavigateView) {
-        onNavigateView(target);
-      }
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Google authentication failed.');
-    } finally {
-      setLoading(false);
-    }
+    await handlePopupGoogleSignIn();
   };
 
   const handleSaveProfile = async () => {
@@ -221,7 +168,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       await updateUserProfile({
         fullName: fullName.trim(),
         phone: phone.trim(),
-        role,
       });
       setInfoMsg('Profile updated!');
       onAuthSuccess?.('Profile saved to your account');
@@ -323,7 +269,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                   <span>Google OAuth Verified</span>
                 </div>
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-[#4A148C] dark:text-purple-300 capitalize">
-                  {authUser?.role || role} Role
+                  {authUser?.role || supabaseProfile?.role || 'customer'} Role
                 </span>
               </div>
               <div className="text-sm font-black truncate">
@@ -381,33 +327,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Active Workspace Role
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(
-                    [
-                      { id: 'customer', label: 'Customer' },
-                      { id: 'provider', label: 'Provider' },
-                      { id: 'admin', label: 'Admin' },
-                    ] as { id: UserRole; label: string }[]
-                  ).map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => setRole(r.id)}
-                      className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                        role === r.id
-                          ? 'bg-[#4A148C] text-white border-[#4A148C]'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-1">
@@ -444,32 +363,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Role Selector for New Registration / Routing */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                Select Account Portal (New users auto-register with this role)
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: 'customer', label: 'Customer Marketplace' },
-                  { id: 'provider', label: 'Service Provider Portal' },
-                ].map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => setRole(r.id as UserRole)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                      role === r.id
-                        ? 'bg-[#4A148C] text-white border-[#4A148C]'
-                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Official Google OAuth Popup Button */}
             <button
               type="button"
@@ -498,66 +391,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               <span>Continue with Google OAuth Popup</span>
             </button>
 
-            <div className="relative flex items-center justify-center">
-              <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-              <span className="bg-white dark:bg-slate-900 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
-                Or Instant Google Account Sign-In / Auto-Register
-              </span>
-              <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-            </div>
-
             <form onSubmit={handleGoogleDirectSubmit} className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Google Email Address *
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="yourname@gmail.com"
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-10 pr-3.5 py-2.5 text-xs outline-hidden focus:border-[#4A148C]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                    Full Name (New User)
-                  </label>
-                  <div className="relative">
-                    <UserIcon className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="Auto-filled if existing"
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-2.5 py-2 text-xs outline-hidden focus:border-[#4A148C]"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                    Mobile (Optional)
-                  </label>
-                  <div className="relative">
-                    <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="9876543210"
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-2.5 py-2 text-xs outline-hidden focus:border-[#4A148C]"
-                    />
-                  </div>
-                </div>
-              </div>
-
+              <p className="text-xs text-slate-500 text-center">Account identity and email are supplied by Google and verified by Supabase Auth. Profile details can be edited after sign-in.</p>
               <button
                 type="submit"
                 disabled={loading}
@@ -565,8 +400,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               >
                 <span>
                   {loading
-                    ? 'Verifying with Google OAuth...'
-                    : 'Sign In / Auto-Register with Google'}
+                    ? 'Opening secure Google sign-in…'
+                    : 'Continue securely with Google'}
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </button>

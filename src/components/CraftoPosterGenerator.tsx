@@ -177,7 +177,7 @@ export const CraftoPosterGenerator: React.FC<CraftoPosterGeneratorProps> = ({
           <div className="flex items-center gap-3">
             <div className="relative">
               <img
-                src={userAvatar || '/public/assets/aistudio/image_13d09e7d.png'}
+                src={userAvatar || '/assets/aistudio/image_13d09e7d.png'}
                 alt={userName}
                 className="w-11 h-11 sm:w-12 sm:h-12 rounded-full object-cover ring-2 ring-amber-400 bg-purple-900 shadow-md"
                 onError={(e) => {

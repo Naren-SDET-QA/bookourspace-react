@@ -11,6 +11,8 @@ export interface VenueCategoryInfo {
     te: string;
     hi: string;
   }[];
+  /** Excludes this category from synthetic demo provider generation. */
+  generateDemoListings?: boolean;
 }
 
 export const venue12Categories: VenueCategoryInfo[] = [

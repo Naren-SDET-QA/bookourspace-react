@@ -20,6 +20,7 @@ import { AppLanguage, getSubcategoryDisplayName, getPriceUnitDisplayName } from 
 import { transliterateLatinToScript } from '../utils/i18nEngine';
 import { UniversalBarcode, StandaloneBarcodeVerifierHub, generateBosBarcodeId, getBarcodePassTitle } from './UniversalBarcode';
 import { CraftoPosterGenerator } from './CraftoPosterGenerator';
+import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
 
 interface ProviderDashboardProps {
   onOpenPostWizard: () => void;
@@ -286,6 +287,12 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
             {bookings.length}
           </div>
         </div>
+      </div>
+
+      <div className="flex justify-end">
+        <LiveEditEntryButton
+          label={loc('Live Edit listings', 'లిస్టింగ్‌లను లైవ్ ఎడిట్ చేయండి', 'लिस्टिंग लाइव एडिट करें')}
+        />
       </div>
 
       {/* Navigation Sub-Tabs */}

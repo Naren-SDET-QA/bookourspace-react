@@ -42,6 +42,8 @@ export interface CategoryDef {
   entityType: EntityType;
   icon: string;
   subcategories: string[];
+  /** Subcategories switched off by an admin — hidden from the public marketplace. */
+  disabledSubcategories?: string[];
   customFields: CustomFieldDef[];
   description: string;
   listingCount: number;

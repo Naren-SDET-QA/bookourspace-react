@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import {
   AdminThemeSettings,
   loadAdminThemeSettings,
-} from '../utils/adminEnterpriseStore';
+} from '../utils/adminPresentationStore';
 
 interface BOSBrandLogoProps {
   onClick?: () => void;

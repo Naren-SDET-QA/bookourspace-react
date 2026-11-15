@@ -310,6 +310,11 @@ export const ListingCard: React.FC<ListingCardProps> = ({
   const isMovie =
     listing.categoryId.startsWith('movie-') ||
     listing.customFieldValues?.sectionType === 'movies';
+  const contactActionLabel = isMovie
+    ? t.bookNow
+    : isHotel || isVenue
+      ? currentLang === 'te' ? 'అందుబాటును అడగండి' : 'Request availability'
+      : currentLang === 'te' ? 'ప్రొవైడర్‌ను సంప్రదించండి' : 'Contact provider';
   const isService = !isPG && !isClass && !isVenue && !isHotel && !isMovie;
 
   const handleSaveBatchUrl = (e: React.FormEvent) => {
@@ -1380,7 +1385,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
               className="bg-[#FB641B] hover:bg-orange-600 active:scale-95 text-white font-black text-[11px] py-1.5 px-2 rounded-lg shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
             >
               <Zap className="w-3.5 h-3.5 fill-current shrink-0" />
-              <span className="truncate">{isClass ? ui.bookSeat : isPG ? ui.reservePG : ui.bookHall}</span>
+                <span className="truncate">{contactActionLabel}</span>
             </button>
           </div>
 

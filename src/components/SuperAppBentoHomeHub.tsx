@@ -16,6 +16,8 @@ import {
   Sliders,
   Users,
   Briefcase,
+  MapPin,
+  ChevronDown,
 } from 'lucide-react';
 import { BOSBrandLogo } from './BOSBrandLogo';
 import {
@@ -50,6 +52,8 @@ interface SuperAppBentoHomeHubProps {
   onToggleDarkMode: () => void;
   verifiedOnly: boolean;
   onToggleVerifiedOnly: () => void;
+  selectedLocationLabel?: string;
+  onOpenLocationSelector?: () => void;
   userRole: 'customer' | 'provider' | 'admin';
   onSelectRole: (role: 'customer' | 'provider' | 'admin') => void;
   userInitials?: string;
@@ -73,6 +77,8 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
   onToggleDarkMode,
   verifiedOnly,
   onToggleVerifiedOnly,
+  selectedLocationLabel,
+  onOpenLocationSelector,
   userRole,
   onSelectRole,
   userInitials = 'BS',
@@ -320,6 +326,16 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
               onVerifiedClick={onToggleVerifiedOnly}
               onClick={() => setShowMoreCategoriesDrawer(false)}
             />
+            <button
+              type="button"
+              onClick={() => onOpenLocationSelector?.()}
+              aria-label="Select city or locality"
+              className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border border-purple-300 bg-purple-50 px-3 py-1 text-[11.5px] font-extrabold text-[#5B21B6] shadow-sm transition hover:border-[#7C3AED] hover:bg-purple-100 dark:border-purple-500/40 dark:bg-purple-500/15 dark:text-purple-300"
+            >
+              <MapPin className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{selectedLocationLabel || 'Hyderabad'}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+            </button>
           </div>
 
           {/* Right: Compact Action Icons (4-Dot Grid, QR/Post, Dark Mode, Bell with Red Badge, User Initials) */}
@@ -555,7 +571,8 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
 
       {/* MAIN MOBILE-LOCKED SUPER-APP BODY (FITS 100% WITHIN VIEWPORT WITH ZERO VERTICAL OR HORIZONTAL SCROLL) */}
       <div className="max-w-md sm:max-w-3xl mx-auto w-full flex-1 min-h-0 px-3 sm:px-5 py-1.5 sm:py-2.5 flex flex-col justify-between gap-1.5 sm:gap-2.5 overflow-hidden box-border">
-        {/* 2. TOP SPOTLIGHT HERO CARD WITH DISTINCT COLOR PALETTES & FRAMED MULTI-COLOR IMAGERY PER ANIMATION */}
+        {/* 2. TOP SPOTLIGHT HERO CARD — REMOVED (banner animation disabled per product request) */}
+        {false && (
         <div
           onMouseEnter={() => setIsHeroPaused(true)}
           onMouseLeave={() => setIsHeroPaused(false)}
@@ -716,6 +733,7 @@ export const SuperAppBentoHomeHub: React.FC<SuperAppBentoHomeHubProps> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* 3. ROUNDED SOFT-LAVENDER SUPER-APP BENTO CONTAINER (2 WIDE + 8 SQUARE CARDS, FLEX-SCALED FOR ZERO SCROLL) */}
         <div className="flex-1 min-h-0 w-full rounded-[22px] bg-[#EAEEF8] dark:bg-[#131836] px-2.5 py-1.5 sm:p-3.5 shadow-2xs border border-indigo-100/80 dark:border-indigo-900/50 flex flex-col justify-between overflow-hidden box-border">

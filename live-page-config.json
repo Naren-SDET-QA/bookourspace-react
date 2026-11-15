@@ -1,0 +1,204 @@
+{
+  "published": {
+    "modules": {},
+    "versionId": "v1.2.0",
+    "lastPublishedAt": "2026-11-01 07:35:15",
+    "publishedBy": "Narendra (Super Admin)"
+  },
+  "draft": {
+    "modules": {},
+    "versionId": "v1.2.0",
+    "lastPublishedAt": "2026-11-01 07:35:15",
+    "publishedBy": "Narendra (Super Admin)"
+  },
+  "versions": [
+    {
+      "versionId": "v1.2.0",
+      "versionNumber": 2,
+      "publishedAt": "2026-11-01 07:35:15",
+      "publishedBy": "Narendra (Super Admin)",
+      "summary": "verification complete - restored defaults",
+      "platforms": [
+        "Web SPA",
+        "Android APK/Bundle (OTA)",
+        "iOS IPA (OTA)"
+      ],
+      "configSnapshot": {
+        "modules": {},
+        "versionId": "v1.2.0",
+        "lastPublishedAt": "2026-11-01 07:35:15",
+        "publishedBy": "Narendra (Super Admin)"
+      }
+    },
+    {
+      "versionId": "v1.1.0",
+      "versionNumber": 1,
+      "publishedAt": "2026-11-01 07:34:52",
+      "publishedBy": "Narendra (Super Admin)",
+      "summary": "module presentation verification",
+      "platforms": [
+        "Web SPA",
+        "Android APK/Bundle (OTA)",
+        "iOS IPA (OTA)"
+      ],
+      "configSnapshot": {
+        "modules": {
+          "pg": {
+            "label": "PGs in Hyderabad",
+            "headline": "Rooms near work, listed by owners"
+          }
+        },
+        "versionId": "v1.1.0",
+        "lastPublishedAt": "2026-11-01 07:34:52",
+        "publishedBy": "Narendra (Super Admin)"
+      }
+    }
+  ],
+  "auditLogs": [
+    {
+      "id": "AUD-PUB-15595",
+      "timestamp": "2026-11-01 07:35:15",
+      "actor": "Narendra (Super Admin)",
+      "role": "admin",
+      "action": "Published v1.2.0 (OTA)",
+      "pageId": "modules",
+      "details": "verification complete - restored defaults — Live across Android, iOS & Web",
+      "versionId": "v1.2.0"
+    },
+    {
+      "id": "AUD-PUB-92787",
+      "timestamp": "2026-11-01 07:34:52",
+      "actor": "Narendra (Super Admin)",
+      "role": "admin",
+      "action": "Published v1.1.0 (OTA)",
+      "pageId": "modules",
+      "details": "module presentation verification — Live across Android, iOS & Web",
+      "versionId": "v1.1.0"
+    },
+    {
+      "id": "AUD-PAGE-92567",
+      "timestamp": "2026-11-01 07:34:52",
+      "actor": "Narendra (Super Admin)",
+      "role": "admin",
+      "action": "Saved Page Draft",
+      "pageId": "modules",
+      "details": "module presentation verification"
+    }
+  ],
+  "billingRecords": [
+    {
+      "id": "BILL-2026-101",
+      "cycleId": "CYC-2026-10",
+      "invoiceNumber": "INV-BOS-CYC-8801",
+      "providerId": "prov-pg-1",
+      "providerName": "Sri Sai Executive Co-Living PG",
+      "providerEmail": "billing@srisaipg.in",
+      "moduleName": "PGs & Hostels",
+      "billingType": "platform_commission",
+      "planOrCommissionLabel": "10% Platform Commission (14 Confirmed Bookings)",
+      "baseAmount": 11800,
+      "gstAmount": 2124,
+      "totalAmount": 13924,
+      "emailStatus": "opened",
+      "paymentStatus": "paid",
+      "billingPeriod": "Oct 2026 Cycle",
+      "generatedAt": "2026-10-28 09:00:00",
+      "lastEmailSentAt": "2026-10-28 09:00:12"
+    },
+    {
+      "id": "BILL-2026-102",
+      "cycleId": "CYC-2026-10",
+      "invoiceNumber": "INV-BOS-CYC-8802",
+      "providerId": "prov-class-1",
+      "providerName": "Apex AI & Full-Stack Coaching Hub",
+      "providerEmail": "accounts@apexacademy.in",
+      "moduleName": "Classes & Coaching",
+      "billingType": "provider_subscription",
+      "planOrCommissionLabel": "BOS Enterprise Partner Subscription (Monthly)",
+      "baseAmount": 2499,
+      "gstAmount": 450,
+      "totalAmount": 2949,
+      "emailStatus": "delivered",
+      "paymentStatus": "paid",
+      "billingPeriod": "Oct 2026 Cycle",
+      "generatedAt": "2026-10-28 09:00:00",
+      "lastEmailSentAt": "2026-10-28 09:00:18"
+    },
+    {
+      "id": "BILL-2026-103",
+      "cycleId": "CYC-2026-10",
+      "invoiceNumber": "INV-BOS-CYC-8803",
+      "providerId": "prov-venue-1",
+      "providerName": "Royal Nizam Grand Convention & Banquet",
+      "providerEmail": "finance@royalnizamhalls.com",
+      "moduleName": "Function Halls & Venues",
+      "billingType": "platform_commission",
+      "planOrCommissionLabel": "10% Platform Commission (4 Wedding Venue Bookings)",
+      "baseAmount": 28500,
+      "gstAmount": 5130,
+      "totalAmount": 33630,
+      "emailStatus": "sent",
+      "paymentStatus": "invoice_sent",
+      "billingPeriod": "Oct 2026 Cycle",
+      "generatedAt": "2026-10-29 18:30:00",
+      "lastEmailSentAt": "2026-10-29 18:30:08"
+    },
+    {
+      "id": "BILL-2026-104",
+      "cycleId": "CYC-2026-10",
+      "invoiceNumber": "INV-BOS-CYC-8804",
+      "providerId": "prov-hotel-1",
+      "providerName": "Deccan Crown Business Suites & Stay",
+      "providerEmail": "accounts@deccancrown.in",
+      "moduleName": "Hotels & Stay",
+      "billingType": "platform_commission",
+      "planOrCommissionLabel": "10% Platform Commission (19 Hourly & Night Stays)",
+      "baseAmount": 9400,
+      "gstAmount": 1692,
+      "totalAmount": 11092,
+      "emailStatus": "delivered",
+      "paymentStatus": "invoice_sent",
+      "billingPeriod": "Oct 2026 Cycle",
+      "generatedAt": "2026-10-29 18:30:00",
+      "lastEmailSentAt": "2026-10-29 18:30:15"
+    },
+    {
+      "id": "BILL-2026-105",
+      "cycleId": "CYC-2026-10",
+      "invoiceNumber": "INV-BOS-CYC-8805",
+      "providerId": "prov-service-1",
+      "providerName": "Hyderabad Rapid Home Care & AC Services",
+      "providerEmail": "support@hydrapidcare.in",
+      "moduleName": "Home & Local Services",
+      "billingType": "provider_subscription",
+      "planOrCommissionLabel": "BOS Pro Verified Partner Plan (Monthly)",
+      "baseAmount": 999,
+      "gstAmount": 180,
+      "totalAmount": 1179,
+      "emailStatus": "sent",
+      "paymentStatus": "overdue",
+      "billingPeriod": "Oct 2026 Cycle",
+      "generatedAt": "2026-10-25 10:00:00",
+      "lastEmailSentAt": "2026-10-29 11:15:00"
+    },
+    {
+      "id": "BILL-2026-106",
+      "cycleId": "CYC-2026-10",
+      "invoiceNumber": "INV-BOS-CYC-8806",
+      "providerId": "prov-movie-1",
+      "providerName": "Asian Multiplex & IMAX Screens",
+      "providerEmail": "settlements@asianmultiplex.in",
+      "moduleName": "Movies & Multiplex",
+      "billingType": "platform_commission",
+      "planOrCommissionLabel": "10% Platform Convenience Commission (312 Tickets)",
+      "baseAmount": 6840,
+      "gstAmount": 1231,
+      "totalAmount": 8071,
+      "emailStatus": "queued",
+      "paymentStatus": "auto_scheduled",
+      "billingPeriod": "Oct 2026 Cycle",
+      "generatedAt": "2026-10-30 08:00:00",
+      "lastEmailSentAt": "Scheduled EOD"
+    }
+  ]
+}

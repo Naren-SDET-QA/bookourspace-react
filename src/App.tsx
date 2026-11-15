@@ -56,7 +56,7 @@ import { MarketplaceProvider, useMarketplace } from './context/MarketplaceContex
 import { MarketplaceListing, CustomerAction, EntityType, Booking } from './types/marketplace';
 import { ServiceProvider } from './types';
 import { customerActionList } from './data/customerActions';
-import { venue12Categories } from './data/venueData';
+import { initialVenueListings, venue12Categories } from './data/venueData';
 import { classCategories } from './data/classesData';
 import { pg29Categories } from './data/pgHostelData';
 import {
@@ -66,38 +66,52 @@ import {
   moviesCategories,
 } from './data/servicesStayMoviesData';
 import { playAlertChime } from './utils/audio';
+import { canAccessAdminConsole } from './lib/accessControl';
+import { DEMO_DATA_ENABLED } from './lib/demoDataPolicy';
 import { popularAreasList, distanceRadiuses } from './data/comprehensiveListings';
 
-// Flipkart Styled Components
-import { CraftoTopServicesBar } from './components/CraftoTopServicesBar';
-import { FlipkartBannerSlider } from './components/FlipkartBannerSlider';
-import { FlipkartFilterSidebar } from './components/FlipkartFilterSidebar';
-import { TrendingNearMeSection } from './components/TrendingNearMeSection';
-import { SectionSpotlightShowcase } from './components/SectionSpotlightShowcase';
+// Route- and modal-specific surfaces stay out of the initial customer bundle.
+const CraftoTopServicesBar = lazy(() => import('./components/CraftoTopServicesBar').then((module) => ({ default: module.CraftoTopServicesBar })));
+import { LocationSelector, loadPersistedLocation, persistLocation, type SelectedLocation } from './components/LocationSelector';
+import { isPopularCategoriesVisible } from './lib/homeVisibilitySettings';
+const FlipkartBannerSlider = lazy(() => import('./components/FlipkartBannerSlider').then((module) => ({ default: module.FlipkartBannerSlider })));
+const FlipkartFilterSidebar = lazy(() => import('./components/FlipkartFilterSidebar').then((module) => ({ default: module.FlipkartFilterSidebar })));
+const TrendingNearMeSection = lazy(() => import('./components/TrendingNearMeSection').then((module) => ({ default: module.TrendingNearMeSection })));
+const SectionSpotlightShowcase = lazy(() => import('./components/SectionSpotlightShowcase').then((module) => ({ default: module.SectionSpotlightShowcase })));
+const HallsMandapExperience = lazy(() => import('./components/HallsMandapExperience').then((module) => ({ default: module.HallsMandapExperience })));
+const VenueDetailModal = lazy(() => import('./components/VenueDetailModal').then((module) => ({ default: module.VenueDetailModal })));
+const VenueBookingModal = lazy(() => import('./components/VenueBookingModal').then((module) => ({ default: module.VenueBookingModal })));
+const VenueOwnerWorkspace = lazy(() => import('./components/VenueOwnerWorkspace').then((module) => ({ default: module.VenueOwnerWorkspace })));
+const VenueAdminWorkspace = lazy(() => import('./components/VenueAdminWorkspace').then((module) => ({ default: module.VenueAdminWorkspace })));
 const DistrictMoviesSection = lazy(() => import('./components/DistrictMoviesSection').then((module) => ({ default: module.DistrictMoviesSection })));
 const ServicesDiscoverySection = lazy(() => import('./components/ServicesDiscoverySection').then((module) => ({ default: module.ServicesDiscoverySection })));
+const FormerLocalServicesSection = lazy(() => import('./components/FormerLocalServicesSection').then((module) => ({ default: module.FormerLocalServicesSection })));
 const HotelsStayExperience = lazy(() => import('./components/HotelsStayExperience').then((module) => ({ default: module.HotelsStayExperience })));
 const PGSectionExperience = lazy(() => import('./components/PGSectionExperience').then((module) => ({ default: module.PGSectionExperience })));
+const PgMyBookingsPanel = lazy(() => import('./components/PgBookingPanel').then((module) => ({ default: module.PgMyBookingsPanel })));
 import { fetchLivePageConfig, resolvePublishedPresentation } from './modules/moduleConfigStore';
 import type { ModuleConfigResolution } from './modules/registry';
 const HomeServicesSection = lazy(() => import('./components/HomeServicesSection').then((module) => ({ default: module.HomeServicesSection })));
+const ClassesTimingsExperience = lazy(() => import('./components/ClassesTimingsExperience').then((module) => ({ default: module.ClassesTimingsExperience })));
 
-// Universal Marketplace Components
-import { ListingCard } from './components/ListingCard';
-import { ListingDetailModal } from './components/ListingDetailModal';
-import { ClassCompareModal } from './components/ClassCompareModal';
-import { CompareFloatingBar } from './components/CompareFloatingBar';
-import { BookingEnquiryModal } from './components/BookingEnquiryModal';
-import { ChatModal } from './components/ChatModal';
-import { PostListingWizard } from './components/PostListingWizard';
-import { ProviderDashboard } from './components/ProviderDashboard';
+// Universal marketplace overlays and item surfaces are loaded on demand.
+const ListingCard = lazy(() => import('./components/ListingCard').then((module) => ({ default: module.ListingCard })));
+const ListingDetailModal = lazy(() => import('./components/ListingDetailModal').then((module) => ({ default: module.ListingDetailModal })));
+const ClassCompareModal = lazy(() => import('./components/ClassCompareModal').then((module) => ({ default: module.ClassCompareModal })));
+const CompareFloatingBar = lazy(() => import('./components/CompareFloatingBar').then((module) => ({ default: module.CompareFloatingBar })));
+const BookingEnquiryModal = lazy(() => import('./components/BookingEnquiryModal').then((module) => ({ default: module.BookingEnquiryModal })));
+const ChatModal = lazy(() => import('./components/ChatModal').then((module) => ({ default: module.ChatModal })));
+const ClassBatchManager = lazy(() => import('./components/ClassBatchManager').then((module) => ({ default: module.ClassBatchManager })));
+const AdminClassBatchReview = lazy(() => import('./components/AdminClassBatchReview').then((module) => ({ default: module.AdminClassBatchReview })));
+const PostListingWizard = lazy(() => import('./components/PostListingWizard').then((module) => ({ default: module.PostListingWizard })));
+const ProviderDashboard = lazy(() => import('./components/ProviderDashboard').then((module) => ({ default: module.ProviderDashboard })));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
-import { PaymentModal } from './components/PaymentModal';
-import { VoiceRegistrationModal } from './components/VoiceRegistrationModal';
-import { VoiceSearchModal } from './components/VoiceSearchModal';
-import { ReviewSubmissionModal } from './components/ReviewSubmissionModal';
-import { RunningBatchesModal } from './components/RunningBatchesModal';
-import { SupabaseAuthModal } from './components/SupabaseAuthModal';
+const PaymentModal = lazy(() => import('./components/PaymentModal').then((module) => ({ default: module.PaymentModal })));
+const VoiceRegistrationModal = lazy(() => import('./components/VoiceRegistrationModal').then((module) => ({ default: module.VoiceRegistrationModal })));
+const VoiceSearchModal = lazy(() => import('./components/VoiceSearchModal').then((module) => ({ default: module.VoiceSearchModal })));
+const ReviewSubmissionModal = lazy(() => import('./components/ReviewSubmissionModal').then((module) => ({ default: module.ReviewSubmissionModal })));
+const RunningBatchesModal = lazy(() => import('./components/RunningBatchesModal').then((module) => ({ default: module.RunningBatchesModal })));
+const SupabaseAuthModal = lazy(() => import('./components/SupabaseAuthModal').then((module) => ({ default: module.SupabaseAuthModal })));
 import { 
   AppLanguage, 
   translations, 
@@ -129,31 +143,24 @@ import {
   loadHomeScreenLayoutStyle,
   saveHomeScreenLayoutStyle,
 } from './components/ModularSystemEngine';
-import { SuperAppBentoHomeHub } from './components/SuperAppBentoHomeHub';
-import { CategoryRailStreamExplorer } from './components/CategoryRailStreamExplorer';
-import { LiveSponsoredAdsStrip } from './components/LiveSponsoredAdsStrip';
-import { LiveScheduledAnnouncementsBanner } from './components/AdminAnnouncementsSection';
-import {
-  UniversalBarcode,
-  StandaloneBarcodeVerifierHub,
-  generateBosBarcodeId,
-  getBarcodePassTitle,
-} from './components/UniversalBarcode';
-import { SwipeableBookingCard } from './components/SwipeableBookingCard';
+const SuperAppBentoHomeHub = lazy(() => import('./components/SuperAppBentoHomeHub').then((module) => ({ default: module.SuperAppBentoHomeHub })));
+const CategoryRailStreamExplorer = lazy(() => import('./components/CategoryRailStreamExplorer').then((module) => ({ default: module.CategoryRailStreamExplorer })));
+const LiveSponsoredAdsStrip = lazy(() => import('./components/LiveSponsoredAdsStrip').then((module) => ({ default: module.LiveSponsoredAdsStrip })));
+const LiveScheduledAnnouncementsBanner = lazy(() => import('./components/AdminAnnouncementsSection').then((module) => ({ default: module.LiveScheduledAnnouncementsBanner })));
+const StandaloneBarcodeVerifierHub = lazy(() => import('./components/UniversalBarcode').then((module) => ({ default: module.StandaloneBarcodeVerifierHub })));
+import { generateBosBarcodeId, getBarcodePassTitle } from './utils/bookingBarcodes';
+const SwipeableBookingCard = lazy(() => import('./components/SwipeableBookingCard').then((module) => ({ default: module.SwipeableBookingCard })));
 import {
   loadAdminThemeSettings,
   saveAdminThemeSettings,
   applyThemeSettingsToDocument,
   AdminThemeSettings,
-} from './utils/adminEnterpriseStore';
-import { generateBookingGSTReceiptPDF } from './utils/gstInvoiceGenerator';
-import {
-  QuickActionModals,
-  QuickActionModalType,
-} from './components/UserWalletAndQuickModals';
-import { UniversalObjectEditorModal } from './components/UniversalObjectEditorModal';
-import { LiveAdminPageEditor } from './components/LiveAdminPageEditor';
-import { QuickBookChatAssistant } from './components/QuickBookChatAssistant';
+} from './utils/adminPresentationStore';
+import type { QuickActionModalType } from './components/UserWalletAndQuickModals';
+const QuickActionModals = lazy(() => import('./components/UserWalletAndQuickModals').then((module) => ({ default: module.QuickActionModals })));
+const UniversalObjectEditorModal = lazy(() => import('./components/UniversalObjectEditorModal').then((module) => ({ default: module.UniversalObjectEditorModal })));
+const LiveAdminPageEditor = lazy(() => import('./components/LiveAdminPageEditor').then((module) => ({ default: module.LiveAdminPageEditor })));
+const QuickBookChatAssistant = lazy(() => import('./components/QuickBookChatAssistant').then((module) => ({ default: module.QuickBookChatAssistant })));
 import {
   LivePageEditorConfig,
   EditablePageSectionItem,
@@ -220,9 +227,12 @@ function MarketplaceAppContent() {
   // Active Market Section: 'pg_hostels' | 'classes' | 'venues' | 'services' | 'hotel_stay' | 'movies'
   const [activeMarketSection, setActiveMarketSection] = useState<MarketSectionType>('pg_hostels');
   const [isServicesDiscoveryOpen, setIsServicesDiscoveryOpen] = useState(false);
+  const [isFormerLocalServicesOpen, setIsFormerLocalServicesOpen] = useState(false);
+  const [formerLocalInitialCategory, setFormerLocalInitialCategory] = useState<string | undefined>(undefined);
   const [isHotelsStayExperienceOpen, setIsHotelsStayExperienceOpen] = useState(false);
   const [isPGSectionOpen, setIsPGSectionOpen] = useState(false);
   const [isHomeServicesOpen, setIsHomeServicesOpen] = useState(false);
+  const [isClassesTimingsOpen, setIsClassesTimingsOpen] = useState(false);
   // Published admin presentation (labels/headlines) applied to the section screens.
   const [modulePresentation, setModulePresentation] = useState<Record<string, ModuleConfigResolution>>({});
   const returnSectionAfterStayRef = useRef<MarketSectionType>('pg_hostels');
@@ -254,6 +264,7 @@ function MarketplaceAppContent() {
 
   // Subcategory filter state (e.g. "House cleaning", "Bathroom cleaning", "Electrician", "Tap repair", "AC", etc.)
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('all');
+  const [hallsVenueType, setHallsVenueType] = useState<string>('all');
 
   // Distance Radius filter state: 'all' | 5 | 10 | 15 km
   const [selectedRadius, setSelectedRadius] = useState<number | 'all'>('all');
@@ -266,6 +277,19 @@ function MarketplaceAppContent() {
 
   // Specific Area/Neighborhood in city (e.g. "Madhapur / Hitech City", "Gachibowli", "Kukatpally", etc.)
   const [selectedArea, setSelectedArea] = useState<string>('all');
+
+  // Premium location selector (state → district → city) shared by all modules
+  const [isLocationSelectorOpen, setIsLocationSelectorOpen] = useState<boolean>(false);
+  const [selectedLocationLabel, setSelectedLocationLabel] = useState<string>('');
+
+  useEffect(() => {
+    const saved = loadPersistedLocation();
+    if (!saved) return;
+    setSelectedLocationLabel(saved.label ?? saved.city);
+    setSelectedCity(saved.city);
+    if (saved.area && saved.area !== saved.city) setSelectedArea(saved.area);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Date-Range Availability Filter State (YYYY-MM-DD)
   const [filterStartDate, setFilterStartDate] = useState<string>('');
@@ -281,6 +305,8 @@ function MarketplaceAppContent() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
   const { favoriteIds, toggleFavorite, supabaseUser, authUser, isAccountBlocked, blockedReason } = useMarketplace();
+  // The admin console is a protected route: only a signed-in admin identity may open it.
+  const isAdminSession = canAccessAdminConsole(authUser?.role);
 
   // Role-based routing on Google OAuth sign-in, logout redirect, & protected route enforcement
   useEffect(() => {
@@ -290,13 +316,12 @@ function MarketplaceAppContent() {
   }, [isAccountBlocked, activeView]);
 
   useEffect(() => {
-    if (!authUser) return;
-    if (activeView === 'admin_console' && authUser.role !== 'admin') {
-      setActiveView(authUser.role === 'provider' ? 'provider_portal' : 'marketplace');
-    } else if (activeView === 'provider_portal' && authUser.role === 'customer') {
+    if (activeView === 'admin_console' && !isAdminSession) {
+      setActiveView(authUser?.role === 'provider' ? 'provider_portal' : 'marketplace');
+    } else if (activeView === 'provider_portal' && (!authUser || authUser.role === 'customer')) {
       setActiveView('marketplace');
     }
-  }, [authUser, activeView]);
+  }, [authUser, activeView, isAdminSession]);
 
   useEffect(() => {
     if (activeMarketSection === 'hotel_stay' && !isHotelsStayExperienceOpen) {
@@ -311,27 +336,121 @@ function MarketplaceAppContent() {
   useEffect(() => {
     const applySectionHash = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (hash === 'pg') {
+      if (hash === 'pg' || hash.startsWith('pg/')) {
         setActiveMarketSection('pg_hostels');
         setIsPGSectionOpen(true);
         setIsHomeServicesOpen(false);
         setIsHotelsStayExperienceOpen(false);
-      } else if (hash === 'services') {
+      } else if (hash === 'services' || hash.startsWith('services/')) {
         setActiveMarketSection('services');
         setIsHomeServicesOpen(true);
         setIsPGSectionOpen(false);
         setIsHotelsStayExperienceOpen(false);
-      } else if (hash === 'stays' || hash === 'hotels') {
+      } else if (hash === 'stays' || hash === 'hotels' || hash.startsWith('stays/') || hash.startsWith('hotels/')) {
         setActiveMarketSection('hotel_stay');
         setIsHotelsStayExperienceOpen(true);
         setIsPGSectionOpen(false);
         setIsHomeServicesOpen(false);
+      } else if (hash === 'classes' || hash.startsWith('classes/')) {
+        setActiveMarketSection('classes');
+        setIsClassesTimingsOpen(true);
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (hash === 'venues' || hash === 'halls' || hash.startsWith('venues/') || hash.startsWith('halls/')) {
+        setActiveMarketSection('venues');
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsClassesTimingsOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (hash === 'movies' || hash === 'cinema' || hash.startsWith('movies/') || hash.startsWith('cinema/')) {
+        setActiveMarketSection('movies');
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsClassesTimingsOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (hash === 'provider' || hash.startsWith('provider/')) {
+        // A URL hash is unauthenticated input and must never grant a role.
+        // Signed-out visitors keep the hash so it applies once the session
+        // hydrates; a signed-in non-provider is redirected to the marketplace.
+        if (!authUser) return;
+        if (!['provider', 'admin'].includes(authUser.role)) {
+          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+          setActiveView('marketplace');
+          return;
+        }
+        setUserRole('provider');
+        setActiveView('provider_portal');
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsClassesTimingsOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (hash === 'admin' || hash.startsWith('admin/')) {
+        // A URL hash is unauthenticated input and must never grant a role.
+        // Keep the hash while the persisted server session is still hydrating;
+        // otherwise a valid admin deep link is erased before /api/auth/me resolves.
+        if (!authUser) return;
+        if (!isAdminSession) {
+          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+          setActiveView('marketplace');
+          return;
+        }
+        setUserRole('admin');
+        setActiveView('admin_console');
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsClassesTimingsOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+      } else if (!hash.startsWith('venue-')) {
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsClassesTimingsOpen(false);
+        setIsHotelsStayExperienceOpen(false);
       }
     };
     applySectionHash();
     window.addEventListener('hashchange', applySectionHash);
     return () => window.removeEventListener('hashchange', applySectionHash);
-  }, []);
+  }, [isAdminSession, authUser]);
+
+  // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
+  useEffect(() => {
+    const applyVenueHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (!hash.startsWith('venue-')) return;
+      const id = hash.slice('venue-'.length);
+      const venue = listings.find((l) => l.id === id) ?? initialVenueListings.find((l) => l.id === id);
+      if (venue) {
+        setIsPGSectionOpen(false);
+        setIsHomeServicesOpen(false);
+        setIsClassesTimingsOpen(false);
+        setIsHotelsStayExperienceOpen(false);
+        setActiveMarketSection('venues');
+        setSelectedDetailListing(venue);
+      }
+    };
+    applyVenueHash();
+    window.addEventListener('hashchange', applyVenueHash);
+    return () => window.removeEventListener('hashchange', applyVenueHash);
+  }, [listings]);
+
+  // Deep link: #listing-<id> opens the correct customer details page directly
+  // (shareable links). The modal only opens when the listing is resolvable.
+  useEffect(() => {
+    const applyListingHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (!/^listing[-/]/i.test(hash)) return;
+      const id = decodeURIComponent(hash.slice('listing-'.length));
+      if (!id) return;
+      const target = listings.find((listing: any) => listing.id === id);
+      if (!target) return;
+      setActiveMarketSection(resolveSectionForCategory(target.categoryId));
+      setSelectedDetailListing(target);
+    };
+    applyListingHash();
+    window.addEventListener('hashchange', applyListingHash);
+    return () => window.removeEventListener('hashchange', applyListingHash);
+  }, [listings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,19 +466,40 @@ function MarketplaceAppContent() {
   }, []);
 
   useEffect(() => {
+    const callbackParams = new URLSearchParams(window.location.search);
+    const callbackError = callbackParams.get('error_description') || callbackParams.get('error');
+    if (callbackError) {
+      if (window.opener) {
+        window.opener.postMessage({
+          type: 'OAUTH_AUTH_ERROR',
+          error: callbackParams.get('error') || 'OAUTH_CALLBACK_ERROR',
+          message: callbackError.replace(/[+_]/g, ' '),
+        }, window.location.origin);
+        window.close();
+      } else {
+        setIsAuthModalOpen(true);
+      }
+    }
     const handleOAuthRedirect = (e: Event) => {
-      const custom = e as CustomEvent;
-      const target = custom.detail?.redirectTarget as
-        | 'marketplace'
-        | 'provider_portal'
-        | 'admin_console'
-        | undefined;
-      if (target) {
-        setActiveView(target);
+      void e;
+      setActiveView('marketplace');
+      setActiveMarketSection('pg_hostels');
+      setIsServicesDiscoveryOpen(false);
+      setIsFormerLocalServicesOpen(false);
+      setIsHotelsStayExperienceOpen(false);
+      setIsPGSectionOpen(false);
+      setIsHomeServicesOpen(false);
+      setIsClassesTimingsOpen(false);
+      setIsBentoLandingActive(true);
+      setActiveBottomTab('home');
+      if (window.location.hash) {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
       }
     };
     const handleOAuthLogout = () => {
       setActiveView('marketplace');
+      setIsBentoLandingActive(true);
+      setActiveBottomTab('home');
     };
     window.addEventListener('bos-google-oauth-redirect', handleOAuthRedirect);
     window.addEventListener('bos-google-oauth-logout', handleOAuthLogout);
@@ -629,6 +769,18 @@ function MarketplaceAppContent() {
   const [runningBatchesListing, setRunningBatchesListing] = useState<MarketplaceListing | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<'home' | 'search' | 'bookings' | 'favorites' | 'profile'>('home');
   const [isMyBookingsOpen, setIsMyBookingsOpen] = useState(false);
+  // A dialog has to be dismissible from the keyboard (WCAG 2.1.2). The My
+  // Bookings overlay is a modal dialog, so Escape closes it.
+  useEffect(() => {
+    if (!isMyBookingsOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setIsMyBookingsOpen(false);
+      setActiveBottomTab('home');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMyBookingsOpen]);
   const [lastRemovedBooking, setLastRemovedBooking] = useState<Booking | null>(null);
   const [isFooterProfileOpen, setIsFooterProfileOpen] = useState(false);
 
@@ -699,6 +851,18 @@ function MarketplaceAppContent() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleSelectLocation = (loc: SelectedLocation) => {
+    setSelectedLocationLabel(loc.label ?? loc.city);
+    setSelectedCity(loc.city);
+    setSelectedArea(loc.area && loc.area !== loc.city ? loc.area : 'all');
+    persistLocation(loc);
+    showToast(
+      currentLang === 'te'
+        ? `లొకేషన్: ${loc.label ?? loc.city}`
+        : `Location set to ${loc.label ?? loc.city}`
+    );
   };
 
   const unreadNotificationsCount = notifications.filter(n => !n.read).length;
@@ -1375,21 +1539,58 @@ function MarketplaceAppContent() {
     ? hotelStayCategories
     : moviesCategories;
 
+  // Section screens render in the page flow (below the common header) instead of
+  // taking over the whole viewport, so the header stays put while content changes.
+  // Other top-level views (provider portal, admin console) keep their own content.
+  const activeSectionExperience: 'pg_hostels' | 'classes' | 'services' | 'hotel_stay' | null =
+    activeView !== 'marketplace'
+      ? null
+      : isPGSectionOpen
+      ? 'pg_hostels'
+      : isClassesTimingsOpen
+      ? 'classes'
+      : isHomeServicesOpen
+      ? 'services'
+      : isHotelsStayExperienceOpen
+      ? 'hotel_stay'
+      : null;
+
+  // Leave any open section screen and return to the landing content.
+  const closeSectionScreens = () => {
+    setIsPGSectionOpen(false);
+    setIsHomeServicesOpen(false);
+    setIsClassesTimingsOpen(false);
+    setIsHotelsStayExperienceOpen(false);
+    clearSectionHash();
+  };
+
   const isBentoHomeScreen =
     activeView === 'marketplace' &&
     homeScreenStyle === 'bento_landing_hub' &&
-    isBentoLandingActive;
+    isBentoLandingActive &&
+    !activeSectionExperience;
 
   return (
+    <Suspense fallback={<SectionScreenFallback label="Loading BookOurSpace…" />}>
     <div
       className={`${
         isBentoHomeScreen
           ? 'h-[100dvh] max-h-[100dvh] overflow-hidden pb-0'
           : 'min-h-screen pb-20'
-      } w-full max-w-full overflow-x-hidden bg-[#F5F4FB] dark:bg-[#0A0C20] text-slate-900 dark:text-slate-100 transition-colors duration-200 flex flex-col box-border`}
+      } w-full max-w-full bg-[#F5F4FB] dark:bg-[#0A0C20] text-slate-900 dark:text-slate-100 transition-colors duration-200 flex flex-col box-border`}
+      style={isBentoHomeScreen ? undefined : { paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
     >
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
       <BOSGlobeLoadingScreen />
+
+      {DEMO_DATA_ENABLED && (
+        <div
+          role="status"
+          className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-950"
+        >
+          DEVELOPMENT DEMO FIXTURES — illustrative listings, prices, ratings, availability and verification labels are not live marketplace data.
+        </div>
+      )}
       
       {/* OFFLINE STATUS BANNER (BROWSER CACHE INDICATOR) */}
       {!isOnline && (
@@ -1430,7 +1631,7 @@ function MarketplaceAppContent() {
 
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-[#172337] text-white px-5 py-3.5 rounded-xs shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 duration-300 border-2 border-[#2874F0]">
+        <div className="fixed bottom-20 right-4 z-[60] bg-[#172337] text-white px-5 py-3.5 rounded-xs shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300 border-2 border-[#2874F0]">
           <CheckCircle2 className="w-5 h-5 text-[#FFE500] shrink-0" />
           <span className="text-xs sm:text-sm font-bold">{toastMessage}</span>
           <button onClick={() => setToastMessage(null)} className="ml-2 hover:opacity-75 p-1 cursor-pointer">
@@ -1453,11 +1654,18 @@ function MarketplaceAppContent() {
       {isBentoHomeScreen ? (
         <SuperAppBentoHomeHub
           activeMarketSection={activeMarketSection}
+          selectedLocationLabel={selectedLocationLabel}
+          onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
           onSelectCategoryAndAdvance={(sec, catId = 'all', subcat = 'all') => {
             setActiveMarketSection(sec);
             setSelectedCategory(catId);
             setSelectedSubcategory(subcat);
             setIsBentoLandingActive(false);
+            // Every module opens its own screen directly below the common header.
+            setIsPGSectionOpen(sec === 'pg_hostels');
+            setIsClassesTimingsOpen(sec === 'classes');
+            setIsHomeServicesOpen(sec === 'services');
+            setIsHotelsStayExperienceOpen(sec === 'hotel_stay');
             if (isTemplateEnabled('category_rail_stream_explorer')) {
               setIsRailStreamExplorerOpen(true);
             }
@@ -1514,17 +1722,13 @@ function MarketplaceAppContent() {
               showToast('🚫 Account is suspended or blocked. Protected routes are disabled.');
               return;
             }
-            if (authUser) {
-              if (role === 'admin' && authUser.role !== 'admin') {
-                setActiveView(authUser.role === 'provider' ? 'provider_portal' : 'marketplace');
-                showToast('🛡️ Protected Route: Only Super Admin accounts can access the Admin Console.');
-                return;
-              }
-              if (role === 'provider' && authUser.role === 'customer') {
-                setActiveView('marketplace');
-                showToast('🛡️ Protected Route: Customer accounts are routed to Marketplace.');
-                return;
-              }
+            if (role !== 'customer' &&
+                (!authUser || (role === 'admin' ? authUser.role !== 'admin' : !['provider', 'admin'].includes(authUser.role)))) {
+              setActiveView('marketplace');
+              showToast(role === 'admin'
+                ? '🛡️ Protected Route: Only a server-authorized administrator can access the Admin Console.'
+                : '🛡️ Sign in with a server-authorized provider account to access the Provider Portal.');
+              return;
             }
             setUserRole(role);
             if (role === 'customer') setActiveView('marketplace');
@@ -1585,6 +1789,11 @@ function MarketplaceAppContent() {
                 setIsHomeServicesOpen(true);
               } else {
                 setIsHomeServicesOpen(false);
+              }
+              if (sec === 'classes') {
+                setIsClassesTimingsOpen(true);
+              } else {
+                setIsClassesTimingsOpen(false);
               }
               setActiveMarketSection(sec);
               setSelectedCategory('all');
@@ -1698,17 +1907,13 @@ function MarketplaceAppContent() {
                 showToast('🚫 Account is suspended or blocked. Protected routes are disabled.');
                 return;
               }
-              if (authUser) {
-                if (role === 'admin' && authUser.role !== 'admin') {
-                  setActiveView(authUser.role === 'provider' ? 'provider_portal' : 'marketplace');
-                  showToast('🛡️ Protected Route: Only Super Admin accounts can access the Admin Console.');
-                  return;
-                }
-                if (role === 'provider' && authUser.role === 'customer') {
-                  setActiveView('marketplace');
-                  showToast('🛡️ Protected Route: Customer accounts are routed to Marketplace.');
-                  return;
-                }
+              if (role !== 'customer' &&
+                  (!authUser || (role === 'admin' ? authUser.role !== 'admin' : !['provider', 'admin'].includes(authUser.role)))) {
+                setActiveView('marketplace');
+                showToast(role === 'admin'
+                  ? '🛡️ Protected Route: Only a server-authorized administrator can access the Admin Console.'
+                  : '🛡️ Sign in with a server-authorized provider account to access the Provider Portal.');
+                return;
               }
               setUserRole(role);
               if (role === 'customer') setActiveView('marketplace');
@@ -1718,6 +1923,7 @@ function MarketplaceAppContent() {
             activeView={activeView}
             comparedCount={comparedListingIds.length}
             onOpenCompareModal={() => setIsCompareModalOpen(true)}
+            onOpenGoogleSignIn={() => setIsAuthModalOpen(true)}
             externalLoginModalOpen={isFooterProfileOpen}
             onExternalLoginModalClose={() => {
               setIsFooterProfileOpen(false);
@@ -1733,6 +1939,8 @@ function MarketplaceAppContent() {
               );
             }}
             popularAreas={popularAreasList}
+            selectedLocationLabel={selectedLocationLabel}
+            onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
             unreadNotificationsCount={unreadNotificationsCount}
             onOpenNotifications={() => setShowNotificationsDropdown(true)}
             darkMode={darkMode}
@@ -1765,6 +1973,7 @@ function MarketplaceAppContent() {
             onBackToHomeHub={
               homeScreenStyle === 'bento_landing_hub'
                 ? () => {
+                    closeSectionScreens();
                     setIsBentoLandingActive(true);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }
@@ -1783,10 +1992,13 @@ function MarketplaceAppContent() {
             }}
             onOpenServicesDiscovery={() => {
               setIsHotelsStayExperienceOpen(false);
-              setIsServicesDiscoveryOpen(true);
+              setIsHomeServicesOpen(true);
             }}
           />
 
+          {/* HOME-SCREEN CHROME (announcements, spotlight carousel) — hidden while a section screen is open */}
+          {!activeSectionExperience && (
+            <>
           {/* SCHEDULED BELOW-HEADER ANNOUNCEMENTS FROM SUPER ADMIN */}
           <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-2.5 space-y-2.5">
             <LiveScheduledAnnouncementsBanner
@@ -1797,7 +2009,7 @@ function MarketplaceAppContent() {
             />
 
             {/* 1A. DYNAMIC ONE-BY-ONE SPOTLIGHT DEAL 6-CATEGORY CAROUSEL WITH DISTINCT COLOR PALETTES & MULTI-COLORED FRAMED IMAGERY */}
-            {(() => {
+            {false && (() => {
               const spotlightSlides = [
                 {
                   id: 'spot-pg',
@@ -2206,7 +2418,82 @@ function MarketplaceAppContent() {
               );
             })()}
           </div>
+            </>
+          )}
 
+          {activeSectionExperience ? (
+            /* SECTION SCREEN — rendered in the page flow, directly under the common header */
+            <section
+              className="w-full flex-1 animate-in fade-in duration-150"
+              aria-label={`${activeSectionExperience} section`}
+            >
+              {activeSectionExperience === 'pg_hostels' && (
+                <Suspense fallback={<SectionScreenFallback label="Loading PGs…" />}>
+                  <PGSectionExperience
+                    inline
+                    listings={listings}
+                    moduleLabel={modulePresentation.pg?.values.label}
+                    moduleHeadline={modulePresentation.pg?.values.headline}
+                    onClose={() => {
+                      setIsPGSectionOpen(false);
+                      clearSectionHash();
+                      setActiveMarketSection(returnSectionAfterPGRef.current);
+                      setSelectedCategory('all');
+                      setSelectedSubcategory('all');
+                    }}
+                  />
+                </Suspense>
+              )}
+
+              {activeSectionExperience === 'classes' && (
+                <Suspense fallback={<SectionScreenFallback label="Loading classes…" />}>
+                  <ClassesTimingsExperience
+                    inline
+                    listings={listings}
+                    onClose={() => {
+                      setIsClassesTimingsOpen(false);
+                      clearSectionHash();
+                    }}
+                  />
+                </Suspense>
+              )}
+
+              {activeSectionExperience === 'services' && (
+                <Suspense fallback={<SectionScreenFallback label="Loading services…" />}>
+                  <HomeServicesSection
+                    inline
+                    listings={listings}
+                    initialCategoryId={selectedCategory === 'all' ? undefined : selectedCategory}
+                    moduleLabel={modulePresentation.services?.values.label}
+                    moduleHeadline={modulePresentation.services?.values.headline}
+                    onClose={() => {
+                      setIsHomeServicesOpen(false);
+                      clearSectionHash();
+                      setActiveMarketSection(returnSectionAfterServicesRef.current);
+                      setSelectedCategory('all');
+                      setSelectedSubcategory('all');
+                    }}
+                  />
+                </Suspense>
+              )}
+
+              {activeSectionExperience === 'hotel_stay' && (
+                <Suspense fallback={<SectionScreenFallback label="Loading stays…" />}>
+                  <HotelsStayExperience
+                    inline
+                    onClose={() => {
+                      setIsHotelsStayExperienceOpen(false);
+                      clearSectionHash();
+                      setActiveMarketSection(returnSectionAfterStayRef.current);
+                      setSelectedCategory('all');
+                      setSelectedSubcategory('all');
+                    }}
+                  />
+                </Suspense>
+              )}
+            </section>
+          ) : (
+            <>
           {/* Main Content Area */}
           <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 space-y-5">
         
@@ -2270,6 +2557,8 @@ function MarketplaceAppContent() {
                     : undefined
                 }
               />
+              {userRole === 'provider' && <ClassBatchManager />}
+              {userRole === 'provider' && <VenueOwnerWorkspace />}
             </SelfHealingBoundary>
           </div>
         )}
@@ -2277,6 +2566,7 @@ function MarketplaceAppContent() {
         {/* VIEW 2: SUPER ADMIN CONSOLE */}
         {activeView === 'admin_console' && (
           <div className="space-y-4 animate-in fade-in duration-200">
+            <VenueAdminWorkspace />
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <div>
                 <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
@@ -2296,6 +2586,7 @@ function MarketplaceAppContent() {
             </div>
             <Suspense fallback={<p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">Loading admin console…</p>}>
               <SelfHealingBoundary moduleId="admin_console_module" moduleName="Super Admin Console Module">
+                <AdminClassBatchReview />
                 <AdminDashboard
                   onApprovedNavigateToApp={(approvedListing) => {
                     const targetSec = resolveSectionForCategory(approvedListing.categoryId);
@@ -2360,6 +2651,10 @@ function MarketplaceAppContent() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (!isAdminSession) {
+                        showToast('🛡️ Admin console requires a signed-in administrator account.');
+                        return;
+                      }
                       setUserRole('admin');
                       setActiveView('admin_console');
                     }}
@@ -3537,6 +3832,13 @@ function MarketplaceAppContent() {
                 'from-purple-600 to-fuchsia-600',
               ];
 
+              // Admin-controlled per-city visibility (Popular Categories can be hidden per city)
+              const visibilityCity =
+                selectedCity && selectedCity !== 'All Cities' && selectedCity !== 'All Locations' && selectedCity !== 'all'
+                  ? selectedCity
+                  : (selectedLocationLabel?.split(',')[0]?.trim() || 'Hyderabad');
+              const showPopularCategories = isPopularCategoriesVisible(visibilityCity);
+
               // Dynamically build Popular Categories from current market section config (`activeCategoryList`)
               const dynamicCategoriesSource = showAllPopularCategories
                 ? activeCategoryList
@@ -3980,6 +4282,7 @@ function MarketplaceAppContent() {
                   </div>
 
                   {/* 3. "⭐ POPULAR CATEGORIES" DYNAMIC VISUAL STRIP WITH CUSTOM VECTOR ICONS & EMOJIS */}
+                  {showPopularCategories && (
                   <div className="bg-white/90 dark:bg-[#0D1126] rounded-3xl border border-slate-200/80 dark:border-slate-800/90 p-3.5 sm:p-4 shadow-xs space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2 min-w-0">
@@ -4107,6 +4410,7 @@ function MarketplaceAppContent() {
                       ))}
                     </div>
                   </div>
+                  )}
                 </div>
               );
             })()}
@@ -4239,6 +4543,10 @@ function MarketplaceAppContent() {
                     setModularTemplates(next);
                   }}
                   onOpenAdminBuilder={() => {
+                    if (!isAdminSession) {
+                      showToast('🛡️ Admin console requires a signed-in administrator account.');
+                      return;
+                    }
                     setUserRole('admin');
                     setActiveView('admin_console');
                   }}
@@ -4259,20 +4567,22 @@ function MarketplaceAppContent() {
                   setModularTemplates(next);
                 }}
               >
-                <StandaloneBarcodeVerifierHub
-                  sampleCodes={[
-                    ...bookings.slice(0, 3).map((bk) => ({
-                      code: generateBosBarcodeId('TKT', `${bk.listingId}-${bk.id}`, activeMarketSection),
-                      title: `${bk.listingTitle} (${bk.customerName})`,
-                      section: activeMarketSection,
-                    })),
-                    ...filteredListings.slice(0, 3).map((l) => ({
-                      code: generateBosBarcodeId('BOS', l.id, l.categoryId),
-                      title: l.title,
-                      section: l.categoryId,
-                    })),
-                  ]}
-                />
+                <Suspense fallback={<p className="text-xs text-slate-500" role="status">Loading barcode verification…</p>}>
+                  <StandaloneBarcodeVerifierHub
+                    sampleCodes={[
+                      ...bookings.slice(0, 3).map((bk) => ({
+                        code: generateBosBarcodeId('TKT', `${bk.listingId}-${bk.id}`, activeMarketSection),
+                        title: `${bk.listingTitle} (${bk.customerName})`,
+                        section: activeMarketSection,
+                      })),
+                      ...filteredListings.slice(0, 3).map((l) => ({
+                        code: generateBosBarcodeId('BOS', l.id, l.categoryId),
+                        title: l.title,
+                        section: l.categoryId,
+                      })),
+                    ]}
+                  />
+                </Suspense>
               </SelfHealingBoundary>
             )}
 
@@ -4557,33 +4867,7 @@ function MarketplaceAppContent() {
               activeSection={activeMarketSection}
             />
 
-            {/* 3. COMPACT 3-IMAGE RIGHT-TO-LEFT ANIMATED SPOTLIGHT SHOWCASE (STRICTLY MATCHING ACTIVE SECTION & CATEGORY) */}
-            {isTemplateEnabled('spotlight_showcase') && (
-              <SelfHealingBoundary moduleId="spotlight_showcase" moduleName="Spotlight Showcase">
-                <SectionSpotlightShowcase
-                  activeMarketSection={activeMarketSection}
-                  listings={filteredListings}
-                  allListings={listings}
-                  currentLang={currentLang}
-                  selectedSubcategory={selectedSubcategory}
-                  onSelectSubcategory={(subcat) => {
-                    setSelectedSubcategory(subcat);
-                    if (subcat !== 'all') {
-                      showToast(`🔍 ${getSubcategoryDisplayName(subcat, currentLang)}`);
-                    }
-                  }}
-                  onSwitchSection={(sec) => {
-                    setActiveMarketSection(sec);
-                    setSelectedCategory('all');
-                    setSelectedSubcategory('all');
-                  }}
-                  onSelectListing={handleSelectListing}
-                  onBookListing={(item) => setBookingListing(item)}
-                  onEnquireListing={(item) => setChatListing(item)}
-                  onOpenRunningBatches={(item) => setRunningBatchesListing(item)}
-                />
-              </SelfHealingBoundary>
-            )}
+            {/* SPOTLIGHT SHOWCASE (3-image animated banner) — REMOVED per product request */}
 
             {/* SCHEDULED SECTION CARD ANNOUNCEMENTS */}
             <LiveScheduledAnnouncementsBanner
@@ -4807,6 +5091,18 @@ function MarketplaceAppContent() {
             )}
 
             {/* LISTINGS FEED GRID (SHOWN FOR ALL SECTIONS, OR WHEN CLASSIC CARDS TOGGLED ON IN MOVIES) */}
+            {/* HALLS — MANDAP-STYLE VENUE TYPES, FILTERS & CARDS */}
+            {activeMarketSection === 'venues' && (
+              <div className="mb-3">
+                <HallsMandapExperience
+                  listings={listings.filter((l) => l.categoryId.startsWith('venue-'))}
+                  activeType={hallsVenueType}
+                  onSelectType={setHallsVenueType}
+                  onOpenListing={handleSelectListing}
+                />
+              </div>
+            )}
+
             {isTemplateEnabled('listings_grid') && (activeMarketSection !== 'movies' || showMoviesClassicGrid) && (
               filteredListings.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 text-center border border-slate-200 dark:border-slate-800 space-y-3">
@@ -5005,21 +5301,25 @@ function MarketplaceAppContent() {
           </div>
         </div>
       </footer>
+            </>
+          )}
         </>
       )}
 
       {/* STICKY BOTTOM NAVIGATION FOOTER */}
       <nav
         aria-label="Bottom Navigation"
-        className="fixed bottom-0 left-0 right-0 z-40 h-[56px] w-full max-w-full overflow-hidden bg-white dark:bg-slate-900 rounded-t-3xl border-t border-slate-200/90 dark:border-slate-800 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] box-border"
+        className="fixed bottom-0 left-0 right-0 z-40 w-full max-w-full overflow-hidden bg-white dark:bg-slate-900 rounded-t-3xl border-t border-slate-200/90 dark:border-slate-800 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] box-border"
+        style={{ height: 'calc(56px + env(safe-area-inset-bottom))' }}
       >
-        <div className="max-w-md sm:max-w-2xl mx-auto h-full px-1.5 sm:px-6 grid grid-cols-5 items-center">
+        <div className="max-w-md sm:max-w-2xl mx-auto h-[56px] px-1.5 sm:px-6 grid grid-cols-5 items-center">
           {/* 1. Home */}
           <button
             type="button"
             onClick={() => {
               setActiveBottomTab('home');
               setActiveView('marketplace');
+              closeSectionScreens();
               if (homeScreenStyle === 'bento_landing_hub') {
                 setIsBentoLandingActive(true);
               }
@@ -5203,8 +5503,8 @@ function MarketplaceAppContent() {
 
       {/* MY BOOKINGS MODAL (OPENS WHEN USER TAPS "నా బుకింగ్స్" IN BOTTOM FOOTER) */}
       {isMyBookingsOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-[#4338CA] text-white flex items-center justify-center font-black">
@@ -5270,6 +5570,10 @@ function MarketplaceAppContent() {
               </div>
             )}
 
+            <Suspense fallback={<p className="text-xs text-slate-500">Loading PG reservations…</p>}>
+              <PgMyBookingsPanel open={isMyBookingsOpen} />
+            </Suspense>
+
             <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1">
               {bookings.length === 0 ? (
                 <div className="text-center py-8 text-xs text-slate-500">
@@ -5317,12 +5621,14 @@ function MarketplaceAppContent() {
                             : `🗑️ Removed "${targetBk.listingTitle}" from My Bookings`
                         );
                       }}
-                      onDownloadReceipt={(targetBk) =>
-                        generateBookingGSTReceiptPDF(targetBk, undefined, 'download')
-                      }
-                      onPrintReceipt={(targetBk) =>
-                        generateBookingGSTReceiptPDF(targetBk, undefined, 'print')
-                      }
+                      onDownloadReceipt={(targetBk) => {
+                        void import('./utils/gstInvoiceGenerator').then(({ generateBookingGSTReceiptPDF }) =>
+                          generateBookingGSTReceiptPDF(targetBk, undefined, 'download'));
+                      }}
+                      onPrintReceipt={(targetBk) => {
+                        void import('./utils/gstInvoiceGenerator').then(({ generateBookingGSTReceiptPDF }) =>
+                          generateBookingGSTReceiptPDF(targetBk, undefined, 'print'));
+                      }}
                     />
                   );
                 })
@@ -5374,6 +5680,10 @@ function MarketplaceAppContent() {
           );
         }}
         onOpenAdminReview={() => {
+          if (!isAdminSession) {
+            showToast('🛡️ Admin console requires a signed-in administrator account.');
+            return;
+          }
           setIsPostWizardOpen(false);
           setUserRole('admin');
           setActiveView('admin_console');
@@ -5389,19 +5699,36 @@ function MarketplaceAppContent() {
       />
 
       {/* LISTING DETAIL MODAL */}
-      <ListingDetailModal
-        listing={selectedDetailListing}
-        currentLang={currentLang}
-        onClose={() => setSelectedDetailListing(null)}
-        onBookNow={(l) => {
-          setSelectedDetailListing(null);
-          setBookingListing(l);
-        }}
-        onEnquire={(l) => {
-          setSelectedDetailListing(null);
-          setChatListing(l);
-        }}
-      />
+      {selectedDetailListing && selectedDetailListing.categoryId.startsWith('venue-') ? (
+        <VenueDetailModal
+          listing={selectedDetailListing}
+          onClose={() => setSelectedDetailListing(null)}
+          onChat={() => {
+            const current = selectedDetailListing;
+            setSelectedDetailListing(null);
+            setChatListing(current);
+          }}
+          onRequestAvailability={() => {
+            const current = selectedDetailListing;
+            setSelectedDetailListing(null);
+            setBookingListing(current);
+          }}
+        />
+      ) : (
+        <ListingDetailModal
+          listing={selectedDetailListing}
+          currentLang={currentLang}
+          onClose={() => setSelectedDetailListing(null)}
+          onBookNow={(l) => {
+            setSelectedDetailListing(null);
+            setBookingListing(l);
+          }}
+          onEnquire={(l) => {
+            setSelectedDetailListing(null);
+            setChatListing(l);
+          }}
+        />
+      )}
 
       {/* CURRENT RUNNING BATCHES MODAL (CONFIGURABLE SCHEDULE LINK & ALL-FORMAT IMAGES) */}
       <RunningBatchesModal
@@ -5440,7 +5767,7 @@ function MarketplaceAppContent() {
 
       {/* UNIVERSAL BOOKING & APPLICATION MODAL */}
       <BookingEnquiryModal
-        listing={bookingListing}
+        listing={bookingListing && !bookingListing.categoryId.startsWith('venue-') ? bookingListing : null}
         currentLang={currentLang}
         initialDateRange={
           filterStartDate
@@ -5449,6 +5776,10 @@ function MarketplaceAppContent() {
         }
         onClose={() => setBookingListing(null)}
         onOpenReview={(l) => setReviewListing(l)}
+      />
+      <VenueBookingModal
+        listing={bookingListing?.categoryId.startsWith('venue-') ? bookingListing : null}
+        onClose={() => setBookingListing(null)}
       />
 
       {/* DYNAMIC REVIEW & RATING SUBMISSION MODAL */}
@@ -5527,37 +5858,49 @@ function MarketplaceAppContent() {
       />
 
       {/* QUICK ACTION MODALS (MY FAVORITES, WALLET & LEDGER, SUPPORT, REFER & EARN, HELP CENTRE) */}
-      <QuickActionModals
-        activeModal={activeQuickModal}
-        onClose={() => setActiveQuickModal(null)}
-        currentLang={currentLang}
-        onSelectListing={(l) => setSelectedDetailListing(l)}
-        onBookListing={(l) => setBookingListing(l)}
-      />
+      <Suspense fallback={null}>
+        {activeQuickModal && (
+          <QuickActionModals
+            activeModal={activeQuickModal}
+            onClose={() => setActiveQuickModal(null)}
+            currentLang={currentLang}
+            onSelectListing={(l) => setSelectedDetailListing(l)}
+            onBookListing={(l) => setBookingListing(l)}
+          />
+        )}
+      </Suspense>
 
       {/* PLUG-AND-PLAY UNIVERSAL OBJECT EDITOR MODAL */}
-      <UniversalObjectEditorModal
-        isOpen={isUniversalEditorOpen}
-        onClose={() => setIsUniversalEditorOpen(false)}
-        activeSection={activeMarketSection}
-        currentLang={currentLang}
-      />
+      <Suspense fallback={null}>
+        {isUniversalEditorOpen && (
+          <UniversalObjectEditorModal
+            isOpen
+            onClose={() => setIsUniversalEditorOpen(false)}
+            activeSection={activeMarketSection}
+            currentLang={currentLang}
+          />
+        )}
+      </Suspense>
 
       {/* SECURE LIVE ADMIN PAGE EDITOR (OTA SYNC FOR WEB, ANDROID & IOS) */}
-      <LiveAdminPageEditor
-        userRole={userRole}
-        activePageId={activeMarketSection}
-        onSelectPageId={(pageId) => {
-          setActiveMarketSection(pageId);
-          setSelectedCategory('all');
-          setSelectedSubcategory('all');
-          setActiveView('marketplace');
-        }}
-        isOpenExternal={isLivePageEditorOpen}
-        onCloseExternal={() => setIsLivePageEditorOpen(false)}
-        onConfigUpdated={(nextCfg) => setLivePageConfig(nextCfg)}
-        onNotify={(msg) => showToast(msg)}
-      />
+      <Suspense fallback={null}>
+        {isLivePageEditorOpen && (
+          <LiveAdminPageEditor
+            userRole={userRole}
+            activePageId={activeMarketSection}
+            onSelectPageId={(pageId) => {
+              setActiveMarketSection(pageId);
+              setSelectedCategory('all');
+              setSelectedSubcategory('all');
+              setActiveView('marketplace');
+            }}
+            isOpenExternal
+            onCloseExternal={() => setIsLivePageEditorOpen(false)}
+            onConfigUpdated={(nextCfg) => setLivePageConfig(nextCfg)}
+            onNotify={(msg) => showToast(msg)}
+          />
+        )}
+      </Suspense>
 
       {/* AI-POWERED QUICK BOOK CHAT ASSISTANT (DISABLED BY DEFAULT) */}
       {isQuickBookOpen && (
@@ -5611,6 +5954,14 @@ function MarketplaceAppContent() {
           }}
         />
       )}
+
+      {/* PREMIUM LOCATION SELECTOR (state → district → city) */}
+      <LocationSelector
+        open={isLocationSelectorOpen}
+        onClose={() => setIsLocationSelectorOpen(false)}
+        selected={{ city: selectedCity, area: selectedArea, label: selectedLocationLabel || undefined }}
+        onSelect={handleSelectLocation}
+      />
 
       {/* SUPABASE AUTHENTICATION MODAL */}
       <SupabaseAuthModal
@@ -5699,56 +6050,33 @@ function MarketplaceAppContent() {
           <ServicesDiscoverySection
             onClose={() => setIsServicesDiscoveryOpen(false)}
             onNavigate={navigateFromServicesDiscovery}
-          />
-        </Suspense>
-      )}
-      {isHotelsStayExperienceOpen && (
-        <Suspense fallback={<div className="fixed inset-0 z-[71] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading stays…</div>}>
-          <HotelsStayExperience
-            onClose={() => {
-              setIsHotelsStayExperienceOpen(false);
-              clearSectionHash();
-              setActiveMarketSection(returnSectionAfterStayRef.current);
-              setSelectedCategory('all');
-              setSelectedSubcategory('all');
+            onOpenFarmVillage={(categoryId) => {
+              setIsServicesDiscoveryOpen(false);
+              setFormerLocalInitialCategory(categoryId);
+              setIsFormerLocalServicesOpen(true);
             }}
           />
         </Suspense>
       )}
-      {isPGSectionOpen && (
-        <Suspense fallback={<div className="fixed inset-0 z-[71] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading PGs…</div>}>
-          <PGSectionExperience
-            listings={listings}
-            moduleLabel={modulePresentation.pg?.values.label}
-            moduleHeadline={modulePresentation.pg?.values.headline}
-            onClose={() => {
-              setIsPGSectionOpen(false);
-              clearSectionHash();
-              setActiveMarketSection(returnSectionAfterPGRef.current);
-              setSelectedCategory('all');
-              setSelectedSubcategory('all');
-            }}
-          />
-        </Suspense>
-      )}
-      {isHomeServicesOpen && (
-        <Suspense fallback={<div className="fixed inset-0 z-[71] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading services…</div>}>
-          <HomeServicesSection
-            listings={listings}
-            initialCategoryId={selectedCategory === 'all' ? undefined : selectedCategory}
-            moduleLabel={modulePresentation.services?.values.label}
-            moduleHeadline={modulePresentation.services?.values.headline}
-            onClose={() => {
-              setIsHomeServicesOpen(false);
-              clearSectionHash();
-              setActiveMarketSection(returnSectionAfterServicesRef.current);
-              setSelectedCategory('all');
-              setSelectedSubcategory('all');
-            }}
-          />
+      {isFormerLocalServicesOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[72] grid place-items-center bg-white text-sm font-semibold text-slate-600" role="status">Loading Farm & Village services…</div>}>
+          <FormerLocalServicesSection initialCategoryId={formerLocalInitialCategory} onClose={() => {
+            setIsFormerLocalServicesOpen(false);
+            setFormerLocalInitialCategory(undefined);
+            setIsServicesDiscoveryOpen(true);
+          }} />
         </Suspense>
       )}
 
+    </div>
+    </Suspense>
+  );
+}
+
+function SectionScreenFallback({ label }: { label: string }) {
+  return (
+    <div className="grid min-h-[50vh] w-full place-items-center bg-white text-sm font-semibold text-slate-500 dark:bg-slate-950 dark:text-slate-400" role="status">
+      {label}
     </div>
   );
 }

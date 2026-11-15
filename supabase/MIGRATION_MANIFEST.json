@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "supabase/tests/migration_manifest.mjs",
+  "applyOrder": "baseline first, then migrations in ascending 14-digit version order",
+  "baseline": {
+    "order": 1,
+    "file": "supabase/schema_and_rls.sql",
+    "bytes": 38951,
+    "sha256": "6d4c2d0ffee3c5b2f231b64ea5827384c06bfb87943b1ec84f5a1fe46b3a1a8c"
+  },
+  "profileBackfill": {
+    "file": "supabase/backfill_existing_google_profiles.sql",
+    "bytes": 1659,
+    "sha256": "91d287eab11b85877848dc2c11e1080c80eae2f6826e5fd3fb9626f5b408847b"
+  },
+  "migrationCount": 37,
+  "migrations": [
+    {
+      "order": 2,
+      "version": "20261101000002",
+      "name": "marketplace_modules_and_stay_inventory",
+      "file": "supabase/migrations/20261101000002_marketplace_modules_and_stay_inventory.sql",
+      "bytes": 29085,
+      "sha256": "c4ef53cc3560116ec640109b70ce2f4810b6a96d4e322fb88bef0624cf5c9430"
+    },
+    {
+      "order": 3,
+      "version": "20261101000003",
+      "name": "fix_provider_contact_listing_ids",
+      "file": "supabase/migrations/20261101000003_fix_provider_contact_listing_ids.sql",
+      "bytes": 5331,
+      "sha256": "1cdd061d19c2d9cf45922ab3cf34c14900e75370c3fcd6c689b941b643655760"
+    },
+    {
+      "order": 4,
+      "version": "20261101000004",
+      "name": "platform_module_realtime",
+      "file": "supabase/migrations/20261101000004_platform_module_realtime.sql",
+      "bytes": 1640,
+      "sha256": "7622ae6b5cc04c2c72bb4cf7462e3829078ec5e1af4ffae6303beaed984d1896"
+    },
+    {
+      "order": 5,
+      "version": "20261101072320",
+      "name": "active_admin_marketplace_listing_rls",
+      "file": "supabase/migrations/20261101072320_active_admin_marketplace_listing_rls.sql",
+      "bytes": 2567,
+      "sha256": "15eb0354ea38d00c35fe42a87faef8856c4d7b037e80a8269c23dd78faf5022a"
+    },
+    {
+      "order": 6,
+      "version": "20261101073937",
+      "name": "admin_stay_inventory_safety",
+      "file": "supabase/migrations/20261101073937_admin_stay_inventory_safety.sql",
+      "bytes": 21303,
+      "sha256": "9f2884112396739f7bfa16795d8c50c570e3d73eec0f9c9d39e0e3f50e42b819"
+    },
+    {
+      "order": 7,
+      "version": "20261101075829",
+      "name": "app_builder_config_versions",
+      "file": "supabase/migrations/20261101075829_app_builder_config_versions.sql",
+      "bytes": 20673,
+      "sha256": "e9360b3c38ef84bece0a97b53aa79a32d43be6c17f39dfe5ed0fa9f6f025648d"
+    },
+    {
+      "order": 8,
+      "version": "20261101175250",
+      "name": "former_local_services_listing_fields",
+      "file": "supabase/migrations/20261101175250_former_local_services_listing_fields.sql",
+      "bytes": 3474,
+      "sha256": "07951a791e0c8193adf1f34bdf0e4f9bd55134f3bfd059cc9e40a3ea6aa0491c"
+    },
+    {
+      "order": 9,
+      "version": "20261103120000",
+      "name": "marketplace_foreign_key_indexes",
+      "file": "supabase/migrations/20261103120000_marketplace_foreign_key_indexes.sql",
+      "bytes": 2613,
+      "sha256": "598a9fd4980246d77209d3f94b37f00e98f65358710689762161525639edf896"
+    },
+    {
+      "order": 10,
+      "version": "20261103130000",
+      "name": "provider_listing_idempotency",
+      "file": "supabase/migrations/20261103130000_provider_listing_idempotency.sql",
+      "bytes": 778,
+      "sha256": "7a76e27f4c38bdbdbd08bb14ae23f8e8b44998704f192647745c8ebaa6dd9dad"
+    },
+    {
+      "order": 11,
+      "version": "20261103171437",
+      "name": "provider_registration_workflow",
+      "file": "supabase/migrations/20261103171437_provider_registration_workflow.sql",
+      "bytes": 3676,
+      "sha256": "ec66f83de3b73d6efcc7bfc3df3f787a7d10848c30f2262dc7bc65dd10c2258a"
+    },
+    {
+      "order": 12,
+      "version": "20261103173631",
+      "name": "venue_booking_inventory",
+      "file": "supabase/migrations/20261103173631_venue_booking_inventory.sql",
+      "bytes": 40272,
+      "sha256": "aa86d0fb16651b21c4606b102c7044ff1cbc26ad297677bcd984cdf926a9f7a5"
+    },
+    {
+      "order": 13,
+      "version": "20261103175957",
+      "name": "venue_dynamic_categories_timezone_dst",
+      "file": "supabase/migrations/20261103175957_venue_dynamic_categories_timezone_dst.sql",
+      "bytes": 7385,
+      "sha256": "f846719d9fe15c9b800bf7e47db6213be235206d9fe204fb5ded4051a4cd5135"
+    },
+    {
+      "order": 14,
+      "version": "20261103180000",
+      "name": "services_booking_lifecycle",
+      "file": "supabase/migrations/20261103180000_services_booking_lifecycle.sql",
+      "bytes": 17105,
+      "sha256": "d8733e97847ab011acb15593dbba4d4085a0ea74d49a46a06234c44ebccc9fd9"
+    },
+    {
+      "order": 15,
+      "version": "20261103190000",
+      "name": "stay_checkout_and_payment_intents",
+      "file": "supabase/migrations/20261103190000_stay_checkout_and_payment_intents.sql",
+      "bytes": 21860,
+      "sha256": "b2b61a494c708125c249a8c1380b210cac508c98425527c42ffaaa924aae5597"
+    },
+    {
+      "order": 16,
+      "version": "20261103200000",
+      "name": "class_batches_and_enrollment",
+      "file": "supabase/migrations/20261103200000_class_batches_and_enrollment.sql",
+      "bytes": 19968,
+      "sha256": "57e2708b55b19368493f6236131ebfc9e104399ffedf5208b7edb0fa4188b425"
+    },
+    {
+      "order": 17,
+      "version": "20261103201000",
+      "name": "stay_confirmation_actor_authorization",
+      "file": "supabase/migrations/20261103201000_stay_confirmation_actor_authorization.sql",
+      "bytes": 11113,
+      "sha256": "057cf3a4c95b3b1d58f2fbfc2a2512a7678c439ec68a19f5019e41cc4026d780"
+    },
+    {
+      "order": 18,
+      "version": "20261103210000",
+      "name": "pg_booking_lifecycle",
+      "file": "supabase/migrations/20261103210000_pg_booking_lifecycle.sql",
+      "bytes": 15706,
+      "sha256": "6656c6fa656609f147d4da2ea1ab2efcfd4415a741c1fd6b0ea334be858c5da8"
+    },
+    {
+      "order": 19,
+      "version": "20261103211000",
+      "name": "services_schedule_and_verified_payments",
+      "file": "supabase/migrations/20261103211000_services_schedule_and_verified_payments.sql",
+      "bytes": 21614,
+      "sha256": "e2bf7a53b9c77d3d3a078b733d8dd12c37cc1ecefacd76b4a8135f939471a183"
+    },
+    {
+      "order": 20,
+      "version": "20261103220000",
+      "name": "pg_payment_lifecycle",
+      "file": "supabase/migrations/20261103220000_pg_payment_lifecycle.sql",
+      "bytes": 27437,
+      "sha256": "19527877eacfdf4f7d7040538d7e7c3e7f95b67f2e34e6440b06626ea0d28810"
+    },
+    {
+      "order": 21,
+      "version": "20261103233000",
+      "name": "venue_booking_disputes",
+      "file": "supabase/migrations/20261103233000_venue_booking_disputes.sql",
+      "bytes": 6243,
+      "sha256": "e2eed075a4df03a11dd085cf0d220b8511434fbcd453c2e3d1245000f6a9997d"
+    },
+    {
+      "order": 22,
+      "version": "20261103234000",
+      "name": "venue_payment_provider_binding",
+      "file": "supabase/migrations/20261103234000_venue_payment_provider_binding.sql",
+      "bytes": 4329,
+      "sha256": "10d8cd68285b484b9b4f9f01c55667e79aa5e93c51f909b6b185463b7b3bf6d2"
+    },
+    {
+      "order": 23,
+      "version": "20261103240000",
+      "name": "stay_checkout_pay_after_service_without_vpa",
+      "file": "supabase/migrations/20261103240000_stay_checkout_pay_after_service_without_vpa.sql",
+      "bytes": 7640,
+      "sha256": "8f3f7738bd3e528681894efade6af60a42a0a919a52b73a98916057dfaa43940"
+    },
+    {
+      "order": 24,
+      "version": "20261103250000",
+      "name": "pg_admin_disputes_invoices",
+      "file": "supabase/migrations/20261103250000_pg_admin_disputes_invoices.sql",
+      "bytes": 60132,
+      "sha256": "9e91f8a603a757d8f1498aed9e2bf67371b6cb77e3f109a7f34711efb82a3c0d"
+    },
+    {
+      "order": 25,
+      "version": "20261104100000",
+      "name": "profiles_private_access",
+      "file": "supabase/migrations/20261104100000_profiles_private_access.sql",
+      "bytes": 4674,
+      "sha256": "46fb996f77c797c13b3573a0db2038675fe3d20ea1ededfc93a6cb275c720849"
+    },
+    {
+      "order": 26,
+      "version": "20261104110000",
+      "name": "google_profile_provision_rpc",
+      "file": "supabase/migrations/20261104110000_google_profile_provision_rpc.sql",
+      "bytes": 2541,
+      "sha256": "d903146b5f16dcb5da4e058c822967f2c1bfe80e12e816f949058bf081af0d19"
+    },
+    {
+      "order": 27,
+      "version": "20261104120000",
+      "name": "admin_provider_activation_rpc",
+      "file": "supabase/migrations/20261104120000_admin_provider_activation_rpc.sql",
+      "bytes": 2591,
+      "sha256": "36c51c615a9dd6766a0d15f2a8dafe9a32e23e010c6c222ba6292a396e63385d"
+    },
+    {
+      "order": 28,
+      "version": "20261104130000",
+      "name": "pg_razorpay_raw_body_settlement",
+      "file": "supabase/migrations/20261104130000_pg_razorpay_raw_body_settlement.sql",
+      "bytes": 14425,
+      "sha256": "6e8c78c82da6433a9aeca46f37f2e74484651a4d2c453880b0ed1a72f52b9560"
+    },
+    {
+      "order": 29,
+      "version": "20261104140000",
+      "name": "restrict_profile_self_insert_columns",
+      "file": "supabase/migrations/20261104140000_restrict_profile_self_insert_columns.sql",
+      "bytes": 733,
+      "sha256": "40655de723fa0f4418452c03fd78a0fa85d9d51a93944e1322ff71f734dcac77"
+    },
+    {
+      "order": 30,
+      "version": "20261104150000",
+      "name": "live_edit_audit_trail",
+      "file": "supabase/migrations/20261104150000_live_edit_audit_trail.sql",
+      "bytes": 5594,
+      "sha256": "43b9fc0dc14a2e06f3f7560ea84c572d265db9d1c1e3e1a464bce9c3c971db05"
+    },
+    {
+      "order": 31,
+      "version": "20261104160000",
+      "name": "super_admin_role_management",
+      "file": "supabase/migrations/20261104160000_super_admin_role_management.sql",
+      "bytes": 6513,
+      "sha256": "12d976466bfe51ba29f6050243e8681461499cdb3aaf79d224376a1777d7521c"
+    },
+    {
+      "order": 32,
+      "version": "20261104170000",
+      "name": "provider_listing_ownership_guards",
+      "file": "supabase/migrations/20261104170000_provider_listing_ownership_guards.sql",
+      "bytes": 5199,
+      "sha256": "03103c30f1e846ef3969b71d77e26e7592bc3494f6117bd4b4c8fb12bb9a28b2"
+    },
+    {
+      "order": 33,
+      "version": "20261104180000",
+      "name": "booking_idempotency_per_user",
+      "file": "supabase/migrations/20261104180000_booking_idempotency_per_user.sql",
+      "bytes": 7712,
+      "sha256": "0f3e83e9a35e616193ff2cb4861b9696203b02b92270228c96936d7b7a8ba818"
+    },
+    {
+      "order": 34,
+      "version": "20261104190000",
+      "name": "active_admin_authorization",
+      "file": "supabase/migrations/20261104190000_active_admin_authorization.sql",
+      "bytes": 1774,
+      "sha256": "6f56be88d5d59673187e11274f805b6900d69e55abc688def8e07933cf819754"
+    },
+    {
+      "order": 35,
+      "version": "20261104200000",
+      "name": "complete_foreign_key_indexes",
+      "file": "supabase/migrations/20261104200000_complete_foreign_key_indexes.sql",
+      "bytes": 3787,
+      "sha256": "71228bb3846387c189082045b0731778cec2ad79196a51bb1039b6378e0be100"
+    },
+    {
+      "order": 36,
+      "version": "20261104210000",
+      "name": "restrict_definer_execution",
+      "file": "supabase/migrations/20261104210000_restrict_definer_execution.sql",
+      "bytes": 4048,
+      "sha256": "5f7587230945e73ccb1434b0cbb3a42e9188466882f34e7a7d338abbc1f9b9f0"
+    },
+    {
+      "order": 37,
+      "version": "20261104220000",
+      "name": "live_edit_backend_security",
+      "file": "supabase/migrations/20261104220000_live_edit_backend_security.sql",
+      "bytes": 55713,
+      "sha256": "64cb1a6c2e98da110a37522be4f33775100292dceb96ff825b9086017c40df4c"
+    },
+    {
+      "order": 38,
+      "version": "20261105000000",
+      "name": "class_batches_role_scoped_read_policies",
+      "file": "supabase/migrations/20261105000000_class_batches_role_scoped_read_policies.sql",
+      "bytes": 1090,
+      "sha256": "19554be8ff35ac14762d973617209d77e19fb670442f00c151c0a25c24469e26"
+    }
+  ]
+}

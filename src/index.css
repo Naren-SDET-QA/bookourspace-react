@@ -8,7 +8,9 @@
   body,
   #root {
     max-width: 100vw;
-    overflow-x: hidden;
+    /* `clip` (not `hidden`) so these elements do not become scroll containers —
+       the sticky common header must stick to the viewport. */
+    overflow-x: clip;
   }
   html {
     background-color: #F5F4FB;

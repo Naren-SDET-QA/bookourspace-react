@@ -172,6 +172,65 @@ test('PG filters combine gender, rent, food, bathroom and query', () => {
   assert.deepEqual(filterPgListings(cards, { ...base, query: 'no-such-pg' }), []);
 });
 
+test('AC, bathroom, audience, hostel and multiple-sharing filters use listed facts only', () => {
+  const acWorking = parsePgListing(
+    pgListing({
+      id: 'pg-ac',
+      customFieldValues: {
+        genderPolicy: 'Men Only',
+        occupantType: 'Working professionals',
+        acType: 'Split AC',
+        roomTypesAvailable: '2 & 4-Sharing',
+        attachedWashroom: 'Attached',
+      },
+    }),
+  );
+  const nonAcHostel = parsePgListing(
+    pgListing({
+      id: 'pg-hostel',
+      categoryId: 'pg-hostel',
+      subcategory: 'Boys Hostel',
+      customFieldValues: {
+        genderPolicy: 'Students Only',
+        acType: 'Non-AC',
+        roomTypesAvailable: '4-Sharing Dormitory',
+        attachedWashroom: 'Common bathroom',
+      },
+    }),
+  );
+  const mixed = parsePgListing(
+    pgListing({
+      id: 'pg-mixed',
+      customFieldValues: {
+        genderPolicy: 'Working professionals & students',
+        roomTypesAvailable: 'AC & Non-AC 3-Sharing',
+        attachedWashroom: 'Attached & common bathrooms',
+      },
+    }),
+  );
+  const unknown = parsePgListing(pgListing({ id: 'pg-unknown', customFieldValues: {} }));
+  const cards = [acWorking, nonAcHostel, mixed, unknown];
+  const base = { query: '', gender: 'all', sharing: 'all', maxRent: null, foodOnly: false, attachedBathOnly: false };
+  const ids = (filters) => filterPgListings(cards, { ...base, ...filters }).map((card) => card.id);
+
+  assert.deepEqual(ids({ ac: 'ac' }), ['pg-ac', 'pg-mixed']);
+  assert.deepEqual(ids({ ac: 'non-ac' }), ['pg-hostel', 'pg-mixed']);
+  assert.deepEqual(ids({ bathroom: 'attached' }), ['pg-ac', 'pg-mixed']);
+  assert.deepEqual(ids({ bathroom: 'common' }), ['pg-hostel', 'pg-mixed']);
+  assert.deepEqual(ids({ occupant: 'student' }), ['pg-hostel', 'pg-mixed']);
+  assert.deepEqual(ids({ occupant: 'working' }), ['pg-ac', 'pg-mixed']);
+  assert.deepEqual(ids({ kind: 'hostel' }), ['pg-hostel']);
+  assert.deepEqual(ids({ kind: 'pg' }), ['pg-ac', 'pg-mixed', 'pg-unknown']);
+  assert.deepEqual(ids({ sharing: 'multiple' }), ['pg-ac', 'pg-hostel']);
+
+  // Fields the owner did not list stay unknown instead of being inferred.
+  assert.equal(unknown.occupant, null);
+  assert.equal(unknown.bathroomKind, null);
+  assert.equal(unknown.hasAc, false);
+  assert.equal(unknown.hasNonAc, false);
+  assert.deepEqual(filterPgListings([unknown], { ...base, ac: 'ac' }), []);
+});
+
 test('service price label respects listed price versus quote-only', () => {
   const priced = parseServiceListing(serviceListing());
   assert.equal(priced.priceLabel.includes('499'), true);

@@ -1,7 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import {
+  archiveServerProviderListing,
+  fetchAdminProviderRegistrations,
+  fetchServerProviderListingOwners,
+  fetchServerProviderListings,
+  reviewServerProviderRegistration,
+  reviewServerProviderListing,
+  saveServerProviderListing,
+} from '../lib/supabaseClient';
+import { FORMER_LOCAL_SERVICE_CATEGORY_IDS } from '../lib/formerLocalServices';
+import { LiveEditEntryButton } from './liveEdit/LiveEditEntryButton';
 
-type ListingStatus = 'pending_approval' | 'active' | 'expired' | 'rejected';
+type ListingStatus = 'pending_approval' | 'active' | 'expired' | 'archived' | 'rejected';
 type ListingRow = {
   id: string;
   owner_id: string;
@@ -13,13 +23,22 @@ type ListingRow = {
   price_unit: string;
   status: ListingStatus;
   payload: Record<string, unknown>;
+  provider_availability_status: 'not_reported' | 'available' | 'unavailable';
+  is_verified: boolean;
   created_at: string;
+  updated_at: string;
 };
-type Provider = { id: string; full_name: string | null; email: string | null };
+type Provider = { id: string; fullName: string; email: string };
+type ProviderRegistration = {
+  id: string; userId: string; providerType: string; businessName: string; contactPhone: string;
+  city: string; area: string; status: 'pending' | 'approved' | 'rejected'; createdAt: string;
+};
 
 const PAGE_SIZE = 20;
 const needsStayInventory = (row: Pick<ListingRow, 'category_id' | 'entity_type'>) =>
   row.entity_type === 'stay' || /^(hotels?|stays?)(-|$)/i.test(row.category_id);
+const isFormerLocalService = (row: Pick<ListingRow, 'category_id'>) =>
+  FORMER_LOCAL_SERVICE_CATEGORY_IDS.includes(row.category_id as (typeof FORMER_LOCAL_SERVICE_CATEGORY_IDS)[number]);
 const BLANK = {
   ownerId: '', title: '', categoryId: '', subcategory: '', entityType: 'service',
   price: '', priceUnit: 'Fixed', description: '', city: '', area: '',
@@ -32,6 +51,7 @@ export function AdminMarketplaceListings() {
   const [busy, setBusy] = useState(true);
   const [rows, setRows] = useState<ListingRow[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [registrations, setRegistrations] = useState<ProviderRegistration[]>([]);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -44,40 +64,26 @@ export function AdminMarketplaceListings() {
   const load = useCallback(async () => {
     setBusy(true);
     setError('');
-    const client = supabase;
-    if (!client) {
-      setAuthorized(false);
-      setRows([]);
-      setError('Supabase is not configured. Listing data is not available for administration.');
-      setBusy(false);
-      return;
-    }
     try {
-      const { data: auth, error: authError } = await client.auth.getUser();
-      if (authError || !auth.user) throw new Error('Sign in with a Supabase admin account to manage listings.');
-      const { data: profile, error: profileError } = await client.from('profiles')
-        .select('role, account_status').eq('id', auth.user.id).maybeSingle();
-      if (profileError || profile?.role !== 'admin' || profile.account_status !== 'active') {
+      const { ok, httpStatus, listings, source, error: apiError } = await fetchServerProviderListings(true);
+      if (!ok || source !== 'postgres') {
         setAuthorized(false);
-        throw new Error('An active Supabase admin profile is required.');
+        throw new Error(httpStatus === 401 ? 'Sign in with an active administrator account.' : apiError || 'PostgreSQL listing administration is unavailable.');
       }
-      setAuthorized(true);
-      const start = page * PAGE_SIZE;
-      let query = client.from('listings')
-        .select('id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload, created_at', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(start, start + PAGE_SIZE - 1);
       const term = search.trim();
-      if (term) query = query.ilike('title', `%${term}%`);
-      const [{ data, error: listError, count }, { data: providerRows, error: providerError }] = await Promise.all([
-        query,
-        client.from('profiles').select('id, full_name, email').eq('role', 'provider').eq('account_status', 'active').order('full_name').limit(500),
-      ]);
-      if (listError) throw new Error('Listing records could not be loaded. Check database permissions.');
-      if (providerError) throw new Error('Provider ownership options could not be loaded.');
-      setRows((data ?? []) as ListingRow[]);
-      setTotal(count ?? 0);
-      setProviders((providerRows ?? []) as Provider[]);
+      // The server projection is structurally a listing row; the status
+      // union is narrowed by the API contract, not by trusting client state.
+      const typedListings = listings as unknown as ListingRow[];
+      const filtered = typedListings.filter((row) => !term || `${row.title} ${row.category_id} ${row.subcategory}`.toLowerCase().includes(term.toLowerCase()));
+      const owners = await fetchServerProviderListingOwners();
+      if (!owners.ok || owners.data.source !== 'postgres') throw new Error(owners.data.error || 'Active provider accounts could not be loaded.');
+      const applications = await fetchAdminProviderRegistrations();
+      if (!applications.ok || applications.data.source !== 'postgres') throw new Error(applications.data.error || 'Provider applications could not be loaded.');
+      setAuthorized(true);
+      setRows(filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
+      setTotal(filtered.length);
+      setProviders(owners.providers);
+      setRegistrations(applications.registrations as ProviderRegistration[]);
     } catch (reason) {
       setRows([]);
       setError(reason instanceof Error ? reason.message : 'Listing records could not be loaded.');
@@ -111,9 +117,8 @@ export function AdminMarketplaceListings() {
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    const client = supabase;
     const price = Number(form.price);
-    if (!client || !authorized) { setError('Supabase admin authorization is required.'); return; }
+    if (!authorized) { setError('An active server-verified administrator session is required.'); return; }
     if (!form.ownerId || !form.title.trim() || !form.categoryId.trim() || !form.subcategory.trim() || !Number.isFinite(price) || price < 0) {
       setError('Choose an active provider and enter a title, category, subcategory, and valid non-negative price.');
       return;
@@ -145,22 +150,20 @@ export function AdminMarketplaceListings() {
         status: existing?.status ?? 'pending_approval',
       };
       const values = {
-        owner_id: form.ownerId,
+        ownerId: form.ownerId,
         title: form.title.trim(),
-        category_id: form.categoryId.trim(),
+        categoryId: form.categoryId.trim(),
         subcategory: form.subcategory.trim(),
-        entity_type: form.entityType.trim(),
+        entityType: form.entityType.trim(),
         price,
-        price_unit: form.priceUnit.trim() || 'Fixed',
-        status: existing?.status ?? 'pending_approval',
+        priceUnit: form.priceUnit.trim() || 'Fixed',
+        expectedUpdatedAt: existing?.updated_at,
+        requestId: editingId ? undefined : crypto.randomUUID(),
         payload,
-        updated_at: new Date().toISOString(),
       };
-      const result = editingId
-        ? await client.from('listings').update(values).eq('id', listingId).select('id').maybeSingle()
-        : await client.from('listings').insert({ id: listingId, ...values }).select('id').maybeSingle();
-      if (result.error || result.data?.id !== listingId) throw new Error('The listing was not saved. Verify Supabase RLS and try again.');
-      setMessage(editingId ? 'Listing changes saved to Supabase.' : 'Draft listing created in Supabase. Publish it only after reviewing its details.');
+      const result = await saveServerProviderListing(editingId, { id: listingId, ...values });
+      if (!result.ok || result.data.source !== 'postgres') throw new Error(result.data.error || 'PostgreSQL did not confirm the listing write.');
+      setMessage(editingId ? 'Listing changes saved to PostgreSQL.' : 'Pending draft saved to PostgreSQL for admin review.');
       setEditingId(null);
       setFormOpen(false);
       setForm(BLANK);
@@ -173,38 +176,94 @@ export function AdminMarketplaceListings() {
   };
 
   const setStatus = async (row: ListingRow, status: ListingStatus) => {
-    const client = supabase;
-    if (!client || !authorized) { setError('Supabase admin authorization is required.'); return; }
+    if (!authorized) { setError('An active server-verified administrator session is required.'); return; }
     setBusy(true);
     setError('');
     setMessage('');
-    const payload = { ...(row.payload ?? {}), status };
-    const { data, error: updateError } = await client.from('listings')
-      .update({ status, payload, updated_at: new Date().toISOString() })
-      .eq('id', row.id).select('id').maybeSingle();
-    if (updateError || data?.id !== row.id) {
-      setError('The status was not changed. Verify database permissions and retry.');
+    const result = status === 'active' || status === 'rejected'
+      ? await reviewServerProviderListing(row.id, status)
+      : await archiveServerProviderListing(row.id);
+    if (!result.ok || result.data.source !== 'postgres') {
+      setError(result.data.error || 'The PostgreSQL status transition was not confirmed.');
     } else {
-      setMessage(status === 'expired' ? 'Listing safely deactivated; related records remain intact.' : `Listing status saved as ${status}.`);
+      setMessage(status === 'expired' || status === 'archived' ? 'Listing safely archived; its row and references remain intact.' : `Admin review saved as ${status}.`);
+      window.dispatchEvent(new Event('bos-marketplace-listings-updated'));
       await load();
     }
     setBusy(false);
   };
 
+  const setVerified = async (row: ListingRow, isVerified: boolean) => {
+    if (!authorized) { setError('An active server-verified administrator session is required.'); return; }
+    setBusy(true);
+    setError('');
+    setMessage('');
+    const result = await saveServerProviderListing(row.id, { isVerified });
+    if (!result.ok || result.data.source !== 'postgres') {
+      setError(result.data.error || 'Verification status was not changed.');
+    } else {
+      setMessage(isVerified ? 'Listing marked verified by the active administrator.' : 'Listing verification was removed.');
+      await load();
+    }
+    setBusy(false);
+  };
+
+  const setAvailability = async (row: ListingRow, availability: ListingRow['provider_availability_status']) => {
+    if (!authorized) { setError('An active server-verified administrator session is required.'); return; }
+    setBusy(true);
+    setError('');
+    setMessage('');
+    const result = await saveServerProviderListing(row.id, { providerAvailabilityStatus: availability });
+    if (!result.ok || result.data.source !== 'postgres') setError(result.data.error || 'Availability status was not changed.');
+    else { setMessage('Provider-reported availability saved.'); await load(); }
+    setBusy(false);
+  };
+
+  const reviewProviderApplication = async (registration: ProviderRegistration, decision: 'approved' | 'rejected') => {
+    if (!authorized) { setError('An active server-verified administrator session is required.'); return; }
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await reviewServerProviderRegistration(registration.id, decision);
+      if (!result.ok || result.data.source !== 'postgres') throw new Error(result.data.error || 'The provider application review was not persisted.');
+      setMessage(decision === 'approved'
+        ? 'Provider access was activated in PostgreSQL. The provider must refresh their account before creating a listing.'
+        : 'Provider application was rejected in PostgreSQL.');
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Provider application review failed.');
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="admin-marketplace-listings-title">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Supabase and RLS backed</p><h4 id="admin-marketplace-listings-title" className="text-lg font-black">Marketplace listings</h4><p className="text-xs text-slate-500">PG, services, halls, classes and general listings. Hotels require a linked property and room inventory; this tool does not create that inventory.</p></div>
-        <button type="button" onClick={() => { setEditingId(null); setFormOpen(true); setForm({ ...BLANK, ownerId: providers[0]?.id ?? '' }); }} disabled={!authorized || busy} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create draft</button>
+        <div><p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Transactional PostgreSQL with RLS</p><h4 id="admin-marketplace-listings-title" className="text-lg font-black">Marketplace listings</h4><p className="text-xs text-slate-500">PG, services, halls, classes and general listings. Hotels require a linked property and room inventory; this tool does not create that inventory.</p></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <LiveEditEntryButton initialModule="pg_hostels" />
+          <button type="button" onClick={() => { setEditingId(null); setFormOpen(true); setForm({ ...BLANK, ownerId: providers[0]?.id ?? '' }); }} disabled={!authorized || busy} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white disabled:opacity-50">Create draft</button>
+        </div>
       </div>
-      {!authorized && !busy && <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900" role="status">Management requires a Supabase-authenticated active admin profile. The app server session alone is not sufficient.</p>}
+      {!authorized && !busy && <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900" role="status">Management requires an active, server-verified administrator session with a matching active PostgreSQL profile.</p>}
       {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs text-rose-900">{error}</p>}
       {message && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-900">{message}</p>}
       {authorized && (
         <>
+          <section aria-labelledby="provider-applications-title" className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
+            <div className="flex items-center justify-between gap-2"><h5 id="provider-applications-title" className="font-black text-slate-900">Provider applications</h5><span className="text-xs text-slate-600">{registrations.filter((item) => item.status === 'pending').length} pending</span></div>
+            {registrations.filter((item) => item.status === 'pending').length === 0 ? <p className="text-xs text-slate-600">No pending provider applications.</p> : registrations.filter((item) => item.status === 'pending').map((registration) => (
+              <article key={registration.id} className="grid gap-3 rounded-xl border border-amber-100 bg-white p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div className="min-w-0"><h6 className="truncate text-sm font-bold">{registration.businessName}</h6><p className="text-xs text-slate-600">{registration.providerType.replaceAll('_', ' ')} · {registration.area}, {registration.city}</p><p className="text-xs text-slate-600">Applicant contact: <a href={`tel:${registration.contactPhone}`} className="underline">{registration.contactPhone}</a></p><p className="break-all text-[10px] text-slate-400">Auth profile {registration.userId}</p></div>
+                <div className="flex gap-2"><button type="button" disabled={busy} onClick={() => void reviewProviderApplication(registration, 'approved')} className="min-h-10 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white disabled:opacity-50">Activate provider</button><button type="button" disabled={busy} onClick={() => void reviewProviderApplication(registration, 'rejected')} className="min-h-10 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-800 disabled:opacity-50">Reject</button></div>
+              </article>
+            ))}
+            <p className="text-[11px] text-slate-500">Activation changes the PostgreSQL profile role only after server-side Admin authorization. Listing publication remains a separate review.</p>
+          </section>
           <input aria-label="Search listings" value={search} onChange={(event) => { setPage(0); setSearch(event.target.value); }} placeholder="Search title or category" className="min-h-10 w-full rounded-xl border border-slate-200 px-3 text-sm sm:max-w-sm" />
           {formOpen && <form onSubmit={save} className="grid gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 sm:grid-cols-2 lg:grid-cols-4">
-            <select aria-label="Listing owner" value={form.ownerId} onChange={(event) => setForm({ ...form, ownerId: event.target.value })} required className="rounded-lg border p-2 text-xs"><option value="">Choose active provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.full_name || provider.email || provider.id}</option>)}</select>
+            <select aria-label="Listing owner" value={form.ownerId} onChange={(event) => setForm({ ...form, ownerId: event.target.value })} required disabled={Boolean(editingId)} className="rounded-lg border p-2 text-xs"><option value="">Choose active provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.fullName || provider.email || provider.id}</option>)}</select>
             <input aria-label="Listing title" placeholder="Title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required className="rounded-lg border p-2 text-xs" />
             <input aria-label="Category ID" placeholder="Category ID (for example hotel-budget)" value={form.categoryId} onChange={(event) => setForm({ ...form, categoryId: event.target.value })} required className="rounded-lg border p-2 text-xs" />
             <input aria-label="Subcategory" placeholder="Subcategory" value={form.subcategory} onChange={(event) => setForm({ ...form, subcategory: event.target.value })} required className="rounded-lg border p-2 text-xs" />
@@ -220,8 +279,13 @@ export function AdminMarketplaceListings() {
           {busy && <p role="status" className="text-xs text-slate-500">Loading listings…</p>}
           {!busy && rows.length === 0 && <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">No database listings match this page and search.</p>}
           <div className="space-y-2">{rows.map((row) => <article key={row.id} className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 p-3 sm:flex-row sm:items-center">
-            <div className="min-w-0"><p className="truncate text-sm font-bold">{row.title}</p><p className="text-xs text-slate-500">{row.category_id} · {row.subcategory} · {row.entity_type} · ₹{Number(row.price).toLocaleString('en-IN')} {row.price_unit}</p><p className="text-[10px] text-slate-400">Owner {row.owner_id} · {row.status}</p></div>
-            <div className="flex flex-wrap gap-1.5"><button type="button" onClick={() => beginEdit(row)} disabled={busy || needsStayInventory(row)} title={needsStayInventory(row) ? 'Stay properties need the separate inventory workflow.' : undefined} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold disabled:opacity-40">Edit</button>{row.status !== 'active' && <button type="button" onClick={() => void setStatus(row, 'active')} disabled={busy || needsStayInventory(row)} title={needsStayInventory(row) ? 'A stay cannot be published until it has linked property and room inventory.' : undefined} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-40">Publish</button>}{row.status === 'active' && <button type="button" onClick={() => void setStatus(row, 'expired')} disabled={busy} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Unpublish</button>}{row.status !== 'expired' && row.status !== 'active' && <button type="button" onClick={() => void setStatus(row, 'expired')} disabled={busy} className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-800">Deactivate</button>}{needsStayInventory(row) && <span className="self-center text-[10px] text-amber-800">Stay inventory workflow unavailable</span>}</div>
+            <div className="min-w-0"><p className="truncate text-sm font-bold">{row.title}</p><p className="text-xs text-slate-500">{row.category_id} · {row.subcategory} · {row.entity_type} · ₹{Number(row.price).toLocaleString('en-IN')} {row.price_unit}</p><p className="text-[10px] text-slate-400">Owner {row.owner_id} · {row.status}{isFormerLocalService(row) ? ` · ${row.is_verified ? 'Verified' : 'Not verified'} · availability: ${row.provider_availability_status.replace('_', ' ')}` : ''}</p></div>
+            <div className="flex flex-wrap items-center gap-1.5">{isFormerLocalService(row) && <><select aria-label={`Availability for ${row.title}`} value={row.provider_availability_status} disabled={busy} onChange={(event) => void setAvailability(row, event.target.value as ListingRow['provider_availability_status'])} className="rounded-lg border px-2 py-1.5 text-xs"><option value="not_reported">Not reported</option><option value="available">Provider reports available</option><option value="unavailable">Provider reports unavailable</option></select><button type="button" onClick={() => void setVerified(row, !row.is_verified)} disabled={busy} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">{row.is_verified ? 'Remove verification' : 'Verify'}</button></>}
+              <button type="button" onClick={() => beginEdit(row)} disabled={busy || needsStayInventory(row)} title={needsStayInventory(row) ? 'Stay properties need the separate inventory workflow.' : undefined} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold disabled:opacity-40">Edit</button>
+              {row.status === 'pending_approval' && <><button type="button" onClick={() => void setStatus(row, 'active')} disabled={busy} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-40">Approve listing</button><button type="button" onClick={() => void setStatus(row, 'rejected')} disabled={busy} className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-bold text-rose-800">Reject</button></>}
+              {row.status === 'active' && <button type="button" onClick={() => void setStatus(row, 'archived')} disabled={busy} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Unpublish</button>}
+              {row.status !== 'archived' && row.status !== 'expired' && <button type="button" onClick={() => void setStatus(row, 'archived')} disabled={busy} className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-800">Archive</button>}
+              {needsStayInventory(row) && <span className="self-center text-[10px] text-amber-800">Stay inventory workflow unavailable</span>}</div>
           </article>)}</div>
           <div className="flex items-center justify-between text-xs"><span>{total} database listing{total === 1 ? '' : 's'}</span><div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0 || busy} className="rounded-lg border px-3 py-2 disabled:opacity-40">Previous</button><span className="self-center">Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><button type="button" onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * PAGE_SIZE >= total || busy} className="rounded-lg border px-3 py-2 disabled:opacity-40">Next</button></div></div>
         </>
