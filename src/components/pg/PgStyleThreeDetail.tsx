@@ -19,7 +19,7 @@ import {
   Wind,
 } from 'lucide-react';
 import SafeImage from '../SafeImage';
-import { BOS_CALL_HREF, whatsappHref } from '../../lib/contactNumbers';
+import { BOS_CONTACT_PHONE, BOS_CALL_HREF, whatsappHref } from '../../lib/contactNumbers';
 import { PgBookingPanel } from '../PgBookingPanel';
 import { VerifiedPhoneReveal } from '../VerifiedPhoneReveal';
 import { formatInr, pgGenderLabel, type PgCard } from '../../lib/sectionExperiences';
@@ -411,7 +411,7 @@ export function PgStyleThreeDetail({
                   </button>
                 ) : (
                   <a href={BOS_CALL_HREF} className="inline-flex min-h-9 items-center justify-center gap-1 rounded-xl bg-orange-600 px-2 text-[10px] font-black text-white">
-                    <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner
+                    <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
                   </a>
                 )}
                 {canWhatsapp ? (
@@ -425,7 +425,7 @@ export function PgStyleThreeDetail({
                   </button>
                 ) : (
                   <a href={fallbackWhatsapp} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center justify-center rounded-xl border border-orange-300 px-2 text-[10px] font-black text-orange-700 dark:border-orange-900 dark:text-orange-300">
-                    WhatsApp
+                    WhatsApp · {BOS_CONTACT_PHONE}
                   </a>
                 )}
               </div>
@@ -469,7 +469,7 @@ export function PgStyleThreeDetail({
                 </button>
                               ) : (
                   <a href={BOS_CALL_HREF} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-orange-600 text-[11px] font-black text-white">
-                  <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner
+                  <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner · {BOS_CONTACT_PHONE}
                 </a>
               )}
             </div>
@@ -490,7 +490,7 @@ export function PgStyleThreeDetail({
             </button>
           ) : (
             <a href={BOS_CALL_HREF} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-orange-300 text-xs font-black text-orange-700 dark:border-orange-900 dark:text-orange-300">
-              <Phone className="h-4 w-4" aria-hidden="true" /> Call Owner
+              <Phone className="h-4 w-4" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
             </a>
           )}
           <button
