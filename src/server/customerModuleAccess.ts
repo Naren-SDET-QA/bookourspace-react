@@ -101,8 +101,18 @@ export function effectiveModuleKeysForActor(input: {
   if (input.role !== 'customer') return [];
   if (input.accountStatus && input.accountStatus !== 'active') return [];
 
-  // Legacy per-account grant rows must not strand customers on one section.
-  return CUSTOMER_MODULE_KEYS.filter((key) => enabled.has(key));
+  // A customer with explicit grants is limited to those live grants. A
+  // customer with no grant rows keeps the product default: every globally
+  // enabled marketplace module is available.
+  const grantRows = input.grants || [];
+  if (grantRows.length === 0) return CUSTOMER_MODULE_KEYS.filter((key) => enabled.has(key));
+  const granted = new Set(
+    grantRows
+      .filter((grant) => isGrantActive(grant, input.nowIso))
+      .map((grant) => normalizeCustomerModuleKey(grant.module_key))
+      .filter((key): key is CustomerModuleKey => key !== null),
+  );
+  return CUSTOMER_MODULE_KEYS.filter((key) => enabled.has(key) && granted.has(key));
 }
 
 export interface CustomerModuleGateResult {

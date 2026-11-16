@@ -23,6 +23,7 @@ import SafeImage from '../SafeImage';
 import { PgBookingPanel } from '../PgBookingPanel';
 import { VerifiedPhoneReveal } from '../VerifiedPhoneReveal';
 import { formatInr, pgGenderLabel, type PgCard } from '../../lib/sectionExperiences';
+import { BOS_CALL_HREF, BOS_CONTACT_PHONE, whatsappHref } from '../../lib/contactNumbers';
 
 type DetailTab = 'about' | 'owner';
 
@@ -102,6 +103,7 @@ export function PgStyleThreeDetail({
   const visiblePhotos = photos.length > 0 ? photos : [''];
   const mainPhoto = visiblePhotos[photoIndex % visiblePhotos.length];
   const totalPhotos = Math.max(card.photoCount || 0, visiblePhotos.length);
+  const fallbackWhatsapp = whatsappHref(`Hi BookOurSpace, I need help with PG listing ${card.title}.`);
 
   const location = [card.locality, card.city].filter(Boolean).join(', ') || 'Location not provided';
   const price = card.rentRupees !== null ? formatInr(card.rentRupees) : 'Rent on request';
@@ -407,9 +409,9 @@ export function PgStyleThreeDetail({
                     <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner
                   </button>
                 ) : (
-                  <button type="button" disabled className="inline-flex min-h-9 items-center justify-center gap-1 rounded-xl bg-slate-300 px-2 text-[10px] font-black text-slate-600">
-                    <Lock className="h-3 w-3" aria-hidden="true" /> Verify email to contact owner
-                  </button>
+                  <a href={BOS_CALL_HREF} className="inline-flex min-h-9 items-center justify-center gap-1 rounded-xl bg-slate-100 px-2 text-[10px] font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
+                  </a>
                 )}
                 {canWhatsapp ? (
                   <button
@@ -421,9 +423,9 @@ export function PgStyleThreeDetail({
                     WhatsApp
                   </button>
                 ) : (
-                  <button type="button" disabled className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-300 px-2 text-[10px] font-black text-slate-500">
-                    Verify email for WhatsApp
-                  </button>
+                  <a href={fallbackWhatsapp} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-300 px-2 text-[10px] font-black text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                    WhatsApp · {BOS_CONTACT_PHONE}
+                  </a>
                 )}
               </div>
               {(ownerState === 'loading' || contactNote) && (

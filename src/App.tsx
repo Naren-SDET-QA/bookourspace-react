@@ -3213,7 +3213,7 @@ function MarketplaceAppContent() {
               className="w-full flex-1 animate-in fade-in duration-150"
               aria-label={`${activeSectionExperience} section`}
             >
-              {DEMO_DATA_ENABLED && demoCardSection && demoCardSection !== 'classes' && selectedCategory === 'all' && (
+              {DEMO_DATA_ENABLED && demoCardSection && selectedCategory === 'all' && demoCardSection !== 'classes' && (
                 <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-6 lg:px-8">
                   <DemoBookableCard section={demoCardSection} />
                 </div>
