@@ -205,11 +205,11 @@ export function CustomerLoginExperience({
   const code = useMemo(() => digits.join(''), [digits]);
   const localDemoProviderAvailable = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
 
-  const signInLocalProvider = async () => {
+  const signInLocalProvider = async (email?: string) => {
     setLocalProviderBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/auth/local-dev/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'provider' }) });
+      const response = await fetch('/api/auth/local-dev/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'provider', ...(email ? { email } : {}) }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.ok || !data?.sessionToken) throw new Error(data?.message || data?.error || 'Local provider sign-in is unavailable.');
       window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
@@ -649,6 +649,15 @@ export function CustomerLoginExperience({
                 className="mt-4 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full border border-violet-300 bg-violet-50 px-4 text-sm font-black text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"
               >
                 {localProviderBusy ? 'Opening provider dashboard…' : 'Test provider dashboard'}
+              </button>}
+
+              {localDemoProviderAvailable && <button
+                type="button"
+                onClick={() => void signInLocalProvider('demo.services@bookourspace.local')}
+                disabled={localProviderBusy}
+                className="mt-2 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-4 text-sm font-black text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60"
+              >
+                {localProviderBusy ? 'Opening services dashboard…' : 'Test services provider dashboard'}
               </button>}
 
               {!authServiceUnavailable && !googleAvailable && !emailOtpAvailable && (

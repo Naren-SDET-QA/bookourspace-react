@@ -16,6 +16,7 @@ if (!connectionString) {
 }
 
 const HOST_ID = 'a11a0000-1111-4111-8111-000000000001';
+const SERVICES_HOST_ID = 'a11a0000-1111-4111-8111-000000000006';
 const ADMIN_ID = 'a11a0000-1111-4111-8111-000000000005';
 const CUSTOMER_IDS = [
   'a11a0000-1111-4111-8111-000000000002',
@@ -148,6 +149,17 @@ async function main() {
         where id = $1`,
       [HOST_ID],
     );
+    await client.query(
+      `insert into auth.users (id, email, raw_user_meta_data)
+       values ($1, 'demo.services@bookourspace.local', '{}'::jsonb) on conflict (id) do nothing`,
+      [SERVICES_HOST_ID],
+    );
+    await client.query(
+      `update public.profiles set full_name = 'BookOurSpace Demo Services', role = 'provider',
+          account_status = 'active', city = 'Hyderabad', verified = true
+        where id = $1`,
+      [SERVICES_HOST_ID],
+    );
 
     await client.query(
       `insert into public.businesses
@@ -165,6 +177,27 @@ async function main() {
          (business_id, module_type, enabled, approval_status, approved_by, approved_at)
        select id, 'pg_hostels', true, 'approved', $1, now()
        from public.businesses where business_ref = 'demo-pg-hostels'
+       on conflict (business_id, module_type) do update set
+         enabled = true, approval_status = 'approved', approved_by = excluded.approved_by,
+         approved_at = excluded.approved_at`,
+      [ADMIN_ID],
+    );
+    await client.query(
+      `insert into public.businesses
+         (business_ref, name, module_type, owner_user_id, approval_status, is_enabled,
+          backfill_source, created_by, approved_by, approved_at)
+       values ('demo-services-provider', 'BookOurSpace Demo Services', 'services', $1,
+          'approved', true, 'local_demo', $1, $2, now())
+       on conflict (business_ref) do update set
+         name = excluded.name, approval_status = 'approved', is_enabled = true,
+         approved_by = excluded.approved_by, approved_at = excluded.approved_at`,
+      [SERVICES_HOST_ID, ADMIN_ID],
+    );
+    await client.query(
+      `insert into public.business_module_access
+         (business_id, module_type, enabled, approval_status, approved_by, approved_at)
+       select id, 'services', true, 'approved', $1, now()
+       from public.businesses where business_ref = 'demo-services-provider'
        on conflict (business_id, module_type) do update set
          enabled = true, approval_status = 'approved', approved_by = excluded.approved_by,
          approved_at = excluded.approved_at`,
