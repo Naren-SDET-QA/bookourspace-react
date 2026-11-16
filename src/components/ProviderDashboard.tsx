@@ -36,7 +36,7 @@ interface ProviderDashboardProps {
   onOpenPaymentModal: (planName: string, amount: number) => void;
   onOpenChatWithCustomer: (customerId: string, customerName: string, listingTitle: string) => void;
   onSwitchToAdminReview?: () => void;
-  onSwitchToMarketplace?: () => void;
+  onSwitchToMarketplace?: (section?: 'pg_hostels' | 'hotel_stay' | 'services' | 'classes') => void;
   /** Ends the signed-in session from the owner console. */
   onSignOut?: () => void;
   currentLang?: AppLanguage;
@@ -348,7 +348,18 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       onChangeLanguage={onChangeLang}
       title={PROVIDER_MODULE_LABELS[activePortalModule] || 'Provider workspace'}
       subtitle={selectedBusiness ? `${selectedBusiness.name} · ${BUSINESS_MODULE_LABELS[selectedBusiness.module_type]}` : 'Business operations'}
-      onOpenMarketplace={onSwitchToMarketplace}
+      onOpenMarketplace={() => {
+        const section = activePortalModule === 'stays'
+          ? 'hotel_stay'
+          : activePortalModule === 'services'
+            ? 'services'
+            : activePortalModule === 'institute'
+              ? 'classes'
+              : activePortalModule === 'pg'
+                ? 'pg_hostels'
+                : undefined;
+        onSwitchToMarketplace?.(section);
+      }}
     >
     <div className="min-w-0 space-y-6 pb-24">
       {/* Pending Admin Approval Alert Banner (Display only for Admin) */}

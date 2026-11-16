@@ -3339,9 +3339,10 @@ function MarketplaceAppContent() {
                   await logoutGoogleSession();
                 }}
                 initialWorkspace={hasInstituteAccess ? 'institute' : 'pg'}
-                onSwitchToMarketplace={() => {
+                onSwitchToMarketplace={(section = 'pg_hostels') => {
                   setActiveView('marketplace');
                   setActiveBottomTab('home');
+                  setActiveMarketSection(section);
                   if (['#provider', '#provider_portal', '#provider_portal1'].includes(window.location.hash.toLowerCase())) {
                     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
                   }
