@@ -204,7 +204,15 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
     return !moduleKey || moduleGranted(accessScope, moduleKey);
   };
   const allowedPortalModules: ProviderPortalModule[] = (Object.keys(PORTAL_MODULE_FOR_TAB) as ProviderWorkspaceTab[])
-    .filter((tab) => tabAllowed(tab) && (tab !== 'team' || !accessScope))
+    .filter((tab) => {
+      if (!tabAllowed(tab) || (tab !== 'team' || !accessScope)) return false;
+      const moduleType = BUSINESS_MODULE_FOR_TAB[tab];
+      // A provider only sees workspace modules for businesses they actually
+      // belong to. This prevents a PG-only account from being presented with
+      // Stays, Services, Institute, or unrelated provider consoles.
+      if (!moduleType) return true;
+      return businesses.some((business) => business.module_type === moduleType);
+    })
     .map((tab) => PORTAL_MODULE_FOR_TAB[tab]);
   const staySectionKeys = grantedSections(accessScope, 'hotel_stay');
   const serviceSectionKeys = grantedSections(accessScope, 'services');
@@ -227,10 +235,15 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   // A restricted member never lands on a workspace they may not open.
   useEffect(() => {
-    if (tabAllowed(activeSubTab)) return;
-    const next = (Object.keys(BUSINESS_MODULE_FOR_TAB) as ProviderWorkspaceTab[]).find(tabAllowed);
+    const moduleType = BUSINESS_MODULE_FOR_TAB[activeSubTab];
+    const moduleVisible = !moduleType || businesses.some((business) => business.module_type === moduleType);
+    if (tabAllowed(activeSubTab) && moduleVisible) return;
+    const next = (Object.keys(BUSINESS_MODULE_FOR_TAB) as ProviderWorkspaceTab[]).find((tab) => {
+      const target = BUSINESS_MODULE_FOR_TAB[tab];
+      return tabAllowed(tab) && (!target || businesses.some((business) => business.module_type === target));
+    });
     setActiveSubTab(next || 'listings');
-  }, [activeSubTab, selectedBusiness?.allowed_modules?.join(',')]);
+  }, [activeSubTab, businesses, selectedBusiness?.allowed_modules?.join(',')]);
 
   // Opening a module tab selects that module's business, so the workspace never
   // asks the server for data under another module's business.
