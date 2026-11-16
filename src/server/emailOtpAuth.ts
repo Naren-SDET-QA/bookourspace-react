@@ -40,6 +40,7 @@ export interface EmailOtpRequestResult {
   retryAfterSeconds?: number;
   cooldownSeconds?: number;
   expiresInSeconds?: number;
+  developmentCode?: string;
 }
 
 export interface EmailOtpVerifyResult {
@@ -55,6 +56,11 @@ interface RateBucket {
   /** Timestamps of accepted requests in the current window. */
   events: number[];
   lastSentAt: number;
+}
+
+interface PendingEmailCode {
+  code: string;
+  expiresAt: number;
 }
 
 const EMAIL_COOLDOWN_MS = 60_000;
@@ -98,6 +104,7 @@ export class EmailOtpService {
   private readonly emailBuckets = new Map<string, RateBucket>();
   private readonly ipBuckets = new Map<string, number[]>();
   private readonly verifyBuckets = new Map<string, number[]>();
+  private readonly pendingCodes = new Map<string, PendingEmailCode>();
   private readonly enabled: boolean;
 
   constructor(private readonly config: EmailOtpServiceConfig) {
@@ -148,7 +155,11 @@ export class EmailOtpService {
 
     const now = Date.now();
     const emailBucket = this.emailBuckets.get(email);
-    if (emailBucket && now - emailBucket.lastSentAt < EMAIL_COOLDOWN_MS) {
+    const activePendingCode = this.pendingCodes.get(email);
+    // Once a code exists, allow a resend during its 10-minute lifetime so the
+    // user receives the same code instead of a confusing cooldown or a new
+    // code that invalidates the email already in transit.
+    if (emailBucket && now - emailBucket.lastSentAt < EMAIL_COOLDOWN_MS && !activePendingCode) {
       const retryAfterSeconds = Math.ceil((EMAIL_COOLDOWN_MS - (now - emailBucket.lastSentAt)) / 1000);
       return {
         ok: false,
@@ -187,31 +198,32 @@ export class EmailOtpService {
       };
     }
 
-    let code: string;
-    try {
-      await this.ensureSupabaseUser(email);
-      const link = await this.generateCode(email);
-      code = link.code;
-    } catch (error) {
-      logSafeError('email-otp', 'supabase code generation', error);
-      return {
-        ok: false,
-        status: 503,
-        error: 'EMAIL_OTP_DELIVERY_UNAVAILABLE',
-        message: 'The sign-in code could not be created right now. Please try again.',
-      };
+    const pending = this.pendingCodes.get(email);
+    let code = pending && pending.expiresAt > now ? pending.code : '';
+    if (!code) {
+      try {
+        await this.ensureSupabaseUser(email);
+        const link = await this.generateCode(email);
+        code = link.code;
+        this.pendingCodes.set(email, { code, expiresAt: now + 10 * 60_000 });
+      } catch (error) {
+        logSafeError('email-otp', 'supabase code generation', error);
+        return {
+          ok: false,
+          status: 503,
+          error: 'EMAIL_OTP_DELIVERY_UNAVAILABLE',
+          message: 'The sign-in code could not be created right now. Please try again.',
+        };
+      }
     }
 
+    let developmentCode: string | undefined;
     try {
       await this.sendWithResend(email, code);
     } catch (error) {
       logSafeError('email-otp', 'resend delivery', error);
-      return {
-        ok: false,
-        status: 503,
-        error: 'EMAIL_OTP_DELIVERY_UNAVAILABLE',
-        message: 'The sign-in code could not be emailed right now. Please try again.',
-      };
+      if (process.env.NODE_ENV !== 'production' && process.env.BOS_EMAIL_OTP_DEV_FALLBACK === '1') developmentCode = code;
+      else return { ok: false, status: 503, error: 'EMAIL_OTP_DELIVERY_UNAVAILABLE', message: 'The sign-in code could not be emailed right now. Please try again.' };
     }
 
     // Record only after delivery succeeds so a provider failure does not lock
@@ -228,6 +240,7 @@ export class EmailOtpService {
       status: 200,
       cooldownSeconds: 60,
       expiresInSeconds: 10 * 60,
+      ...(developmentCode ? { developmentCode } : {}),
     };
   }
 
@@ -275,7 +288,10 @@ export class EmailOtpService {
           'content-type': 'application/json',
           accept: 'application/json',
         },
-        body: JSON.stringify({ type: 'magiclink', email, token }),
+        // Supabase's current email OTP verification contract uses `email`.
+        // `magiclink` is deprecated for this code-based sign-in path and can
+        // cause a valid emailed OTP to be rejected as expired/invalid.
+        body: JSON.stringify({ type: 'email', email, token }),
       });
     } catch (error) {
       logSafeError('email-otp', 'supabase verification', error);
@@ -312,6 +328,7 @@ export class EmailOtpService {
 
     // A successful verification consumes the attempt budget for this key.
     this.verifyBuckets.delete(attemptKey);
+    this.pendingCodes.delete(email);
     return { ok: true, status: 200, accessToken, refreshToken };
   }
 

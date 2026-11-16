@@ -43,6 +43,9 @@ export interface PgCard {
   subcategory: string;
   locality: string;
   city: string;
+  state: string;
+  district: string;
+  mandal: string;
   rentRupees: number | null;
   rentUnit: string;
   gender: PgGender;
@@ -321,6 +324,9 @@ export function parsePgListing(listing: MarketplaceListing): PgCard {
     subcategory: listing.subcategory,
     locality: text(listing.location?.area),
     city: text(listing.location?.city),
+    state: text(listing.location?.state),
+    district: text(fields.district) || text(fields.districtName),
+    mandal: text(fields.mandal) || text(fields.mandalName),
     rentRupees: isPositiveNumber(listing.price) ? listing.price : null,
     rentUnit: text(listing.priceUnit) || '/month',
     gender,
@@ -383,7 +389,7 @@ export function filterPgListings(cards: readonly PgCard[], filters: PgFilters): 
     if (filters.kind === 'pg' && card.kind !== 'pg') return false;
     if (filters.kind === 'hostel' && card.kind !== 'hostel') return false;
     if (!query) return true;
-    return [card.title, card.subcategory, card.locality, card.city, card.providerName]
+    return [card.title, card.subcategory, card.locality, card.city, card.mandal, card.district, card.state, card.providerName]
       .join(' ')
       .toLowerCase()
       .includes(query);

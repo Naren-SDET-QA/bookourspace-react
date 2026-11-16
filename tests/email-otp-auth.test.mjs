@@ -297,11 +297,11 @@ test('a valid request creates the Supabase user, generates a code and emails it 
   assert.doesNotMatch(serialized, new RegExp(OTP_CODE), 'the API response never contains the code');
 });
 
-test('a resend inside the cooldown is refused', async () => {
+test('a resend inside the cooldown delivers the same active code', async () => {
   const response = await call('POST', '/api/auth/email-otp/request', { body: { email: CUSTOMER_EMAIL } });
-  assert.equal(response.status, 429);
-  assert.equal(response.body.error, 'OTP_COOLDOWN');
-  assert.ok(response.body.retryAfterSeconds > 0);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.match(String(lastEmail.body.subject), new RegExp(OTP_CODE));
 });
 
 test('a wrong code is refused with a generic message', async () => {

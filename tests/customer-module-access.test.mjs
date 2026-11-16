@@ -69,6 +69,17 @@ test('providers and admins bypass the allow-list but still respect global flags'
   }
 });
 
+test('customers with no grant rows receive all globally enabled modules by default', () => {
+  const modules = effectiveModuleKeysForActor({
+    role: 'customer',
+    accountStatus: 'active',
+    grants: [],
+    moduleFlags: FLAGS,
+    nowIso: '2026-11-12T23:00:00.000Z',
+  });
+  assert.deepEqual(modules, ['pg', 'hotels', 'services', 'movies', 'classes', 'function_hall']);
+});
+
 test('inactive or unknown roles fail closed', () => {
   assert.deepEqual(
     effectiveModuleKeysForActor({ role: 'customer', accountStatus: 'blocked', grants: [{ module_key: 'pg', expires_at: null }], moduleFlags: FLAGS, nowIso: '2026-11-12T23:00:00.000Z' }),

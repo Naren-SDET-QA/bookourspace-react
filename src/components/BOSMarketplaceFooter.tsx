@@ -45,7 +45,7 @@ export function BOSMarketplaceFooter({
       data-testid="bos-marketplace-footer"
       className="mt-10 border-t border-white/10 bg-[#1a1f36] pb-[calc(6rem+env(safe-area-inset-bottom))] text-slate-300"
     >
-      <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 pt-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr] lg:gap-10 lg:px-8">
+      <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 pt-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr] lg:gap-10 lg:px-8">
         <div>
           <div className="inline-flex rounded-2xl bg-white px-3 py-2">
             <img
@@ -112,6 +112,26 @@ export function BOSMarketplaceFooter({
           </ul>
         </nav>
 
+        <nav aria-label="BookOurSpace company information">
+          <h2 className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Company</h2>
+          <ul className="mt-4 space-y-2.5">
+            {['About Us', 'Testimonials', 'Terms & Conditions', 'Refund & Cancellation Policy', 'Payment Terms & Conditions', 'Privacy Policy'].map((label) => (
+              <li key={label}>
+                <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('bos-open-help'))} className={linkClass}>{label}</button>
+              </li>
+            ))}
+          </ul>
+          <h2 className="mt-6 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Media</h2>
+          <ul className="mt-4 space-y-2.5">
+            {['FAQs', 'Blog', 'Careers'].map((label) => (
+              <li key={label}>
+                <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('bos-open-help'))} className={linkClass}>{label}</button>
+              </li>
+            ))}
+            <li><a href="mailto:support@bookourspace.in" className={linkClass}>Contact Us</a></li>
+          </ul>
+        </nav>
+
         <div>
           <h2 className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Contact</h2>
           <ul className="mt-4 space-y-2.5">
@@ -137,6 +157,9 @@ export function BOSMarketplaceFooter({
               Hyderabad, Telangana
             </li>
           </ul>
+          <p className="mt-5 max-w-xs text-[11px] leading-5 text-slate-500">
+            BookOurSpace is a Hyderabad-based marketplace helping customers find, book and enjoy verified spaces and services across India.
+          </p>
         </div>
       </div>
 

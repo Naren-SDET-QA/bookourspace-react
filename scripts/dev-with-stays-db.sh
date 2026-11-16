@@ -4,6 +4,29 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLI_BOS_DEV_DB_PORT="${BOS_DEV_DB_PORT-}"
+CLI_PORT="${PORT-}"
+CLI_VITE_ENABLE_DEMO_DATA="${VITE_ENABLE_DEMO_DATA-}"
+CLI_BOS_STAY_INCLUDE_DEMO="${BOS_STAY_INCLUDE_DEMO-}"
+CLI_BOS_STAY_ALLOW_DEMO_BOOKING="${BOS_STAY_ALLOW_DEMO_BOOKING-}"
+
+# The Vite client loads .env.local automatically, but this standalone server
+# process does not. Load the same local configuration so server-side Supabase
+# and email authentication use the configured project during local testing.
+if [ -f "$ROOT/.env.local" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env.local"
+  set +a
+fi
+
+# Preserve explicit command-line environment overrides over .env.local.
+[ -n "$CLI_BOS_DEV_DB_PORT" ] && export BOS_DEV_DB_PORT="$CLI_BOS_DEV_DB_PORT"
+[ -n "$CLI_PORT" ] && export PORT="$CLI_PORT"
+[ -n "$CLI_VITE_ENABLE_DEMO_DATA" ] && export VITE_ENABLE_DEMO_DATA="$CLI_VITE_ENABLE_DEMO_DATA"
+[ -n "$CLI_BOS_STAY_INCLUDE_DEMO" ] && export BOS_STAY_INCLUDE_DEMO="$CLI_BOS_STAY_INCLUDE_DEMO"
+[ -n "$CLI_BOS_STAY_ALLOW_DEMO_BOOKING" ] && export BOS_STAY_ALLOW_DEMO_BOOKING="$CLI_BOS_STAY_ALLOW_DEMO_BOOKING"
+
 DATA_DIR="${BOS_DEV_DB_DATA_DIR:-$ROOT/.local/stays-db}"
 DB_NAME="bookourspace_dev"
 DB_PORT="${BOS_DEV_DB_PORT:-55440}"

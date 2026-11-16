@@ -103,10 +103,15 @@ export async function verifySupabaseAppIdentity(
     if (!isSupabaseAuthUuid || !emailVerified || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
 
     const providers = projectProviders(user);
+    // Passwordless email sessions can have a confirmed email but omit the
+    // provider name from app_metadata/identities. Treat that verified,
+    // non-Google identity as email OTP rather than rejecting a valid session.
     const provider: VerifiedAuthProvider | null = allowed.has('google') && providers.has('google')
       ? 'google'
       : allowed.has('email') && providers.has('email')
         ? 'email'
+        : allowed.has('email') && emailVerified && !providers.has('google')
+          ? 'email'
         : null;
     if (!provider) return null;
 

@@ -16,11 +16,12 @@ import {
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { isSupabaseEmailProviderEnabled, isValidEmailAddress, requestEmailOtp, requestSupabaseEmailOtp } from '../lib/emailOtpClient';
-import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 import type { AuthAccessConfig } from '../lib/authAccessClient';
 import BOSOfficialLogo from './BOSOfficialLogo';
 
-const OTP_LENGTH = 6;
+const EMAIL_OTP_LENGTH = 8;
+const MOBILE_OTP_LENGTH = 6;
 const RESEND_SECONDS = 60;
 
 /** Premium resort/pool hero, the same Unsplash source the stay module already uses. */
@@ -75,11 +76,13 @@ function OtpInput({
   onChange,
   disabled,
   inputRef,
+  length,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
   disabled: boolean;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  length: number;
 }) {
   const refs = useRef<Array<HTMLInputElement | null>>([]);
   const setDigit = (index: number, raw: string) => {
@@ -87,18 +90,18 @@ function OtpInput({
     const next = [...value];
     next[index] = digit;
     onChange(next);
-    if (digit && index < OTP_LENGTH - 1) refs.current[index + 1]?.focus();
+    if (digit && index < length - 1) refs.current[index + 1]?.focus();
   };
   const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
-    const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, OTP_LENGTH);
+    const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
     if (!pasted) return;
     event.preventDefault();
-    onChange(Array.from({ length: OTP_LENGTH }, (_, index) => pasted[index] || ''));
-    refs.current[Math.min(pasted.length, OTP_LENGTH - 1)]?.focus();
+    onChange(Array.from({ length }, (_, index) => pasted[index] || ''));
+    refs.current[Math.min(pasted.length, length - 1)]?.focus();
   };
   return (
-    <div className="flex items-center justify-between gap-2 sm:gap-2.5" role="group" aria-label="Six digit sign-in code">
-      {Array.from({ length: OTP_LENGTH }, (_, index) => (
+    <div className="flex items-center justify-between gap-1.5 sm:gap-2" role="group" aria-label={`${length} digit sign-in code`}>
+      {Array.from({ length }, (_, index) => (
         <input
           key={index}
           ref={(element) => {
@@ -112,7 +115,7 @@ function OtpInput({
           maxLength={1}
           value={value[index] || ''}
           disabled={disabled}
-          aria-label={`Digit ${index + 1} of ${OTP_LENGTH}`}
+          aria-label={`Digit ${index + 1} of ${length}`}
           onChange={(event) => setDigit(index, event.target.value)}
           onPaste={handlePaste}
           onKeyDown={(event) => {
@@ -124,7 +127,7 @@ function OtpInput({
               refs.current[index - 1]?.focus();
             }
             if (event.key === 'ArrowLeft' && index > 0) refs.current[index - 1]?.focus();
-            if (event.key === 'ArrowRight' && index < OTP_LENGTH - 1) refs.current[index + 1]?.focus();
+            if (event.key === 'ArrowRight' && index < length - 1) refs.current[index + 1]?.focus();
           }}
           className="h-13 w-full min-w-0 rounded-2xl border-2 border-slate-200 bg-white py-3 text-center text-xl font-black text-brand-navy outline-none transition focus:border-[#7c3aed] focus:ring-4 focus:ring-violet-100 focus-visible:outline-none disabled:opacity-60"
         />
@@ -172,7 +175,7 @@ export function CustomerLoginExperience({
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [digits, setDigits] = useState<string[]>(() => Array.from({ length: OTP_LENGTH }, () => ''));
+  const [digits, setDigits] = useState<string[]>(() => Array.from({ length: EMAIL_OTP_LENGTH }, () => ''));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -266,9 +269,9 @@ export function CustomerLoginExperience({
       }
       setEmail(target);
       setStep('code');
-      setDigits(Array.from({ length: OTP_LENGTH }, () => ''));
+      setDigits(Array.from({ length: EMAIL_OTP_LENGTH }, () => ''));
       setCooldown(Math.min(120, result.cooldownSeconds || RESEND_SECONDS));
-      setInfo(`We emailed a ${OTP_LENGTH}-digit code to ${target}. It expires in 10 minutes.`);
+      setInfo(result.developmentCode ? `Development mode: your code is ${result.developmentCode}.` : `We emailed an ${EMAIL_OTP_LENGTH}-digit code to ${target}. It expires in 10 minutes.`);
       return true;
     } finally {
       setBusy(false);
@@ -276,17 +279,21 @@ export function CustomerLoginExperience({
   };
 
   const verifyCode = async () => {
-    if (code.length !== OTP_LENGTH) {
-      setError(`Enter the ${OTP_LENGTH}-digit code from your email.`);
+    const expectedLength = tab === 'mobile' ? MOBILE_OTP_LENGTH : EMAIL_OTP_LENGTH;
+    if (code.length !== expectedLength) {
+      setError(`Enter the ${expectedLength}-digit code from your ${tab === 'mobile' ? 'phone' : 'email'}.`);
       return;
     }
     setBusy(true);
     setError('');
     try {
-      const result = await completeEmailOtpSignIn(normalizeEmail(), code, { verifyWithSupabase: nativeSupabaseOtp });
+      const result = await completeEmailOtpSignIn(tab === 'mobile' ? `+91${phoneDigits}` : normalizeEmail(), code, {
+        verifyWithSupabase: tab === 'mobile' || nativeSupabaseOtp,
+        phone: tab === 'mobile',
+      });
       if (!result.ok) {
         setError(result.message || 'That code is invalid or has expired. Request a new code.');
-        setDigits(Array.from({ length: OTP_LENGTH }, () => ''));
+        setDigits(Array.from({ length: tab === 'mobile' ? MOBILE_OTP_LENGTH : EMAIL_OTP_LENGTH }, () => ''));
         otpRef.current?.focus();
         return;
       }
@@ -297,13 +304,19 @@ export function CustomerLoginExperience({
     }
   };
 
+  const sendPhoneCode = async () => {
+    void phoneDigits;
+    void phoneValid;
+    setError('Mobile OTP is unavailable until an SMS provider is configured. Use email OTP for now.');
+  };
+
   const switchTab = (next: 'mobile' | 'email') => {
     setTab(next);
     setError('');
     setInfo('');
+    setStep('email');
     if (next === 'mobile') {
-      setStep('email');
-      setDigits(Array.from({ length: OTP_LENGTH }, () => ''));
+      setDigits(Array.from({ length: next === 'mobile' ? MOBILE_OTP_LENGTH : EMAIL_OTP_LENGTH }, () => ''));
     }
   };
 
@@ -461,7 +474,7 @@ export function CustomerLoginExperience({
                 </div>
               )}
 
-              {tab === 'mobile' ? (
+              {tab === 'mobile' && step === 'email' ? (
                 <div className="mt-4">
                   <label htmlFor="bos-login-phone" className="sr-only">
                     Mobile number
@@ -484,32 +497,35 @@ export function CustomerLoginExperience({
                       value={phoneDigits}
                       onChange={(event) => setPhone(event.target.value)}
                       placeholder="Enter your mobile number"
+                      disabled
+                      aria-describedby="bos-mobile-otp-unavailable"
                       aria-invalid={Boolean(phoneDigits) && !phoneValid}
-                      aria-describedby="bos-login-phone-note"
                       className="h-14 w-full min-w-0 bg-transparent px-4 text-sm font-semibold tracking-wide text-[#1e1b34] outline-none placeholder:font-medium placeholder:tracking-normal placeholder:text-slate-400"
                     />
                   </div>
                   <p id="bos-login-phone-note" className="mt-2 text-[10px] font-semibold text-slate-500">
                     {phoneDigits && !phoneValid
                       ? 'Enter a 10-digit Indian mobile number starting with 6, 7, 8 or 9.'
-                      : 'We will text a 6-digit code to this number.'}
+                      : `We will text a ${MOBILE_OTP_LENGTH}-digit code to this number.`}
                   </p>
+                  <p id="bos-mobile-otp-unavailable" className="sr-only">Mobile OTP is unavailable until an SMS provider is configured.</p>
 
-                  {/* Disabled on purpose: the server's verified-session exchange only
-                      accepts google and email identities, so no SMS can be sent yet. */}
                   <button
                     type="button"
+                    onClick={() => void sendPhoneCode()}
                     disabled
-                    aria-describedby="bos-mobile-otp-unavailable"
                     className={`mt-3 ${CTA_CLASS}`}
                   >
-                    Send OTP
+                    {busy ? 'Sending code…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send OTP'}
                   </button>
-                  <p id="bos-mobile-otp-unavailable" className="mt-2 rounded-2xl bg-orange-50 p-2.5 text-[11px] font-semibold leading-5 text-orange-900">
-                    Mobile OTP is not enabled on this deployment yet, so no SMS will be sent. Use Email or Google to sign in —
-                    {' '}the number field stays here for when SMS delivery is switched on.
-                  </p>
                 </div>
+              ) : tab === 'mobile' ? (
+                <form className="mt-4" onSubmit={(event) => { event.preventDefault(); void verifyCode(); }}>
+                  <label className="block text-[11px] font-black text-slate-700">Enter the SMS code</label>
+                  <div className="mt-2"><OtpInput value={digits} onChange={setDigits} disabled={busy} inputRef={otpRef} length={MOBILE_OTP_LENGTH} /></div>
+                  <button type="submit" disabled={busy || code.length !== MOBILE_OTP_LENGTH} className={`mt-3 ${CTA_CLASS}`}>{busy ? 'Verifying…' : 'Verify and continue'}</button>
+                  <button type="button" onClick={() => setStep('email')} className="mt-3 flex w-full items-center justify-center gap-1 text-[11px] font-bold text-slate-500"><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" /> Change mobile number</button>
+                </form>
               ) : step === 'email' ? (
                 <form
                   className="mt-4"
@@ -559,7 +575,7 @@ export function CustomerLoginExperience({
                     type="button"
                     onClick={() => {
                       setStep('email');
-                      setDigits(Array.from({ length: OTP_LENGTH }, () => ''));
+                      setDigits(Array.from({ length: EMAIL_OTP_LENGTH }, () => ''));
                       setError('');
                       setInfo('');
                     }}
@@ -570,9 +586,9 @@ export function CustomerLoginExperience({
                   </button>
                   <label className="block text-[11px] font-black text-slate-700">Sign-in code</label>
                   <div className="mt-1.5">
-                    <OtpInput value={digits} onChange={setDigits} disabled={busy} inputRef={otpRef} />
+                    <OtpInput value={digits} onChange={setDigits} disabled={busy} inputRef={otpRef} length={EMAIL_OTP_LENGTH} />
                   </div>
-                  <button type="submit" disabled={busy || code.length !== OTP_LENGTH} className={`mt-3 ${CTA_CLASS}`}>
+                  <button type="submit" disabled={busy || code.length !== EMAIL_OTP_LENGTH} className={`mt-3 ${CTA_CLASS}`}>
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
                     {busy ? 'Verifying…' : 'Verify & sign in'}
                   </button>

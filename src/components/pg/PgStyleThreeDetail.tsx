@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Clock,
   MapPin,
+  Lock,
   Phone,
   ShieldCheck,
   Shirt,
@@ -19,7 +20,6 @@ import {
   Wind,
 } from 'lucide-react';
 import SafeImage from '../SafeImage';
-import { BOS_CONTACT_PHONE, BOS_CALL_HREF, whatsappHref } from '../../lib/contactNumbers';
 import { PgBookingPanel } from '../PgBookingPanel';
 import { VerifiedPhoneReveal } from '../VerifiedPhoneReveal';
 import { formatInr, pgGenderLabel, type PgCard } from '../../lib/sectionExperiences';
@@ -105,7 +105,6 @@ export function PgStyleThreeDetail({
 
   const location = [card.locality, card.city].filter(Boolean).join(', ') || 'Location not provided';
   const price = card.rentRupees !== null ? formatInr(card.rentRupees) : 'Rent on request';
-  const fallbackWhatsapp = whatsappHref(`Hi, I am interested in ${card.title} at ${location}. Is it available?`);
   const laundry = card.facilities.find((row) => row.label === 'Laundry')?.value || '';
   const infoTiles: Array<[string, string]> = [
     ['Available for', card.availableFor || pgGenderLabel(card.gender)],
@@ -394,11 +393,9 @@ export function PgStyleThreeDetail({
               <h2 className="text-[11px] font-black uppercase tracking-wide text-slate-500">Owner &amp; Booking</h2>
               <p className="mt-1 text-[11px] font-black">{card.providerName || 'Owner details not listed'}</p>
               <p className="text-[9px] text-slate-500">Owner contact uses BookOurSpace's authorised flow. The number stays masked until you sign in and verify your email code.</p>
-              {ownerPhone && (
-                <div className="mt-2">
-                  <VerifiedPhoneReveal phone={ownerPhone} />
-                </div>
-              )}
+              <div className="mt-2">
+                <VerifiedPhoneReveal phone={ownerPhone} />
+              </div>
               <div className="mt-2 grid grid-cols-2 gap-1.5">
                 {canCall ? (
                   <button
@@ -410,9 +407,9 @@ export function PgStyleThreeDetail({
                     <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner
                   </button>
                 ) : (
-                  <a href={BOS_CALL_HREF} className="inline-flex min-h-9 items-center justify-center gap-1 rounded-xl bg-orange-600 px-2 text-[10px] font-black text-white">
-                    <Phone className="h-3 w-3" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
-                  </a>
+                  <button type="button" disabled className="inline-flex min-h-9 items-center justify-center gap-1 rounded-xl bg-slate-300 px-2 text-[10px] font-black text-slate-600">
+                    <Lock className="h-3 w-3" aria-hidden="true" /> Verify email to contact owner
+                  </button>
                 )}
                 {canWhatsapp ? (
                   <button
@@ -424,9 +421,9 @@ export function PgStyleThreeDetail({
                     WhatsApp
                   </button>
                 ) : (
-                  <a href={fallbackWhatsapp} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center justify-center rounded-xl border border-orange-300 px-2 text-[10px] font-black text-orange-700 dark:border-orange-900 dark:text-orange-300">
-                    WhatsApp · {BOS_CONTACT_PHONE}
-                  </a>
+                  <button type="button" disabled className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-300 px-2 text-[10px] font-black text-slate-500">
+                    Verify email for WhatsApp
+                  </button>
                 )}
               </div>
               {(ownerState === 'loading' || contactNote) && (
@@ -468,9 +465,9 @@ export function PgStyleThreeDetail({
                   <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner
                 </button>
                               ) : (
-                  <a href={BOS_CALL_HREF} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-orange-600 text-[11px] font-black text-white">
-                  <Phone className="h-3.5 w-3.5" aria-hidden="true" /> Contact Owner · {BOS_CONTACT_PHONE}
-                </a>
+                <button type="button" disabled className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-slate-300 text-[11px] font-black text-slate-600">
+                  <Lock className="h-3.5 w-3.5" aria-hidden="true" /> Verify email to contact owner
+                </button>
               )}
             </div>
           </aside>
@@ -489,9 +486,9 @@ export function PgStyleThreeDetail({
               <Phone className="h-4 w-4" aria-hidden="true" /> Call Owner
             </button>
           ) : (
-            <a href={BOS_CALL_HREF} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-orange-300 text-xs font-black text-orange-700 dark:border-orange-900 dark:text-orange-300">
-              <Phone className="h-4 w-4" aria-hidden="true" /> Call Owner · {BOS_CONTACT_PHONE}
-            </a>
+            <button type="button" disabled className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-300 text-xs font-black text-slate-500">
+              <Lock className="h-4 w-4" aria-hidden="true" /> Verify email to contact owner
+            </button>
           )}
           <button
             type="button"

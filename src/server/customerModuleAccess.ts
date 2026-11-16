@@ -76,8 +76,9 @@ export function isGrantActive(
  * Resolve the module keys a signed-in account may use.
  *
  * Providers and active administrators bypass the allow-list entirely. A
- * customer receives only granted, unexpired modules whose global flag is
- * enabled. Anything else yields an empty list (fail closed).
+ * active customers receive every globally enabled marketplace module by
+ * default. Administrators control availability through global module flags
+ * and category configuration.
  */
 export function effectiveModuleKeysForActor(input: {
   role: string | null | undefined;
@@ -100,12 +101,8 @@ export function effectiveModuleKeysForActor(input: {
   if (input.role !== 'customer') return [];
   if (input.accountStatus && input.accountStatus !== 'active') return [];
 
-  return CUSTOMER_MODULE_KEYS.filter((key) => {
-    if (!enabled.has(key)) return false;
-    const grant = (input.grants || []).find((row) => row && row.module_key === key);
-    if (!grant) return false;
-    return isGrantActive(grant, input.nowIso);
-  });
+  // Legacy per-account grant rows must not strand customers on one section.
+  return CUSTOMER_MODULE_KEYS.filter((key) => enabled.has(key));
 }
 
 export interface CustomerModuleGateResult {

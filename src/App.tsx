@@ -559,17 +559,12 @@ function MarketplaceAppContent() {
     if (authUser?.role !== 'customer' || !customerModulesChecked) return null;
     if (customerModuleGrants.length === 0) return null;
     return accessScopeFrom({
-      allowed_modules: customerModuleGrants.map((grant) => grant.moduleKey),
-      allowed_sections: Object.fromEntries(
-        customerModuleGrants
-          .filter((grant) => (grant.sections || []).length > 0)
-          .map((grant) => [grant.moduleKey, grant.sections as string[]]),
-      ),
-      allowed_actions: Object.fromEntries(
-        customerModuleGrants
-          .filter((grant) => (grant.actions || []).length > 0)
-          .map((grant) => [grant.moduleKey, grant.actions as string[]]),
-      ),
+      // Use the server's effective module list so default-enabled modules such
+      // as Services remain reachable even when an older account has grant rows
+      // for only a subset of marketplace modules.
+      allowed_modules: customerModules,
+      allowed_sections: {},
+      allowed_actions: {},
     });
   }, [authUser?.role, customerModuleGrants, customerModulesChecked]);
 
@@ -2183,8 +2178,7 @@ function MarketplaceAppContent() {
 
   // Exactly one curated, bookable demo card per module (demo mode only).
   const demoCardSection: DemoSectionKey | null =
-    activeSectionExperience === 'pg_hostels' ? 'pg'
-    : activeSectionExperience === 'classes' ? 'classes'
+    activeSectionExperience === 'classes' ? 'classes'
     : activeSectionExperience === 'services' ? 'services'
     : activeSectionExperience === 'hotel_stay' ? 'stay'
     : activeSectionExperience === 'movies' ? 'movies'
@@ -3238,6 +3232,7 @@ function MarketplaceAppContent() {
                     selectedCategory={selectedCategory}
                     selectedSubcategory={selectedSubcategory}
                     selectedCity={sharedSelectedCity}
+                    onOpenLocationSelector={() => setIsLocationSelectorOpen(true)}
                     moduleLabel={modulePresentation.pg?.values.label}
                     moduleHeadline={modulePresentation.pg?.values.headline}
                     pageCopy={pageCopyFromPage(livePageConfig.pages.pg_hostels)}

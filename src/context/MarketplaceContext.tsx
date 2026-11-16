@@ -158,7 +158,7 @@ interface MarketplaceContextType {
   }) => Promise<void>;
   /** Verify an email one-time code, install the Supabase session and mint the
    *  server application session in one step. */
-  completeEmailOtpSignIn: (email: string, token: string, options?: { verifyWithSupabase?: boolean }) => Promise<{
+  completeEmailOtpSignIn: (email: string, token: string, options?: { verifyWithSupabase?: boolean; phone?: boolean }) => Promise<{
     ok: boolean;
     isNewUser?: boolean;
     user?: AuthoritativeGoogleUser;
@@ -1001,7 +1001,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const completeEmailOtpSignIn = async (
     email: string,
     token: string,
-    options?: { verifyWithSupabase?: boolean },
+    options?: { verifyWithSupabase?: boolean; phone?: boolean },
   ) => {
     if (!supabase) {
       return {
@@ -1014,7 +1014,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (options?.verifyWithSupabase) {
       // Fallback path: Supabase's own email provider sends the code, so the
       // browser verifies it directly and installs the returned session.
-      const verified = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+      const verified = options?.phone
+        ? await supabase.auth.verifyOtp({ phone: email, token, type: 'sms' })
+        : await supabase.auth.verifyOtp({ email, token, type: 'email' });
       if (verified.error || !verified.data.session) {
         return {
           ok: false,
@@ -1025,25 +1027,33 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       accessToken = verified.data.session.access_token;
     } else {
       const verified = await verifyEmailOtpCode(email, token);
-      if (!verified.ok || !verified.accessToken || !verified.refreshToken) {
-        return {
-          ok: false,
-          error: verified.error || 'EMAIL_OTP_INVALID',
-          message: verified.message || 'That code is invalid or has expired. Request a new code.',
-        };
+      if (verified.ok && verified.accessToken && verified.refreshToken) {
+        const installed = await supabase.auth.setSession({
+          access_token: verified.accessToken,
+          refresh_token: verified.refreshToken,
+        });
+        if (installed.error || !installed.data.session) {
+          return {
+            ok: false,
+            error: 'SUPABASE_SESSION_FAILED',
+            message: installed.error?.message || 'The verified session could not be installed. Please try again.',
+          };
+        }
+        accessToken = installed.data.session.access_token;
+      } else {
+        // Keep the browser flow compatible with hosted Supabase projects that
+        // accept the OTP directly even when the server-side exchange rejects
+        // a legacy or differently-issued code.
+        const direct = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+        if (direct.error || !direct.data.session) {
+          return {
+            ok: false,
+            error: verified.error || 'EMAIL_OTP_INVALID',
+            message: verified.message || 'That code is invalid or has expired. Request a new code.',
+          };
+        }
+        accessToken = direct.data.session.access_token;
       }
-      const installed = await supabase.auth.setSession({
-        access_token: verified.accessToken,
-        refresh_token: verified.refreshToken,
-      });
-      if (installed.error || !installed.data.session) {
-        return {
-          ok: false,
-          error: 'SUPABASE_SESSION_FAILED',
-          message: installed.error?.message || 'The verified session could not be installed. Please try again.',
-        };
-      }
-      accessToken = installed.data.session.access_token;
     }
     const result = await authenticateWithSupabaseServer({ accessToken });
     if (!result.ok || !result.user || !result.sessionToken) {

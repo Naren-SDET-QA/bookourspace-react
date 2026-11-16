@@ -61,6 +61,7 @@ interface PGSectionExperienceProps {
   blocks?: Record<string, boolean>;
   onClose: () => void;
   selectedCity?: string;
+  onOpenLocationSelector?: () => void;
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
   /** Centrally published Style 1/2/3 choice. */
@@ -129,7 +130,7 @@ function DetailList({ title, rows }: { title: string; rows: Array<{ label: strin
   );
 }
 
-export function PGSectionExperience({ listings, isLoading = false, moduleLabel, moduleHeadline, pageCopy, blocks, onClose, inline = false, selectedCity, style, selectedCategory = 'all', selectedSubcategory = 'all' }: PGSectionExperienceProps) {
+export function PGSectionExperience({ listings, isLoading = false, moduleLabel, moduleHeadline, pageCopy, blocks, onClose, inline = false, selectedCity, onOpenLocationSelector, style, selectedCategory = 'all', selectedSubcategory = 'all' }: PGSectionExperienceProps) {
   // Admin-controlled visibility. Only an explicit `false` hides a block.
   const showHero = blocks?.showHero !== false;
   const showSearch = blocks?.showSearch !== false;
@@ -221,11 +222,6 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
     [allListings],
   );
 
-  const cityOptions = useMemo(
-    () => Array.from(new Set([...cards.map((card) => card.city).filter(Boolean), ...(city !== 'all' ? [city] : [])])).sort(),
-    [cards, city],
-  );
-
   useEffect(() => {
     const value = selectedCity?.trim();
     setCity(value && !['all', 'all cities', 'all locations'].includes(value.toLowerCase()) ? value : 'all');
@@ -254,6 +250,12 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
   const totalPages = pageCount(filtered.length, 10);
   const safePage = Math.min(page, Math.max(0, totalPages - 1));
   const visible = paginate(filtered, safePage, 10);
+  const exploreCities = ['Gurgaon', 'Bangalore', 'Noida', 'Hyderabad', 'Chennai', 'Mumbai', 'Pune', 'Kolkata', 'Jaipur', 'Kochi'];
+  const [exploreCityCount, setExploreCityCount] = useState(6);
+  const exploreLocalities = useMemo(
+    () => Array.from(new Set(cards.map((card) => card.locality).filter(Boolean))).slice(0, 24),
+    [cards],
+  );
   const state = resolveSectionState(isLoading, false, filtered.length);
   const activeFilterCount =
     (sharing !== 'all' ? 1 : 0) +
@@ -307,37 +309,6 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
       aria-modal={inline ? undefined : true}
       aria-labelledby="pg-section-title"
     >
-      <header
-        className={
-          inline
-            ? 'border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950'
-            : 'sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95'
-        }
-      >
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 dark:border-slate-700 dark:hover:bg-slate-800"
-            aria-label="Back to all sections"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </button>
-          <span className="text-base font-black tracking-tight">
-            {inline ? (
-              <span className="text-violet-700 dark:text-violet-400">PGs &amp; Hostels</span>
-            ) : (
-              <>
-                BookOurSpace <span className="text-violet-700 dark:text-violet-400">PGs</span>
-              </>
-            )}
-          </span>
-          <span className="ml-auto hidden rounded-full bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-violet-800 sm:block dark:bg-violet-950 dark:text-violet-200">
-            {moduleLabel || 'Owner-listed accommodation'}
-          </span>
-        </div>
-      </header>
-
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 pt-8 sm:px-6">
         <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-purple-50 to-white p-6 sm:p-9 dark:from-violet-950/40 dark:via-purple-950/30 dark:to-slate-950">
           <h1 id="pg-section-title" className={showHero ? 'text-3xl font-black tracking-tight sm:text-4xl' : 'sr-only'}>
@@ -350,24 +321,21 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
 
           <div className={showSearch ? 'mt-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900' : 'hidden'}>
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-              <label className="flex min-h-12 items-center gap-2 rounded-xl px-3 lg:w-[170px]">
+              <button type="button" onClick={onOpenLocationSelector} className="flex min-h-12 items-center gap-2 rounded-xl px-3 text-left lg:w-[220px]" aria-label="Choose PG location or use current location">
                 <MapPin className="h-4 w-4 shrink-0 text-violet-700" aria-hidden="true" />
-                <span className="sr-only">City</span>
-                <select value={city} onChange={(e) => setCity(e.target.value)} className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none">
-                  <option value="all">All Cities</option>
-                  {cityOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </label>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{city === 'all' ? 'All Cities' : city}</span>
+                <span className="text-xs font-bold text-violet-700">Choose / GPS</span>
+              </button>
               <span className="hidden h-6 w-px bg-slate-200 lg:block" />
               <div className="flex min-h-12 flex-1 items-center gap-2 px-3">
                 <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-                <label htmlFor="pg-search" className="sr-only">Locality, city or PG name</label>
+                <label htmlFor="pg-search" className="sr-only">State, district, mandal, city, locality or PG name</label>
                 <input
                   id="pg-search"
                   type="search"
                   value={queryInput}
                   onChange={(event) => setQueryInput(event.target.value)}
-                  placeholder="Try ‘Madhapur’, ‘KPHB’ or a PG name"
+                  placeholder="Search state, district, mandal, city or locality"
                   className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-slate-400"
                 />
                 {queryInput && (
@@ -555,6 +523,43 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
         </div>
 
         <Pagination page={safePage} totalPages={totalPages} onChange={setPage} tone="emerald" />
+        <section className="mt-8 rounded-2xl bg-slate-900 px-4 py-6 text-slate-300 sm:px-6" aria-labelledby="pg-explore-links-title">
+          <h2 id="pg-explore-links-title" className="text-base font-black text-white">Explore PGs across India</h2>
+          <div className="mt-4 divide-y divide-white/15">
+            {exploreCities.slice(0, exploreCityCount).map((name) => (
+              <div key={name} className="py-3 text-xs leading-6">
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  <button type="button" onClick={() => { setCity(name); setQueryInput(''); setPage(0); }} className="font-black text-white hover:text-violet-300">PG in {name}</button>
+                  <span aria-hidden="true">:</span>
+                  {exploreLocalities.slice(0, 8).map((locality) => (
+                    <button key={`${name}-${locality}`} type="button" onClick={() => { setCity(name); setQueryInput(locality); setPage(0); }} className="hover:text-white hover:underline">{locality}</button>
+                  ))}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3">
+                  {['Girls PG', 'Boys PG', 'Coliving PG'].map((label) => (
+                    <button key={`${name}-${label}`} type="button" onClick={() => { setCity(name); setQueryInput(''); setGender(label.startsWith('Girls') ? 'girls' : label.startsWith('Boys') ? 'boys' : 'co-living'); setPage(0); }} className="text-slate-400 hover:text-white hover:underline">{label} in {name}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {exploreCityCount < exploreCities.length && (
+            <button type="button" onClick={() => setExploreCityCount(exploreCities.length)} className="mx-auto mt-5 block rounded-lg border border-orange-400 px-5 py-2 text-xs font-black text-orange-300 hover:bg-orange-400/10">Load more cities</button>
+          )}
+        </section>
+
+        <section className="mt-8 border-t border-slate-200 pt-6 dark:border-slate-700" aria-labelledby="pg-company-links-title">
+          <h2 id="pg-company-links-title" className="text-sm font-black uppercase tracking-wide text-slate-500">Company</h2>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs">
+            {['About Us', 'Testimonials', 'Terms & Conditions', 'Refund & Cancellation Policy', 'Payment Terms & Conditions', 'Privacy Policy', 'FAQs', 'Blog', 'Careers'].map((label) => (
+              <button key={label} type="button" onClick={() => window.dispatchEvent(new CustomEvent('bos-open-help'))} className="font-semibold text-violet-700 underline-offset-2 hover:underline dark:text-violet-300">
+                {label}
+              </button>
+            ))}
+            <a href="mailto:support@bookourspace.in" className="font-semibold text-violet-700 underline-offset-2 hover:underline dark:text-violet-300">Contact Us</a>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">BookOurSpace is a Hyderabad-based marketplace helping customers find, book and enjoy verified spaces and services across India.</p>
+        </section>
       </main>
 
       {selected && experienceTab !== 'style3' && (
@@ -714,7 +719,9 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
           contactNote={contactNote}
           onCall={() => void owner.contact('call')}
           onWhatsapp={() => void owner.contact('whatsapp')}
-          ownerPhone={canCall ? (owner.details?.phone || '') : ''}
+                  // Always render the masked reveal gate when the listing has
+                  // an owner phone; never hide the gate behind contact access.
+                  ownerPhone={owner.details?.phone || ''}
         />
       )}
     </div>

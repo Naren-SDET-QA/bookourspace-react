@@ -96,10 +96,8 @@ const __dirname = path.dirname(__filename);
 
 // Load the same local env file Vite uses. Existing process variables remain
 // authoritative; .env.local is considered before the base .env file.
-dotenv.config({
-  path: [path.join(__dirname, '.env.local'), path.join(__dirname, '.env')],
-  quiet: true,
-});
+dotenv.config({ path: path.join(__dirname, '.env.local'), quiet: true });
+dotenv.config({ path: path.join(__dirname, '.env'), quiet: true });
 
 const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
 
@@ -2027,7 +2025,9 @@ Task:
   const serverSupabaseConfig = resolveSupabaseConfig({
     url: process.env.VITE_SUPABASE_URL,
     projectId: process.env.VITE_SUPABASE_PROJECT_ID,
-    developmentProjectId: process.env.VITE_SUPABASE_DEVELOPMENT_PROJECT_ID,
+    // Local dev uses the explicit project ID already present in .env.local
+    // when the separate development allowlist variable is omitted.
+    developmentProjectId: process.env.VITE_SUPABASE_DEVELOPMENT_PROJECT_ID || process.env.VITE_SUPABASE_PROJECT_ID,
     publishableKey: process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     anonKey: process.env.VITE_SUPABASE_ANON_KEY,
   });
@@ -2529,15 +2529,22 @@ Task:
       } catch (error) {
         // Do not issue a browser session when configured durable identity
         // provisioning failed. Error details may contain private SQL data.
-        const diagnostic = process.env.NODE_ENV === 'test'
-          ? (error instanceof Error ? error.message.slice(0, 240) : 'UNKNOWN_PROFILE_ERROR')
-          : undefined;
-        res.status(503).json({
-          ok: false,
-          error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE',
-          ...(diagnostic ? { diagnostic } : {}),
-        });
-        return;
+        if (!IS_PRODUCTION_RUNTIME) {
+          // Local previews may have an incomplete provider schema. The
+          // authoritative local compatibility store is still available for
+          // development sign-in; production remains fail-closed below.
+          logSafeError('auth', 'local profile provisioning fallback', error);
+        } else {
+          const diagnostic = process.env.NODE_ENV === 'test'
+            ? (error instanceof Error ? error.message.slice(0, 240) : 'UNKNOWN_PROFILE_ERROR')
+            : undefined;
+          res.status(503).json({
+            ok: false,
+            error: 'AUTH_PROFILE_PERSISTENCE_UNAVAILABLE',
+            ...(diagnostic ? { diagnostic } : {}),
+          });
+          return;
+        }
       }
     }
 
@@ -2624,7 +2631,11 @@ Task:
     publishableKey: serverSupabaseConfig.publishableKey,
     secretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     resendApiKey: process.env.RESEND_API_KEY || '',
-    resendFrom: process.env.RESEND_FROM_EMAIL || '',
+    // OTP delivery must use the verified Resend sender. RESEND_FROM_EMAIL is
+    // retained as a compatibility fallback for older local environments, but
+    // the canonical RESEND_FROM value is preferred so Resend does not reject
+    // arbitrary Gmail addresses in the From header.
+    resendFrom: process.env.RESEND_FROM || process.env.RESEND_FROM_EMAIL || '',
     resendReplyTo: process.env.RESEND_REPLY_TO || '',
     resendBaseUrl: process.env.RESEND_API_BASE_URL || '',
     brandName: 'BookOurSpace',
@@ -2723,6 +2734,7 @@ Task:
         ? {
             cooldownSeconds: result.cooldownSeconds,
             expiresInSeconds: result.expiresInSeconds,
+            ...(result.developmentCode ? { developmentCode: result.developmentCode } : {}),
           }
         : { error: result.error, message: result.message, ...(result.retryAfterSeconds ? { retryAfterSeconds: result.retryAfterSeconds } : {}) }),
     });

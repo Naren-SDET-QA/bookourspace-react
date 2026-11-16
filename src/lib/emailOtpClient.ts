@@ -16,6 +16,7 @@ export interface EmailOtpRequestResponse {
   retryAfterSeconds?: number;
   cooldownSeconds?: number;
   expiresInSeconds?: number;
+  developmentCode?: string;
 }
 
 export interface EmailOtpVerifyResponse {
@@ -95,6 +96,7 @@ export async function requestEmailOtp(emailInput: string): Promise<EmailOtpReque
       ok: true,
       cooldownSeconds: Number(data?.cooldownSeconds) || 60,
       expiresInSeconds: Number(data?.expiresInSeconds) || 600,
+      developmentCode: typeof data?.developmentCode === 'string' ? data.developmentCode : undefined,
     };
   } catch {
     return {
@@ -112,7 +114,7 @@ export async function verifyEmailOtpCode(emailInput: string, tokenInput: string)
     return { ok: false, error: 'INVALID_EMAIL', message: 'Enter a valid email address.' };
   }
   if (!/^\d{6,10}$/.test(token)) {
-    return { ok: false, error: 'INVALID_OTP_FORMAT', message: 'Enter the 6-digit code from your email.' };
+    return { ok: false, error: 'INVALID_OTP_FORMAT', message: 'Enter the code from your email.' };
   }
   try {
     const response = await fetch('/api/auth/email-otp/verify', {

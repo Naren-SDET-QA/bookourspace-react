@@ -14,7 +14,7 @@ interface VerifiedPhoneRevealProps {
   onRevealed?: () => void;
 }
 
-type RevealPhase = 'idle' | 'otp' | 'revealed';
+type RevealPhase = 'idle' | 'details' | 'otp' | 'revealed';
 
 /** Mask everything but the first two and last two digits of the local number. */
 export function maskPhone(phone: string): string {
@@ -40,11 +40,14 @@ export function VerifiedPhoneReveal({
   const { authUser } = useMarketplace();
   const [phase, setPhase] = useState<RevealPhase>('idle');
   const [otpInput, setOtpInput] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [contactMobile, setContactMobile] = useState('');
+  const [contactEmail, setContactEmail] = useState(authUser?.email || '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const masked = useMemo(() => maskPhone(phone), [phone]);
-  const signedInEmail = authUser?.email || '';
+  const signedInEmail = contactEmail.trim().toLowerCase();
   const te = currentLang === 'te';
 
   const sendCode = async () => {
@@ -62,22 +65,8 @@ export function VerifiedPhoneReveal({
 
   const beginReveal = () => {
     setError('');
-    if (!authUser) {
-      if (onOpenSignIn) {
-        onOpenSignIn();
-        return;
-      }
-      // No sign-in handler was wired by the caller: fall back to the app's own
-      // sign-in route so this button always does something visible.
-      setError(te ? 'నంబర్ చూడాలంటే సైన్ ఇన్ చేయండి.' : 'Sign in to view the owner number.');
-      if (typeof window !== 'undefined') window.location.hash = '#login';
-      return;
-    }
-    if (!signedInEmail || !isValidEmailAddress(signedInEmail)) {
-      setError(te ? 'మీ ఖాతాకు చెల్లుబాటు అయ్యే ఇమెయిల్ లేదు.' : 'Your account has no valid email address.');
-      return;
-    }
-    void sendCode();
+    setContactEmail(authUser?.email || '');
+    setPhase('details');
   };
 
   const verifyCode = async () => {
@@ -124,6 +113,26 @@ export function VerifiedPhoneReveal({
               : (te ? 'నంబర్ చూడటానికి సైన్ ఇన్ చేయండి' : 'Sign in to view the number')}
           </span>
         </button>
+      )}
+
+      {phase === 'details' && (
+        <form
+          className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const mobile = contactMobile.replace(/\D/g, '');
+            if (contactName.trim().length < 2) { setError('Enter your name.'); return; }
+            if (!/^[6-9]\d{9}$/.test(mobile)) { setError('Enter a valid 10-digit mobile number.'); return; }
+            if (!isValidEmailAddress(signedInEmail)) { setError('Enter a valid email address.'); return; }
+            setError('');
+            void sendCode();
+          }}
+        >
+          <input required minLength={2} value={contactName} onChange={(event) => setContactName(event.target.value)} placeholder="Your full name" className="min-h-9 rounded-lg border border-slate-300 px-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+          <input required inputMode="numeric" value={contactMobile} onChange={(event) => setContactMobile(event.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Your mobile number" className="min-h-9 rounded-lg border border-slate-300 px-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+          <input required type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} placeholder="Your email address" className="min-h-9 rounded-lg border border-slate-300 px-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+          <button type="submit" disabled={busy} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Sending…' : 'Send verification code'}</button>
+        </form>
       )}
 
       {phase === 'otp' && (
