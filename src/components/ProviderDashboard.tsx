@@ -706,14 +706,20 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
             onCreated={(business) => { setBusinesses((current) => [...current, business]); setSelectedBusinessId(business.id); }}
           />)}
 
-      {activeSubTab === 'pg_inventory' && (activePgBusiness
-        ? <PgProviderWorkspace businessId={activePgBusiness.id} businessRole={activePgBusiness.role} businesses={pgBusinesses} onSelectBusiness={setSelectedBusinessId} onAddProperty={onOpenPostWizard} onSwitchToMarketplace={onSwitchToMarketplace} onSignOut={onSignOut} />
-        : <MissingModuleBusiness
-            heading="PG inventory"
-            description="A PG business holds your hostels, rooms, beds and residents."
-            module="pg_hostels"
-            onCreated={(business) => { setBusinesses((current) => [...current, business]); setSelectedBusinessId(business.id); }}
-          />)}
+      {activeSubTab === 'pg_inventory' && (
+        <PgProviderWorkspace
+          // Keep the complete PG owner dashboard visible while a provider is
+          // still completing PG onboarding. The API receives the business id
+          // when one exists and continues to enforce ownership server-side.
+          businessId={activePgBusiness?.id}
+          businessRole={activePgBusiness?.role}
+          businesses={pgBusinesses}
+          onSelectBusiness={setSelectedBusinessId}
+          onAddProperty={onOpenPostWizard}
+          onSwitchToMarketplace={onSwitchToMarketplace}
+          onSignOut={onSignOut}
+        />
+      )}
 
       {activeSubTab === 'team' && <BusinessStaffPanel businessId={selectedBusinessId || undefined} canInvite={['owner', 'manager'].includes(String(selectedBusiness?.role || ''))} />}
 
