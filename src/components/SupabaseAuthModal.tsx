@@ -215,7 +215,13 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const showLocalDevSignIn = Boolean(import.meta.env.DEV) || import.meta.env.VITE_BOS_LOCAL_DEV_AUTH === '1';
+  // The preview server may serve a production-shaped Vite bundle while still
+  // running locally. Keep the demo controls visible on loopback only; the
+  // server independently enforces BOS_LOCAL_DEV_AUTH and never enables this
+  // route for production.
+  const showLocalDevSignIn = Boolean(import.meta.env.DEV)
+    || import.meta.env.VITE_BOS_LOCAL_DEV_AUTH === '1'
+    || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
 
   const handleLocalDevSignIn = async (role: 'admin' | 'customer' | 'provider') => {
     setLocalDevLoading(role);
