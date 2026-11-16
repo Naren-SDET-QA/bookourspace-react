@@ -48,6 +48,9 @@ export function ProviderOnboardingForm({
   const [pgRent, setPgRent] = useState('');
   const [pgDeposit, setPgDeposit] = useState('');
   const [pgPhotos, setPgPhotos] = useState(['', '', '']);
+  const [pgMediaNames, setPgMediaNames] = useState<string[]>([]);
+  const [pgVoiceNote, setPgVoiceNote] = useState('');
+  const [recordingVoice, setRecordingVoice] = useState(false);
   const [pgAmenities, setPgAmenities] = useState('');
   const [pgRules, setPgRules] = useState('');
   const [pgDescription, setPgDescription] = useState('');
@@ -89,6 +92,40 @@ export function ProviderOnboardingForm({
         setError('GPS found your position, but the address could not be resolved. Please enter the address manually.');
       } finally { setLocationBusy(false); }
     }, () => { setLocationBusy(false); setError('Location permission was denied. Please enter the address manually.'); }, { enableHighAccuracy: true, timeout: 10000 });
+  };
+
+  const addMediaFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const accepted = Array.from(files).filter((file) => file.size <= 4 * 1024 * 1024);
+    if (accepted.length !== files.length) setError('Each image or 3D file must be 4 MB or smaller.');
+    const encoded = await Promise.all(accepted.slice(0, 6).map((file) => new Promise<{ name: string; data: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, data: String(reader.result || '') });
+      reader.onerror = () => reject(new Error('MEDIA_READ_FAILED'));
+      reader.readAsDataURL(file);
+    })));
+    setPgPhotos((current) => [...current.filter(Boolean), ...encoded.map((item) => item.data)].slice(0, 12));
+    setPgMediaNames((current) => [...current, ...encoded.map((item) => item.name)].slice(0, 12));
+  };
+
+  const recordVoiceNote = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Voice recording is not supported in this browser. Voice dictation is still available.'); return; }
+    if (recordingVoice) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      setRecordingVoice(true);
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const reader = new FileReader();
+        reader.onload = () => { setPgVoiceNote(String(reader.result || '')); setRecordingVoice(false); };
+        reader.readAsDataURL(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+      };
+      recorder.start();
+      window.setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 30_000);
+    } catch { setRecordingVoice(false); setError('Microphone permission was denied. You can use voice dictation or type the details.'); }
   };
 
   useEffect(() => {
@@ -147,7 +184,7 @@ export function ProviderOnboardingForm({
           photos, address: pgAddress.trim(), pincode: pgPincode.trim(), gender: pgGender, roomType: pgRoomType,
           totalBeds: Number(pgBeds), monthlyRent: Number(pgRent), securityDeposit: Number(pgDeposit) || 0,
           amenities: pgAmenities.split(',').map((value) => value.trim()).filter(Boolean).slice(0, 30),
-          houseRules: pgRules.trim(), description: pgDescription.trim(),
+          houseRules: pgRules.trim(), description: pgDescription.trim(), voiceNote: pgVoiceNote,
         } } : {}),
       });
       if (!result.ok || result.data.source !== 'postgres' || !result.registration) {
@@ -225,10 +262,11 @@ export function ProviderOnboardingForm({
                 <label className="block text-sm font-semibold text-slate-800">Monthly rent (₹) *<input type="number" min="1" value={pgRent} onChange={(event) => setPgRent(event.target.value)} required className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
                 <label className="block text-sm font-semibold text-slate-800">Security deposit (₹)<input type="number" min="0" value={pgDeposit} onChange={(event) => setPgDeposit(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
               </div>
-              <div className="space-y-2"><p className="text-sm font-semibold text-slate-800">Property photo URL (at least 1 required)</p>{pgPhotos.map((photo, index) => <input key={index} type="url" value={photo} onChange={(event) => setPgPhotos((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`Photo ${index + 1} URL`} required={index === 0} className="min-h-11 w-full rounded-xl border border-slate-300 px-3" />)}</div>
+              <div className="space-y-2"><p className="text-sm font-semibold text-slate-800">Property photos and 3D media (at least 1 required)</p><input type="file" accept="image/*,.heic,.heif,.webp,.avif,.glb,.gltf,.usdz,.obj,.fbx" multiple onChange={(event) => void addMediaFiles(event.target.files)} className="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm" /><p className="text-xs text-slate-500">Accepts JPG, PNG, WebP, HEIC, AVIF and common 3D formats. Maximum 4 MB per file.</p>{pgPhotos.slice(0, 3).map((photo, index) => <input key={index} type="url" value={photo.startsWith('data:') ? '' : photo} onChange={(event) => setPgPhotos((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`Photo ${index + 1} URL`} required={index === 0 && !pgPhotos.some((item) => item.startsWith('data:'))} className="min-h-11 w-full rounded-xl border border-slate-300 px-3" />)}{pgMediaNames.length > 0 && <p className="text-xs font-semibold text-emerald-700">Selected: {pgMediaNames.join(', ')}</p>}</div>
               <label className="block text-sm font-semibold text-slate-800">Amenities <input value={pgAmenities} onChange={(event) => setPgAmenities(event.target.value)} placeholder="Wi-Fi, food, AC, laundry, parking" className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
               <label className="block text-sm font-semibold text-slate-800">House rules <textarea value={pgRules} onChange={(event) => setPgRules(event.target.value)} maxLength={1000} rows={2} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>
               <label className="block text-sm font-semibold text-slate-800">Description <div className="flex gap-2"><textarea value={pgDescription} onChange={(event) => setPgDescription(event.target.value)} maxLength={2000} rows={3} className="mt-1 min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2" /><button type="button" aria-label="Speak property description" onClick={() => speakInto('description', setPgDescription)} className={`mt-1 self-start rounded-xl border px-3 py-3 text-lg ${voiceField === 'description' ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'}`}>🎙️</button></div></label>
+              <button type="button" onClick={() => void recordVoiceNote()} className="min-h-11 w-full rounded-xl border border-indigo-200 bg-white px-3 text-sm font-bold text-indigo-700">{recordingVoice ? 'Recording voice note… (up to 30 seconds)' : pgVoiceNote ? 'Voice note recorded — record again' : 'Record a voice note'}</button>
             </fieldset>}
             {authUser.email && <p className="text-xs text-slate-500">Application identity: {authUser.email}</p>}
             <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Your contact details are visible to the applicant and authorized administrators. Approval only activates provider access; each listing still requires separate Admin approval.</p>

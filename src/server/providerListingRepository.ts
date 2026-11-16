@@ -676,7 +676,7 @@ export class ProviderListingRepository {
       const photos = Array.isArray(availability.photos) ? availability.photos.map((value) => String(value).trim()).filter(Boolean) : [];
       const monthlyRent = Number(availability.monthlyRent);
       const beds = Number(availability.totalBeds);
-      if (photos.length < 1 || photos.length > 12 || photos.some((photo) => photo.length > 500) ||
+      if (photos.length < 1 || photos.length > 12 || photos.some((photo) => photo.length > 7_000_000) ||
           !safeText(availability.address) || safeText(availability.address).length < 8 ||
           !/^\d{6}$/.test(safeText(availability.pincode)) ||
           !Number.isFinite(monthlyRent) || monthlyRent <= 0 || monthlyRent > 1000000 ||
