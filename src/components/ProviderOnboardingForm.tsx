@@ -67,7 +67,11 @@ export function ProviderOnboardingForm({
 
   const speakInto = (field: string, setter: (value: string) => void) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { setError('Voice input is not supported in this browser. You can type the same details instead.'); return; }
+    if (!SpeechRecognition) {
+      setError('Live dictation is unavailable in this preview, so the voice note recorder will be used instead.');
+      void recordVoiceNote();
+      return;
+    }
     const recognition = new SpeechRecognition();
     recognition.lang = formLanguage;
     recognition.interimResults = false;
