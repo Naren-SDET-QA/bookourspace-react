@@ -104,11 +104,6 @@ async function main() {
   await client.connect();
   try {
     const existing = await client.query(`select count(*)::int as count from public.stay_properties`);
-    if (Number(existing.rows[0].count) > 0) {
-      console.log(`[stays-demo] ${existing.rows[0].count} stay properties already exist; keeping them.`);
-      return;
-    }
-
     await client.query('BEGIN');
     // The local catalog is deliberately marked as demo data. Its lifecycle
     // trigger requires a Super Admin transition, just as production does;
@@ -153,6 +148,34 @@ async function main() {
         where id = $1`,
       [HOST_ID],
     );
+
+    await client.query(
+      `insert into public.businesses
+         (business_ref, name, module_type, owner_user_id, approval_status, is_enabled,
+          backfill_source, created_by, approved_by, approved_at)
+       values ('demo-pg-hostels', 'BookOurSpace Demo PG Hosts', 'pg_hostels', $1,
+          'approved', true, 'local_demo', $1, $2, now())
+       on conflict (business_ref) do update set
+         name = excluded.name, approval_status = 'approved', is_enabled = true,
+         approved_by = excluded.approved_by, approved_at = excluded.approved_at`,
+      [HOST_ID, ADMIN_ID],
+    );
+    await client.query(
+      `insert into public.business_module_access
+         (business_id, module_type, enabled, approval_status, approved_by, approved_at)
+       select id, 'pg_hostels', true, 'approved', $1, now()
+       from public.businesses where business_ref = 'demo-pg-hostels'
+       on conflict (business_id, module_type) do update set
+         enabled = true, approval_status = 'approved', approved_by = excluded.approved_by,
+         approved_at = excluded.approved_at`,
+      [ADMIN_ID],
+    );
+
+    if (Number(existing.rows[0].count) > 0) {
+      await client.query('COMMIT');
+      console.log(`[stays-demo] ${existing.rows[0].count} stay properties already exist; PG demo provider ensured.`);
+      return;
+    }
 
     for (const [index, listing] of airbnbListings.entries()) {
       const listingId = `demo-${listing.id}`;
