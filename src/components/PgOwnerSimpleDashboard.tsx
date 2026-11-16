@@ -1,4 +1,4 @@
-import { ArrowRight, BedDouble, Building2, CalendarCheck2, CheckCircle2, CircleDollarSign, Plus, Users } from 'lucide-react';
+import { ArrowRight, BedDouble, Building2, CalendarCheck2, CheckCircle2, CircleDollarSign, CreditCard, Plus, Users, Wallet } from 'lucide-react';
 import type { PgBooking, PgRoomType } from '../lib/pgBookingClient';
 
 type PgOwnerListing = {
@@ -22,7 +22,7 @@ type PgOwnerSimpleDashboardProps = {
   bookings: PgBooking[];
   pendingBookings: PgBooking[];
   onAddProperty?: () => void;
-  onNavigate: (section: 'bookings' | 'rooms' | 'properties') => void;
+  onNavigate: (section: 'bookings' | 'rooms' | 'properties' | 'dues' | 'collections') => void;
 };
 
 const formatInr = (paise: number) => `₹${(Number(paise || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -69,6 +69,27 @@ export default function PgOwnerSimpleDashboard({
         <SummaryCard icon={BedDouble} label="Total beds" value={String(totals.beds)} helper={`${totals.rooms.length} room types`} tone="purple" />
         <SummaryCard icon={Users} label="Available beds" value={String(totals.availableBeds)} helper={`${occupancy}% occupied`} tone="green" />
         <SummaryCard icon={CalendarCheck2} label="Needs attention" value={String(pendingBookings.length)} helper={pendingBookings.length ? 'Bookings to review' : 'All caught up'} tone="amber" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <FinanceCard
+          icon={Wallet}
+          title="Dues"
+          value={formatInr(bookings.filter((booking) => !['paid', 'verified', 'collected', 'refunded'].includes(String(booking.paymentStatus).toLowerCase())).reduce((sum, booking) => sum + Number(booking.totalDuePaise || 0), 0))}
+          helper="Outstanding resident payments"
+          actionLabel="Open dues"
+          onClick={() => onNavigate('dues')}
+          tone="amber"
+        />
+        <FinanceCard
+          icon={CreditCard}
+          title="Collections"
+          value={formatInr(bookings.filter((booking) => ['paid', 'verified', 'collected'].includes(String(booking.paymentStatus).toLowerCase())).reduce((sum, booking) => sum + Number(booking.totalDuePaise || 0), 0))}
+          helper="Payments collected from residents"
+          actionLabel="Open collections"
+          onClick={() => onNavigate('collections')}
+          tone="green"
+        />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr_0.9fr]">
@@ -127,6 +148,11 @@ export default function PgOwnerSimpleDashboard({
 function SummaryCard({ icon: Icon, label, value, helper, tone }: { icon: typeof Building2; label: string; value: string; helper: string; tone: 'blue' | 'purple' | 'green' | 'amber' }) {
   const toneClasses = { blue: 'bg-blue-100 text-[#0B8F76] dark:bg-blue-950 dark:text-blue-200', purple: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-200', green: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200', amber: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200' }[tone];
   return <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</p><p className="mt-2 text-2xl font-black tracking-tight text-slate-950 dark:text-white">{value}</p></div><span className={`grid h-10 w-10 place-items-center rounded-xl ${toneClasses}`}><Icon className="h-5 w-5" /></span></div><p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{helper}</p></article>;
+}
+
+function FinanceCard({ icon: Icon, title, value, helper, actionLabel, onClick, tone }: { icon: typeof Wallet; title: string; value: string; helper: string; actionLabel: string; onClick: () => void; tone: 'green' | 'amber' }) {
+  const classes = tone === 'green' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200';
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{title}</p><p className="mt-2 text-3xl font-black tracking-tight text-slate-950 dark:text-white">{value}</p><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{helper}</p></div><span className={`grid h-11 w-11 place-items-center rounded-xl ${classes}`}><Icon className="h-5 w-5" /></span></div><button type="button" onClick={onClick} className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-xl bg-slate-100 px-3.5 text-sm font-black text-slate-800 hover:bg-slate-200 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700">{actionLabel}<ArrowRight className="h-4 w-4" /></button></section>;
 }
 
 function MiniMetric({ label, value }: { label: string; value: string }) { return <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/70"><p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{label}</p><p className="mt-1 truncate text-lg font-black text-slate-900 dark:text-white">{value}</p></div>; }
