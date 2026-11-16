@@ -220,6 +220,21 @@ export function CustomerLoginExperience({
     } finally { setLocalProviderBusy(false); }
   };
 
+  const signInLocalAdmin = async () => {
+    setLocalProviderBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/auth/local-dev/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'admin' }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.sessionToken) throw new Error(data?.message || data?.error || 'Local admin sign-in is unavailable.');
+      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      window.location.hash = 'admin';
+      window.location.reload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Local admin sign-in failed.');
+    } finally { setLocalProviderBusy(false); }
+  };
+
   const phoneDigits = phone.replace(/\D/g, '').slice(0, 10);
   const phoneValid = /^[6-9]\d{9}$/.test(phoneDigits);
 
@@ -658,6 +673,15 @@ export function CustomerLoginExperience({
                 className="mt-2 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-4 text-sm font-black text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60"
               >
                 {localProviderBusy ? 'Opening services dashboard…' : 'Test services provider dashboard'}
+              </button>}
+
+              {localDemoProviderAvailable && <button
+                type="button"
+                onClick={() => void signInLocalAdmin()}
+                disabled={localProviderBusy}
+                className="mt-2 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-4 text-sm font-black text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
+              >
+                {localProviderBusy ? 'Opening admin console…' : 'Test admin console'}
               </button>}
 
               {!authServiceUnavailable && !googleAvailable && !emailOtpAvailable && (
