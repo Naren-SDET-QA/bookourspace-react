@@ -181,6 +181,7 @@ export function CustomerLoginExperience({
   const [info, setInfo] = useState('');
   const [cooldown, setCooldown] = useState(0);
   const [supabaseEmailProvider, setSupabaseEmailProvider] = useState(false);
+  const [localProviderBusy, setLocalProviderBusy] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
   const otpRef = useRef<HTMLInputElement>(null);
 
@@ -202,6 +203,22 @@ export function CustomerLoginExperience({
   const emailAdminDisabled = !authServiceUnavailable && config != null && config.emailOtpEnabled === false;
   const guestAvailable = guestLoginEnabled || config?.guestLoginEnabled === true;
   const code = useMemo(() => digits.join(''), [digits]);
+  const localDemoProviderAvailable = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+
+  const signInLocalProvider = async () => {
+    setLocalProviderBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/auth/local-dev/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'provider' }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.sessionToken) throw new Error(data?.message || data?.error || 'Local provider sign-in is unavailable.');
+      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      window.location.hash = 'provider';
+      window.location.reload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Local provider sign-in failed.');
+    } finally { setLocalProviderBusy(false); }
+  };
 
   const phoneDigits = phone.replace(/\D/g, '').slice(0, 10);
   const phoneValid = /^[6-9]\d{9}$/.test(phoneDigits);
@@ -624,6 +641,15 @@ export function CustomerLoginExperience({
                   </button>
                 </>
               )}
+
+              {localDemoProviderAvailable && <button
+                type="button"
+                onClick={() => void signInLocalProvider()}
+                disabled={localProviderBusy}
+                className="mt-4 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full border border-violet-300 bg-violet-50 px-4 text-sm font-black text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"
+              >
+                {localProviderBusy ? 'Opening provider dashboard…' : 'Test provider dashboard'}
+              </button>}
 
               {!authServiceUnavailable && !googleAvailable && !emailOtpAvailable && (
                 <p className="mt-3 rounded-2xl bg-slate-50 p-2.5 text-[11px] font-semibold text-slate-600">
