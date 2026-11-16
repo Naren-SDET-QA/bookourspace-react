@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import {
   BadgeIndianRupee,
   CalendarClock,
@@ -57,6 +58,28 @@ const STATUS_TONE: Record<ServiceBooking['status'], string> = {
 
 function money(value: number): string {
   return `₹${value.toLocaleString('en-IN')}`;
+}
+
+function downloadServiceReceipt(booking: ServiceBooking): void {
+  const doc = new jsPDF();
+  const issuedAt = new Date().toLocaleString('en-IN');
+  doc.setFontSize(20);
+  doc.text('BookOurSpace', 20, 24);
+  doc.setFontSize(14);
+  doc.text('Service receipt / invoice copy', 20, 36);
+  doc.setFontSize(10);
+  doc.text(`Booking reference: ${booking.bookingRef}`, 20, 52);
+  doc.text(`Issued: ${issuedAt}`, 20, 60);
+  doc.text(`Service: ${booking.listingTitle}`, 20, 76, { maxWidth: 170 });
+  doc.text(`Scheduled: ${booking.scheduledDate} · ${booking.timeSlot}`, 20, 90);
+  doc.text(`Delivery: ${booking.deliveryMode.replace(/_/g, ' ')}`, 20, 98);
+  doc.text(`Address: ${booking.serviceAddress || 'Not provided'}`, 20, 106, { maxWidth: 170 });
+  doc.line(20, 118, 190, 118);
+  doc.text(`Amount paid: ${money(booking.amount)} ${booking.currency}`, 20, 132);
+  doc.text(`Payment status: ${booking.paymentStatus}`, 20, 140);
+  doc.text('GST tax invoice: not issued — verified supplier/tax configuration is not available.', 20, 156, { maxWidth: 170 });
+  doc.text('This computer-generated document is a service payment receipt.', 20, 174, { maxWidth: 170 });
+  doc.save(`BookOurSpace-Service-${booking.bookingRef}.pdf`);
 }
 
 export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsWorkspaceProps) {
@@ -491,8 +514,11 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
                           <button type="button" disabled={busy} onClick={() => void submitClaim(booking)} className="mt-2 min-h-9 rounded-lg bg-violet-700 px-3 text-[11px] font-bold text-white hover:bg-violet-800 disabled:opacity-60">Submit for verification</button>
                         </div>
                       )}
-                      {role !== 'admin' && booking.status === 'completed' && booking.paymentStatus === 'settled' && (
-                        <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Payment verified and settled</p>
+                      {booking.status === 'completed' && booking.paymentStatus === 'settled' && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Payment verified and settled</p>
+                          <button type="button" onClick={() => downloadServiceReceipt(booking)} className="min-h-9 rounded-xl border border-emerald-300 px-3 text-[11px] font-bold text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/40">Download receipt PDF</button>
+                        </div>
                       )}
 
                       {role === 'admin' && booking.paymentStatus === 'settled' && booking.status !== 'completed' && (
