@@ -1366,6 +1366,7 @@ export async function submitServerProviderRegistration(body: {
   city: string;
   area: string;
   serviceArea?: string;
+  availability?: Record<string, unknown>;
 }) {
   const response = await requestProviderListings('/api/provider/registrations', 'POST', body);
   return { ...response, registration: response.data.registration || null };

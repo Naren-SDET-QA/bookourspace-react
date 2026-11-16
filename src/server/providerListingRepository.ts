@@ -672,6 +672,19 @@ export class ProviderListingRepository {
     }
     const pricingNote = safeText(input.pricingNote).slice(0, 300);
     const availability = asPayload(input.availability);
+    if (providerType === 'pg_hostels') {
+      const photos = Array.isArray(availability.photos) ? availability.photos.map((value) => String(value).trim()).filter(Boolean) : [];
+      const monthlyRent = Number(availability.monthlyRent);
+      const beds = Number(availability.totalBeds);
+      if (photos.length < 1 || photos.length > 12 || photos.some((photo) => photo.length > 500) ||
+          !safeText(availability.address) || safeText(availability.address).length < 8 ||
+          !/^\d{6}$/.test(safeText(availability.pincode)) ||
+          !Number.isFinite(monthlyRent) || monthlyRent <= 0 || monthlyRent > 1000000 ||
+          !Number.isInteger(beds) || beds < 1 || beds > 10000 ||
+          !safeText(availability.gender).length || !safeText(availability.roomType).length) {
+        throw new ProviderListingRepositoryError('INVALID_PG_LISTING_DETAILS', 400);
+      }
+    }
     const availabilityDays = Array.isArray(availability.days) ? availability.days : [];
     const validDays = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
     if (availabilityDays.length > 7 || availabilityDays.some((day) => !validDays.has(String(day)))) {

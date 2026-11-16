@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchOwnProviderRegistration, submitServerProviderRegistration } from '../lib/supabaseClient';
 import type { MarketSectionType } from '../data/servicesStayMoviesData';
 import { ServiceCoveragePicker } from './ServiceCoveragePicker';
+import { nearestCatalogLocation } from '../lib/locationSearch';
 
 type ProviderType = MarketSectionType;
 
@@ -39,6 +40,20 @@ export function ProviderOnboardingForm({
   const [contactPhone, setContactPhone] = useState('');
   const [city, setCity] = useState('');
   const [area, setArea] = useState('');
+  const [pgAddress, setPgAddress] = useState('');
+  const [pgPincode, setPgPincode] = useState('');
+  const [pgGender, setPgGender] = useState('any');
+  const [pgRoomType, setPgRoomType] = useState('single');
+  const [pgBeds, setPgBeds] = useState('1');
+  const [pgRent, setPgRent] = useState('');
+  const [pgDeposit, setPgDeposit] = useState('');
+  const [pgPhotos, setPgPhotos] = useState(['', '', '']);
+  const [pgAmenities, setPgAmenities] = useState('');
+  const [pgRules, setPgRules] = useState('');
+  const [pgDescription, setPgDescription] = useState('');
+  const [formLanguage, setFormLanguage] = useState('en-IN');
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [voiceField, setVoiceField] = useState('');
   const [serviceCoverage, setServiceCoverage] = useState<{ state: string; district: string; mandal: string; village: string; path: string } | null>(null);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(true);
@@ -46,6 +61,35 @@ export function ProviderOnboardingForm({
   const [existing, setExisting] = useState<any>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+
+  const speakInto = (field: string, setter: (value: string) => void) => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { setError('Voice input is not supported in this browser. You can type the same details instead.'); return; }
+    const recognition = new SpeechRecognition();
+    recognition.lang = formLanguage;
+    recognition.interimResults = false;
+    recognition.onstart = () => setVoiceField(field);
+    recognition.onend = () => setVoiceField('');
+    recognition.onerror = () => { setVoiceField(''); setError('Voice input was not clear. Please try again or type the value.'); };
+    recognition.onresult = (event: any) => setter(String(event.results?.[0]?.[0]?.transcript || '').trim());
+    recognition.start();
+  };
+
+  const useGpsForProperty = () => {
+    if (!navigator.geolocation) { setError('Location is not available on this device. Please enter the address manually.'); return; }
+    setLocationBusy(true); setError('');
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+      try {
+        const location = await nearestCatalogLocation(coords.latitude, coords.longitude);
+        setCity(location.name || location.district || '');
+        setArea(location.name || location.district || '');
+        if (location.pincode) setPgPincode(location.pincode);
+        setPgAddress([location.name, location.district, location.state].filter(Boolean).join(', '));
+      } catch {
+        setError('GPS found your position, but the address could not be resolved. Please enter the address manually.');
+      } finally { setLocationBusy(false); }
+    }, () => { setLocationBusy(false); setError('Location permission was denied. Please enter the address manually.'); }, { enableHighAccuracy: true, timeout: 10000 });
+  };
 
   useEffect(() => {
     if (!authUser) { setBusy(false); return; }
@@ -80,8 +124,13 @@ export function ProviderOnboardingForm({
     }
     const selectedCity = providerType === 'services' ? serviceCoverage?.district || '' : city.trim();
     const selectedArea = providerType === 'services' ? serviceCoverage?.village || '' : area.trim();
+    const photos = pgPhotos.map((photo) => photo.trim()).filter(Boolean);
     if (businessName.trim().length < 2 || !/^\+?[0-9][0-9\s().-]{5,22}$/.test(contactPhone.trim()) || selectedCity.length < 2 || selectedArea.length < 2 || (providerType === 'services' && !serviceCoverage?.path)) {
       setError('Enter a business name, valid contact phone, city and area.');
+      return;
+    }
+    if (providerType === 'pg_hostels' && (photos.length < 1 || pgAddress.trim().length < 8 || !/^\d{6}$/.test(pgPincode.trim()) || Number(pgRent) <= 0 || Number(pgBeds) < 1 || !pgGender || !pgRoomType)) {
+      setError('For a PG, add at least one photo URL, full address, 6-digit PIN, rent, beds, room type and occupancy.');
       return;
     }
     setSubmitting(true);
@@ -94,6 +143,12 @@ export function ProviderOnboardingForm({
         city: selectedCity,
         area: selectedArea,
         ...(providerType === 'services' && serviceCoverage?.path ? { serviceArea: serviceCoverage.path } : {}),
+        ...(providerType === 'pg_hostels' ? { availability: {
+          photos, address: pgAddress.trim(), pincode: pgPincode.trim(), gender: pgGender, roomType: pgRoomType,
+          totalBeds: Number(pgBeds), monthlyRent: Number(pgRent), securityDeposit: Number(pgDeposit) || 0,
+          amenities: pgAmenities.split(',').map((value) => value.trim()).filter(Boolean).slice(0, 30),
+          houseRules: pgRules.trim(), description: pgDescription.trim(),
+        } } : {}),
       });
       if (!result.ok || result.data.source !== 'postgres' || !result.registration) {
         throw new Error(result.data.error || 'PostgreSQL did not confirm your registration.');
@@ -158,6 +213,23 @@ export function ProviderOnboardingForm({
                 <label className="block text-sm font-semibold text-slate-800">Area / locality<input value={area} onChange={(event) => setArea(event.target.value)} maxLength={120} autoComplete="address-level3" required className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
               </div>
             )}
+            {providerType === 'pg_hostels' && <fieldset className="space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
+              <legend className="px-1 text-sm font-black text-indigo-950">PG listing details</legend>
+              <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-slate-600">Use GPS, type the address, or dictate it in your language.</p><div className="flex gap-2"><select aria-label="Voice input language" value={formLanguage} onChange={(event) => setFormLanguage(event.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"><option value="en-IN">English</option><option value="hi-IN">हिन्दी</option><option value="te-IN">తెలుగు</option><option value="ta-IN">தமிழ்</option><option value="kn-IN">ಕನ್ನಡ</option><option value="ml-IN">മലയാളം</option><option value="mr-IN">मराठी</option></select><button type="button" onClick={useGpsForProperty} disabled={locationBusy} className="rounded-lg border border-indigo-200 bg-white px-3 py-1 text-xs font-bold text-indigo-700">{locationBusy ? 'Finding…' : 'Use GPS'}</button></div></div>
+              <label className="block text-sm font-semibold text-slate-800">Full property address *<div className="flex gap-2"><textarea value={pgAddress} onChange={(event) => setPgAddress(event.target.value)} maxLength={400} required rows={2} className="mt-1 min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2" /><button type="button" aria-label="Speak property address" onClick={() => speakInto('address', setPgAddress)} className={`mt-1 self-start rounded-xl border px-3 py-3 text-lg ${voiceField === 'address' ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'}`}>🎙️</button></div></label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm font-semibold text-slate-800">PIN code *<input inputMode="numeric" pattern="[0-9]{6}" value={pgPincode} onChange={(event) => setPgPincode(event.target.value.replace(/\D/g, '').slice(0, 6))} required className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
+                <label className="block text-sm font-semibold text-slate-800">For *<select value={pgGender} onChange={(event) => setPgGender(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3"><option value="any">Everyone</option><option value="boys">Boys</option><option value="girls">Girls</option></select></label>
+                <label className="block text-sm font-semibold text-slate-800">Room type *<select value={pgRoomType} onChange={(event) => setPgRoomType(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3"><option value="single">Single</option><option value="double">Double sharing</option><option value="triple">Triple sharing</option><option value="dormitory">Dormitory</option></select></label>
+                <label className="block text-sm font-semibold text-slate-800">Total beds *<input type="number" min="1" max="10000" value={pgBeds} onChange={(event) => setPgBeds(event.target.value)} required className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
+                <label className="block text-sm font-semibold text-slate-800">Monthly rent (₹) *<input type="number" min="1" value={pgRent} onChange={(event) => setPgRent(event.target.value)} required className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
+                <label className="block text-sm font-semibold text-slate-800">Security deposit (₹)<input type="number" min="0" value={pgDeposit} onChange={(event) => setPgDeposit(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
+              </div>
+              <div className="space-y-2"><p className="text-sm font-semibold text-slate-800">Property photo URL (at least 1 required)</p>{pgPhotos.map((photo, index) => <input key={index} type="url" value={photo} onChange={(event) => setPgPhotos((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`Photo ${index + 1} URL`} required={index === 0} className="min-h-11 w-full rounded-xl border border-slate-300 px-3" />)}</div>
+              <label className="block text-sm font-semibold text-slate-800">Amenities <input value={pgAmenities} onChange={(event) => setPgAmenities(event.target.value)} placeholder="Wi-Fi, food, AC, laundry, parking" className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
+              <label className="block text-sm font-semibold text-slate-800">House rules <textarea value={pgRules} onChange={(event) => setPgRules(event.target.value)} maxLength={1000} rows={2} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>
+              <label className="block text-sm font-semibold text-slate-800">Description <div className="flex gap-2"><textarea value={pgDescription} onChange={(event) => setPgDescription(event.target.value)} maxLength={2000} rows={3} className="mt-1 min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2" /><button type="button" aria-label="Speak property description" onClick={() => speakInto('description', setPgDescription)} className={`mt-1 self-start rounded-xl border px-3 py-3 text-lg ${voiceField === 'description' ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'}`}>🎙️</button></div></label>
+            </fieldset>}
             {authUser.email && <p className="text-xs text-slate-500">Application identity: {authUser.email}</p>}
             <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Your contact details are visible to the applicant and authorized administrators. Approval only activates provider access; each listing still requires separate Admin approval.</p>
             {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
