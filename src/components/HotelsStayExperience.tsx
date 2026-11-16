@@ -46,7 +46,7 @@ import {
 } from '../lib/servicesStayRules';
 import { supabase, fetchCurrentAuthSession } from '../lib/supabaseClient';
 import { useMarketplace } from '../context/MarketplaceContext';
-import { patchStayCheckoutDraft, readStayCheckoutDraft } from '../lib/stayCheckoutDraft';
+import { clearStayCheckoutDraft, patchStayCheckoutDraft, readStayCheckoutDraft } from '../lib/stayCheckoutDraft';
 import { AirbnbIndiaExperience } from './AirbnbIndiaExperience';
 import { StayCheckoutPanel } from './StayCheckoutPanel';
 import type { PageCopyOverrides } from '../utils/livePageEditorStore';
@@ -365,6 +365,11 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
   const access: ModuleAccess = resolveServicesModuleAccess(moduleFlags, 'hotels');
   const selectedStayCity = ['all', 'all cities', 'all locations'].includes(selectedCity.trim().toLowerCase()) ? '' : selectedCity;
 
+  const closeSelectedProperty = () => {
+    clearStayCheckoutDraft();
+    setSelectedProperty(null);
+  };
+
   const getStaySearchPage = async (
     filters: { destination: string; checkIn?: string; checkOut?: string; guests?: number; includeUnavailable?: boolean },
     page = 0,
@@ -471,7 +476,10 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
       if (event.key !== 'Escape') return;
       if (menuOpen) setMenuOpen(false);
       else if (filtersOpen) setFiltersOpen(false);
-      else if (selectedProperty) setSelectedProperty(null);
+      else if (selectedProperty) {
+        clearStayCheckoutDraft();
+        setSelectedProperty(null);
+      }
       else onClose();
     };
     window.addEventListener('keydown', onKeyDown);
@@ -1110,14 +1118,14 @@ export function HotelsStayExperience({ onClose, inline = false, onStartHosting, 
               <div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between gap-3 px-4 sm:px-6">
                 <button
                   type="button"
-                  onClick={() => setSelectedProperty(null)}
+                  onClick={closeSelectedProperty}
                   className="inline-flex h-9 items-center gap-2 rounded-full px-2 text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#222222]"
                 >
                   <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to stays
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSelectedProperty(null)}
+                  onClick={closeSelectedProperty}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-[#f7f7f7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#222222] dark:hover:bg-slate-800"
                   aria-label="Close property details"
                 >
