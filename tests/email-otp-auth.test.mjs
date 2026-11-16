@@ -36,6 +36,7 @@ let storePath;
 let lastEmail = null;
 let lastAdminUserBody = null;
 let lastGenerateLinkBody = null;
+let lastVerifyBody = null;
 let userEmail = CUSTOMER_EMAIL;
 
 async function availablePort() {
@@ -162,6 +163,7 @@ before(async () => {
     }
     if (url.pathname === '/auth/v1/verify' && request.method === 'POST') {
       const body = await readBody(request);
+      lastVerifyBody = body;
       if (body?.token !== OTP_CODE || body?.email !== userEmail) {
         json(response, 400, { error: 'invalid_grant', msg: 'Token has expired or is invalid' });
         return;
@@ -318,6 +320,7 @@ test('the emailed code verifies, mints a session and restores as an email identi
   });
   assert.equal(verified.status, 200);
   assert.equal(verified.body.ok, true);
+  assert.equal(lastVerifyBody.type, 'magiclink');
   assert.equal(verified.body.accessToken, SUPABASE_ACCESS_TOKEN);
   assert.equal(verified.body.refreshToken, SUPABASE_REFRESH_TOKEN);
 

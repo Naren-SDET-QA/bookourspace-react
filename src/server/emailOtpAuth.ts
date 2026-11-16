@@ -288,10 +288,11 @@ export class EmailOtpService {
           'content-type': 'application/json',
           accept: 'application/json',
         },
-        // Supabase's current email OTP verification contract uses `email`.
-        // `magiclink` is deprecated for this code-based sign-in path and can
-        // cause a valid emailed OTP to be rejected as expired/invalid.
-        body: JSON.stringify({ type: 'email', email, token }),
+        // This code was created through the Admin `generate_link` endpoint
+        // with type `magiclink`, so Supabase requires the matching type here.
+        // The email template may still display the generated `email_otp` as a
+        // numeric code; the verification type must match its origin.
+        body: JSON.stringify({ type: 'magiclink', email, token }),
       });
     } catch (error) {
       logSafeError('email-otp', 'supabase verification', error);
