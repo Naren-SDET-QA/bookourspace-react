@@ -74,10 +74,19 @@ export interface Faculty {
   achievements?: string[];
 }
 
+export type CoursePathway = 'Academic' | 'Skill';
+
 export interface CourseListing {
   id: string;
   title: string;
   category: CourseCategory | string;
+  /**
+   * 'Academic' = tuition, entrance and admission content, which is what the
+   * Academic explorer lists. 'Skill' = career, hobby or skill training that must
+   * stay out of it. Required, and set by whoever publishes the listing, so no
+   * title or description wording can decide where it appears.
+   */
+  pathway: CoursePathway;
   description: string;
   provider: string;
   /** Optional provider WhatsApp number; absent means open WhatsApp contact picker. */
@@ -144,6 +153,7 @@ export const classListings: CourseListing[] = [
     id: 'c-fullstack',
     title: 'Full Stack Web Development',
     category: 'IT & Software',
+    pathway: 'Skill',
     description: 'A comprehensive Full Stack Web Development course covering frontend, backend and deployment with real-world projects.',
     provider: 'CodeCraft Academy',
     providerId: DEMO_PROVIDER_ID,
@@ -235,6 +245,7 @@ export const classListings: CourseListing[] = [
     id: 'c-python',
     title: 'Python for Data Science',
     category: 'Professional & IT',
+    pathway: 'Skill',
     description: 'Master Python, pandas, NumPy and visualisation with real datasets. Includes interview preparation and a capstone project.',
     provider: 'DataMinds',
     providerId: DEMO_PROVIDER_ID,
@@ -299,6 +310,7 @@ export const classListings: CourseListing[] = [
     id: 'c-maths',
     title: 'CBSE Class 10 Mathematics',
     category: 'Academic',
+    pathway: 'Academic',
     description: 'Concept-first coaching for CBSE Class 10 Maths with weekly tests, doubt sessions and guaranteed revision of all chapters.',
     provider: 'BrightTutors',
     providerId: DEMO_PROVIDER_ID,
@@ -333,6 +345,7 @@ export const classListings: CourseListing[] = [
     id: 'c-english',
     title: 'Spoken English Masterclass',
     category: 'Languages',
+    pathway: 'Academic',
     description: 'Speak English with confidence through daily practice, pronunciation drills and live conversation clubs.',
     provider: 'FluentFirst',
     providerId: DEMO_PROVIDER_ID,
@@ -370,6 +383,7 @@ export const classListings: CourseListing[] = [
     id: 'c-carnatic',
     title: 'Carnatic Vocal Music',
     category: 'Arts & Music',
+    pathway: 'Skill',
     description: 'Learn classical Carnatic vocal basics — ragas, talas and voice culture — from experienced gurus in small batches.',
     provider: 'Sangeetha Studio',
     providerId: DEMO_PROVIDER_ID,
@@ -401,6 +415,7 @@ export const classListings: CourseListing[] = [
     id: 'c-guitar',
     title: 'Guitar for Beginners',
     category: 'Arts & Music',
+    pathway: 'Skill',
     description: 'From your first chord to your first song. Acoustic guitar fundamentals, strumming patterns and rhythm practice.',
     provider: 'ChordNest',
     providerId: DEMO_PROVIDER_ID,
@@ -435,6 +450,7 @@ export const classListings: CourseListing[] = [
     id: 'c-dance',
     title: 'Bollywood Dance',
     category: 'Arts & Music',
+    pathway: 'Skill',
     description: 'High-energy Bollywood choreography for all levels. Learn a full routine and perform at the studio showcase.',
     provider: 'StepUp Studio',
     providerId: DEMO_PROVIDER_ID,
@@ -466,6 +482,7 @@ export const classListings: CourseListing[] = [
     id: 'c-upsc',
     title: 'UPSC Prelims Foundation',
     category: 'Competitive Exams',
+    pathway: 'Academic',
     description: 'Complete GS foundation for UPSC Prelims — polity, geography, history, economy and current affairs with weekly mock tests.',
     provider: 'Aspirant Academy',
     providerId: DEMO_PROVIDER_ID,
@@ -503,6 +520,7 @@ export const classListings: CourseListing[] = [
     id: 'c-swimming',
     title: 'Swimming for Beginners',
     category: 'Sports & Fitness',
+    pathway: 'Skill',
     description: 'Learn water safety, floating, breathing and freestyle with certified coaches in a heated pool. Small batches and personal attention.',
     provider: 'AquaFit Academy',
     providerId: DEMO_PROVIDER_ID,
@@ -573,6 +591,7 @@ export const classListings: CourseListing[] = [
     id: 'c-yoga',
     title: 'Yoga & Wellness',
     category: 'Sports & Fitness',
+    pathway: 'Skill',
     description: 'Beginner-friendly yoga for flexibility, strength and stress relief. Includes pranayama and meditation practice.',
     provider: 'Prana Wellness',
     providerId: DEMO_PROVIDER_ID,
@@ -607,6 +626,7 @@ export const classListings: CourseListing[] = [
     id: 'c-driving',
     title: 'Car Driving — Beginner',
     category: 'Driving',
+    pathway: 'Skill',
     description: 'Learn to drive a manual/automatic car with certified instructors. Includes traffic rules, parking and licence guidance.',
     provider: 'SafeDrive School',
     providerId: DEMO_PROVIDER_ID,
@@ -641,6 +661,7 @@ export const classListings: CourseListing[] = [
     id: 'c-kids-coding',
     title: 'Coding for Kids (Scratch)',
     category: 'Kids',
+    pathway: 'Academic',
     description: 'Fun, project-based coding for children using Scratch and block programming. Build games and animations every week.',
     provider: 'LittleCoders',
     providerId: DEMO_PROVIDER_ID,
@@ -675,6 +696,7 @@ export const classListings: CourseListing[] = [
     id: 'c-nursing',
     title: 'Nursing Entrance Coaching',
     category: 'Healthcare',
+    pathway: 'Academic',
     description: 'Targeted NEET-Nursing coaching with biology, chemistry, physics and nursing aptitude practice.',
     provider: 'CareGivers Academy',
     providerId: DEMO_PROVIDER_ID,
@@ -709,6 +731,7 @@ export const classListings: CourseListing[] = [
     id: 'c-digital-marketing',
     title: 'Digital Marketing Pro',
     category: 'Business',
+    pathway: 'Skill',
     description: 'SEO, social media, paid ads, analytics and content marketing with live campaigns and a portfolio review.',
     provider: 'GrowthLab',
     providerId: DEMO_PROVIDER_ID,
@@ -740,6 +763,7 @@ export const classListings: CourseListing[] = [
     id: 'c-agri',
     title: 'Organic Farming Basics',
     category: 'Agriculture',
+    pathway: 'Skill',
     description: 'Practical organic farming — soil health, composting, pest control and crop planning for small landholders.',
     provider: 'GreenFields',
     providerId: DEMO_PROVIDER_ID,
@@ -771,6 +795,7 @@ export const classListings: CourseListing[] = [
     id: 'c-community',
     title: 'Community Leadership Workshop',
     category: 'Community Skills',
+    pathway: 'Skill',
     description: 'Learn grassroots leadership, volunteering, community organising and public speaking for social impact.',
     provider: 'CivicCircle',
     providerId: DEMO_PROVIDER_ID,

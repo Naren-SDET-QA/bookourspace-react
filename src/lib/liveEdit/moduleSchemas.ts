@@ -16,6 +16,13 @@ const PG_DETAIL_FIELDS: LiveEditFieldDefinition[] = [
 
 const CLASS_DETAIL_FIELDS: LiveEditFieldDefinition[] = [
   {
+    key: 'pathway',
+    label: 'Listing pathway',
+    kind: 'select',
+    options: ['Academic', 'Skill'],
+    help: 'Academic shows the listing in the Academic explorer (tuition, entrance and admission batches). Skill keeps career and hobby training out of it; anything left unset is treated as Skill.',
+  },
+  {
     key: 'modeLabel',
     label: 'Learning mode',
     kind: 'select',

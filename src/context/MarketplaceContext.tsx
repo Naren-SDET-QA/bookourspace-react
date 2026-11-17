@@ -339,7 +339,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [listings, setListings] = useState<MarketplaceListing[]>(() => {
     if (!DEMO_DATA_ENABLED) return [];
     try {
-      const saved = localStorage.getItem('marketplace_listings_v18');
+      const saved = localStorage.getItem('marketplace_listings_v19');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 20) {
@@ -433,7 +433,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       demoListingIdsRef.current = new Set(seed.initialListings.map((listing) => listing.id));
       demoSeedHydratedRef.current = true;
       setListings((current) => {
-        const seeded = loadStoredOrSeed('marketplace_listings_v18', seed.initialListings).map(ensureListingPriceBreakdown);
+        const seeded = loadStoredOrSeed('marketplace_listings_v19', seed.initialListings).map(ensureListingPriceBreakdown);
         if (!current.length) return seeded;
         const existingIds = new Set(current.map((listing) => listing.id));
         return [...current, ...seeded.filter((listing) => !existingIds.has(listing.id))];
@@ -1217,7 +1217,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     if (!DEMO_DATA_ENABLED || !demoSeedHydratedRef.current) return;
     try {
-      localStorage.setItem('marketplace_listings_v18', JSON.stringify(listings));
+      localStorage.setItem('marketplace_listings_v19', JSON.stringify(listings));
     } catch {}
   }, [listings]);
 
@@ -1319,7 +1319,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const handleStorageSync = (e: StorageEvent) => {
       if (!e.newValue) return;
       try {
-        if (e.key === 'marketplace_listings_v18') {
+        if (e.key === 'marketplace_listings_v19') {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setListings(parsed.map((item) => ensureListingPriceBreakdown(item)));
         } else if (e.key === 'marketplace_bookings') {

@@ -33,6 +33,7 @@ import {
   type BatchTiming,
   type CourseListing,
   type CourseMode,
+  type CoursePathway,
   type FeePlan,
   type TimingSlot,
 } from '../data/classesTimingsData';
@@ -43,10 +44,10 @@ import { ClassesStyleThreeCards } from './classes/ClassesStyleThreeCards';
 import { ClassesCategoryRail, type ClassesCategorySelection } from './classes/ClassesCategoryRail';
 import { ClassesSpotlightCards } from './classes/ClassesSpotlightCards';
 import { ClassesStyleThreeDetail } from './classes/ClassesStyleThreeDetail';
+import { ClassesStyleFour } from './classes/ClassesStyleFour';
 import type { MarketplaceListing } from '../types/marketplace';
 import { canContactOwner } from '../lib/servicesStayRules';
 import { useOwnerContact } from '../lib/useOwnerContact';
-import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 interface ClassesTimingsExperienceProps {
   onClose: () => void;
@@ -54,9 +55,7 @@ interface ClassesTimingsExperienceProps {
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
   /** 'cards' keeps the course-card grid; 'timetable' renders a weekly schedule; 'style3' is the compact list. */
-  style?: 'cards' | 'timetable' | 'style3';
-  /** Admin-authored heading and subheading from the page-field form. */
-  pageCopy?: PageCopyOverrides;
+  style?: 'cards' | 'timetable' | 'style3' | 'style4';
 }
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -716,6 +715,9 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
     id: listing.id,
     title: listing.title,
     category: listing.subcategory || listing.categoryId,
+    // Provider listings declare their pathway through the live-edit form; an
+    // unclassified row stays out of the Academic explorer instead of guessing.
+    pathway: text(custom.pathway) === 'Academic' ? 'Academic' : 'Skill',
     description: listing.description,
     provider: listing.providerName,
     providerPhone: listing.providerPhone || '',
@@ -744,10 +746,37 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
   };
 }
 
-export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards', pageCopy }: ClassesTimingsExperienceProps) {
-  // Classes are locked to Style 3 by product decision.
-  const [activeStyle] = useState<'cards' | 'timetable' | 'style3'>('style3');
-  useEffect(() => { /* Style 1 and Style 2 are disabled for Classes. */ }, [style]);
+/**
+ * Style 4 pathway groupings. The Academic pathway is tuition and admissions
+ * only: school/degree academics, entrance coaching, languages, kids classes,
+ * healthcare entrance prep, plus the Business and Technical categories where
+ * management and engineering coaching is usually filed. Career and skill
+ * courses are kept out per listing by the explicit `pathway` field on the course
+ * data, never by matching words in a title.
+ */
+/**
+ * The chosen Style 4 pathway survives module switches and remounts. Without it,
+ * leaving Classes and coming back drops the learner into the default layout
+ * because the view was only ever derived from the URL hash.
+ */
+const STYLE4_GROUP_KEY = 'bos_classes_style4_group_v1';
+type Style4Group = 'All' | 'Academic' | 'Personal' | 'Professional';
+function readSavedStyle4Group(): Style4Group {
+  if (typeof window === 'undefined') return 'All';
+  const saved = window.sessionStorage.getItem(STYLE4_GROUP_KEY);
+  return saved === 'Academic' || saved === 'Personal' || saved === 'Professional' ? saved : 'All';
+}
+
+const STYLE_FOUR_GROUPS: Record<'Academic' | 'Personal' | 'Professional', string[]> = {
+  Academic: ['Academic', 'Competitive Exams', 'Languages', 'Kids', 'Healthcare', 'Business', 'Technical'],
+  Personal: ['Arts & Music', 'Languages', 'Sports & Fitness', 'Driving', 'Kids'],
+  Professional: ['IT & Software', 'Professional & IT', 'Business', 'Community Skills', 'Agriculture', 'Healthcare'],
+};
+
+export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
+  const [style4Group, setStyle4Group] = useState<Style4Group>(readSavedStyle4Group);
+  const style4DeepLink = typeof window !== 'undefined' && /#classes\/(?:4|style4)/i.test(window.location.hash);
+  const activeStyle = style4DeepLink || style4Group !== 'All' ? 'style4' : style;
   const [mode, setMode] = useState<'All' | CourseMode>('All');
   const [timing, setTiming] = useState<'All' | TimingSlot>('All');
   const [feeBand, setFeeBand] = useState<'All' | 'Free' | 'Under3k' | '3k8k' | '8kPlus'>('All');
@@ -767,6 +796,11 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const owner = useOwnerContact('classes');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (style4Group === 'All') window.sessionStorage.removeItem(STYLE4_GROUP_KEY);
+    else window.sessionStorage.setItem(STYLE4_GROUP_KEY, style4Group);
+  }, [style4Group]);
   const providerCourses = useMemo(() => listings
     .filter((listing) => listing.status === 'active' && (listing.categoryId === 'classes' || listing.categoryId.startsWith('class-')))
     .map(mapProviderCourse), [listings]);
@@ -817,10 +851,20 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
     [providerCourses, localCourses, liveBatchesByListing],
   );
 
+  // The Academic rail filters inside the module, so it needs the full academic
+  // pool rather than the already-narrowed discovery results.
+  const academicPool = useMemo(
+    () => allCourses.filter(
+      (course) => STYLE_FOUR_GROUPS.Academic.includes(course.category) && course.pathway === 'Academic',
+    ),
+    [allCourses],
+  );
+
   const results = useMemo(() => {
     return allCourses.filter((c) => {
       if (query.trim() && !`${c.title} ${c.provider} ${c.category} ${c.area} ${c.city}`.toLowerCase().includes(query.trim().toLowerCase())) return false;
       if (category !== 'All' && c.category !== category) return false;
+      if (style4Group !== 'All' && !STYLE_FOUR_GROUPS[style4Group].includes(c.category)) return false;
       if (mode !== 'All' && c.mode !== mode && !c.modeOptions.includes(mode)) return false;
       if (timing !== 'All' && !c.batches.some((b) => b.slot === timing)) return false;
       if (verifiedOnly && !c.verified) return false;
@@ -839,8 +883,76 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
       if (age === 'adults' && !/18|21|16/.test(c.ageGroup)) return false;
       return true;
     });
-  }, [allCourses, query, category, mode, timing, feeBand, area, distance, duration, age, verifiedOnly]);
+  }, [allCourses, query, category, style4Group, mode, timing, feeBand, area, distance, duration, age, verifiedOnly]);
   const categoryOptions = useMemo(() => ['All', ...Array.from(new Set(allCourses.map((course) => course.category))).sort()], [allCourses]);
+
+  // Style 4 uses friendly marketplace labels. Translate them into the real
+  // listing taxonomy so every card, shortcut, and category control changes the
+  // results instead of silently selecting a category that does not exist.
+  const resetDiscoveryFilters = () => {
+    setQuery('');
+    setMode('All');
+    setTiming('All');
+    setFeeBand('All');
+    setArea('');
+    setDistance('Any');
+    setDuration('Any');
+    setAge('Any');
+    setVerifiedOnly(false);
+  };
+
+  // Landing cards (school blocks, category rail) open the matching Academic
+  // section directly, so a click never bounces back to the pathway landing.
+  const [academicSectionRequest, setAcademicSectionRequest] = useState<{ short: string; key: number } | null>(null);
+  const openAcademicSection = (short: string) => {
+    setStyle4Group('Academic');
+    setCategory('All');
+    resetDiscoveryFilters();
+    setAcademicSectionRequest({ short, key: Date.now() });
+  };
+
+  const selectStyleFour = (value: string) => {
+    if (value === 'Academic' || value === 'Personal' || value === 'Professional') {
+      setStyle4Group(value);
+      setCategory('All');
+      resetDiscoveryFilters();
+      return;
+    }
+    const exact = categoryOptions.find((option) => option.toLowerCase() === value.toLowerCase());
+    if (value === 'All') {
+      setStyle4Group('All');
+      setCategory('All');
+      setQuery('');
+      return;
+    }
+    if (exact) {
+      setStyle4Group('All');
+      setCategory(exact);
+      setQuery('');
+      return;
+    }
+    const keywords: Record<string, string> = {
+      Academic: 'academic',
+      Personal: 'music',
+      Professional: 'professional',
+      School: 'school',
+      Intermediate: 'intermediate',
+      Degree: 'degree',
+      Engineering: 'engineering',
+      Medical: 'health',
+      Law: 'law',
+      MBA: 'business',
+      Postgraduate: 'postgraduate',
+      Institute: 'institute',
+      Admission: 'admission',
+      Exam: 'exam',
+      Certification: 'certification',
+      Online: 'online',
+      Near: area || 'Andhra',
+    };
+    setCategory('All');
+    setQuery(keywords[value] ?? value);
+  };
 
   const selectCategoryCard = (selection: ClassesCategorySelection) => {
     if (selection.category) {
@@ -866,16 +978,16 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
       aria-labelledby="classes-title"
     >
       {/* Header */}
-      <header className="shrink-0 border-b border-[#ece8fb] bg-white/95 backdrop-blur">
+      {activeStyle !== 'style4' && <header className="shrink-0 border-b border-[#ece8fb] bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-3 py-2.5 sm:px-5">
           <button type="button" onClick={onClose} aria-label="Back to all sections" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#ece8fb] transition hover:bg-[#f5f3ff]">
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div className="min-w-0 flex-1">
             <h1 id="classes-title" className="truncate text-[15px] font-black text-[#1e1b4b] sm:text-[17px]">
-              {pageCopy?.heading || 'Classes & Training'}
+              Classes & Training
             </h1>
-            <p className="truncate text-[10.5px] text-[#64748b]">{pageCopy?.subheading || 'Courses · Institutes · Expert Faculty'}</p>
+            <p className="truncate text-[10.5px] text-[#64748b]">Courses · Institutes · Expert Faculty</p>
           </div>
           <button type="button" onClick={() => setShowMyClasses(true)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#ece8fb] px-3 text-[11.5px] font-bold text-[#4c1d95] transition hover:bg-[#f5f3ff]">
             <CalendarDays className="h-3.5 w-3.5" /> My classes
@@ -908,11 +1020,12 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
             <BadgeCheck className="h-3 w-3" /> Verified
           </button>
         </div>
-      </header>
+      </header>}
 
       {/* Results */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-3 py-3 sm:px-5">
+          {activeStyle === 'style4' && <ClassesStyleFour courses={results} academicCourses={academicPool} query={query} onQuery={setQuery} onCategory={selectStyleFour} onOpen={openCourse} group={style4Group} academicSectionRequest={academicSectionRequest} onAcademicSection={openAcademicSection} />}
           {activeStyle === 'style3' && (
             <>
               <ClassesSpotlightCards
@@ -926,12 +1039,12 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
               <ClassesCategoryRail activeCategory={category} activeQuery={query} onSelect={selectCategoryCard} />
             </>
           )}
-          <div className="mb-2 flex items-center justify-between gap-2">
+          {activeStyle !== 'style4' && <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-[13px] font-extrabold text-[#1e1b4b]">{results.length} courses</h2>
             <span className="text-[10.5px] font-semibold text-[#94a3b8]">{providerCourses.length ? 'Admin-approved PostgreSQL listings' : DEMO_DATA_ENABLED ? 'Demo data' : 'Admin-approved listings only'}</span>
-          </div>
+          </div>}
 
-          {results.length === 0 ? (
+          {activeStyle !== 'style4' && (results.length === 0 ? (
             <div className="rounded-2xl border border-[#ece8fb] bg-white p-8 text-center">
               <GraduationCap className="mx-auto h-7 w-7 text-[#7c3aed]" />
               <p className="mt-2 text-[13px] font-bold text-[#1e1b4b]">No courses match these filters</p>
@@ -947,7 +1060,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
                 <CourseCard key={c.id} item={c} onOpen={() => openCourse(c)} />
               ))}
             </div>
-          )}
+          ))}
         </div>
       </div>
 
@@ -1046,6 +1159,7 @@ function FilterSelect({
 function AddCourseForm({ onClose, onCreate }: { onClose: () => void; onCreate: (c: CourseListing) => void }) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState(COURSE_CATEGORIES[0]);
+  const [pathway, setPathway] = useState<CoursePathway>('Skill');
   const [mode, setMode] = useState<CourseMode>('Offline');
   const [area, setArea] = useState('');
   const [fee, setFee] = useState('');
@@ -1064,6 +1178,7 @@ function AddCourseForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
       id: `local-${Date.now()}`,
       title: title.trim(),
       category,
+      pathway,
       description: description.trim() || 'Provider course listing.',
       provider: 'Your Academy',
       providerId: 'local-provider',
@@ -1105,6 +1220,7 @@ function AddCourseForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
           <Field label="Course title"><input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="e.g. Spoken English for Beginners" className={inputCls} /></Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Category"><select value={category} onChange={(e) => setCategory(e.target.value as any)} className={inputCls}>{COURSE_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+            <Field label="Pathway"><select value={pathway} onChange={(e) => setPathway(e.target.value as CoursePathway)} className={inputCls}><option value="Academic">Academic admissions</option><option value="Skill">Skill course</option></select></Field>
             <Field label="Mode"><select value={mode} onChange={(e) => setMode(e.target.value as CourseMode)} className={inputCls}>{COURSE_MODES.map((m) => <option key={m}>{m}</option>)}</select></Field>
             <Field label="Area"><input value={area} onChange={(e) => setArea(e.target.value)} placeholder="Madhapur" className={inputCls} /></Field>
             <Field label="Fee"><input value={fee} onChange={(e) => setFee(e.target.value)} placeholder="2999" inputMode="numeric" className={inputCls} /></Field>

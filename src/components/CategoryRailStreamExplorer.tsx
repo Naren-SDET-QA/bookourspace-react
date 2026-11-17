@@ -19,6 +19,14 @@ import {
   Mic,
   X,
   RotateCcw,
+  BookOpen,
+  BriefcaseBusiness,
+  Cog,
+  GraduationCap,
+  Microscope,
+  Scale,
+  School,
+  Stethoscope,
 } from 'lucide-react';
 import { MarketplaceListing } from '../types/marketplace';
 import { MarketSectionType, servicesCategories, hotelStayCategories, moviesCategories } from '../data/servicesStayMoviesData';
@@ -154,6 +162,24 @@ const FALLBACK_RAIL_IMAGES = [
   'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=300&q=80',
 ];
 
+const EDUCATION_FEATURES: Array<{
+  id: string;
+  title: string;
+  subtitle: string;
+  emoji: string;
+  tone: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'class-healthcare', title: 'Medical & MBBS', subtitle: 'NEET, medicine & clinical prep', emoji: '🩺', tone: 'from-rose-50 to-orange-50 border-rose-100', icon: Stethoscope },
+  { id: 'class-professional', title: 'Law & LAWCET', subtitle: 'Law entrance and legal studies', emoji: '⚖️', tone: 'from-sky-50 to-indigo-50 border-sky-100', icon: Scale },
+  { id: 'class-business', title: 'MBA & Management', subtitle: 'Business, leadership & careers', emoji: '📈', tone: 'from-amber-50 to-orange-50 border-amber-100', icon: BriefcaseBusiness },
+  { id: 'class-technical', title: 'Engineering & JEE', subtitle: 'Engineering, coding & JEE', emoji: '⚙️', tone: 'from-cyan-50 to-blue-50 border-cyan-100', icon: Cog },
+  { id: 'class-academic', title: 'Degree & Undergraduate', subtitle: 'B.Tech, B.Sc, B.Com and more', emoji: '🎓', tone: 'from-violet-50 to-indigo-50 border-violet-100', icon: GraduationCap },
+  { id: 'class-online', title: 'Postgraduate', subtitle: 'Flexible higher education paths', emoji: '📚', tone: 'from-teal-50 to-emerald-50 border-teal-100', icon: BookOpen },
+  { id: 'class-ai', title: 'PhD & Research', subtitle: 'Research, AI and emerging fields', emoji: '🔬', tone: 'from-fuchsia-50 to-purple-50 border-fuchsia-100', icon: Microscope },
+  { id: 'class-kids', title: 'School & Intermediate', subtitle: 'School support and exam readiness', emoji: '🏫', tone: 'from-blue-50 to-sky-50 border-blue-100', icon: School },
+];
+
 export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProps> = ({
   activeMarketSection,
   onSelectMarketSection,
@@ -185,6 +211,7 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
   onNotify,
 }) => {
   const [streamGridCols, setStreamGridCols] = useState<'compact' | 'detailed'>('compact');
+  const isEducationSection = activeMarketSection === 'classes';
 
   const sectionCategories: (PGCategoryInfo | ClassCategoryInfo | VenueCategoryInfo)[] =
     activeMarketSection === 'pg_hostels'
@@ -400,7 +427,7 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
         {/* LEFT PANE: VERTICAL CATEGORY RAIL (BLINKIT / ZEPTO / CLASSCONNECT STYLE) */}
         <aside
           aria-label="Category Rail"
-          className="w-[82px] sm:w-[116px] md:w-[148px] shrink-0 bg-[#F4F6FB] dark:bg-[#090D1E] border-r border-slate-200/90 dark:border-slate-800 overflow-y-auto no-scrollbar py-2 select-none"
+          className={`shrink-0 bg-[#F4F6FB] dark:bg-[#090D1E] border-r border-slate-200/90 dark:border-slate-800 overflow-y-auto no-scrollbar py-2 select-none ${isEducationSection ? 'w-[104px] sm:w-[142px] md:w-[190px]' : 'w-[82px] sm:w-[116px] md:w-[148px]'}`}
         >
           <div className="flex flex-col gap-1">
             {/* "All Categories" Top Rail Item */}
@@ -468,7 +495,7 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
 
                   {/* Category Squircle Thumbnail + Emoji Badge */}
                   <div
-                    className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden mb-1 border transition-all duration-200 ${
+                    className={`relative ${isEducationSection ? 'w-14 h-14 sm:w-16 sm:h-16' : 'w-12 h-12 sm:w-14 sm:h-14'} rounded-2xl overflow-hidden mb-1 border transition-all duration-200 ${
                       isSelected
                         ? 'border-[#5B21B6] dark:border-amber-400 ring-2 ring-[#5B21B6]/25 dark:ring-amber-400/30 scale-105 shadow-sm'
                         : 'border-slate-200/90 dark:border-slate-800 group-hover:scale-105'
@@ -494,7 +521,7 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
 
                   {/* Category Name */}
                   <span
-                    className={`text-[10px] sm:text-[11px] leading-tight line-clamp-2 px-0.5 ${
+                    className={`${isEducationSection ? 'text-[10px] sm:text-xs' : 'text-[10px] sm:text-[11px]'} leading-tight line-clamp-2 px-0.5 ${
                       isSelected
                         ? 'font-black text-[#5B21B6] dark:text-amber-300'
                         : 'font-bold text-slate-700 dark:text-slate-300'
@@ -639,6 +666,38 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
 
           {/* STREAM EXPLORER RESULTS GRID */}
           <div className="p-2.5 sm:p-4 flex-1">
+            {isEducationSection && (
+              <section aria-labelledby="education-featured-heading" className="mb-4 overflow-hidden rounded-[20px] border border-[#f3e8df] bg-gradient-to-br from-[#fffaf7] via-white to-[#f4f8ff] p-3 shadow-[0_10px_30px_rgba(15,23,42,0.06)] sm:p-5">
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#f06b3c]">BookOurSpace Education</p>
+                    <h2 id="education-featured-heading" className="mt-1 text-lg font-black tracking-tight text-[#10213f] sm:text-2xl">Find the right learning path</h2>
+                    <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500 sm:text-sm">Explore verified courses, coaching and admissions support across every stage of your journey.</p>
+                  </div>
+                  <span className="hidden rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-slate-500 shadow-sm sm:inline-flex">{sectionCategories.length} categories</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+                  {EDUCATION_FEATURES.map((feature) => {
+                    const Icon = feature.icon;
+                    const active = selectedCategory === feature.id;
+                    return (
+                      <button
+                        key={feature.id}
+                        type="button"
+                        onClick={() => handleSelectRailCategory(feature.id)}
+                        className={`group relative min-h-[132px] overflow-hidden rounded-2xl border bg-gradient-to-br p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f06b3c] ${feature.tone} ${active ? 'ring-2 ring-[#f06b3c] ring-offset-1' : ''}`}
+                      >
+                        <span className="absolute -right-3 -top-3 text-5xl opacity-10 transition duration-300 group-hover:scale-110">{feature.emoji}</span>
+                        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/90 text-[#f06b3c] shadow-sm"><Icon className="h-5 w-5" aria-hidden="true" /></span>
+                        <span className="mt-4 block text-[11px] font-black leading-tight text-[#10213f] sm:text-sm">{feature.title}</span>
+                        <span className="mt-1 block text-[9px] leading-4 text-slate-500 sm:text-[10px]">{feature.subtitle}</span>
+                        <ChevronRight className="absolute bottom-3 right-3 h-3.5 w-3.5 text-[#f06b3c] transition group-hover:translate-x-0.5" aria-hidden="true" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
             {listings.length === 0 ? (
               <div className="bg-slate-50 dark:bg-[#131836] rounded-2xl p-8 text-center border border-slate-200/80 dark:border-slate-800 space-y-2.5 my-4">
                 <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-950/60 text-[#5B21B6] dark:text-purple-300 flex items-center justify-center mx-auto">
@@ -671,7 +730,7 @@ export const CategoryRailStreamExplorer: React.FC<CategoryRailStreamExplorerProp
               <div
                 className={
                   streamGridCols === 'compact'
-                    ? 'grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3.5'
+                    ? `${isEducationSection ? 'grid grid-cols-2 md:grid-cols-2 xl:grid-cols-3' : 'grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4'} gap-2.5 sm:gap-3.5`
                     : 'grid grid-cols-1 md:grid-cols-2 gap-3'
                 }
               >

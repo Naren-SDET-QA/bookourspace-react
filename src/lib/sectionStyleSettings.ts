@@ -9,7 +9,7 @@
 export type PgStyle = 'style1' | 'style2' | 'style3';
 export type StayStyle = 'old' | 'airbnb' | 'style3';
 export type ServicesStyle = 'old' | 'triangle' | 'noddyy';
-export type ClassesStyle = 'cards' | 'timetable' | 'style3';
+export type ClassesStyle = 'cards' | 'timetable' | 'style3' | 'style4';
 export type VenuesStyle = 'showcase' | 'agenda' | 'style3';
 export type MoviesStyle = 'experience' | 'classic' | 'style3';
 
@@ -28,21 +28,21 @@ const PREFS_KEY = 'bos_section_style_prefs_v1';
 export const SECTION_STYLES_EVENT = 'bos-section-styles-changed';
 
 /** Product decision: PG and Classes ship only the Style 3 experience. */
-export const STYLE3_LOCKED_SECTIONS = ['pg', 'classes'] as const;
+export const STYLE3_LOCKED_SECTIONS = ['pg'] as const;
 export function isStyle3Locked(section: keyof SectionStyles): boolean {
   return section === 'pg' || section === 'classes';
 }
 
 function applyStyleLocks(value: SectionStyles): SectionStyles {
   // Halls ships only Style 2 (agenda); Services only Style 2 (triangle).
-  return { ...value, pg: 'style3', classes: 'style3', venues: 'agenda', services: 'triangle' };
+  return { ...value, pg: 'style3', venues: 'agenda', services: 'triangle' };
 }
 
 const VALID_VALUES: Record<keyof SectionStyles, readonly string[]> = {
   pg: ['style1', 'style2', 'style3'],
   stay: ['old', 'airbnb', 'style3'],
   services: ['old', 'triangle', 'noddyy'],
-  classes: ['cards', 'timetable', 'style3'],
+  classes: ['cards', 'timetable', 'style3', 'style4'],
   venues: ['showcase', 'agenda', 'style3'],
   movies: ['experience', 'classic', 'style3'],
 };
@@ -66,7 +66,6 @@ export function loadStylePreferences(): Partial<SectionStyles> {
     const parsed = validStyles(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'));
     // A stored Style 1/2 choice is stale for the locked sections.
     if (parsed.pg) parsed.pg = 'style3';
-    if (parsed.classes) parsed.classes = 'style3';
     if (parsed.venues) parsed.venues = 'agenda';
     if (parsed.services) parsed.services = 'triangle';
     return parsed;
@@ -103,7 +102,7 @@ const DEFAULTS: SectionStyles = {
   pg: 'style3',
   stay: 'old',
   services: 'triangle',
-  classes: 'style3',
+  classes: 'style4',
   venues: 'agenda',
   movies: 'experience',
 };
@@ -124,7 +123,7 @@ export function loadSectionStyles(): SectionStyles {
         parsed.services === 'old' || parsed.services === 'triangle' || parsed.services === 'noddyy'
           ? parsed.services
           : DEFAULTS.services,
-      classes: parsed.classes === 'timetable' || parsed.classes === 'style3' ? parsed.classes : DEFAULTS.classes,
+      classes: parsed.classes === 'timetable' || parsed.classes === 'style3' || parsed.classes === 'style4' ? parsed.classes : DEFAULTS.classes,
       venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : DEFAULTS.venues,
       movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : DEFAULTS.movies,
       ...preferences,
@@ -150,7 +149,7 @@ export function applyRemoteSectionStyles(value: unknown, sectionStylesVersion?: 
       ? 'old'
       : parsed.stay === 'old' || parsed.stay === 'airbnb' || parsed.stay === 'style3' ? parsed.stay : loadSectionStyles().stay,
     services: parsed.services === 'old' || parsed.services === 'triangle' || parsed.services === 'noddyy' ? parsed.services : loadSectionStyles().services,
-    classes: parsed.classes === 'timetable' || parsed.classes === 'style3' ? parsed.classes : 'cards',
+    classes: parsed.classes === 'timetable' || parsed.classes === 'style3' || parsed.classes === 'style4' ? parsed.classes : 'cards',
     venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : 'showcase',
     movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : 'experience',
   } as SectionStyles;
@@ -211,7 +210,7 @@ export function getServicesStyle(): ServicesStyle {
 }
 
 export function getClassesStyle(): ClassesStyle {
-  return 'style3';
+  return loadSectionStyles().classes;
 }
 
 export function getVenuesStyle(): VenuesStyle {
