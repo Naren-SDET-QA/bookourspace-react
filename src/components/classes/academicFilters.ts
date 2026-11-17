@@ -100,6 +100,17 @@ const ART = {
   postgrad: photo('photo-1497366811353-6870744d04b2'),
   research: photo('photo-1532094349884-543bc11b234d'),
   exam: photo('photo-1434030216411-0b793f4b4173'),
+  school: photo('photo-1503676260728-1c00da094a0b'),
+  music: photo('photo-1511379938547-c1f69419868d'),
+  dance: photo('photo-1508807526345-15e9b5f4eaff'),
+  yoga: photo('photo-1544367567-0f2fcb009e0b'),
+  language: photo('photo-1546410531-bb4caa6b424d'),
+  photography: photo('photo-1452587925148-ce544e77e70d'),
+  marketing: photo('photo-1533750349088-cd871a92f312'),
+  government: photo('photo-1434030216411-0b793f4b4173'),
+  it: photo('photo-1518770660439-4636190af475'),
+  data: photo('photo-1551288049-bebda4e38f71'),
+  finance: photo('photo-1554224155-6726b3ff858f'),
 } as const;
 
 export type SubcategoryCard = {
@@ -113,6 +124,25 @@ type Programme = {
   title: string;
   cards: SubcategoryCard[];
 };
+
+/** Nursery to Class 12 — the School entry screen uses the same cards. */
+export const SCHOOL_CLASS_CARDS: SubcategoryCard[] = [
+  { label: 'Nursery', subtitle: 'Early learning · Play group', image: ART.school, words: ['nursery'] },
+  { label: 'LKG', subtitle: 'Lower kindergarten', image: ART.school, words: ['lkg'] },
+  { label: 'UKG', subtitle: 'Upper kindergarten', image: ART.school, words: ['ukg'] },
+  { label: 'Class 1', subtitle: 'Primary · All subjects', image: ART.books, words: ['class 1'] },
+  { label: 'Class 2', subtitle: 'Primary · All subjects', image: ART.books, words: ['class 2'] },
+  { label: 'Class 3', subtitle: 'Primary · All subjects', image: ART.books, words: ['class 3'] },
+  { label: 'Class 4', subtitle: 'Primary · All subjects', image: ART.books, words: ['class 4'] },
+  { label: 'Class 5', subtitle: 'Primary · All subjects', image: ART.books, words: ['class 5'] },
+  { label: 'Class 6', subtitle: 'Upper primary', image: ART.science, words: ['class 6'] },
+  { label: 'Class 7', subtitle: 'Upper primary', image: ART.science, words: ['class 7'] },
+  { label: 'Class 8', subtitle: 'Upper primary', image: ART.science, words: ['class 8'] },
+  { label: 'Class 9', subtitle: 'Board preparation', image: ART.maths, words: ['class 9'] },
+  { label: 'Class 10', subtitle: 'Board preparation', image: ART.maths, words: ['class 10'] },
+  { label: 'Class 11', subtitle: 'Intermediate · +2', image: ART.students, words: ['class 11'] },
+  { label: 'Class 12', subtitle: 'Intermediate · +2', image: ART.students, words: ['class 12'] },
+];
 
 /** Sub-categories (streams, programmes, exams) offered by each category. */
 const PROGRAMMES: Record<string, Programme> = {
@@ -217,6 +247,120 @@ const PROGRAMMES: Record<string, Programme> = {
       { label: 'UGC NET', subtitle: 'Lectureship · Research', image: ART.books, words: ['ugc net', 'net'] },
       { label: 'UPSC', subtitle: 'Civil services', image: ART.exam, words: ['upsc', 'prelims'] },
       { label: 'EAPCET', subtitle: 'State engineering entrance', image: ART.exam, words: ['eapcet'] },
+    ],
+  },
+  School: {
+    title: 'Class',
+    cards: SCHOOL_CLASS_CARDS,
+  },
+  Music: {
+    title: 'Instrument or Style',
+    cards: [
+      { label: 'Guitar', subtitle: 'Strings · Beginner friendly', image: ART.music, words: ['guitar'] },
+      { label: 'Singing', subtitle: 'Vocals · Classical and film', image: ART.music, words: ['singing', 'vocal'] },
+      { label: 'Piano', subtitle: 'Keys · Theory and practice', image: ART.music, words: ['piano', 'keyboard'] },
+      { label: 'Drums', subtitle: 'Percussion · Rhythm', image: ART.music, words: ['drums', 'percussion'] },
+    ],
+  },
+  Dance: {
+    title: 'Dance Style',
+    cards: [
+      { label: 'Classical', subtitle: 'Bharatanatyam · Kuchipudi', image: ART.dance, words: ['bharatanatyam', 'kuchipudi', 'classical dance'] },
+      { label: 'Bollywood', subtitle: 'Film · Freestyle', image: ART.dance, words: ['bollywood', 'freestyle'] },
+      { label: 'Western', subtitle: 'Hip-hop · Jazz', image: ART.dance, words: ['hip hop', 'hip-hop', 'jazz', 'western dance'] },
+      { label: 'Kids Dance', subtitle: 'Fun · Basics', image: ART.dance, words: ['kids dance', 'dance for kids'] },
+    ],
+  },
+  'Arts & Craft': {
+    title: 'Creative Course',
+    cards: [
+      { label: 'Drawing & Painting', subtitle: 'Sketching · Colour theory', image: ART.arts, words: ['drawing', 'painting', 'sketching'] },
+      { label: 'Craft', subtitle: 'Handmade · DIY', image: ART.arts, words: ['craft', 'handmade'] },
+      { label: 'Photography', subtitle: 'Camera · Editing', image: ART.photography, words: ['photography', 'camera'] },
+      { label: 'Design', subtitle: 'Graphic · Digital art', image: ART.arts, words: ['design', 'graphic'] },
+    ],
+  },
+  Languages: {
+    title: 'Language',
+    cards: [
+      { label: 'English', subtitle: 'Spoken · Grammar', image: ART.language, words: ['english'] },
+      { label: 'Hindi', subtitle: 'Reading · Writing', image: ART.language, words: ['hindi'] },
+      { label: 'French', subtitle: 'Beginner · A1', image: ART.language, words: ['french'] },
+      { label: 'Spanish', subtitle: 'Conversation', image: ART.language, words: ['spanish'] },
+      { label: 'German', subtitle: 'Beginner · A1', image: ART.language, words: ['german'] },
+    ],
+  },
+  'Yoga & Fitness': {
+    title: 'Programme',
+    cards: [
+      { label: 'Yoga', subtitle: 'Hatha · Ashtanga', image: ART.yoga, words: ['yoga'] },
+      { label: 'Fitness', subtitle: 'Strength · Cardio', image: ART.yoga, words: ['fitness', 'gym', 'cardio'] },
+      { label: 'Zumba', subtitle: 'Dance fitness', image: ART.dance, words: ['zumba', 'aerobics'] },
+      { label: 'Meditation', subtitle: 'Breathwork · Calm', image: ART.yoga, words: ['meditation', 'breathwork'] },
+    ],
+  },
+  Personality: {
+    title: 'Skill',
+    cards: [
+      { label: 'Communication', subtitle: 'Speaking · Confidence', image: ART.students, words: ['communication', 'confidence'] },
+      { label: 'Life Skills', subtitle: 'Habits · Time management', image: ART.students, words: ['life skills', 'time management'] },
+      { label: 'Public Speaking', subtitle: 'Debate · Stage', image: ART.students, words: ['public speaking', 'debate'] },
+      { label: 'Interview Prep', subtitle: 'Resume · Mock rounds', image: ART.business, words: ['interview', 'resume'] },
+    ],
+  },
+  'IT & AI': {
+    title: 'Technology',
+    cards: [
+      { label: 'Programming', subtitle: 'Python · Java', image: ART.it, words: ['python', 'java', 'programming'] },
+      { label: 'Web Development', subtitle: 'HTML · React', image: ART.computer, words: ['web development', 'react', 'html'] },
+      { label: 'AI & ML', subtitle: 'Models · Data', image: ART.data, words: ['ai', 'artificial intelligence', 'machine learning'] },
+      { label: 'Cyber Security', subtitle: 'Networks · Defence', image: ART.it, words: ['cyber', 'security'] },
+    ],
+  },
+  'Data & Cloud': {
+    title: 'Specialisation',
+    cards: [
+      { label: 'Data Science', subtitle: 'Python · SQL', image: ART.data, words: ['data science', 'sql'] },
+      { label: 'Cloud', subtitle: 'AWS · Azure', image: ART.data, words: ['cloud', 'aws', 'azure'] },
+      { label: 'Analytics', subtitle: 'Excel · BI tools', image: ART.data, words: ['analytics', 'bi'] },
+      { label: 'DevOps', subtitle: 'CI/CD · Containers', image: ART.it, words: ['devops', 'docker', 'kubernetes'] },
+    ],
+  },
+  'Business & Finance': {
+    title: 'Programme',
+    cards: [
+      { label: 'Accounting', subtitle: 'Tally · Bookkeeping', image: ART.finance, words: ['accounting', 'tally'] },
+      { label: 'Taxation', subtitle: 'GST · Returns', image: ART.finance, words: ['taxation', 'gst', 'tax'] },
+      { label: 'Banking', subtitle: 'Banking exams · Credit', image: ART.finance, words: ['banking', 'ibps', 'bank exam'] },
+      { label: 'Investment', subtitle: 'Markets · Mutual funds', image: ART.finance, words: ['investment', 'mutual fund', 'stock'] },
+    ],
+  },
+  'CA / CMA / CS': {
+    title: 'Certification',
+    cards: [
+      { label: 'CA', subtitle: 'Foundation · Inter · Final', image: ART.finance, words: ['ca foundation', 'chartered accountant', 'ca inter'] },
+      { label: 'CMA', subtitle: 'Cost accounting', image: ART.accounts, words: ['cma', 'cost accountant'] },
+      { label: 'CS', subtitle: 'Company secretary', image: ART.books, words: ['company secretary', 'cs executive'] },
+      { label: 'GST', subtitle: 'Returns · Compliance', image: ART.accounts, words: ['gst', 'compliance'] },
+    ],
+  },
+  'Government Exams': {
+    title: 'Exam',
+    cards: [
+      { label: 'UPSC', subtitle: 'Civil services', image: ART.government, words: ['upsc', 'civil services'] },
+      { label: 'SSC', subtitle: 'Staff selection', image: ART.government, words: ['ssc'] },
+      { label: 'Banking Exams', subtitle: 'IBPS · SBI PO', image: ART.finance, words: ['ibps', 'sbi po', 'bank exam'] },
+      { label: 'Railway', subtitle: 'RRB · NTPC', image: ART.government, words: ['railway', 'rrb', 'ntpc'] },
+      { label: 'State PSC', subtitle: 'Groups · APPSC · TSPSC', image: ART.government, words: ['appsc', 'tspsc', 'state psc', 'group'] },
+    ],
+  },
+  'Digital Marketing': {
+    title: 'Specialisation',
+    cards: [
+      { label: 'SEO', subtitle: 'Search · Content', image: ART.marketing, words: ['seo', 'search engine'] },
+      { label: 'Social Media', subtitle: 'Instagram · Meta ads', image: ART.marketing, words: ['social media', 'instagram'] },
+      { label: 'Google Ads', subtitle: 'PPC · Analytics', image: ART.marketing, words: ['google ads', 'ppc', 'adwords'] },
+      { label: 'Content', subtitle: 'Copy · Video', image: ART.marketing, words: ['content', 'copywriting'] },
     ],
   },
 };

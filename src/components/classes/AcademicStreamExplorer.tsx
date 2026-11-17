@@ -20,6 +20,8 @@ type Props = {
   sectionRequest?: { short: string; key: number } | null;
   /** The landing "Admissions" shortcut opens School with the admissions sheet. */
   admissionRequest?: number;
+  /** Which pathway this explorer shows: academic, personal or professional. */
+  scope?: 'Academic' | 'Personal' | 'Professional';
 };
 
 const img = (id: string, w = 500): string =>
@@ -38,6 +40,16 @@ const P = {
   research: 'photo-1532094349884-543bc11b234d',
   maths: 'photo-1509228468518-180dd4864904',
   exam: 'photo-1434030216411-0b793f4b4173',
+  music: 'photo-1511379938547-c1f69419868d',
+  dance: 'photo-1508807526345-15e9b5f4eaff',
+  arts: 'photo-1508700115892-45ecd05ae2ad',
+  language: 'photo-1546410531-bb4caa6b424d',
+  yoga: 'photo-1544367567-0f2fcb009e0b',
+  it: 'photo-1518770660439-4636190af475',
+  data: 'photo-1551288049-bebda4e38f71',
+  finance: 'photo-1554224155-6726b3ff858f',
+  marketing: 'photo-1533750349088-cd871a92f312',
+  government: 'photo-1434030216411-0b793f4b4173',
 } as const;
 
 type AcademicSection = {
@@ -50,6 +62,8 @@ type AcademicSection = {
   image: string;
   /** Lowercase whole-word keywords matched against a listing's search text. */
   keywords: string[];
+  /** Personal and professional sections leave this unset (academic). */
+  group?: 'Personal' | 'Professional';
 };
 
 const SECTIONS: AcademicSection[] = [
@@ -129,6 +143,102 @@ const SECTIONS: AcademicSection[] = [
     examples: 'NEET · JEE · CAT · GATE · UGC NET · UPSC · EAPCET and others',
     image: P.exam,
     keywords: ['entrance', 'neet', 'jee', 'cat', 'gate', 'ugc net', 'upsc', 'eapcet', 'cet', 'prelims', 'exam'],
+  },
+  {
+    short: 'Music',
+    label: 'Music classes',
+    examples: 'Guitar · Singing · Piano · Drums · Theory',
+    image: P.music,
+    keywords: ['music', 'guitar', 'singing', 'vocal', 'piano', 'keyboard', 'drums', 'percussion'],
+    group: 'Personal',
+  },
+  {
+    short: 'Dance',
+    label: 'Dance',
+    examples: 'Classical · Bollywood · Western · Kids dance',
+    image: P.dance,
+    keywords: ['dance', 'bharatanatyam', 'kuchipudi', 'bollywood', 'hip hop', 'salsa', 'ballet'],
+    group: 'Personal',
+  },
+  {
+    short: 'Arts & Craft',
+    label: 'Arts and Craft',
+    examples: 'Drawing · Painting · Craft · Photography · Design',
+    image: P.arts,
+    keywords: ['art', 'arts', 'drawing', 'painting', 'sketching', 'craft', 'photography', 'design'],
+    group: 'Personal',
+  },
+  {
+    short: 'Languages',
+    label: 'Languages',
+    examples: 'English · Hindi · French · Spanish · German',
+    image: P.language,
+    keywords: ['language', 'english', 'hindi', 'french', 'spanish', 'german', 'japanese', 'spoken'],
+    group: 'Personal',
+  },
+  {
+    short: 'Yoga & Fitness',
+    label: 'Yoga and Fitness',
+    examples: 'Yoga · Fitness · Zumba · Meditation · Wellness',
+    image: P.yoga,
+    keywords: ['yoga', 'fitness', 'gym', 'zumba', 'aerobics', 'meditation', 'wellness'],
+    group: 'Personal',
+  },
+  {
+    short: 'Personality',
+    label: 'Personality and Life Skills',
+    examples: 'Communication · Life skills · Public speaking · Interview prep',
+    image: P.students,
+    keywords: ['personality', 'life skills', 'communication', 'public speaking', 'confidence', 'soft skills'],
+    group: 'Personal',
+  },
+  {
+    short: 'IT & AI',
+    label: 'IT, AI and Programming',
+    examples: 'Python · Web development · AI and ML · Cyber security',
+    image: P.it,
+    keywords: ['python', 'java', 'programming', 'coding', 'web development', 'artificial intelligence', 'machine learning', 'cyber'],
+    group: 'Professional',
+  },
+  {
+    short: 'Data & Cloud',
+    label: 'Data, Analytics and Cloud',
+    examples: 'Data science · AWS · Azure · Analytics · DevOps',
+    image: P.data,
+    keywords: ['data science', 'cloud', 'aws', 'azure', 'analytics', 'devops', 'sql', 'big data'],
+    group: 'Professional',
+  },
+  {
+    short: 'Business & Finance',
+    label: 'Business and Finance',
+    examples: 'Accounting · Taxation · Banking · Investment',
+    image: P.finance,
+    keywords: ['finance', 'accounting', 'taxation', 'gst', 'tally', 'banking', 'investment', 'mutual fund'],
+    group: 'Professional',
+  },
+  {
+    short: 'CA / CMA / CS',
+    label: 'CA, CMA and CS',
+    examples: 'CA foundation · CMA · CS executive · GST compliance',
+    image: P.finance,
+    keywords: ['chartered accountant', 'ca foundation', 'ca inter', 'cma', 'cost accountant', 'company secretary', 'cs executive'],
+    group: 'Professional',
+  },
+  {
+    short: 'Government Exams',
+    label: 'Government exams',
+    examples: 'UPSC · SSC · Banking · Railway · State PSC',
+    image: P.government,
+    keywords: ['upsc', 'ssc', 'ibps', 'sbi po', 'railway', 'rrb', 'ntpc', 'appsc', 'tspsc', 'group', 'police'],
+    group: 'Professional',
+  },
+  {
+    short: 'Digital Marketing',
+    label: 'Digital Marketing',
+    examples: 'SEO · Social media · Google Ads · Content',
+    image: P.marketing,
+    keywords: ['digital marketing', 'seo', 'social media', 'google ads', 'ppc', 'content marketing', 'branding'],
+    group: 'Professional',
   },
 ];
 
@@ -481,9 +591,23 @@ function BrowseGroup({ title, tiles, active, onSelect }: { title: string; tiles:
   );
 }
 
-export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionRequest, admissionRequest }: Props) {
+export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionRequest, admissionRequest, scope = 'Academic' }: Props) {
   const [activeIndex, setActiveIndex] = useState(readSavedSectionIndex);
-  const active = SECTIONS[activeIndex];
+  // Each pathway (academic, personal, professional) shows only its own categories.
+  const sections = useMemo(
+    () => SECTIONS.filter((section) => (section.group ?? 'Academic') === scope),
+    [scope],
+  );
+  const safeIndex = Math.min(activeIndex, sections.length - 1);
+  const active = sections[safeIndex];
+
+  // Switching pathway starts at its first category instead of a foreign index.
+  const scopeRef = useRef(scope);
+  useEffect(() => {
+    if (scopeRef.current === scope) return;
+    scopeRef.current = scope;
+    setActiveIndex(0);
+  }, [scope]);
 
   // The rail filters the academic listing pool locally, so a section can never
   // bounce the learner out of the pathway or empty the grid through the parent
@@ -560,7 +684,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
     if (!admissionRequest) return;
     // The category-reset effect also runs on mount; this request must outlive it.
     keepAdmissionRequest.current = true;
-    const schoolIndex = SECTIONS.findIndex((section) => section.short === 'School');
+    const schoolIndex = sections.findIndex((section) => section.short === 'School');
     if (schoolIndex >= 0 && schoolIndex !== activeIndex) setActiveIndex(schoolIndex);
     setSelectedFilters({});
     setSchoolClass(null);
@@ -614,9 +738,9 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
   // instead of dropping the learner back on the pathway landing.
   useEffect(() => {
     if (!sectionRequest) return;
-    const index = SECTIONS.findIndex((section) => section.short.toLowerCase() === sectionRequest.short.toLowerCase());
+    const index = sections.findIndex((section) => section.short.toLowerCase() === sectionRequest.short.toLowerCase());
     if (index >= 0) setActiveIndex(index);
-  }, [sectionRequest]);
+  }, [sectionRequest, sections]);
 
   return (
     <section className="overflow-hidden bg-white">
@@ -624,8 +748,8 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
         {/* The rail scrolls on its own so all sections stay reachable while the
             listings beside it remain visible. */}
         <aside aria-label="Academic categories" className="max-h-[70vh] w-[68px] shrink-0 self-start overflow-y-auto border-r border-[#e6ecf6] bg-[#f0f5fc] sm:w-[136px]">
-          {SECTIONS.map((section, index) => {
-            const isActive = index === activeIndex;
+          {sections.map((section, index) => {
+            const isActive = index === safeIndex;
             return (
               <button
                 key={section.label}
@@ -752,7 +876,8 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                   <span aria-hidden className="pointer-events-none absolute -right-1 -top-1 text-[38px] leading-none">🎓</span>
                 </div>
 
-                {active.short === 'School' && (
+                {/* Every category's page offers the same service choice; only
+                    School opens the admissions-style filter sheet. */}
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {['Admissions', 'Tuition', 'Coaching'].map((service) => {
                     const isActive = schoolService === service;
@@ -763,7 +888,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                         onClick={() => {
                           const next = isActive ? null : service;
                           chooseService(next);
-                          setSchoolSheetOpen(Boolean(next));
+                          setSchoolSheetOpen(active.short === 'School' && Boolean(next));
                         }}
                         aria-pressed={isActive}
                         className={`rounded-full border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${isActive ? 'border-[#6f3ff2] bg-[#6f3ff2] text-white' : 'border-[#e6dcff] bg-white text-[#5b3fa8] hover:bg-[#f8f4ff]'}`}
@@ -773,7 +898,6 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                     );
                   })}
                 </div>
-                )}
 
                 {/* Subjects belong to tuition and coaching; admissions never shows them. */}
                 {(schoolService === 'Tuition' || schoolService === 'Coaching') && (
@@ -816,6 +940,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                 <div className="mt-2.5 flex items-center justify-between gap-2">
                   <p className="truncate text-[10.5px] font-semibold text-[#5b6b85]">
                     <span className="font-black text-[#12244a]">{schoolResults.length} {schoolResults.length === 1 ? 'result' : 'results'}</span> for {schoolClass ?? schoolService ?? 'all classes'}
+                    {schoolClass && schoolService ? ` \u00b7 ${schoolService}` : ''}
                     {currentFilterValue('subject') ? ` \u00b7 ${currentFilterValue('subject')}` : ''}
                   </p>
                   <div className="flex shrink-0 rounded-lg border border-[#e6ecf6] p-0.5">

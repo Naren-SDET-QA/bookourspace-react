@@ -1,6 +1,7 @@
-import { BookOpen, FileText, Layers, MapPin, Monitor, SlidersHorizontal, Users } from 'lucide-react';
+import { BookOpen, FileText, GraduationCap, MapPin, Monitor, SlidersHorizontal, Users } from 'lucide-react';
 import type { ComponentType } from 'react';
 import SafeImage from '../SafeImage';
+import { SCHOOL_CLASS_CARDS } from './academicFilters';
 
 type Props = {
   /** Selected service (admissions, tuition, coaching), or null for every service. */
@@ -34,26 +35,6 @@ const SERVICE_TILES: FilterTile[] = [
 const MODE_TILES: FilterTile[] = [
   { label: 'Online', icon: Monitor, bg: '#e2f6ec', fg: '#17a673' },
   { label: 'Offline', icon: MapPin, bg: '#fdf3e7', fg: '#e8912f' },
-];
-
-type ClassTile = { label: string; bg: string; emoji?: string; num?: string; numBg?: string };
-
-const CLASSES: ClassTile[] = [
-  { label: 'Nursery', bg: '#fde7ea', emoji: '🧸' },
-  { label: 'LKG', bg: '#dfeefc', emoji: '🧩' },
-  { label: 'UKG', bg: '#efe6fb', emoji: '🧱' },
-  { label: 'Class 1', bg: '#fde9e4', num: '1', numBg: '#ef5350' },
-  { label: 'Class 2', bg: '#fdf1dc', num: '2', numBg: '#f5a02b' },
-  { label: 'Class 3', bg: '#e3f2fc', num: '3', numBg: '#2f9be0' },
-  { label: 'Class 4', bg: '#e4f6e5', num: '4', numBg: '#34a853' },
-  { label: 'Class 5', bg: '#fdf3df', num: '5', numBg: '#e0a92b' },
-  { label: 'Class 6', bg: '#e9eefc', num: '6', numBg: '#3b6fe0' },
-  { label: 'Class 7', bg: '#fdeee2', num: '7', numBg: '#e8802f' },
-  { label: 'Class 8', bg: '#fde3f0', num: '8', numBg: '#e94b8a' },
-  { label: 'Class 9', bg: '#ece4fb', num: '9', numBg: '#8b5cf6' },
-  { label: 'Class 10', bg: '#fde3ea', num: '10', numBg: '#e0417c' },
-  { label: 'Class 11', bg: '#fdeae7', num: '11', numBg: '#4a7de8' },
-  { label: 'Class 12', bg: '#e3f2e2', num: '12', numBg: '#3aa856' },
 ];
 
 /**
@@ -131,11 +112,11 @@ export function SchoolClassPicker({ filter, onFilter, modeFilter, onModeFilter, 
 
       <div className="mt-3 sm:mt-4">
         <h3 className="flex items-center gap-1.5 text-[13px] font-black tracking-tight text-[#1b2a4a] sm:text-[18px]">
-          <Layers className="h-4 w-4 shrink-0 text-[#ef5a7a] sm:h-5 sm:w-5" aria-hidden />
-          Select class
+          <GraduationCap className="h-4 w-4 shrink-0 text-[#ef5a7a] sm:h-5 sm:w-5" aria-hidden />
+          Choose Your Class
         </h3>
-        <div className="mt-1.5 grid grid-cols-4 gap-1 sm:mt-2 sm:gap-2">
-          {CLASSES.map(({ label, bg, emoji, num, numBg }) => {
+        <div className="mt-1.5 grid grid-cols-2 gap-2 sm:mt-2 sm:gap-2.5 lg:grid-cols-3">
+          {SCHOOL_CLASS_CARDS.map(({ label, subtitle, image }) => {
             const isActive = selectedClass === label;
             return (
               <button
@@ -144,21 +125,31 @@ export function SchoolClassPicker({ filter, onFilter, modeFilter, onModeFilter, 
                 onClick={() => onSelectClass(isActive ? null : label)}
                 aria-pressed={isActive}
                 aria-label={`Select ${label}`}
-                style={{ backgroundColor: bg }}
-                className={`flex flex-col items-center gap-1 rounded-xl border px-0.5 py-1.5 transition sm:rounded-2xl sm:py-2.5 ${isActive ? 'border-[#2874f0] ring-1 ring-[#2874f0]/30' : 'border-transparent hover:brightness-[.98]'}`}
+                className={`group overflow-hidden rounded-2xl border bg-white text-left shadow-[0_2px_10px_rgba(23,37,84,.06)] transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0] ${
+                  isActive ? 'border-[#2874f0] ring-2 ring-[#2874f0]/25' : 'border-[#e8ecf3]'
+                }`}
               >
-                {emoji ? (
-                  <span aria-hidden className="text-[17px] leading-none sm:text-[24px]">{emoji}</span>
-                ) : (
+                <span className="block h-[74px] w-full overflow-hidden bg-[#f4f7fd] sm:h-[92px]">
+                  <SafeImage
+                    src={image}
+                    alt=""
+                    category="classes"
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    sizes="(max-width: 639px) 45vw, 200px"
+                  />
+                </span>
+                <span className="flex items-center gap-1.5 px-2 py-1.5">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[11.5px] font-black leading-tight text-[#172554] sm:text-[13px]">{label}</span>
+                    <span className="mt-0.5 block truncate text-[8.5px] font-semibold text-[#64748b] sm:text-[10px]">{subtitle}</span>
+                  </span>
                   <span
                     aria-hidden
-                    style={{ backgroundColor: numBg }}
-                    className="flex h-6 w-6 -rotate-3 items-center justify-center rounded-[7px] text-[11px] font-black leading-none text-white shadow-[0_2px_5px_rgba(16,36,74,.18)] sm:h-8 sm:w-8 sm:rounded-[9px] sm:text-[14px]"
+                    className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-black ${isActive ? 'bg-[#2874f0] text-white' : 'bg-[#eff4ff] text-[#2874f0]'}`}
                   >
-                    {num}
+                    →
                   </span>
-                )}
-                <span className="text-center text-[8.5px] font-bold leading-tight text-[#23324d] sm:text-[11.5px]">{label}</span>
+                </span>
               </button>
             );
           })}
