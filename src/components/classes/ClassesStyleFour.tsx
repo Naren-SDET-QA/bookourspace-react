@@ -52,3 +52,76 @@ export function ClassesStyleFour({ courses, academicCourses, query, onQuery, onC
     if (section && onAcademicSection) onAcademicSection(section);
     else onCategory(label);
   }; return <div className="min-h-screen bg-[#fbfcff] text-[#10244a]"><header className={`sticky top-0 z-20 h-[58px] items-center justify-between gap-4 border-b border-slate-100 bg-white px-4 shadow-sm lg:px-8 ${group === 'Academic' ? 'hidden sm:flex' : 'flex'}`}><div className="flex items-center gap-2"><div className="flex h-10 w-10 items-center justify-center rounded-br-2xl rounded-tl-2xl bg-gradient-to-br from-orange-500 to-blue-700 text-2xl font-black text-white">B</div><div className="hidden leading-none sm:block"><div className="text-[22px] font-black tracking-tight text-[#0f1c3d]">Book<span className="text-orange-500">Our</span><span className="text-blue-700">Space</span></div><small className="text-[10px] font-bold tracking-widest text-slate-500">FIND · BOOK · LEARN · GROW</small></div></div><nav className="hidden items-center gap-1 text-[13px] font-black lg:flex">{['⌂ Home', '▦ Hotels', '♧ PG', '♧ Halls', '♡ Services'].map(x => <button key={x} className="rounded-full px-4 py-3 hover:bg-slate-50">{x}</button>)}<button className="rounded-full bg-[#ffd5f4] px-5 py-3 text-[#492395]">♧ Classes &amp; Learning</button><button className="rounded-full px-4 py-3">▣ Movies</button><button className="rounded-full px-4 py-3">More⌄</button></nav><div className="flex items-center gap-3 text-blue-700"><span className="hidden items-center gap-1 rounded-full border px-3 py-2 text-xs font-bold md:flex"><MapPin className="h-4 w-4" /> Andhra Pradesh <ChevronDown className="h-3 w-3" /></span><Bell className="h-5 w-5" /><UserRound className="h-8 w-8 rounded-full bg-blue-600 p-1.5 text-white" /></div></header><section className={`relative overflow-hidden bg-[linear-gradient(180deg,#dff1ff,#fff3fa)] px-4 text-center lg:px-10 ${group === 'Academic' ? 'pb-3 pt-3 sm:pb-8 sm:pt-7' : 'pb-8 pt-7'}`}><div className={`absolute inset-0 bg-[url('https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1800&q=82')] bg-cover bg-center opacity-25 ${group === 'Academic' ? 'hidden sm:block' : ''}`} /><div className="relative mx-auto max-w-6xl"><h1 className={`font-black tracking-tight text-[#10204b] ${group === 'Academic' ? 'text-[17px] leading-tight sm:text-4xl' : 'text-3xl sm:text-4xl'}`}>Learn · Get Admitted · Build Your Career</h1><p className={`mt-2 text-base font-semibold text-[#2c3c61] sm:text-lg ${group === 'Academic' ? 'hidden sm:block' : ''}`}>Schools, Colleges, Courses, Skills, Trainings &amp; More — All in One Place</p><label className={`mx-auto flex max-w-[840px] items-center overflow-hidden rounded-full border-4 border-white bg-white text-slate-400 shadow-lg ${group === 'Academic' ? 'mt-2 sm:mt-5' : 'mt-5'}`}><Search className="ml-5 h-6 w-6" /><input value={query} onChange={e => onQuery(e.target.value)} placeholder="Search courses, colleges, exams, skills or trainers..." className={`min-w-0 flex-1 px-4 outline-none ${group === 'Academic' ? 'py-2.5 text-[13px] sm:py-4 sm:text-sm' : 'py-4 text-sm'}`} /><button type="button" className={`bg-gradient-to-r from-pink-500 to-orange-400 text-sm font-black text-white ${group === 'Academic' ? 'px-5 py-2.5 sm:px-8 sm:py-4' : 'px-8 py-4'}`}>Search</button></label></div></section><main className={group === 'Academic' ? 'mx-auto max-w-[1450px] pb-12' : 'mx-auto max-w-[1450px] px-4 pb-12 lg:px-8'}>{pathway ? <div className="m-2 overflow-hidden rounded-2xl border border-[#e6ecf6] bg-white shadow-[0_12px_40px_rgba(27,50,90,.08)] sm:m-3 sm:rounded-[26px] lg:m-5"><div className="flex items-center justify-between gap-2 border-b border-[#eef2f8] bg-[#fbfdff] px-2.5 py-2 sm:px-5"><button type="button" onClick={() => onCategory('All')} className="inline-flex items-center gap-1 rounded-full border border-[#e2ecff] bg-white px-2.5 py-1.5 text-[11px] font-bold text-[#2874f0] hover:bg-[#f2f7ff] sm:px-3">← All courses</button><span className="text-[10px] font-semibold text-[#7185a6]">{pathway} pathway</span></div><AcademicStreamExplorer courses={pathway === 'Academic' ? (academicCourses ?? courses) : courses} query={query} onOpen={onOpen} sectionRequest={academicSectionRequest} admissionRequest={admissionRequest} scope={pathway ?? 'Academic'} /></div> : <><div className="-mt-1 grid gap-4 lg:grid-cols-3">{cards.map(x => <FeatureCard key={x.title} item={x} onCategory={onCategory} />)}</div><div className="mt-7 grid grid-cols-2 gap-2 rounded-3xl bg-white px-2 py-4 shadow-[0_5px_22px_rgba(27,50,90,.08)] sm:grid-cols-4 lg:grid-cols-8">{[['All Courses', '🎓'], ['Find Institutes', '🏫'], ['Admissions', '🗓️'], ['Exams & Notifications', '📋'], ['Certifications', '🛡️'], ['Online & Offline', '▶'], ['Near Me', '📍'], ['Saved', '♡']].map(([x, icon]) => <button key={x} type="button" onClick={() => { const value = ({ 'All Courses': 'All', 'Find Institutes': 'Institute', Admissions: 'Admission', 'Exams & Notifications': 'Exam', Certifications: 'Certification', 'Online & Offline': 'Online', 'Near Me': 'Near', Saved: 'Saved' } as Record<string, string>)[x]; if (value === 'Admission') openAdmissions(); else onCategory(value); }} className="flex flex-col items-center gap-1 border-r border-slate-200 px-2 text-center text-[11px] font-black last:border-0 hover:text-blue-600"><span className="text-2xl">{icon}</span>{x}</button>)}</div><div className="mt-8 flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-3 text-2xl font-black"><span className="text-orange-500">▱</span>Browse Learning Categories</h2><div className="flex gap-2">{['All', 'Academic', 'Personal', 'Professional'].map(x => <button key={x} type="button" onClick={() => onCategory(x)} className="rounded-full border border-slate-200 bg-white px-5 py-2 text-xs font-black shadow-sm first:bg-violet-600 first:text-white">{x}</button>)}</div></div><div className="mt-4 grid gap-4 lg:grid-cols-[260px_1fr]"><aside className="rounded-2xl bg-white p-2 shadow-sm ring-1 ring-slate-100">{categories.map(([label, value]) => <button type="button" key={label} onClick={() => openLabel(value)} className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-bold hover:bg-pink-50"><span>{label}</span><ArrowRight className="h-4 w-4" /></button>)}</aside><section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100"><div className="flex items-center justify-between"><div><h3 className="text-xl font-black">School Education</h3><p className="text-xs font-semibold text-slate-500">Pre-primary to Class 12 · CBSE, ICSE, State Board &amp; More</p></div><button type="button" onClick={() => onCategory('School')} className="text-xs font-black text-violet-700">View All →</button></div><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{schoolCards.map(([label, subtitle, image]) => <button type="button" key={label} onClick={() => openLabel(label)} className="overflow-hidden rounded-2xl border border-slate-100 text-left shadow-sm hover:shadow-md"><img src={photo(image, 500)} alt="" className="h-24 w-full object-cover" /><p className="p-2 pb-0 text-xs font-black">{label}</p><p className="px-2 pb-2 text-[10px] font-semibold text-slate-500">{subtitle}</p></button>)}</div></section></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{courses.slice(0, 3).map(course => <button type="button" key={course.id} onClick={() => onOpen(course)} className="flex gap-3 rounded-2xl bg-white p-3 text-left shadow-sm ring-1 ring-slate-100"><SafeImage src={course.image} alt="" category="classes" className="h-16 w-20 rounded-xl object-cover" /><span className="min-w-0"><b className="line-clamp-2 text-xs">{course.title}</b><span className="mt-1 block text-[10px] text-slate-500">{course.provider}</span><span className="mt-1 flex items-center gap-1 text-[10px] font-bold text-blue-600"><ShieldCheck className="h-3 w-3" /> Verified · View details</span></span></button>)}</div></> }</main></div>; }
+
+// Style 1 cards - simpler list-style cards showing section options
+export function Style1Cards({ onSectionSelect }: { onSectionSelect: (section: string) => void }) {
+  return (
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
+      {style1Cards.map((card) => (
+        <button
+          key={card.label}
+          type="button"
+          onClick={() => onSectionSelect(card.section)}
+          className={
+            `rounded-xl border bg-white p-4 shadow-sm hover:shadow-md transition duration-300 flex flex-col items-center gap-2 [&>span]:text-[#172554] [&>svg]:text-[#6f3ff2]`
+          }
+        >
+          <SafeImage
+            src={card.image}
+            alt={card.label}
+            category="classes"
+            className="w-full h-24 object-cover rounded-txl"
+          />
+          <span className="text-[12px] font-black text-[#172554] truncate" title={card.label}>{card.label}</span>
+          <p className="text-[10px] text-[#64748b] line-clamp-1">{card.subtitle}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type Style1Card = {
+  label: string;
+  subtitle: string;
+  image: string;
+  section: string;
+};
+
+const style1Cards: Style1Card[] = [
+  // School section
+  { label: 'Nursery - Class 10', subtitle: 'Nursery through Class 10 image cards', image: 'photo-1503676260728-1c00da094a0b', section: 'School' },
+  // Inter section
+  { label: 'MPC, BiPC, MEC, CEC', subtitle: 'Intermediate streams with subject combinations', image: 'photo-1523240795612-9a054b0db644', section: 'Inter' },
+  // Degree section
+  { label: 'B.A., B.Sc, B.Com', subtitle: 'Undergraduate programmes across streams', image: 'photo-1523050854058-8df90110c9f1', section: 'Degree' },
+  // Engineering section
+  { label: 'B.Tech, Polytechnic', subtitle: 'Engineering and technology programmes', image: 'photo-1518770660439-4636190af475', section: 'Engineering' },
+  // Medical section
+  { label: 'MBBS, BDS, BAMS', subtitle: 'Medical and healthcare programmes', image: 'photo-1576091160399-112ba8d25d1d', section: 'Medical' },
+  // Law section
+  { label: 'LLB, LLM', subtitle: 'Law degrees and specialisations', image: 'photo-1589829545856-d10d557cf95f', section: 'Law' },
+  // MBA section
+  { label: 'MBA, PGDM', subtitle: 'Business and management programmes', image: 'photo-1517245386807-bb43f82c33c4', section: 'MBA' },
+  // PG section
+  { label: 'M.A., M.Sc, M.Com', subtitle: 'Postgraduate programmes', image: 'photo-1497366811353-6870744d04b2', section: 'PG' },
+  // PhD section
+  { label: 'PhD, Research', subtitle: 'Doctoral and research programmes', image: 'photo-1532094349884-543bc11b234d', section: 'PhD' },
+  // Diploma section
+  { label: 'Diploma, Polytechnic', subtitle: 'Diploma and vocational programmes', image: 'photo-1504328345606-18bbc8c9d7d1', section: 'Diploma' },
+  // Entrance section
+  { label: 'NEET, JEE, CAT', subtitle: 'Entrance examination preparation', image: 'photo-1434030216411-0b793f4b4173', section: 'Entrance' },
+  // Music section
+  { label: 'Music, Dance, Arts', subtitle: 'Creative and performing arts programmes', image: 'photo-1511379938547-c1f69419868d', section: 'Music' },
+  // Languages section
+  { label: 'English, Hindi, French', subtitle: 'Language learning programmes', image: 'photo-1546410531-bb4caa6b424d', section: 'Languages' },
+  // Yoga & Fitness section
+  { label: 'Yoga, Fitness, Zumba', subtitle: 'Wellness and fitness programmes', image: 'photo-1544367567-0f2fcb009e0b', section: 'Yoga & Fitness' },
+  // IT & AI section
+  { label: 'Programming, AI, Cloud', subtitle: 'Technology and AI training', image: 'photo-1518770660439-4636190af475', section: 'IT & AI' },
+  // Business & Finance section
+  { label: 'Accounting, Taxation, Banking', subtitle: 'Business and finance programmes', image: 'photo-1554224155-6726b3ff858f', section: 'Business & Finance' },
+  // Government Exams section
+  { label: 'UPSC, SSC, Banking', subtitle: 'Government job examination preparation', image: 'photo-1434030216411-0b793f4b4173', section: 'Government Exams' },
+  // Digital Marketing section
+  { label: 'SEO, Social Media, Google Ads', subtitle: 'Digital marketing specialisations', image: 'photo-1533750349088-cd871a92f312', section: 'Digital Marketing' },
+];
