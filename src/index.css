@@ -36,6 +36,27 @@
     linear-gradient(165deg, #0B0E1A 0%, #0B0F1E 52%, #090C17 100%);
   padding: max(24px, env(safe-area-inset-top)) clamp(20px, 5vw, 28px) max(28px, env(safe-area-inset-bottom));
 }
+
+/* Classes marketplace (Style 4). Scoped to .bos-classes-fk so it cannot
+   restyle SiteChrome or other sticky headers. */
+.bos-classes-fk {
+  --fk-blue: #2874f0;
+  --fk-blue-deep: #1a5dc9;
+  --fk-yellow: #ffe500;
+  --fk-bg: #f1f3f6;
+  --fk-ink: #212121;
+  --fk-muted: #878787;
+  --fk-green: #388e3c;
+  background: var(--fk-bg);
+  color: var(--fk-ink);
+  font-family: Inter, Roboto, Arial, sans-serif;
+}
+
+.bos-classes-fk input:focus-visible,
+.bos-classes-fk button:focus-visible {
+  outline: 2px solid #ffe500;
+  outline-offset: 2px;
+}
 .bos-entry-screen::before { content: ''; position: absolute; inset: 0; z-index: -3; pointer-events: none; opacity: .2; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse at 50% 36%, #000 0%, transparent 72%); }
 .bos-entry-backdrop { position: absolute; inset: 0; z-index: -2; overflow: hidden; pointer-events: none; }
 .bos-entry-aurora { position: absolute; z-index: 0; width: min(70vw, 520px); aspect-ratio: 1; border-radius: 9999px; pointer-events: none; filter: blur(90px); }

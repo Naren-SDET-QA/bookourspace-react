@@ -1970,7 +1970,6 @@ function MarketplaceAppContent() {
   // Exactly one curated, bookable demo card per module (demo mode only).
   const demoCardSection: DemoSectionKey | null =
     activeSectionExperience === 'pg_hostels' ? 'pg'
-    : activeSectionExperience === 'classes' ? 'classes'
     : activeSectionExperience === 'services' ? 'services'
     : activeSectionExperience === 'hotel_stay' ? 'stay'
     : activeSectionExperience === 'movies' ? 'movies'

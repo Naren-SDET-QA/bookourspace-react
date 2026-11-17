@@ -21,7 +21,7 @@ type Props = {
   /** The landing "Admissions" shortcut opens School with the admissions sheet. */
   admissionRequest?: number;
   /** Which pathway this explorer shows: academic, personal or professional. */
-  scope?: 'Academic' | 'Personal' | 'Professional';
+  scope?: string;
 };
 
 const img = (id: string, w = 500): string =>
@@ -32,7 +32,7 @@ const P = {
   school: 'photo-1503676260728-1c00da094a0b',
   students: 'photo-1523240795612-9a054b0db644',
   degree: 'photo-1541339907198-e08756dedf3f',
-  engineering: 'photo-1518770660439-4636190af475',
+  engineering: 'photo-1581091226825-a6a2a5aee158',
   medical: 'photo-1576091160399-112ba8d25d1d',
   law: 'photo-1589829545856-d10d557cf95f',
   business: 'photo-1556761175-b413da4baf72',
@@ -45,7 +45,7 @@ const P = {
   arts: 'photo-1508700115892-45ecd05ae2ad',
   language: 'photo-1546410531-bb4caa6b424d',
   yoga: 'photo-1544367567-0f2fcb009e0b',
-  it: 'photo-1518770660439-4636190af475',
+  it: 'photo-1517694712202-14dd9538aa97',
   data: 'photo-1551288049-bebda4e38f71',
   finance: 'photo-1554224155-6726b3ff858f',
   marketing: 'photo-1533750349088-cd871a92f312',
@@ -344,12 +344,12 @@ function SchoolFilters({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold transition sm:text-[12px] ${open ? 'border-[#6f3ff2] bg-[#f7f3ff] text-[#6f3ff2]' : 'border-[#6f3ff2]/60 bg-white text-[#6f3ff2]'}`}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold transition sm:text-[12px] ${open ? 'border-[#2874f0] bg-[#f7f3ff] text-[#2874f0]' : 'border-[#2874f0]/60 bg-white text-[#2874f0]'}`}
       >
         <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
         Filters
         {activeCount > 0 && (
-          <span className="grid h-4 min-w-[16px] place-items-center rounded-full bg-[#6f3ff2] px-1 text-[9px] font-black leading-none text-white">{activeCount}</span>
+          <span className="grid h-4 min-w-[16px] place-items-center rounded-full bg-[#2874f0] px-1 text-[9px] font-black leading-none text-white">{activeCount}</span>
         )}
       </button>
 
@@ -368,7 +368,7 @@ function SchoolFilters({
                         type="button"
                         onClick={() => onPick(group.key, option.label)}
                         aria-pressed={isSelected}
-                        className={`rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition ${isSelected ? 'border-[#6f3ff2] bg-[#efe8ff] text-[#5b3fa8]' : 'border-[#dfe6ef] bg-white text-[#1f2937] hover:bg-[#f8fafc]'}`}
+                        className={`rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition ${isSelected ? 'border-[#2874f0] bg-[#efe8ff] text-[#5b3fa8]' : 'border-[#dfe6ef] bg-white text-[#1f2937] hover:bg-[#f8fafc]'}`}
                       >
                         {option.label}
                       </button>
@@ -382,7 +382,7 @@ function SchoolFilters({
             <p className="text-[10px] leading-tight text-[#8a97ab]">
               Filters use each listing's own published details. Listings without that information stay out of the results instead of being guessed.
             </p>
-            <button type="button" onClick={onClear} className="shrink-0 text-[11px] font-bold text-[#6f3ff2]">Clear all</button>
+            <button type="button" onClick={onClear} className="shrink-0 text-[11px] font-bold text-[#2874f0]">Clear all</button>
           </div>
         </div>
       )}
@@ -407,9 +407,9 @@ function ListingCard({ course, onOpen }: { course: CourseListing; onOpen: (cours
       type="button"
       onClick={() => onOpen(course)}
       aria-label={`View details for ${course.title}`}
-      className="group overflow-hidden rounded-2xl border border-[#e9eff8] bg-white text-left shadow-[0_1px_4px_rgba(16,36,74,.06)] transition hover:-translate-y-0.5 hover:border-[#2874f0]/40 hover:shadow-[0_10px_24px_rgba(40,116,240,.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0]"
+      className="group overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white text-left transition hover:shadow-[0_2px_8px_rgba(0,0,0,.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0]"
     >
-      <span className="relative block aspect-[16/10] w-full overflow-hidden bg-[#f4f7fd] sm:aspect-[4/3]">
+      <span className="relative block aspect-[16/10] w-full overflow-hidden bg-[#f1f3f6] sm:aspect-[4/3]">
         <SafeImage
           src={course.image}
           alt={`${course.title} at ${course.provider}`}
@@ -417,20 +417,27 @@ function ListingCard({ course, onOpen }: { course: CourseListing; onOpen: (cours
           className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]"
           sizes="(max-width: 639px) 92vw, (max-width: 1023px) 45vw, 240px"
         />
-        <span className={`absolute bottom-1.5 left-1.5 whitespace-nowrap rounded px-1 py-0.5 text-[7.5px] font-black uppercase tracking-tight text-white shadow-sm sm:px-1.5 sm:text-[8px] sm:tracking-wide ${course.free ? 'bg-[#0f9d58]' : course.liveCalendar ? 'bg-[#2874f0]' : 'bg-[#f59e0b]'}`}>
+        <span className={`absolute bottom-1.5 left-1.5 whitespace-nowrap rounded-[2px] px-1 py-0.5 text-[7.5px] font-black uppercase tracking-tight text-white shadow-sm sm:px-1.5 sm:text-[8px] sm:tracking-wide ${course.free ? 'bg-[#388e3c]' : course.liveCalendar ? 'bg-[#2874f0]' : 'bg-[#fb641b]'}`}>
           {course.free ? 'Free' : course.liveCalendar ? 'Open batch' : 'Book seat'}
         </span>
         {course.verified && (
-          <span className="absolute right-1 top-1 hidden rounded bg-white/90 px-1 py-0.5 text-[7.5px] font-black uppercase tracking-tight text-emerald-700 shadow-sm sm:right-1.5 sm:top-1.5 sm:block sm:px-1.5 sm:text-[8px]">Verified</span>
+          <span className="absolute right-1 top-1 hidden rounded-[2px] bg-white/90 px-1 py-0.5 text-[7.5px] font-black uppercase tracking-tight text-[#388e3c] shadow-sm sm:right-1.5 sm:top-1.5 sm:block sm:px-1.5 sm:text-[8px]">Verified</span>
         )}
       </span>
       <span className="block p-2 sm:p-2.5">
-        <span className="line-clamp-2 text-[10.5px] font-bold leading-[1.25] text-[#12244a] group-hover:text-[#2874f0] sm:text-[12px]">{course.title}</span>
-        <span className="mt-0.5 block truncate text-[9.5px] font-semibold text-[#7185a6]">{course.provider}</span>
-        <span className="mt-0.5 block truncate text-[9px] font-semibold text-[#8ca0c0]">
-          {course.mode}{course.duration ? ` · ${course.duration}` : ''}
+        <span className="line-clamp-2 text-[10.5px] font-medium leading-[1.25] text-[#212121] group-hover:text-[#2874f0] sm:text-[12px]">{course.title}</span>
+        <span className="mt-0.5 block truncate text-[9.5px] font-semibold text-[#878787]">{course.provider}</span>
+        <span className="mt-0.5 block truncate text-[9px] font-semibold text-[#878787]">
+          {[course.area, course.city].filter(Boolean).join(', ') || `${course.mode}${course.duration ? ` · ${course.duration}` : ''}`}
         </span>
-        <span className="mt-1 block text-[10px] font-black text-[#12244a] sm:text-[11px]">{course.free ? 'FREE' : `${inr(course.fee)} onwards`}</span>
+        <span className="mt-1 flex items-center gap-1.5">
+          {typeof course.rating === 'number' ? (
+            <span className="inline-flex items-center gap-0.5 rounded-[2px] bg-[#388e3c] px-1 py-0.5 text-[9px] font-bold text-white">
+              {course.rating.toFixed(1)} <Star className="h-2.5 w-2.5 fill-white" aria-hidden />
+            </span>
+          ) : null}
+          <span className="text-[10px] font-bold text-[#212121] sm:text-[11px]">{course.free ? 'FREE' : `${inr(course.fee)} onwards`}</span>
+        </span>
       </span>
     </button>
   );
@@ -461,10 +468,10 @@ function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: 
       role="button"
       tabIndex={0}
       aria-label={`View details for ${course.title}`}
-      className="@container cursor-pointer overflow-hidden rounded-2xl border border-[#e8ecf3] bg-white shadow-[0_2px_10px_rgba(16,36,74,.07)] transition hover:border-[#6f3ff2]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6f3ff2]"
+      className="@container cursor-pointer overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white transition hover:shadow-[0_2px_8px_rgba(0,0,0,.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0]"
     >
       <div className="flex flex-col @md:flex-row">
-      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-[#eef2f8] @md:aspect-auto @md:w-[11rem]">
+      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-[#f1f3f6] @md:aspect-auto @md:w-[11rem]">
         <SafeImage
           src={course.image}
           alt={`${course.title} at ${course.provider}`}
@@ -473,14 +480,8 @@ function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: 
           sizes="(max-width: 639px) 92vw, 220px"
         />
         {course.verified && (
-          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-[#0f9d58] px-2.5 py-1 text-[11px] font-bold text-white shadow-sm">
+          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-[2px] bg-[#388e3c] px-2 py-1 text-[11px] font-bold text-white">
             <BadgeCheck className="h-3.5 w-3.5" aria-hidden /> Verified
-          </span>
-        )}
-        {typeof course.rating === 'number' && (
-          <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-bold text-white">
-            <Star className="h-3.5 w-3.5 fill-[#f5b82e] text-[#f5b82e]" aria-hidden />
-            {course.rating.toFixed(1)}{course.reviews ? ` (${course.reviews})` : ''}
           </span>
         )}
         <button
@@ -497,19 +498,26 @@ function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: 
         </button>
       </div>
       <div className="flex min-w-0 flex-1 flex-col p-3.5">
-        <h3 className="text-[15px] font-extrabold leading-snug text-[#12244a] @md:text-[16px]">{course.title}</h3>
-        <p className="mt-0.5 text-[12px] font-semibold text-[#5b6b85]">
+        <h3 className="text-[15px] font-medium leading-snug text-[#212121] @md:text-[16px]">{course.title}</h3>
+        <p className="mt-0.5 text-[13px] font-semibold text-[#878787]">{course.provider}</p>
+        <p className="mt-0.5 text-[12px] font-medium text-[#878787]">
           {tags.length > 0 ? tags.join(' • ') : course.category}
         </p>
-        <p className="mt-0.5 flex items-center gap-1 text-[12px] font-semibold text-[#5b6b85]">
+        <p className="mt-0.5 flex items-center gap-1 text-[12px] font-medium text-[#878787]">
           <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
           <span className="truncate">{area || 'Location shared on enquiry'}</span>
         </p>
         <div className="mt-2.5 flex items-center justify-between gap-2">
-          <p className="text-[12px] text-[#5b6b85]">
-            <span className="text-[18px] font-extrabold text-[#12244a]">₹{course.fee.toLocaleString('en-IN')}</span> / {course.feeUnit}
+          <p className="flex items-center gap-2 text-[12px] text-[#878787]">
+            {typeof course.rating === 'number' && (
+              <span className="inline-flex items-center gap-0.5 rounded-[2px] bg-[#388e3c] px-1.5 py-0.5 text-[12px] font-bold text-white">
+                {course.rating.toFixed(1)} <Star className="h-3 w-3 fill-white" aria-hidden />
+                {course.reviews ? <span className="font-medium opacity-90">({course.reviews})</span> : null}
+              </span>
+            )}
+            <span className="text-[18px] font-bold text-[#212121]">₹{course.fee.toLocaleString('en-IN')}</span> / {course.feeUnit}
           </p>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#f1ecff] px-2.5 py-1 text-[11px] font-bold text-[#5b3fa8]">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-[2px] bg-[#fff8e1] px-2.5 py-1 text-[11px] font-bold text-[#212121]">
             <CalendarDays className="h-3.5 w-3.5" aria-hidden /> Next Batch: {course.startDate}
           </span>
         </div>
@@ -519,7 +527,7 @@ function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: 
               href={`tel:${course.providerPhone}`}
               onClick={(event) => event.stopPropagation()}
               aria-label={`Call ${course.provider} about ${course.title}`}
-              className="flex items-center justify-center gap-1.5 rounded-xl border border-[#6f3ff2] bg-white py-2.5 text-[13px] font-bold text-[#6f3ff2]"
+              className="flex items-center justify-center gap-1.5 rounded-[2px] border border-[#2874f0] bg-white py-2.5 text-[13px] font-bold text-[#2874f0]"
             >
               <Phone className="h-4 w-4" aria-hidden /> Enquire
             </a>
@@ -531,7 +539,7 @@ function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: 
                 openListing();
               }}
               aria-label={`Enquire about ${course.title}`}
-              className="flex items-center justify-center gap-1.5 rounded-xl border border-[#6f3ff2] bg-white py-2.5 text-[13px] font-bold text-[#6f3ff2]"
+              className="flex items-center justify-center gap-1.5 rounded-[2px] border border-[#2874f0] bg-white py-2.5 text-[13px] font-bold text-[#2874f0]"
             >
               <Phone className="h-4 w-4" aria-hidden /> Enquire
             </button>
@@ -542,7 +550,7 @@ function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: 
               event.stopPropagation();
               openListing();
             }}
-            className="rounded-xl bg-[#6f3ff2] py-2.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-[#5f33da]"
+            className="rounded-[2px] bg-[#2874f0] py-2.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-[#1a5dc9]"
           >
             View Details →
           </button>
@@ -594,10 +602,14 @@ function BrowseGroup({ title, tiles, active, onSelect }: { title: string; tiles:
 export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionRequest, admissionRequest, scope = 'Academic' }: Props) {
   const [activeIndex, setActiveIndex] = useState(readSavedSectionIndex);
   // Each pathway (academic, personal, professional) shows only its own categories.
-  const sections = useMemo(
-    () => SECTIONS.filter((section) => (section.group ?? 'Academic') === scope),
-    [scope],
-  );
+  const sections = useMemo(() => {
+    const scoped = SECTIONS.filter((section) => (section.group ?? 'Academic') === scope);
+    // The centralized taxonomy uses stable section IDs, while this explorer
+    // still stores its legacy rails as Academic/Personal/Professional groups.
+    // Keep the explorer usable for the new Competitive and other IDs until
+    // those legacy rails are migrated into the same configurable taxonomy.
+    return scoped.length > 0 ? scoped : SECTIONS;
+  }, [scope]);
   const safeIndex = Math.min(activeIndex, sections.length - 1);
   const active = sections[safeIndex];
 
@@ -721,6 +733,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
     list = list.filter((course) => matchesAcademicFilters(course, selectedFilters, groups));
     if (schoolSort === 'Fee: low to high') list = [...list].sort((a, b) => a.fee - b.fee);
     else if (schoolSort === 'Fee: high to low') list = [...list].sort((a, b) => b.fee - a.fee);
+    else if (schoolSort === 'Popularity') list = [...list].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
     return list;
   }, [matched, schoolClass, schoolService, selectedFilters, groups, schoolSort]);
   const schoolResults = schoolPageOpen ? visibleListings : [];
@@ -778,7 +791,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                     <ChevronDown className={`h-3.5 w-3.5 transition ${sheetBodyOpen ? 'rotate-180' : ''}`} aria-hidden />
                   </button>
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={clearFilters} className="text-[11px] font-bold text-[#6f3ff2]">Clear All</button>
+                    <button type="button" onClick={clearFilters} className="text-[11px] font-bold text-[#2874f0]">Clear All</button>
                     <button type="button" onClick={closeSchoolPage} aria-label="Close filters" className="text-[15px] font-bold leading-none text-[#12244a]">×</button>
                   </div>
                 </div>
@@ -825,7 +838,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                               type="button"
                               onClick={() => group.onPick(option)}
                               aria-pressed={group.selected === option}
-                              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${group.selected === option ? 'border-[#6f3ff2] bg-[#efe8ff] text-[#5b3fa8]' : 'border-[#d9dfe9] bg-white text-[#1f2937]'}`}
+                              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${group.selected === option ? 'border-[#2874f0] bg-[#efe8ff] text-[#5b3fa8]' : 'border-[#d9dfe9] bg-white text-[#1f2937]'}`}
                             >
                               {option}
                             </button>
@@ -840,7 +853,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
 
                 <div className="mt-3 flex gap-2">
                   <button type="button" onClick={resetPage} className="flex-1 rounded-full border border-[#d9dfe9] bg-white py-2 text-[12px] font-bold text-[#12244a]">Reset</button>
-                  <button type="button" onClick={() => setSchoolSheetOpen(false)} className="flex-[1.6] rounded-full bg-[#6f3ff2] py-2 text-[12px] font-bold text-white">Show Results ({schoolResults.length})</button>
+                  <button type="button" onClick={() => setSchoolSheetOpen(false)} className="flex-[1.6] rounded-full bg-[#2874f0] py-2 text-[12px] font-bold text-white">Show Results ({schoolResults.length})</button>
                 </div>
               </div>
             ) : schoolPageOpen ? (
@@ -857,16 +870,16 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                   )}
                 </div>
 
-                <div className="relative mt-2 overflow-hidden rounded-2xl bg-[linear-gradient(100deg,#f4eaff,#faf7ff_58%,#eef4ff)] px-3 py-2.5 ring-1 ring-[#ece1ff]">
+                <div className="relative mt-2 overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white px-3 py-2.5">
                   <div className="flex items-start gap-2">
-                    <span className="grid h-9 w-9 shrink-0 -rotate-6 place-items-center rounded-lg bg-[#f0426b] text-[12px] font-black text-white shadow-sm">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[2px] bg-[#2874f0] text-[12px] font-black text-white">
                       {classBadge}
                     </span>
                     <div className="min-w-0 pr-8">
-                      <h2 className="text-[15px] font-black leading-tight text-[#3b1d63] sm:text-[19px]">
+                      <h2 className="text-[15px] font-bold leading-tight text-[#212121] sm:text-[19px]">
                         {schoolClass ?? 'All classes'}{schoolService ? ` \u00b7 ${schoolService}` : ''}
                       </h2>
-                      <p className="mt-0.5 text-[9.5px] font-semibold text-[#7a6b95] sm:text-[11px]">
+                      <p className="mt-0.5 text-[9.5px] font-semibold text-[#878787] sm:text-[11px]">
                         {active.short === 'School'
                           ? `CBSE · ICSE · State board${schoolService === 'Tuition' || schoolService === 'Coaching' ? ' · All subjects' : ''}`
                           : active.examples}
@@ -891,7 +904,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                           setSchoolSheetOpen(active.short === 'School' && Boolean(next));
                         }}
                         aria-pressed={isActive}
-                        className={`rounded-full border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${isActive ? 'border-[#6f3ff2] bg-[#6f3ff2] text-white' : 'border-[#e6dcff] bg-white text-[#5b3fa8] hover:bg-[#f8f4ff]'}`}
+                        className={`rounded-[2px] border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${isActive ? 'border-[#2874f0] bg-[#2874f0] text-white' : 'border-[#e0e0e0] bg-white text-[#212121] hover:bg-[#f5f7fa]'}`}
                       >
                         {service}
                       </button>
@@ -906,7 +919,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                       type="button"
                       onClick={() => setFilter('subject', null)}
                       aria-pressed={!currentFilterValue('subject')}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${!currentFilterValue('subject') ? 'border-[#6f3ff2] bg-[#6f3ff2] text-white' : 'border-[#e6dcff] bg-white text-[#5b3fa8] hover:bg-[#f8f4ff]'}`}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[2px] border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${!currentFilterValue('subject') ? 'border-[#2874f0] bg-[#2874f0] text-white' : 'border-[#e0e0e0] bg-white text-[#212121] hover:bg-[#f5f7fa]'}`}
                     >
                       <LayoutGrid className="h-3.5 w-3.5" aria-hidden /> All subjects
                     </button>
@@ -918,7 +931,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                           type="button"
                           onClick={() => toggleFilter('subject', label)}
                           aria-pressed={isActive}
-                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${isActive ? 'border-[#6f3ff2] bg-[#6f3ff2] text-white' : 'border-[#e6dcff] bg-white text-[#5b3fa8] hover:bg-[#f8f4ff]'}`}
+                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-[2px] border px-3 py-1.5 text-[10px] font-bold transition sm:text-[11px] ${isActive ? 'border-[#2874f0] bg-[#2874f0] text-white' : 'border-[#e0e0e0] bg-white text-[#212121] hover:bg-[#f5f7fa]'}`}
                         >
                           {label}
                         </button>
@@ -937,19 +950,35 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                   onClear={clearFilters}
                 />
 
+                <div className="mt-2.5 flex flex-wrap items-center gap-1 border-b border-[#f0f0f0] pb-2 text-[12px]">
+                  {(['Relevance', 'Popularity', 'Fee: low to high', 'Fee: high to low'] as const).map((option) => {
+                    const active = (option === 'Relevance' && !schoolSort) || schoolSort === option;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setSchoolSort(option === 'Relevance' ? null : option)}
+                        aria-pressed={active}
+                        className={`px-2 py-1 ${active ? 'border-b-2 border-[#2874f0] font-bold text-[#2874f0]' : 'text-[#212121]'}`}
+                      >
+                        {option === 'Fee: low to high' ? 'Price — Low to High' : option === 'Fee: high to low' ? 'Price — High to Low' : option}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="mt-2.5 flex items-center justify-between gap-2">
                   <p className="truncate text-[10.5px] font-semibold text-[#5b6b85]">
                     <span className="font-black text-[#12244a]">{schoolResults.length} {schoolResults.length === 1 ? 'result' : 'results'}</span> for {schoolClass ?? schoolService ?? 'all classes'}
                     {schoolClass && schoolService ? ` \u00b7 ${schoolService}` : ''}
                     {currentFilterValue('subject') ? ` \u00b7 ${currentFilterValue('subject')}` : ''}
                   </p>
-                  <div className="flex shrink-0 rounded-lg border border-[#e6ecf6] p-0.5">
+                  <div className="flex shrink-0 rounded-[2px] border border-[#e6ecf6] p-0.5">
                     <button
                       type="button"
                       onClick={() => setSchoolLayout('grid')}
                       aria-pressed={schoolLayout === 'grid'}
                       aria-label="Grid view"
-                      className={`rounded-md p-1 ${schoolLayout === 'grid' ? 'bg-[#6f3ff2] text-white' : 'text-[#8ca0c0]'}`}
+                      className={`rounded-md p-1 ${schoolLayout === 'grid' ? 'bg-[#2874f0] text-white' : 'text-[#8ca0c0]'}`}
                     >
                       <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
                     </button>
@@ -958,7 +987,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                       onClick={() => setSchoolLayout('list')}
                       aria-pressed={schoolLayout === 'list'}
                       aria-label="List view"
-                      className={`rounded-md p-1 ${schoolLayout === 'list' ? 'bg-[#6f3ff2] text-white' : 'text-[#8ca0c0]'}`}
+                      className={`rounded-md p-1 ${schoolLayout === 'list' ? 'bg-[#2874f0] text-white' : 'text-[#8ca0c0]'}`}
                     >
                       <List className="h-3.5 w-3.5" aria-hidden />
                     </button>
@@ -989,7 +1018,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                         <button
                           type="button"
                           onClick={resetPage}
-                          className="mt-2 rounded-full border border-[#6f3ff2] px-3 py-1.5 text-[11px] font-bold text-[#6f3ff2]"
+                          className="mt-2 rounded-full border border-[#2874f0] px-3 py-1.5 text-[11px] font-bold text-[#2874f0]"
                         >
                           Reset filters
                         </button>

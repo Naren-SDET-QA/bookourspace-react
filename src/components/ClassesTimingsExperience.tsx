@@ -47,6 +47,7 @@ import { ClassesStyleThreeDetail } from './classes/ClassesStyleThreeDetail';
 import { ClassesStyleFour } from './classes/ClassesStyleFour';
 import type { MarketplaceListing } from '../types/marketplace';
 import { canContactOwner } from '../lib/servicesStayRules';
+import { CLASS_MAIN_SECTIONS, getClassMainSection, type ClassMainSectionId } from '../data/classesTaxonomy';
 import { useOwnerContact } from '../lib/useOwnerContact';
 
 interface ClassesTimingsExperienceProps {
@@ -760,18 +761,16 @@ export function mapProviderCourse(listing: MarketplaceListing): CourseListing {
  * because the view was only ever derived from the URL hash.
  */
 const STYLE4_GROUP_KEY = 'bos_classes_style4_group_v1';
-type Style4Group = 'All' | 'Academic' | 'Personal' | 'Professional';
+type Style4Group = 'All' | ClassMainSectionId;
 function readSavedStyle4Group(): Style4Group {
   if (typeof window === 'undefined') return 'All';
   const saved = window.sessionStorage.getItem(STYLE4_GROUP_KEY);
-  return saved === 'Academic' || saved === 'Personal' || saved === 'Professional' ? saved : 'All';
+  return CLASS_MAIN_SECTIONS.some((section) => section.id === saved) ? saved as ClassMainSectionId : 'All';
 }
 
-const STYLE_FOUR_GROUPS: Record<'Academic' | 'Personal' | 'Professional', string[]> = {
-  Academic: ['Academic', 'Competitive Exams', 'Languages', 'Kids', 'Healthcare', 'Business', 'Technical'],
-  Personal: ['Arts & Music', 'Languages', 'Sports & Fitness', 'Driving', 'Kids'],
-  Professional: ['IT & Software', 'Professional & IT', 'Business', 'Community Skills', 'Agriculture', 'Healthcare'],
-};
+const STYLE_FOUR_GROUPS = Object.fromEntries(
+  CLASS_MAIN_SECTIONS.map((section) => [section.id, section.courseCategories]),
+) as Record<ClassMainSectionId, string[]>;
 
 export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
   const [style4Group, setStyle4Group] = useState<Style4Group>(readSavedStyle4Group);
@@ -855,7 +854,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
   // pool rather than the already-narrowed discovery results.
   const academicPool = useMemo(
     () => allCourses.filter(
-      (course) => STYLE_FOUR_GROUPS.Academic.includes(course.category) && course.pathway === 'Academic',
+      (course) => getClassMainSection(undefined, course.category) === 'academic-education' && course.pathway === 'Academic',
     ),
     [allCourses],
   );
@@ -864,7 +863,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
     return allCourses.filter((c) => {
       if (query.trim() && !`${c.title} ${c.provider} ${c.category} ${c.area} ${c.city}`.toLowerCase().includes(query.trim().toLowerCase())) return false;
       if (category !== 'All' && c.category !== category) return false;
-      if (style4Group !== 'All' && !STYLE_FOUR_GROUPS[style4Group].includes(c.category)) return false;
+      if (style4Group !== 'All' && getClassMainSection(undefined, c.category) !== style4Group) return false;
       if (mode !== 'All' && c.mode !== mode && !c.modeOptions.includes(mode)) return false;
       if (timing !== 'All' && !c.batches.some((b) => b.slot === timing)) return false;
       if (verifiedOnly && !c.verified) return false;
@@ -905,14 +904,14 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
   // section directly, so a click never bounces back to the pathway landing.
   const [academicSectionRequest, setAcademicSectionRequest] = useState<{ short: string; key: number } | null>(null);
   const openAcademicSection = (short: string) => {
-    setStyle4Group('Academic');
+    setStyle4Group('academic-education');
     setCategory('All');
     resetDiscoveryFilters();
     setAcademicSectionRequest({ short, key: Date.now() });
   };
 
   const selectStyleFour = (value: string) => {
-    if (value === 'Academic' || value === 'Personal' || value === 'Professional') {
+    if (value === 'academic-education' || value === 'competitive-exams' || value === 'professional-career' || value === 'personal-hobbies') {
       setStyle4Group(value);
       setCategory('All');
       resetDiscoveryFilters();
@@ -970,8 +969,8 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
     <div
       className={
         inline
-          ? 'w-full bg-[#faf9ff] text-slate-900'
-          : 'fixed inset-0 z-[71] flex flex-col overflow-hidden bg-[#faf9ff] text-slate-900'
+          ? `w-full text-slate-900 ${activeStyle === 'style4' ? 'bg-[#f1f3f6]' : 'bg-[#faf9ff]'}`
+          : `fixed inset-0 z-[71] flex flex-col overflow-hidden text-slate-900 ${activeStyle === 'style4' ? 'bg-[#f1f3f6]' : 'bg-[#faf9ff]'}`
       }
       role={inline ? undefined : 'dialog'}
       aria-modal={inline ? undefined : true}
@@ -1024,8 +1023,10 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
 
       {/* Results */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl px-3 py-3 sm:px-5">
-          {activeStyle === 'style4' && <ClassesStyleFour courses={results} academicCourses={academicPool} query={query} onQuery={setQuery} onCategory={selectStyleFour} onOpen={openCourse} group={style4Group} academicSectionRequest={academicSectionRequest} onAcademicSection={openAcademicSection} />}
+        {activeStyle === 'style4' && (
+          <ClassesStyleFour courses={results} academicCourses={academicPool} query={query} onQuery={setQuery} onCategory={selectStyleFour} onOpen={openCourse} group={style4Group} academicSectionRequest={academicSectionRequest} onAcademicSection={openAcademicSection} />
+        )}
+        <div className={activeStyle === 'style4' ? 'hidden' : 'mx-auto max-w-6xl px-3 py-3 sm:px-5'}>
           {activeStyle === 'style3' && (
             <>
               <ClassesSpotlightCards

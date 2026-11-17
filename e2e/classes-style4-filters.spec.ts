@@ -32,8 +32,9 @@ async function dismissPrivacy(page: Page, attempts = 12): Promise<void> {
 async function prepare(page: Page): Promise<void> {
   await page.goto('/#classes/style4', { waitUntil: 'domcontentloaded' });
   await dismissPrivacy(page);
-  // Style 4 opens on the pathway landing; the academic rail lives under Academic.
-  const academic = page.getByRole('button', { name: 'Academic', exact: true });
+  // Style 4 opens on the pathway landing; the academic rail lives under the
+  // approved four-section label.
+  const academic = page.getByRole('button', { name: /^Academic Education\b/ });
   await expect(academic).toBeVisible({ timeout: 30_000 });
   await academic.click();
   await expect(page.getByRole('complementary', RAIL)).toBeVisible({ timeout: 30_000 });

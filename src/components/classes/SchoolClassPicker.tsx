@@ -45,7 +45,7 @@ const MODE_TILES: FilterTile[] = [
 export function SchoolClassPicker({ filter, onFilter, modeFilter, onModeFilter, selectedClass, onSelectClass }: Props) {
   return (
     <section aria-label="School education" className="mb-3 max-w-[560px] sm:mb-5">
-      <div className="relative overflow-hidden rounded-2xl border border-[#f6e5da] bg-[linear-gradient(100deg,#fff6f1_0%,#fffdfa_58%,#f3fbf4_100%)] sm:rounded-[22px]">
+      <div className="relative overflow-hidden rounded-[2px] border border-[#e0e0e0] bg-white">
         <div className="relative z-10 max-w-[66%] px-2.5 py-2.5 sm:px-5 sm:py-4">
           <div className="flex items-start gap-1.5 sm:gap-2.5">
             <span aria-hidden className="text-[20px] leading-none sm:text-[30px]">🎓</span>
