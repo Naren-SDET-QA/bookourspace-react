@@ -57,6 +57,121 @@
   outline: 2px solid #ffe500;
   outline-offset: 2px;
 }
+
+.bos-classes-fk .bos-svc-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 1px rgba(0, 0, 0, .04);
+  transition: transform .2s cubic-bezier(.2, .7, .2, 1), box-shadow .2s cubic-bezier(.2, .7, .2, 1);
+}
+.bos-classes-fk .bos-svc-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 24px rgba(40, 116, 240, .16), 0 2px 8px rgba(0, 0, 0, .08);
+}
+.bos-classes-fk .bos-svc-card.bos-svc-card--flat:hover {
+  transform: none;
+  box-shadow: 0 6px 16px rgba(40, 116, 240, .12), 0 1px 4px rgba(0, 0, 0, .06);
+}
+.bos-classes-fk .bos-svc-card.bos-svc-card--airbnb {
+  box-shadow: none;
+  background: transparent;
+}
+.bos-classes-fk .bos-svc-card.bos-svc-card--airbnb:hover,
+.bos-classes-fk .bos-svc-card.bos-svc-card--airbnb:active {
+  transform: none;
+  box-shadow: none;
+}
+.bos-classes-fk .bos-svc-card.bos-svc-card--airbnb .bos-svc-photo::after {
+  display: none;
+}
+
+.bos-classes-fk .bos-listing-carousel {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.bos-classes-fk .bos-listing-carousel::-webkit-scrollbar {
+  display: none;
+}
+.bos-classes-fk .bos-listing-carousel > * {
+  flex: 0 0 calc((100% - 0.75rem) / 2.2);
+  min-width: 0;
+  scroll-snap-align: start;
+}
+@media (min-width: 640px) {
+  .bos-classes-fk .bos-listing-carousel > * {
+    flex-basis: calc((100% - 2.25rem) / 4.25);
+  }
+}
+@media (min-width: 1024px) {
+  .bos-classes-fk .bos-listing-carousel > * {
+    flex-basis: calc((100% - 3.75rem) / 6.25);
+  }
+}
+@media (min-width: 1280px) {
+  .bos-classes-fk .bos-listing-carousel > * {
+    flex-basis: calc((100% - 4.5rem) / 7.25);
+  }
+}
+.bos-classes-fk .bos-svc-card:active {
+  transform: translateY(-1px) scale(.995);
+}
+.bos-classes-fk .bos-svc-card .bos-svc-photo {
+  position: relative;
+}
+.bos-classes-fk .bos-svc-card .bos-svc-photo img {
+  transition: transform .45s cubic-bezier(.2, .7, .2, 1);
+}
+.bos-classes-fk .bos-svc-card:hover .bos-svc-photo img {
+  transform: scale(1.07);
+}
+.bos-classes-fk .bos-svc-card .bos-svc-photo::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, .38) 50%, transparent 60%);
+  transform: translateX(-130%);
+  pointer-events: none;
+}
+.bos-classes-fk .bos-svc-card:hover .bos-svc-photo::after {
+  transform: translateX(130%);
+  transition: transform .7s ease;
+}
+.bos-classes-fk .bos-svc-cta {
+  transition: background-color .15s ease, transform .15s ease, filter .15s ease;
+}
+.bos-classes-fk .bos-svc-cta:hover {
+  filter: brightness(1.04);
+}
+.bos-classes-fk .bos-svc-cta:active {
+  transform: scale(.98);
+}
+.bos-classes-fk .bos-svc-heart {
+  transition: transform .18s cubic-bezier(.2, .8, .2, 1);
+}
+.bos-classes-fk .bos-svc-heart:hover {
+  transform: scale(1.08);
+}
+.bos-classes-fk .bos-svc-heart:active {
+  transform: scale(1.18);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bos-classes-fk .bos-svc-card,
+  .bos-classes-fk .bos-svc-card .bos-svc-photo img,
+  .bos-classes-fk .bos-svc-card .bos-svc-photo::after,
+  .bos-classes-fk .bos-svc-cta,
+  .bos-classes-fk .bos-svc-heart {
+    transition: none;
+  }
+  .bos-classes-fk .bos-svc-card:hover,
+  .bos-classes-fk .bos-svc-card:hover .bos-svc-photo img,
+  .bos-classes-fk .bos-svc-card:hover .bos-svc-photo::after {
+    transform: none;
+  }
+}
 .bos-entry-screen::before { content: ''; position: absolute; inset: 0; z-index: -3; pointer-events: none; opacity: .2; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse at 50% 36%, #000 0%, transparent 72%); }
 .bos-entry-backdrop { position: absolute; inset: 0; z-index: -2; overflow: hidden; pointer-events: none; }
 .bos-entry-aurora { position: absolute; z-index: 0; width: min(70vw, 520px); aspect-ratio: 1; border-radius: 9999px; pointer-events: none; filter: blur(90px); }

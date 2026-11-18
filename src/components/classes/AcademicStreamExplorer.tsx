@@ -1,7 +1,10 @@
-import { Atom, BadgeCheck, CalendarDays, ChevronDown, ChevronRight, GraduationCap, Globe, Heart, IndianRupee, Languages, LayoutGrid, List, MapPin, Monitor, MoreHorizontal, Phone, Sigma, SlidersHorizontal, Star, Users } from 'lucide-react';
+import { Atom, BadgeCheck, CalendarDays, ChevronDown, ChevronRight, GraduationCap, Globe, Languages, LayoutGrid, List, MoreHorizontal, Sigma, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CourseListing } from '../../data/classesTimingsData';
 import SafeImage from '../SafeImage';
+import { ClassesServiceCard } from './ClassesServiceCard';
+import { ClassesListingsStrip, ClassesSectionShelves } from './ClassesListingCarousel';
+import { shelvesForExplorer } from './classesShelfCatalog';
 import { SchoolClassPicker } from './SchoolClassPicker';
 import { AcademicTrackPicker } from './AcademicTrackPicker';
 import {
@@ -22,6 +25,8 @@ type Props = {
   admissionRequest?: number;
   /** Which pathway this explorer shows: academic, personal or professional. */
   scope?: string;
+  /** Four-section marketplace id; drives subcategory shelves. */
+  sectionId?: string;
 };
 
 const img = (id: string, w = 500): string =>
@@ -62,8 +67,8 @@ type AcademicSection = {
   image: string;
   /** Lowercase whole-word keywords matched against a listing's search text. */
   keywords: string[];
-  /** Personal and professional sections leave this unset (academic). */
-  group?: 'Personal' | 'Professional';
+  /** Personal, professional and competitive sections leave this unset (academic). */
+  group?: 'Personal' | 'Professional' | 'Competitive';
 };
 
 const SECTIONS: AcademicSection[] = [
@@ -240,14 +245,59 @@ const SECTIONS: AcademicSection[] = [
     keywords: ['digital marketing', 'seo', 'social media', 'google ads', 'ppc', 'content marketing', 'branding'],
     group: 'Professional',
   },
+  {
+    short: 'UPSC',
+    label: 'UPSC',
+    examples: 'Prelims · Mains · Interview',
+    image: P.exam,
+    keywords: ['upsc'],
+    group: 'Competitive',
+  },
+  {
+    short: 'APPSC',
+    label: 'APPSC',
+    examples: 'Group I · Group II · State services',
+    image: P.exam,
+    keywords: ['appsc'],
+    group: 'Competitive',
+  },
+  {
+    short: 'NEET',
+    label: 'NEET',
+    examples: 'NEET UG · Medical entrance',
+    image: P.medical,
+    keywords: ['neet'],
+    group: 'Competitive',
+  },
+  {
+    short: 'JEE',
+    label: 'JEE',
+    examples: 'JEE Main · JEE Advanced',
+    image: P.engineering,
+    keywords: ['jee'],
+    group: 'Competitive',
+  },
+  {
+    short: 'SSC',
+    label: 'SSC',
+    examples: 'CGL · CHSL · GD',
+    image: P.exam,
+    keywords: ['ssc'],
+    group: 'Competitive',
+  },
+  {
+    short: 'Banking',
+    label: 'Banking',
+    examples: 'IBPS · SBI PO · Clerical',
+    image: P.finance,
+    keywords: ['banking', 'ibps', 'sbi po'],
+    group: 'Competitive',
+  },
 ];
 
 /** Whole-word, case-insensitive matcher for a section's keyword list. */
 const sectionPattern = (keywords: string[]) =>
   new RegExp(`(^|[^a-z0-9])(?:${keywords.join('|')})(?![a-z0-9])`, 'i');
-
-const inr = (value: number) => `₹${Math.round(value).toLocaleString('en-IN')}`;
-const countLabel = (value: number) => `${value} ${value === 1 ? 'listing' : 'listings'}`;
 
 // Certification text is deliberately excluded: every course advertises a
 // "completion certificate", which would make broad keywords such as Diploma
@@ -390,177 +440,6 @@ function SchoolFilters({
   );
 }
 
-const schoolFilterMatch = (course: CourseListing, filter: string) => {
-  const text = searchText(course);
-  const mode = course.mode.toLowerCase();
-  if (filter === 'Online') return mode.includes('online');
-  if (filter === 'Offline') return mode.includes('offline');
-  if (filter === 'Admissions') return /admission|entrance|apply|enrol/.test(text);
-  if (filter === 'Tuition') return /tuition|tutor|coaching|class/.test(text);
-  if (filter === 'Coaching') return /coaching|institute|academy|batch/.test(text);
-  return true;
-};
-
-function ListingCard({ course, onOpen }: { course: CourseListing; onOpen: (course: CourseListing) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(course)}
-      aria-label={`View details for ${course.title}`}
-      className="group overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white text-left transition hover:shadow-[0_2px_8px_rgba(0,0,0,.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0]"
-    >
-      <span className="relative block aspect-[16/10] w-full overflow-hidden bg-[#f1f3f6] sm:aspect-[4/3]">
-        <SafeImage
-          src={course.image}
-          alt={`${course.title} at ${course.provider}`}
-          category="classes"
-          className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]"
-          sizes="(max-width: 639px) 92vw, (max-width: 1023px) 45vw, 240px"
-        />
-        <span className={`absolute bottom-1.5 left-1.5 whitespace-nowrap rounded-[2px] px-1 py-0.5 text-[7.5px] font-black uppercase tracking-tight text-white shadow-sm sm:px-1.5 sm:text-[8px] sm:tracking-wide ${course.free ? 'bg-[#388e3c]' : course.liveCalendar ? 'bg-[#2874f0]' : 'bg-[#fb641b]'}`}>
-          {course.free ? 'Free' : course.liveCalendar ? 'Open batch' : 'Book seat'}
-        </span>
-        {course.verified && (
-          <span className="absolute right-1 top-1 hidden rounded-[2px] bg-white/90 px-1 py-0.5 text-[7.5px] font-black uppercase tracking-tight text-[#388e3c] shadow-sm sm:right-1.5 sm:top-1.5 sm:block sm:px-1.5 sm:text-[8px]">Verified</span>
-        )}
-      </span>
-      <span className="block p-2 sm:p-2.5">
-        <span className="line-clamp-2 text-[10.5px] font-medium leading-[1.25] text-[#212121] group-hover:text-[#2874f0] sm:text-[12px]">{course.title}</span>
-        <span className="mt-0.5 block truncate text-[9.5px] font-semibold text-[#878787]">{course.provider}</span>
-        <span className="mt-0.5 block truncate text-[9px] font-semibold text-[#878787]">
-          {[course.area, course.city].filter(Boolean).join(', ') || `${course.mode}${course.duration ? ` · ${course.duration}` : ''}`}
-        </span>
-        <span className="mt-1 flex items-center gap-1.5">
-          {typeof course.rating === 'number' ? (
-            <span className="inline-flex items-center gap-0.5 rounded-[2px] bg-[#388e3c] px-1 py-0.5 text-[9px] font-bold text-white">
-              {course.rating.toFixed(1)} <Star className="h-2.5 w-2.5 fill-white" aria-hidden />
-            </span>
-          ) : null}
-          <span className="text-[10px] font-bold text-[#212121] sm:text-[11px]">{course.free ? 'FREE' : `${inr(course.fee)} onwards`}</span>
-        </span>
-      </span>
-    </button>
-  );
-}
-
-const feeLabel = (course: CourseListing) =>
-  course.free ? 'Free' : `\u20b9${Math.round(course.fee).toLocaleString('en-IN')}`;
-
-/** Full-width course card used on a class page: photo, faculty, fee, area and batch. */
-function SchoolListingCard({ course, onOpen }: { course: CourseListing; onOpen: (course: CourseListing) => void }) {
-  const [liked, setLiked] = useState(false);
-  const tags = ['Maths', 'Science', 'English', 'Social', 'CBSE', 'ICSE', 'Class 10']
-    .filter((tag) => new RegExp(`(^|[^a-z0-9])${tag.toLowerCase()}(?![a-z0-9])`, 'i').test(searchText(course)))
-    .slice(0, 4);
-  const area = [course.area, course.city].filter(Boolean).join(', ');
-  // One handler for the card; inner controls stop propagation so a favourite
-  // tap or a details tap can never navigate twice.
-  const openListing = () => onOpen(course);
-  return (
-    <article
-      onClick={openListing}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          openListing();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      aria-label={`View details for ${course.title}`}
-      className="@container cursor-pointer overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white transition hover:shadow-[0_2px_8px_rgba(0,0,0,.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0]"
-    >
-      <div className="flex flex-col @md:flex-row">
-      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-[#f1f3f6] @md:aspect-auto @md:w-[11rem]">
-        <SafeImage
-          src={course.image}
-          alt={`${course.title} at ${course.provider}`}
-          category="classes"
-          className="absolute inset-0 h-full w-full object-cover"
-          sizes="(max-width: 639px) 92vw, 220px"
-        />
-        {course.verified && (
-          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-[2px] bg-[#388e3c] px-2 py-1 text-[11px] font-bold text-white">
-            <BadgeCheck className="h-3.5 w-3.5" aria-hidden /> Verified
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            setLiked((value) => !value);
-          }}
-          aria-pressed={liked}
-          aria-label={liked ? `Remove ${course.title} from favourites` : `Save ${course.title} to favourites`}
-          className="absolute right-2.5 top-2.5 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow-md"
-        >
-          <Heart className={`h-4.5 w-4.5 text-[#1f2937] ${liked ? 'fill-[#e0417c] text-[#e0417c]' : ''}`} aria-hidden />
-        </button>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col p-3.5">
-        <h3 className="text-[15px] font-medium leading-snug text-[#212121] @md:text-[16px]">{course.title}</h3>
-        <p className="mt-0.5 text-[13px] font-semibold text-[#878787]">{course.provider}</p>
-        <p className="mt-0.5 text-[12px] font-medium text-[#878787]">
-          {tags.length > 0 ? tags.join(' • ') : course.category}
-        </p>
-        <p className="mt-0.5 flex items-center gap-1 text-[12px] font-medium text-[#878787]">
-          <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="truncate">{area || 'Location shared on enquiry'}</span>
-        </p>
-        <div className="mt-2.5 flex items-center justify-between gap-2">
-          <p className="flex items-center gap-2 text-[12px] text-[#878787]">
-            {typeof course.rating === 'number' && (
-              <span className="inline-flex items-center gap-0.5 rounded-[2px] bg-[#388e3c] px-1.5 py-0.5 text-[12px] font-bold text-white">
-                {course.rating.toFixed(1)} <Star className="h-3 w-3 fill-white" aria-hidden />
-                {course.reviews ? <span className="font-medium opacity-90">({course.reviews})</span> : null}
-              </span>
-            )}
-            <span className="text-[18px] font-bold text-[#212121]">₹{course.fee.toLocaleString('en-IN')}</span> / {course.feeUnit}
-          </p>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-[2px] bg-[#fff8e1] px-2.5 py-1 text-[11px] font-bold text-[#212121]">
-            <CalendarDays className="h-3.5 w-3.5" aria-hidden /> Next Batch: {course.startDate}
-          </span>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2.5">
-          {course.providerPhone ? (
-            <a
-              href={`tel:${course.providerPhone}`}
-              onClick={(event) => event.stopPropagation()}
-              aria-label={`Call ${course.provider} about ${course.title}`}
-              className="flex items-center justify-center gap-1.5 rounded-[2px] border border-[#2874f0] bg-white py-2.5 text-[13px] font-bold text-[#2874f0]"
-            >
-              <Phone className="h-4 w-4" aria-hidden /> Enquire
-            </a>
-          ) : (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                openListing();
-              }}
-              aria-label={`Enquire about ${course.title}`}
-              className="flex items-center justify-center gap-1.5 rounded-[2px] border border-[#2874f0] bg-white py-2.5 text-[13px] font-bold text-[#2874f0]"
-            >
-              <Phone className="h-4 w-4" aria-hidden /> Enquire
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              openListing();
-            }}
-            className="rounded-[2px] bg-[#2874f0] py-2.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-[#1a5dc9]"
-          >
-            View Details →
-          </button>
-        </div>
-      </div>
-      </div>
-    </article>
-  );
-}
-
 const ACADEMIC_SECTION_KEY = 'bos_academic_section_v1';
 
 function readSavedSectionIndex(): number {
@@ -599,7 +478,7 @@ function BrowseGroup({ title, tiles, active, onSelect }: { title: string; tiles:
   );
 }
 
-export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionRequest, admissionRequest, scope = 'Academic' }: Props) {
+export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionRequest, admissionRequest, scope = 'Academic', sectionId }: Props) {
   const [activeIndex, setActiveIndex] = useState(readSavedSectionIndex);
   // Each pathway (academic, personal, professional) shows only its own categories.
   const sections = useMemo(() => {
@@ -641,7 +520,7 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
   const [schoolService, setSchoolService] = useState<string | null>(null);
   const [selectedFilters, setSelectedFilters] = useState<Record<string, string>>({});
   const [schoolSort, setSchoolSort] = useState<string | null>(null);
-  const [schoolLayout, setSchoolLayout] = useState<'list' | 'grid'>('list');
+  const [schoolLayout, setSchoolLayout] = useState<'list' | 'grid'>('grid');
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [schoolSheetOpen, setSchoolSheetOpen] = useState(false);
   const [sheetCollapsed, setSheetCollapsed] = useState<string[]>([]);
@@ -738,6 +617,16 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
   }, [matched, schoolClass, schoolService, selectedFilters, groups, schoolSort]);
   const schoolResults = schoolPageOpen ? visibleListings : [];
 
+  const explorerShelves = useMemo(
+    () =>
+      shelvesForExplorer({
+        sectionId,
+        railShort: active.short,
+        schoolClass,
+        subject: activeFilters.subject ?? null,
+      }),
+    [sectionId, active.short, schoolClass, activeFilters.subject],
+  );
 
   const sectionIsEmpty = matched.length === 0;
 
@@ -994,15 +883,30 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                   </div>
                 </div>
 
-                {schoolResults.length > 0 ? (
-                  <div className={schoolLayout === 'grid' ? 'mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3' : 'mt-2 space-y-2.5'}>
+                {schoolLayout === 'list' && schoolResults.length > 0 ? (
+                  <div className="mt-2 space-y-2.5">
                     {schoolResults.map((course) => (
-                      schoolLayout === 'grid' ? (
-                        <SchoolListingCard key={course.id} course={course} onOpen={onOpen} />
-                      ) : (
-                        <SchoolListingCard key={course.id} course={course} onOpen={onOpen} />
-                      )
+                      <ClassesServiceCard key={course.id} course={course} onOpen={onOpen} layout="featured" />
                     ))}
+                  </div>
+                ) : explorerShelves && !(schoolResults.length === 0 && (activeFilterCount > 0 || Boolean(schoolService))) ? (
+                  <div className="mt-3">
+                    <ClassesSectionShelves
+                      shelves={explorerShelves}
+                      courses={schoolResults}
+                      inventory={matched}
+                      onOpen={onOpen}
+                      titleMode={schoolClass === 'Class 5' || schoolClass === 'Class 10' ? 'subject' : 'full'}
+                    />
+                  </div>
+                ) : schoolResults.length > 0 ? (
+                  <div className="mt-3">
+                    <ClassesListingsStrip
+                      title={schoolClass ?? schoolService ?? active.short}
+                      courses={schoolResults}
+                      onOpen={onOpen}
+                      showHeading={false}
+                    />
                   </div>
                 ) : (
                   <div>
@@ -1067,11 +971,13 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                   <span className="rounded-full bg-[#f2f6fc] px-2 py-0.5 text-[10px] font-bold text-[#7185a6]">{visibleListings.length}</span>
                 </h3>
 
-                {visibleListings.length > 0 ? (
-                  <div className="mt-2.5 grid grid-cols-1 gap-x-2 gap-y-2.5 sm:mt-3 sm:grid-cols-2 sm:gap-x-3.5 sm:gap-y-3 md:grid-cols-3 xl:grid-cols-4">
-                    {visibleListings.map((course) => (
-                      <ListingCard key={course.id} course={course} onOpen={onOpen} />
-                    ))}
+                {explorerShelves ? (
+                  <div className="mt-2.5 sm:mt-3">
+                    <ClassesSectionShelves shelves={explorerShelves} courses={pool} inventory={pool} onOpen={onOpen} />
+                  </div>
+                ) : visibleListings.length > 0 ? (
+                  <div className="mt-2.5 sm:mt-3">
+                    <ClassesListingsStrip title={`Listings in ${active.short}`} courses={visibleListings} onOpen={onOpen} showHeading={false} />
                   </div>
                 ) : (
                   <div className="mt-2.5 rounded-2xl border border-dashed border-[#dfe7f3] bg-[#fbfdff] px-3 py-6 text-center sm:mt-3 sm:px-4 sm:py-7">
@@ -1089,20 +995,9 @@ export function AcademicStreamExplorer({ courses, query = '', onOpen, sectionReq
                   </div>
                 )}
 
-                {sectionIsEmpty && pool.length > 0 && (
+                {sectionIsEmpty && pool.length > 0 && !explorerShelves && (
                   <section aria-label="Other academic listings" className="mt-6 border-t border-[#eef2f8] pt-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-[13.5px] font-extrabold tracking-tight text-[#0f1c3d] sm:text-[15px]">Other academic listings</h3>
-                      <span className="rounded-full bg-[#f2f6fc] px-2 py-0.5 text-[10px] font-bold text-[#7185a6]">{countLabel(pool.length)}</span>
-                    </div>
-                    <p className="mt-0.5 text-[10px] font-semibold leading-tight text-[#7185a6]">
-                      Approved listings from the other academic sections — not {active.label}.
-                    </p>
-                    <div className="mt-2.5 grid grid-cols-1 gap-x-2 gap-y-2.5 sm:mt-3 sm:grid-cols-2 sm:gap-x-3.5 sm:gap-y-3 md:grid-cols-3 xl:grid-cols-4">
-                      {pool.map((course) => (
-                        <ListingCard key={course.id} course={course} onOpen={onOpen} />
-                      ))}
-                    </div>
+                    <ClassesListingsStrip title="Other academic listings" courses={pool} onOpen={onOpen} />
                   </section>
                 )}
               </>

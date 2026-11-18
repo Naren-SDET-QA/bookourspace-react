@@ -140,8 +140,8 @@ export interface CourseListing {
   statsLink?: string;
 }
 
-const img = (id: string, w = 900): string =>
-  `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=80`;
+const img = (id: string, w = 1200): string =>
+  `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=86`;
 
 const facultyPhoto = (id: string): string =>
   `https://images.unsplash.com/${id}?auto=format&fit=crop&w=200&h=200&q=80`;
@@ -371,7 +371,7 @@ export const classListings: CourseListing[] = [
     verified: true,
     demo: true,
     status: 'approved',
-    image: img('photo-1523240795612-9a054b0db644'),
+    image: img('photo-1546410531-bb4caa6b424d'),
     rating: 4.6,
     reviews: 265,
     feePlans: [
@@ -473,7 +473,7 @@ export const classListings: CourseListing[] = [
     verified: true,
     demo: true,
     status: 'approved',
-    image: img('photo-1508700115892-45ecd05ae2ad'),
+    image: img('photo-1508807526345-15e9b5f4eaff'),
     rating: 4.6,
     reviews: 174,
     feePlans: [{ label: 'Monthly', amount: 3200, unit: 'month', mode: 'Offline' }],
@@ -687,7 +687,7 @@ export const classListings: CourseListing[] = [
     verified: false,
     demo: true,
     status: 'approved',
-    image: img('photo-1503676260728-1c00da094a0b'),
+    image: img('photo-1606092195730-5d7b9af1efc5'),
     rating: 4.8,
     reviews: 64,
     feePlans: [{ label: 'Monthly', amount: 2499, unit: 'month', mode: 'Online' }],

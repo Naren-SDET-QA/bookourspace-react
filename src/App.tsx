@@ -85,10 +85,10 @@ function applyRouteStyleToSectionStyles(base: SectionStyles): SectionStyles {
   const [section, raw = ''] = window.location.hash.replace('#', '').toLowerCase().split('/');
   const style = raw === '1' || raw === 'style1' ? 1 : raw === '2' || raw === 'style2' ? 2 : raw === '3' || raw === 'style3' ? 3 : raw === '4' || raw === 'style4' ? 4 : 0;
   if (!style) return base;
-  // PG and Classes ship only Style 3; a stale #pg/style1 or #classes/style2
-  // deep link must not re-enable the retired layouts.
+  // PG ships only Style 3. Classes keeps Style 3 on #classes / #classes/style3
+  // (training E2E) and honours an explicit #classes/style4 marketplace link.
   if (section === 'pg') return { ...base, pg: 'style3' };
-  if (section === 'classes') return { ...base, classes: 'style3' };
+  if (section === 'classes') return { ...base, classes: style === 4 ? 'style4' : 'style3' };
   // Services ships only Style 2; a stale #services/style1 or /style3 deep link
   // must not re-enable the retired layouts.
   if (section === 'services') return { ...base, services: 'triangle' };

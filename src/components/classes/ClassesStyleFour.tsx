@@ -1,9 +1,12 @@
-import { ArrowRight, BookOpen, Briefcase, Check, ChevronRight, MapPin, Search, ShieldCheck, Sparkles, Star, Trophy } from 'lucide-react';
+import { ArrowRight, BookOpen, Briefcase, Check, ChevronRight, Search, Sparkles, Trophy } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import type { CourseListing } from '../../data/classesTimingsData';
-import { CLASS_MAIN_SECTIONS, getClassCategoryCatalog, type ClassMainSectionId } from '../../data/classesTaxonomy';
+import { CLASS_MAIN_SECTIONS, type ClassMainSectionId } from '../../data/classesTaxonomy';
 import SafeImage from '../SafeImage';
 import { AcademicStreamExplorer } from './AcademicStreamExplorer';
+import { ClassesListingsStrip, ClassesSectionShelves } from './ClassesListingCarousel';
+import { ClassesServiceCard } from './ClassesServiceCard';
+import { SHELVES_BY_SECTION } from './classesShelfCatalog';
 
 type AcademicSectionRequest = { short: string; key: number };
 
@@ -50,14 +53,24 @@ const CATEGORY_ID_TO_RAIL: Record<string, string> = {
   'class-life-skills': 'Personality',
 };
 
-const EXPLORER_SCOPE: Record<string, 'Academic' | 'Personal' | 'Professional'> = {
+const EXPLORER_SCOPE: Record<string, 'Academic' | 'Personal' | 'Professional' | 'Competitive'> = {
   'academic-education': 'Academic',
   Academic: 'Academic',
-  'competitive-exams': 'Academic',
+  'competitive-exams': 'Competitive',
   'professional-career': 'Professional',
   Professional: 'Professional',
   'personal-hobbies': 'Personal',
   Personal: 'Personal',
+};
+
+const SECTION_ID: Record<string, ClassMainSectionId> = {
+  'academic-education': 'academic-education',
+  Academic: 'academic-education',
+  'competitive-exams': 'competitive-exams',
+  'professional-career': 'professional-career',
+  Professional: 'professional-career',
+  'personal-hobbies': 'personal-hobbies',
+  Personal: 'personal-hobbies',
 };
 
 const photo = (id: string, width = 900) =>
@@ -233,10 +246,6 @@ const SORTS = [
   { label: 'Price — High to Low', value: 'fee-desc' },
 ] as const;
 
-function inr(amount: number) {
-  return `\u20b9${Math.round(amount).toLocaleString('en-IN')}`;
-}
-
 function FeatureCard({
   item,
   onCategory,
@@ -283,116 +292,49 @@ function FeatureCard({
 }
 
 function ListingTile({ course, onOpen }: { course: CourseListing; onOpen: (course: CourseListing) => void }) {
-  const place = [course.area, course.city].filter(Boolean).join(', ');
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(course)}
-      aria-label={`View details for ${course.title}`}
-      className="w-[168px] shrink-0 overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white text-left transition hover:shadow-[0_2px_8px_rgba(0,0,0,.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0] sm:w-[188px]"
-    >
-      <span className="relative block h-[140px] overflow-hidden bg-[#f1f3f6] sm:h-[164px]">
-        <SafeImage
-          src={course.image}
-          alt={`${course.title} at ${course.provider}`}
-          category="classes"
-          className="h-full w-full object-cover"
-          sizes="188px"
-        />
-      </span>
-      <span className="block p-2.5">
-        <span className="line-clamp-2 min-h-[32px] text-[13px] font-medium leading-4 text-[#212121]">{course.title}</span>
-        <span className="mt-1 block truncate text-[12px] text-[#878787]">{course.provider}</span>
-        {place ? (
-          <span className="mt-0.5 flex items-center gap-0.5 truncate text-[11px] text-[#878787]">
-            <MapPin className="h-3 w-3 shrink-0" aria-hidden />
-            {place}
-          </span>
-        ) : null}
-        <span className="mt-1.5 flex items-center gap-2">
-          {typeof course.rating === 'number' ? (
-            <span className="inline-flex items-center gap-0.5 rounded-[2px] bg-[#388e3c] px-1.5 py-0.5 text-[11px] font-bold text-white">
-              {course.rating.toFixed(1)} <Star className="h-2.5 w-2.5 fill-white" aria-hidden />
-            </span>
-          ) : null}
-          <span className="text-[14px] font-bold text-[#212121]">{course.free ? 'FREE' : inr(course.fee)}</span>
-        </span>
-      </span>
-    </button>
-  );
+  return <ClassesServiceCard course={course} onOpen={onOpen} layout="tile" />;
 }
 
 function ResultRow({ course, onOpen }: { course: CourseListing; onOpen: (course: CourseListing) => void }) {
-  const place = [course.area, course.city].filter(Boolean).join(', ');
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(course)}
-      aria-label={`View details for ${course.title}`}
-      className="flex w-full gap-3 border-b border-[#f0f0f0] bg-white p-3 text-left last:border-0 hover:shadow-[0_1px_6px_rgba(0,0,0,.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2874f0] sm:gap-4 sm:p-4"
-    >
-      <SafeImage
-        src={course.image}
-        alt={`${course.title} at ${course.provider}`}
-        category="classes"
-        className="h-[92px] w-[92px] shrink-0 rounded-[2px] object-cover sm:h-[120px] sm:w-[120px]"
-        sizes="120px"
-      />
-      <span className="min-w-0 flex-1">
-        <span className="line-clamp-2 text-[14px] font-medium text-[#212121] sm:text-[16px]">{course.title}</span>
-        <span className="mt-0.5 block truncate text-[13px] text-[#878787]">{course.provider}</span>
-        {place ? <span className="mt-0.5 block truncate text-[12px] text-[#878787]">{place}</span> : null}
-        <span className="mt-2 flex flex-wrap items-center gap-2">
-          {typeof course.rating === 'number' ? (
-            <span className="inline-flex items-center gap-0.5 rounded-[2px] bg-[#388e3c] px-1.5 py-0.5 text-[12px] font-bold text-white">
-              {course.rating.toFixed(1)} <Star className="h-3 w-3 fill-white" aria-hidden />
-              {course.reviews ? <span className="font-medium opacity-90">({course.reviews})</span> : null}
-            </span>
-          ) : null}
-          {course.verified ? (
-            <span className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-[#2874f0]">
-              <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Verified
-            </span>
-          ) : null}
-        </span>
-        <span className="mt-1.5 block text-[18px] font-bold text-[#212121]">
-          {course.free ? 'FREE' : `${inr(course.fee)} onwards`}
-        </span>
-      </span>
-    </button>
-  );
+  return <ClassesServiceCard course={course} onOpen={onOpen} layout="row" />;
 }
 
-function Shelf({
-  title,
+function MarketplaceShelves({
   courses,
   onOpen,
-  onViewAll,
+  onCategory,
 }: {
-  title: string;
   courses: CourseListing[];
   onOpen: (course: CourseListing) => void;
-  onViewAll: () => void;
+  onCategory: (value: string) => void;
 }) {
-  if (courses.length === 0) return null;
   return (
-    <section className="mt-3 overflow-hidden rounded-[2px] bg-white shadow-[0_1px_2px_rgba(0,0,0,.1)]">
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <h2 className="text-[16px] font-medium text-[#212121] sm:text-[20px]">{title}</h2>
-        <button
-          type="button"
-          onClick={onViewAll}
-          className="inline-flex items-center gap-1 rounded-[2px] bg-[#2874f0] px-3 py-1.5 text-[12px] font-bold uppercase tracking-wide text-white"
-        >
-          View all
-        </button>
-      </div>
-      <div className="flex gap-3 overflow-x-auto px-4 pb-4 [scrollbar-width:thin]">
-        {courses.map((course) => (
-          <ListingTile key={course.id} course={course} onOpen={onOpen} />
-        ))}
-      </div>
-    </section>
+    <div className="mt-4 space-y-8 sm:space-y-10">
+      {CLASS_MAIN_SECTIONS.map((section) => (
+        <section key={section.id} className="rounded-2xl bg-white px-3 py-4 sm:px-5 sm:py-5">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[20px] font-semibold tracking-tight text-[#222] sm:text-[22px]">{section.label}</h2>
+              <p className="mt-0.5 text-[13px] text-[#6a6a6a]">{section.description}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onCategory(section.id)}
+              aria-label={`View all ${section.label}`}
+              className="shrink-0 text-[13px] font-semibold text-[#222] underline decoration-[#ddd] underline-offset-4"
+            >
+              View all
+            </button>
+          </div>
+          <ClassesSectionShelves
+            shelves={SHELVES_BY_SECTION[section.id]}
+            courses={courses}
+            onOpen={onOpen}
+            onViewAll={() => onCategory(section.id)}
+          />
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -416,24 +358,6 @@ export function ClassesStyleFour({
   const pathway = group && group !== 'All' ? group : null;
   const explorerScope = pathway ? EXPLORER_SCOPE[pathway] ?? 'Academic' : 'Academic';
   const explorerCourses = explorerScope === 'Academic' ? (academicCourses ?? courses) : courses;
-  const catalog = getClassCategoryCatalog();
-
-  const openLabel = (label: string) => {
-    const section = ACADEMIC_SECTION_BY_LABEL[label];
-    if (section && onAcademicSection) onAcademicSection(section);
-    else onCategory(label);
-  };
-
-  const openCatalogCategory = (categoryId: string, name: string) => {
-    const rail = CATEGORY_ID_TO_RAIL[categoryId];
-    if (rail && onAcademicSection) {
-      onAcademicSection(rail);
-      return;
-    }
-    const parent = CLASS_MAIN_SECTIONS.find((section) => section.categoryIds.includes(categoryId));
-    if (parent) onCategory(parent.id);
-    else onCategory(name);
-  };
 
   const sortedResults = useMemo(() => {
     const list = [...courses];
@@ -444,18 +368,6 @@ export function ClassesStyleFour({
   }, [courses, sort]);
 
   const searching = query.trim().length > 0;
-  const topRated = useMemo(
-    () => courses.filter((course) => (course.rating ?? 0) >= 4).slice(0, 10),
-    [courses],
-  );
-  const verified = useMemo(
-    () => courses.filter((course) => course.verified).slice(0, 10),
-    [courses],
-  );
-  const nearby = useMemo(
-    () => courses.filter((course) => course.area || course.city).slice(0, 10),
-    [courses],
-  );
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -504,6 +416,7 @@ export function ClassesStyleFour({
               sectionRequest={academicSectionRequest}
               admissionRequest={admissionRequest}
               scope={explorerScope}
+              sectionId={pathway ? SECTION_ID[pathway] : undefined}
             />
           </div>
         ) : (
@@ -521,18 +434,12 @@ export function ClassesStyleFour({
                       <SafeImage src={photo(item.image, 160)} alt="" category="classes" className="h-full w-full object-cover" sizes="64px" />
                     </span>
                     <span className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#212121] sm:text-[13px]">
-                      {item.section.shortLabel}
+                      {item.section.label}
                     </span>
                   </button>
                 ))}
               </div>
             </nav>
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {sectionCards.map((item) => (
-                <FeatureCard key={item.section.id} item={item} onCategory={onCategory} />
-              ))}
-            </div>
 
             <div className="mt-3 overflow-hidden rounded-[2px] bg-white shadow-[0_1px_2px_rgba(0,0,0,.1)]">
               <div className="grid grid-cols-4 sm:grid-cols-8">
@@ -553,94 +460,9 @@ export function ClassesStyleFour({
               </div>
             </div>
 
-            <section className="mt-3 rounded-[2px] bg-white p-3 shadow-[0_1px_2px_rgba(0,0,0,.1)] sm:p-4">
-              <div className="mb-3 flex items-end justify-between gap-2">
-                <div>
-                  <h2 className="text-[16px] font-medium text-[#212121] sm:text-[20px]">Browse by category</h2>
-                  <p className="text-[12px] text-[#878787]">All 26 class categories, grouped under the four marketplace sections.</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
-                {catalog.map((category) => (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => openCatalogCategory(category.id, category.name)}
-                    className="overflow-hidden rounded-[2px] border border-[#f0f0f0] bg-white text-left hover:shadow-[0_2px_8px_rgba(0,0,0,.1)]"
-                  >
-                    <span className="block h-[72px] overflow-hidden bg-[#f1f3f6] sm:h-[88px]">
-                      <SafeImage
-                        src={CATEGORY_ART[category.id] || photo(P.campusStudents, 360)}
-                        alt={category.name}
-                        category="classes"
-                        className="h-full w-full object-cover"
-                        sizes="140px"
-                      />
-                    </span>
-                    <span className="block px-1.5 py-1.5 text-center text-[11px] font-semibold leading-tight text-[#212121]">
-                      {category.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {CLASS_MAIN_SECTIONS.map((section) => {
-              const cats = catalog.filter((category) => section.categoryIds.includes(category.id));
-              const chipStart =
-                section.id === 'academic-education' ? 0
-                : section.id === 'competitive-exams' ? 5
-                : section.id === 'professional-career' ? 12
-                : 27;
-              let chipIndex = chipStart;
-              const chips = cats.flatMap((category) =>
-                category.subcategories.slice(0, 4).map((sub) => {
-                  const image = photo(CHIP_POOL[chipIndex % CHIP_POOL.length], 360);
-                  chipIndex += 1;
-                  return {
-                    key: `${category.id}-${sub.en}`,
-                    label: sub.en,
-                    image,
-                  };
-                }),
-              );
-              if (chips.length === 0) return null;
-              return (
-                <section key={section.id} className="mt-3 rounded-[2px] bg-white p-3 shadow-[0_1px_2px_rgba(0,0,0,.1)] sm:p-4">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <h2 className="text-[16px] font-medium text-[#212121] sm:text-[18px]">{section.label}</h2>
-                    <button
-                      type="button"
-                      onClick={() => onCategory(section.id)}
-                      className="inline-flex items-center text-[12px] font-bold text-[#2874f0]"
-                    >
-                      View all <ChevronRight className="h-4 w-4" aria-hidden />
-                    </button>
-                  </div>
-                  <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
-                    {chips.map((chip) => (
-                      <button
-                        key={chip.key}
-                        type="button"
-                        onClick={() => onCategory(chip.label)}
-                        className="w-[132px] shrink-0 overflow-hidden rounded-[2px] border border-[#f0f0f0] text-left hover:shadow-sm"
-                      >
-                        <span className="block h-[88px] overflow-hidden bg-[#f1f3f6]">
-                          <SafeImage src={chip.image} alt={chip.label} category="classes" className="h-full w-full object-cover" sizes="132px" />
-                        </span>
-                        <span className="line-clamp-2 px-2 py-1.5 text-[11px] font-semibold leading-tight text-[#212121]">{chip.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-
-            <Style1Cards onSectionSelect={onAcademicSection} />
-
-            <div className="mt-3 grid gap-3 lg:grid-cols-[240px_1fr]">
-              <aside className="rounded-[2px] bg-white p-2 shadow-[0_1px_2px_rgba(0,0,0,.1)]">
-                <p className="px-3 py-2 text-[13px] font-bold text-[#212121]">Academic pathways</p>
+            <aside className="mt-3 overflow-hidden rounded-2xl bg-white p-2 shadow-[0_1px_2px_rgba(0,0,0,.1)]">
+              <p className="px-3 py-2 text-[13px] font-bold text-[#212121]">Academic pathways</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
                 {[
                   ['School Education', 'School'],
                   ['Intermediate / +2', 'Intermediate'],
@@ -657,44 +479,23 @@ export function ClassesStyleFour({
                   <button
                     type="button"
                     key={label}
-                    onClick={() => openLabel(value)}
-                    className="flex w-full items-center justify-between rounded-[2px] px-3 py-2.5 text-left text-[13px] font-medium text-[#212121] hover:bg-[#f5f7fa]"
+                    onClick={() => {
+                      const section = ACADEMIC_SECTION_BY_LABEL[label];
+                      if (section && onAcademicSection) onAcademicSection(section);
+                      else onCategory(value);
+                    }}
+                    className="flex items-center justify-between rounded-[2px] px-3 py-2.5 text-left text-[13px] font-medium text-[#212121] hover:bg-[#f5f7fa]"
                   >
                     <span>{label}</span>
                     <ChevronRight className="h-4 w-4 text-[#878787]" aria-hidden />
                   </button>
                 ))}
-              </aside>
-              <section className="rounded-[2px] bg-white p-3 shadow-[0_1px_2px_rgba(0,0,0,.1)] sm:p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-[16px] font-medium text-[#212121] sm:text-[18px]">School Education</h3>
-                    <p className="text-[12px] text-[#878787]">Pre-primary to Class 12 · CBSE, ICSE, State Board &amp; More</p>
-                  </div>
-                  <button type="button" onClick={() => onCategory('School')} className="text-[12px] font-bold text-[#2874f0]">
-                    View All
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                  {schoolCards.map(([label, subtitle, image]) => (
-                    <button
-                      type="button"
-                      key={label}
-                      onClick={() => openLabel(label)}
-                      className="overflow-hidden rounded-[2px] border border-[#f0f0f0] text-left hover:shadow-sm"
-                    >
-                      <SafeImage src={photo(image, 500)} alt={label} category="classes" className="h-24 w-full object-cover" sizes="180px" />
-                      <p className="px-2 pt-2 text-[12px] font-bold text-[#212121]">{label}</p>
-                      <p className="px-2 pb-2 text-[10px] text-[#878787]">{subtitle}</p>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            </div>
+              </div>
+            </aside>
 
             {searching ? (
-              <section className="mt-3 overflow-hidden rounded-[2px] bg-white shadow-[0_1px_2px_rgba(0,0,0,.1)]">
-                <div className="flex flex-wrap items-center gap-1 border-b border-[#f0f0f0] px-3 py-2 text-[13px] sm:px-4">
+              <section className="mt-3 overflow-hidden rounded-2xl bg-white px-3 py-4 shadow-[0_1px_2px_rgba(0,0,0,.1)] sm:px-5">
+                <div className="mb-3 flex flex-wrap items-center gap-1 text-[13px]">
                   <span className="mr-2 font-semibold text-[#212121]">{sortedResults.length} results</span>
                   {SORTS.map((option) => (
                     <button
@@ -711,17 +512,11 @@ export function ClassesStyleFour({
                 {sortedResults.length === 0 ? (
                   <p className="px-4 py-10 text-center text-[13px] text-[#878787]">No courses match this search.</p>
                 ) : (
-                  sortedResults.map((course) => (
-                    <ResultRow key={course.id} course={course} onOpen={onOpen} />
-                  ))
+                  <ClassesListingsStrip title="Search results" courses={sortedResults} onOpen={onOpen} />
                 )}
               </section>
             ) : (
-              <>
-                <Shelf title="Top rated classes" courses={topRated} onOpen={onOpen} onViewAll={() => onCategory('All')} />
-                <Shelf title="Verified institutes" courses={verified} onOpen={onOpen} onViewAll={() => onCategory('All')} />
-                <Shelf title="Classes near you" courses={nearby} onOpen={onOpen} onViewAll={() => onCategory('Near')} />
-              </>
+              <MarketplaceShelves courses={courses} onOpen={onOpen} onCategory={onCategory} />
             )}
           </>
         )}

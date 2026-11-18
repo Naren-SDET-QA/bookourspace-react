@@ -45,6 +45,7 @@ import { ClassesCategoryRail, type ClassesCategorySelection } from './classes/Cl
 import { ClassesSpotlightCards } from './classes/ClassesSpotlightCards';
 import { ClassesStyleThreeDetail } from './classes/ClassesStyleThreeDetail';
 import { ClassesStyleFour } from './classes/ClassesStyleFour';
+import { ClassesKindShowcase } from './classes/ClassesListingCarousel';
 import type { MarketplaceListing } from '../types/marketplace';
 import { canContactOwner } from '../lib/servicesStayRules';
 import { CLASS_MAIN_SECTIONS, getClassMainSection, type ClassMainSectionId } from '../data/classesTaxonomy';
@@ -1029,6 +1030,9 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
         <div className={activeStyle === 'style4' ? 'hidden' : 'mx-auto max-w-6xl px-3 py-3 sm:px-5'}>
           {activeStyle === 'style3' && (
             <>
+              <div className="bos-classes-fk">
+                <ClassesKindShowcase courses={results} onOpen={(course) => setSelected(course)} />
+              </div>
               <ClassesSpotlightCards
                 courses={allCourses}
                 onOpen={(course) => setSelected(course)}
