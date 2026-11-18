@@ -60,7 +60,31 @@ export function resolvePostgresTlsConnectionString(connectionString: string): st
 
 let sharedPool: Pool | null = null;
 let sharedConnectionString = '';
+let sharedPoolMax = 0;
 let closed = false;
+
+/** Default sized for ~100 GPS writes/s plus other API traffic. Override with BOS_PG_POOL_MAX. */
+export const DEFAULT_PG_POOL_MAX = 40;
+export const PG_POOL_MAX_FLOOR = 8;
+export const PG_POOL_MAX_CEILING = 80;
+
+export function resolvePostgresPoolMax(environment: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(environment.BOS_PG_POOL_MAX);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.min(PG_POOL_MAX_CEILING, Math.max(PG_POOL_MAX_FLOOR, Math.floor(raw)));
+  }
+  return DEFAULT_PG_POOL_MAX;
+}
+
+export function postgresPoolOptions(connectionString: string, environment: NodeJS.ProcessEnv = process.env) {
+  return {
+    connectionString,
+    max: resolvePostgresPoolMax(environment),
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+    allowExitOnIdle: false,
+  };
+}
 
 export function isPostgresConfigured(environment: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(String(environment.BOS_LISTINGS_DATABASE_URL || '').trim());
@@ -94,21 +118,27 @@ export function getSharedPostgresPool(
   const normalised = resolvePostgresTlsConnectionString(
     assertPostgresConnectionTarget(connectionString, environment),
   );
-  if (sharedPool && sharedConnectionString === normalised && !closed) return sharedPool;
+  const poolMax = resolvePostgresPoolMax(environment);
+  if (sharedPool && sharedConnectionString === normalised && sharedPoolMax === poolMax && !closed) return sharedPool;
   if (sharedPool && !closed) {
     // A different database was configured. The old pool is released.
     void sharedPool.end().catch(() => undefined);
   }
   closed = false;
   sharedConnectionString = normalised;
-  sharedPool = new Pool({
-    connectionString: normalised,
-    max: 8,
-    connectionTimeoutMillis: 3000,
-    idleTimeoutMillis: 10000,
-    allowExitOnIdle: false,
-  });
+  sharedPoolMax = poolMax;
+  sharedPool = new Pool(postgresPoolOptions(normalised, environment));
   return sharedPool;
+}
+
+export function getSharedPostgresPoolStats(): { totalCount: number; idleCount: number; waitingCount: number; max: number } | null {
+  if (!sharedPool) return null;
+  return {
+    totalCount: sharedPool.totalCount,
+    idleCount: sharedPool.idleCount,
+    waitingCount: sharedPool.waitingCount,
+    max: sharedPoolMax,
+  };
 }
 
 const REQUIRED_STAY_RELATIONS = [
@@ -200,6 +230,7 @@ export async function initializePostgresRuntime(
         if (pool === sharedPool) {
           sharedPool = null;
           sharedConnectionString = '';
+          sharedPoolMax = 0;
           closed = true;
         }
         throw error;
@@ -218,6 +249,7 @@ export async function initializePostgresRuntime(
   if (pool === sharedPool) {
     sharedPool = null;
     sharedConnectionString = '';
+    sharedPoolMax = 0;
     closed = true;
   }
   if (['28P01', '28000'].includes(rawCode)) throw new Error('BOS_LISTINGS_DATABASE_AUTHENTICATION_FAILED');
@@ -233,6 +265,7 @@ export async function closeSharedPostgresPool(): Promise<void> {
   const pool = sharedPool;
   sharedPool = null;
   sharedConnectionString = '';
+  sharedPoolMax = 0;
   closed = true;
   await pool.end().catch(() => undefined);
 }

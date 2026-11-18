@@ -57,6 +57,8 @@ import {
 } from './src/server/customerPermissions';
 import { registerServiceBookingApi } from './src/server/serviceBookingApi';
 import { ServiceCatalogRepository, registerServiceCatalogApi } from './src/server/serviceCatalogRepository';
+import { GpsPolicyRepository, registerGpsPolicyApi } from './src/server/gpsPolicyApi';
+import { registerTrackingShareApi } from './src/server/trackingShareApi';
 import { registerServiceCommerceApi } from './src/server/serviceCommerceApi';
 import { registerProviderOperationsApi } from './src/server/providerOperationsApi';
 import { registerServiceDispatchApi } from './src/server/serviceDispatchApi';
@@ -82,6 +84,7 @@ import { sendBookingNotificationEmails } from './src/server/bookingNotificationE
 import { buildWhatsAppFaqReply } from './src/server/whatsappFaq';
 import { sendPgQaSampleEmails } from './src/server/pgQaEmailSamples';
 import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
+import { VITE_ALLOWED_HOSTS } from './src/server/viteAllowedHosts';
 import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
 import { apiNoStoreByDefault } from './src/server/apiCachePrivacy';
 import { logSafeError } from './src/server/safeLogging';
@@ -419,6 +422,7 @@ async function startServer() {
       throw new Error('SERVICE_CATALOG_DATABASE_UNAVAILABLE');
     }
   }
+  const gpsPolicyRepository = GpsPolicyRepository.fromEnvironment();
 
   // PG reservations use shared PostgreSQL inventory and remain pay-later.
   // This repository never starts or verifies a payment provider transaction.
@@ -5187,6 +5191,17 @@ Task:
     repository: serviceCatalogRepository,
     verifySession: verifySessionTokenFromRequest,
   });
+  registerGpsPolicyApi(app, {
+    repository: gpsPolicyRepository,
+    verifySession: verifySessionTokenFromRequest,
+  });
+  if (serviceBookingRepository) {
+    registerTrackingShareApi(app, {
+      repository: serviceBookingRepository,
+      verifySession: verifySessionTokenFromRequest,
+      env: process.env,
+    });
+  }
 
   // Real slot availability, provider schedule/profile and server-verified UPI
   // settlement. Fails closed with 503 when PostgreSQL is not configured.
@@ -6424,6 +6439,7 @@ Task:
         ws: { server: httpServer },
         hmr: hmrDisabled ? false : undefined,
         watch: hmrDisabled ? null : {},
+        allowedHosts: [...VITE_ALLOWED_HOSTS],
       },
       appType: 'spa',
     });

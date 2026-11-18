@@ -12,6 +12,7 @@ import {
   isTerminalDeliveryStatus,
   isLiveDeliveryStatus,
   nextTrackingPollDelay,
+  type DeliveryStatus,
 } from '../lib/deliveryTracking';
 import { hasRealtimeTransport } from '../lib/deliveryTrackingClient';
 
@@ -151,7 +152,7 @@ export function useHelperLocationPublisher(bookingId: string | null, enabled: bo
   const lastSent = useRef(0);
 
   useEffect(() => {
-    if (!bookingId || !enabled || !point || !status || !isLiveDeliveryStatus(status as any)) return;
+    if (!bookingId || !enabled || !point || !status || !isLiveDeliveryStatus(status as DeliveryStatus)) return;
     const captured = new Date(point.capturedAt).getTime();
     if (!Number.isFinite(captured) || Date.now() - captured > 30_000) return;
     if (captured - lastSent.current < 10_000) return;

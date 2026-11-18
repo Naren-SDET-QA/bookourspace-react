@@ -1,9 +1,9 @@
 /**
  * Shared, server-agnostic rules for BookOurSpace delivery tracking.
  *
- * The database is authoritative for booking access and OTP verification. This
- * module only describes the client-visible contract so Human Help, Medicine
- * Delivery and Water Bottle Delivery use the same states and limits.
+ * The database is authoritative for booking access and OTP verification. GPS
+ * itself is service-independent: category toggles and booking assignment decide
+ * whether a plumber, water-can driver or packers crew is tracked.
  */
 
 export type DeliveryKind = 'human_help' | 'medicine_delivery' | 'water_delivery';
@@ -11,10 +11,16 @@ export type DeliveryKind = 'human_help' | 'medicine_delivery' | 'water_delivery'
 export type DeliveryStatus =
   | 'requested'
   | 'accepted'
+  | 'assigned'
+  | 'travelling'
+  | 'arrived'
+  | 'started'
   | 'in_progress'
   | 'completed'
   | 'cancelled'
   | 'rejected';
+
+export type JourneyStatus = 'idle' | 'awaiting_permission' | 'en_route' | 'arriving' | 'arrived' | 'stopped';
 
 export interface DeliveryKindConfig {
   kind: DeliveryKind;
@@ -58,12 +64,18 @@ export const DELIVERY_TRACKING_CONFIG: Record<DeliveryKind, DeliveryKindConfig> 
 
 export const TRACKING_STALE_AFTER_MS = 45_000;
 export const TRACKING_UPDATE_INTERVAL_MS = 12_000;
+export const INACCURATE_GPS_METERS = 150;
+export const ARRIVAL_RADIUS_METERS = 80;
+export const APPROACHING_RADIUS_METERS = 400;
+export const DEFAULT_URBAN_SPEED_MPS = 6.11;
 export const OTP_TTL_MS = 10 * 60_000;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_LENGTH = 6;
 
 export const TERMINAL_DELIVERY_STATUSES: readonly DeliveryStatus[] = ['completed', 'cancelled', 'rejected'];
-export const LIVE_DELIVERY_STATUSES: readonly DeliveryStatus[] = ['accepted', 'in_progress'];
+export const LIVE_DELIVERY_STATUSES: readonly DeliveryStatus[] = [
+  'accepted', 'assigned', 'travelling', 'arrived', 'started', 'in_progress',
+];
 
 export function isTerminalDeliveryStatus(status: DeliveryStatus): boolean {
   return TERMINAL_DELIVERY_STATUSES.includes(status);
@@ -80,6 +92,83 @@ export function isValidCoordinate(latitude: number, longitude: number): boolean 
     && latitude <= 90
     && longitude >= -180
     && longitude <= 180;
+}
+
+export function isGpsInaccurate(accuracyMeters: number | null | undefined): boolean {
+  return Number.isFinite(Number(accuracyMeters)) && Number(accuracyMeters) > INACCURATE_GPS_METERS;
+}
+
+/** Haversine distance in whole metres. Used for ETA; no external maps API. */
+export function haversineMeters(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number },
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(to.latitude - from.latitude);
+  const dLon = toRad(to.longitude - from.longitude);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(from.latitude)) * Math.cos(toRad(to.latitude)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(6371000 * 2 * Math.asin(Math.min(1, Math.sqrt(a))));
+}
+
+export function etaSecondsFromDistance(distanceMeters: number, speedMps?: number | null): number {
+  const speed = Number(speedMps) >= 1.5 ? Number(speedMps) : DEFAULT_URBAN_SPEED_MPS;
+  return Math.max(0, Math.ceil(distanceMeters / speed));
+}
+
+/**
+ * One GPS-derived journey triple. Distance, ETA and status always come from
+ * the same two coordinates so the map, Distance card and Time Taken cannot
+ * drift apart.
+ */
+export function deriveJourneyMetrics(
+  from: { latitude: number; longitude: number } | null | undefined,
+  to: { latitude: number; longitude: number } | null | undefined,
+  speedMps?: number | null,
+): { distanceMeters: number | null; etaSeconds: number | null; journeyStatus: JourneyStatus } {
+  if (!from || !to || !isValidCoordinate(from.latitude, from.longitude) || !isValidCoordinate(to.latitude, to.longitude)) {
+    return { distanceMeters: null, etaSeconds: null, journeyStatus: from ? 'en_route' : 'idle' };
+  }
+  const distanceMeters = haversineMeters(from, to);
+  return {
+    distanceMeters,
+    etaSeconds: etaSecondsFromDistance(distanceMeters, speedMps),
+    journeyStatus: journeyStatusFromDistance(distanceMeters),
+  };
+}
+
+export function journeyStatusFromDistance(distanceMeters: number | null | undefined): JourneyStatus {
+  if (distanceMeters == null || !Number.isFinite(distanceMeters)) return 'en_route';
+  if (distanceMeters <= ARRIVAL_RADIUS_METERS) return 'arrived';
+  if (distanceMeters <= APPROACHING_RADIUS_METERS) return 'arriving';
+  return 'en_route';
+}
+
+export function formatDistance(meters: number | null | undefined): string {
+  if (meters == null || !Number.isFinite(meters)) return 'Distance unavailable';
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+export function formatEta(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return 'ETA unavailable';
+  if (seconds < 60) return 'Under 1 min';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+export function journeyStatusLabel(status: JourneyStatus | string | null | undefined): string {
+  switch (status) {
+    case 'awaiting_permission': return 'Waiting for location permission';
+    case 'en_route': return 'On the way';
+    case 'arriving': return 'Arriving';
+    case 'arrived': return 'Arrived';
+    case 'stopped': return 'Tracking stopped';
+    default: return 'Waiting for GPS';
+  }
 }
 
 export function isLocationStale(capturedAt: string | number | Date, now = Date.now()): boolean {
@@ -135,7 +224,11 @@ export function deliveryKindFor(input: { categoryId?: string | null; title?: str
 export function trackingStatusLabel(status: DeliveryStatus): string {
   switch (status) {
     case 'requested': return 'Waiting for assignment';
-    case 'accepted': return 'Helper assigned';
+    case 'accepted': return 'Assigned';
+    case 'assigned': return 'Assigned';
+    case 'travelling': return 'On the way';
+    case 'arrived': return 'Arrived';
+    case 'started': return 'Service started';
     case 'in_progress': return 'On the way';
     case 'completed': return 'Completed';
     case 'cancelled': return 'Cancelled';
@@ -165,9 +258,11 @@ export function nextTrackingPollDelay(input: TrackingPollState): number | null {
   if (!input.trackingEnabled || isTerminalDeliveryStatus(input.status)) return null;
   if (!input.online) return 30_000;
   if (!input.visible) return 30_000;
-  if (input.realtime) return 60_000;
   if (!input.hasLocation) return 4_000;
   const stale = isLocationStale(input.capturedAt || 0, input.now ?? Date.now());
   if (stale) return 5_000;
+  // Realtime (when it actually delivers) is still primary. The poll is the
+  // live safety-net so a customer map moves without a manual refresh even
+  // when hosted Realtime is pointed at a different database.
   return 8_000;
 }

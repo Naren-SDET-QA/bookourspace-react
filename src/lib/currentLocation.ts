@@ -67,20 +67,43 @@ export function getGeolocationErrorMessage(error: Pick<GeolocationPositionError,
   }
 }
 
+function readValidCoordinates(coords: GeolocationCoordinates): BrowserCoordinates | null {
+  const latitude = Number(coords.latitude);
+  const longitude = Number(coords.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return null;
+  }
+  return { latitude, longitude };
+}
+
 export function getCurrentBrowserPosition(): Promise<BrowserCoordinates> {
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    return Promise.reject(new Error('GEOLOCATION_INSECURE_CONTEXT'));
+  }
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     return Promise.reject(new Error('GEOLOCATION_UNSUPPORTED'));
   }
 
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => resolve({ latitude: coords.latitude, longitude: coords.longitude }),
-      reject,
-      {
-        enableHighAccuracy: false,
-        timeout: 10000,
-        maximumAge: 300000,
+  const geo = navigator.geolocation;
+  const take = (options: PositionOptions) => new Promise<BrowserCoordinates>((resolve, reject) => {
+    geo.getCurrentPosition(
+      ({ coords }) => {
+        const point = readValidCoordinates(coords);
+        if (!point) {
+          reject(new Error('GEOLOCATION_INVALID'));
+          return;
+        }
+        resolve(point);
       },
+      reject,
+      options,
     );
+  });
+
+  return take({ enableHighAccuracy: false, timeout: 12_000, maximumAge: 30_000 }).catch((error) => {
+    if (error && typeof error === 'object' && 'code' in error && Number((error as GeolocationPositionError).code) === 1) {
+      throw error;
+    }
+    return take({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 5_000 });
   });
 }

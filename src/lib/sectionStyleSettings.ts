@@ -27,15 +27,76 @@ const KEY = 'bos_section_styles_v2';
 const PREFS_KEY = 'bos_section_style_prefs_v1';
 export const SECTION_STYLES_EVENT = 'bos-section-styles-changed';
 
+/** Retired customer hashes that used to open Services Style 1 or Style 3. */
+const RETIRED_SERVICES_HASH_STYLES = new Set([
+  'old', '1', 'style1', 'services1',
+  'noddyy', '3', 'style3', 'services3',
+  'triangle', '2', 'style2', 'services2',
+]);
+
 /** Product decision: PG and Classes ship only the Style 3 experience. */
 export const STYLE3_LOCKED_SECTIONS = ['pg'] as const;
 export function isStyle3Locked(section: keyof SectionStyles): boolean {
-  return section === 'pg' || section === 'classes';
+  return section === 'pg';
 }
 
 function applyStyleLocks(value: SectionStyles): SectionStyles {
   // Halls ships only Style 2 (agenda); Services only Style 2 (triangle).
   return { ...value, pg: 'style3', venues: 'agenda', services: 'triangle' };
+}
+
+/** Rewrite a stale services=old cache without broadcasting a style-change event. */
+function persistLockedServices(next: SectionStyles): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<SectionStyles> | null;
+      if (parsed && parsed.services && parsed.services !== 'triangle') {
+        localStorage.setItem(KEY, JSON.stringify({ ...parsed, ...next, services: 'triangle' }));
+      }
+    }
+    const prefsRaw = localStorage.getItem(PREFS_KEY);
+    if (prefsRaw) {
+      const prefs = JSON.parse(prefsRaw) as Partial<SectionStyles> | null;
+      if (prefs && prefs.services && prefs.services !== 'triangle') {
+        localStorage.setItem(PREFS_KEY, JSON.stringify({ ...prefs, services: 'triangle' }));
+      }
+    }
+  } catch {
+    // Storage can be unavailable; the in-memory lock still applies.
+  }
+}
+
+/**
+ * Drop retired Services style segments (#services/old, /style1, /noddyy, …)
+ * so a bookmark or OAuth return cannot reopen Style 1.
+ */
+export function canonicalizeServicesHash(): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const raw = window.location.hash.replace(/^#/, '').toLowerCase();
+    const [sec, style] = raw.split('/');
+    if (sec !== 'services' || !style) return;
+    if (!RETIRED_SERVICES_HASH_STYLES.has(style)) return;
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#services`);
+  } catch {
+    // Hash rewrite is best-effort; the render lock still forces triangle.
+  }
+}
+
+/** Keep Classes Style 4 and other module hashes; fold Services deep-links to #services. */
+export function sanitizeServicesReturnHash(hash: string): string {
+  const body = String(hash || '').replace(/^#/, '').toLowerCase();
+  if (body === 'services' || body.startsWith('services/')) return '#services';
+  if (body === 'classes' || body.startsWith('classes/')) {
+    const [, style = ''] = body.split('/');
+    // Training E2E uses bare #classes / #classes/style3 for Style 3.
+    if (!style) return '#classes';
+    if (style === '3' || style === 'style3') return '#classes/style3';
+    return '#classes/style4';
+  }
+  return hash;
 }
 
 const VALID_VALUES: Record<keyof SectionStyles, readonly string[]> = {
@@ -111,26 +172,35 @@ export function loadSectionStyles(): SectionStyles {
   const preferences = loadStylePreferences();
   // A browser-local preference may help development, but must never replace a
   // centrally published production design on a device that has stale storage.
-  if (!localPreferencesEnabled()) return applyStyleLocks({ ...DEFAULTS, ...preferences });
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return applyStyleLocks({ ...DEFAULTS, ...preferences });
-    const parsed = JSON.parse(raw) as Partial<SectionStyles>;
-    return applyStyleLocks({
-      pg: parsed.pg === 'style1' || parsed.pg === 'style2' || parsed.pg === 'style3' ? parsed.pg : DEFAULTS.pg,
-      stay: parsed.stay === 'old' || parsed.stay === 'airbnb' || parsed.stay === 'style3' ? parsed.stay : DEFAULTS.stay,
-      services:
-        parsed.services === 'old' || parsed.services === 'triangle' || parsed.services === 'noddyy'
-          ? parsed.services
-          : DEFAULTS.services,
-      classes: parsed.classes === 'timetable' || parsed.classes === 'style3' || parsed.classes === 'style4' ? parsed.classes : DEFAULTS.classes,
-      venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : DEFAULTS.venues,
-      movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : DEFAULTS.movies,
-      ...preferences,
-    });
-  } catch {
-    return applyStyleLocks({ ...DEFAULTS, ...preferences });
+  let locked: SectionStyles;
+  if (!localPreferencesEnabled()) {
+    locked = applyStyleLocks({ ...DEFAULTS, ...preferences });
+  } else {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) {
+        locked = applyStyleLocks({ ...DEFAULTS, ...preferences });
+      } else {
+        const parsed = JSON.parse(raw) as Partial<SectionStyles>;
+        locked = applyStyleLocks({
+          pg: parsed.pg === 'style1' || parsed.pg === 'style2' || parsed.pg === 'style3' ? parsed.pg : DEFAULTS.pg,
+          stay: parsed.stay === 'old' || parsed.stay === 'airbnb' || parsed.stay === 'style3' ? parsed.stay : DEFAULTS.stay,
+          services:
+            parsed.services === 'old' || parsed.services === 'triangle' || parsed.services === 'noddyy'
+              ? parsed.services
+              : DEFAULTS.services,
+          classes: parsed.classes === 'timetable' || parsed.classes === 'style3' || parsed.classes === 'style4' ? parsed.classes : DEFAULTS.classes,
+          venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : DEFAULTS.venues,
+          movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : DEFAULTS.movies,
+          ...preferences,
+        });
+      }
+    } catch {
+      locked = applyStyleLocks({ ...DEFAULTS, ...preferences });
+    }
   }
+  persistLockedServices(locked);
+  return locked;
 }
 
 export function applyRemoteSectionStyles(value: unknown, sectionStylesVersion?: number): SectionStyles | null {
@@ -148,8 +218,8 @@ export function applyRemoteSectionStyles(value: unknown, sectionStylesVersion?: 
     stay: legacyDefaults && parsed.stay === 'airbnb'
       ? 'old'
       : parsed.stay === 'old' || parsed.stay === 'airbnb' || parsed.stay === 'style3' ? parsed.stay : loadSectionStyles().stay,
-    services: parsed.services === 'old' || parsed.services === 'triangle' || parsed.services === 'noddyy' ? parsed.services : loadSectionStyles().services,
-    classes: parsed.classes === 'timetable' || parsed.classes === 'style3' || parsed.classes === 'style4' ? parsed.classes : 'cards',
+    services: 'triangle',
+    classes: parsed.classes === 'timetable' || parsed.classes === 'style3' || parsed.classes === 'style4' ? parsed.classes : loadSectionStyles().classes,
     venues: parsed.venues === 'agenda' || parsed.venues === 'style3' ? parsed.venues : 'showcase',
     movies: parsed.movies === 'classic' || parsed.movies === 'style3' ? parsed.movies : 'experience',
   } as SectionStyles;
@@ -227,6 +297,7 @@ export function styleFromHash(section: 'pg' | 'stays' | 'hotels' | 'services'): 
     const hash = window.location.hash.replace('#', '').toLowerCase();
     const [sec, style] = hash.split('/');
     if (sec !== section) return null;
+    if (section === 'services') return null;
     return style || null;
   } catch {
     return null;

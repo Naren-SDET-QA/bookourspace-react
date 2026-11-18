@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 119,
+  "migrationCount": 122,
   "migrations": [
     {
       "order": 2,
@@ -966,6 +966,30 @@
       "file": "supabase/migrations/20261115120000_service_role_config_mirror_grants.sql",
       "bytes": 1856,
       "sha256": "4ba7e9e8281014fffb98bd464e8c4710cdbeca55c8eb0d10d41a8355d907d68c"
+    },
+    {
+      "order": 121,
+      "version": "20261118180000",
+      "name": "universal_gps_engine",
+      "file": "supabase/migrations/20261118180000_universal_gps_engine.sql",
+      "bytes": 16505,
+      "sha256": "b488b6aa14db23ecc92a3451293baef2e2a96a98884bc39c001f71c65bb002e0"
+    },
+    {
+      "order": 122,
+      "version": "20261118190000",
+      "name": "admin_gps_policy",
+      "file": "supabase/migrations/20261118190000_admin_gps_policy.sql",
+      "bytes": 16291,
+      "sha256": "6bbb119e6641ad9628a3c6d8d0840da29d3f23904e81478dff5aefa1faa12537"
+    },
+    {
+      "order": 123,
+      "version": "20261118200000",
+      "name": "service_tracking_share_links",
+      "file": "supabase/migrations/20261118200000_service_tracking_share_links.sql",
+      "bytes": 9590,
+      "sha256": "0d16336b6d0f623ee5e7ea1dfecb1f664c7187714f04cbde8e3d2d18b322daec"
     }
   ],
   "review": {

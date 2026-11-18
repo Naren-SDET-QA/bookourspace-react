@@ -41,10 +41,9 @@ async function pageFor(browser: Browser, key: 'customer' | 'provider' | 'admin')
           'bos_privacy_consent_v1',
           JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }),
         );
-        // Select the classic services experience (the curated hub is display-only).
         window.localStorage.setItem(
           'bos_section_styles_v2',
-          JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'old' }),
+          JSON.stringify({ pg: 'style3', stay: 'airbnb', services: 'triangle' }),
         );
       } catch {
         /* storage unavailable */
@@ -57,14 +56,10 @@ async function pageFor(browser: Browser, key: 'customer' | 'provider' | 'admin')
 }
 
 async function openServices(page: Page) {
-  // The section has two experiences. The curated "triangle" hub is display-only,
-  // so the bookable/operations surfaces live in the classic experience selected
-  // by bos_section_styles_v2 (seeded before React boots, in pageFor).
   await page.goto('/#services', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#root > *', { timeout: 30_000 });
   await page.waitForFunction(() => document.body.innerText.trim().length > 200, { timeout: 30_000 });
-  await expect(page.getByRole('region', { name: 'services section' })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('heading', { name: /professional for the job at hand/i })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Services app' })).toBeVisible({ timeout: 30_000 });
   if (!(await page.getByRole('button', { name: 'My service bookings' }).isVisible().catch(() => false))) {
     const allServices = page.getByRole('button', { name: /^All Services$/i }).first();
     if (await allServices.isVisible().catch(() => false)) await allServices.click();

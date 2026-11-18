@@ -73,7 +73,10 @@ import { playAlertChime } from './utils/audio';
 import { canAccessAdminConsole } from './lib/accessControl';
 import type { SuperAdminSectionId } from './components/AdminDashboard';
 import { applyLivePageOverrides } from './lib/livePageOverrides';
-import { applyRemoteSectionStyles, loadSectionStyles, saveStylePreference, SECTION_STYLES_EVENT, type SectionStyles } from './lib/sectionStyleSettings';
+import { applyRemoteSectionStyles, canonicalizeServicesHash, loadSectionStyles, sanitizeServicesReturnHash, saveStylePreference, SECTION_STYLES_EVENT, type SectionStyles } from './lib/sectionStyleSettings';
+import { approvedHashForSection, isClearedLocationCity, resolveSectionHashNavigation } from './lib/sectionRouteHash';
+import { readPublicTrackingToken } from './lib/trackingShare';
+import { PublicTrackingPanel } from './components/tracking/PublicTrackingPanel';
 
 /**
  * A deep link such as #classes/style3 must survive the later published-config
@@ -81,20 +84,25 @@ import { applyRemoteSectionStyles, loadSectionStyles, saveStylePreference, SECTI
  * refresh keeps the style the visitor chose.
  */
 function applyRouteStyleToSectionStyles(base: SectionStyles): SectionStyles {
-  if (typeof window === 'undefined') return base;
+  if (typeof window === 'undefined') return { ...base, services: 'triangle' };
   const [section, raw = ''] = window.location.hash.replace('#', '').toLowerCase().split('/');
   const style = raw === '1' || raw === 'style1' ? 1 : raw === '2' || raw === 'style2' ? 2 : raw === '3' || raw === 'style3' ? 3 : raw === '4' || raw === 'style4' ? 4 : 0;
-  if (!style) return base;
+  // Services ships only Triangle, including #services/old bookmarks and empty hashes.
+  const withServices = { ...base, services: 'triangle' as const };
+  if (section === 'services') return withServices;
   // PG ships only Style 3. Classes keeps Style 3 on #classes / #classes/style3
   // (training E2E) and honours an explicit #classes/style4 marketplace link.
-  if (section === 'pg') return { ...base, pg: 'style3' };
-  if (section === 'classes') return { ...base, classes: style === 4 ? 'style4' : 'style3' };
-  // Services ships only Style 2; a stale #services/style1 or /style3 deep link
-  // must not re-enable the retired layouts.
-  if (section === 'services') return { ...base, services: 'triangle' };
-  if (section === 'venues' || section === 'halls') return { ...base, venues: 'agenda' };
-  if (section === 'movies' || section === 'cinema') return { ...base, movies: style === 1 ? 'experience' : style === 2 ? 'classic' : 'style3' };
-  return base;
+  if (section === 'pg') return { ...withServices, pg: 'style3' };
+  if (section === 'classes') {
+    if (style === 4) return { ...withServices, classes: 'style4' };
+    if (style === 3) return { ...withServices, classes: 'style3' };
+    if (!raw) return withServices;
+    return { ...withServices, classes: 'style4' };
+  }
+  if (!style) return withServices;
+  if (section === 'venues' || section === 'halls') return { ...withServices, venues: 'agenda' };
+  if (section === 'movies' || section === 'cinema') return { ...withServices, movies: style === 1 ? 'experience' : style === 2 ? 'classic' : 'style3' };
+  return withServices;
 }
 
 const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
@@ -112,6 +120,7 @@ const ADMIN_CONSOLE_TABS: { id: SuperAdminSectionId; label: string }[] = [
   { id: 'theme_management', label: 'Theme' },
   { id: 'ad_management', label: 'Ads' },
   { id: 'integrations', label: 'Integrations' },
+  { id: 'gps_tracking', label: 'GPS Tracking' },
   { id: 'audit_logs', label: 'Audit Logs' },
   { id: 'app_settings', label: 'Settings' },
 ];
@@ -150,6 +159,7 @@ import { popularAreasList, distanceRadiuses } from './data/filterOptions';
 // Route- and modal-specific surfaces stay out of the initial customer bundle.
 const CraftoTopServicesBar = lazy(() => import('./components/CraftoTopServicesBar').then((module) => ({ default: module.CraftoTopServicesBar })));
 import { LocationSelector, loadPersistedLocation, persistLocation, type SelectedLocation } from './components/LocationSelector';
+import { useLocationPickerHistory } from './lib/locationPickerHistory';
 import { filterListingsByLocation, matchesSelectedLocation } from './lib/locationCityFilter';
 import { isPopularCategoriesVisible } from './lib/homeVisibilitySettings';
 import { applyRemoteMarketplaceVisibility } from './lib/marketplaceVisibility';
@@ -406,10 +416,26 @@ function MarketplaceAppContent() {
 
   // Section screens are deep-linkable (#pg, #services, #stays) so a section can be
   // shared or opened directly without walking the marketplace carousels.
+  const appliedSectionHashRef = useRef<string | undefined>(undefined);
+  const [publicTrackToken, setPublicTrackToken] = useState<string | null>(
+    () => (typeof window === 'undefined' ? null : readPublicTrackingToken(window.location)),
+  );
   const clearSectionHash = () => {
     if (typeof window !== 'undefined' && window.location.hash) {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
     }
+    appliedSectionHashRef.current = '';
+  };
+  const pinSectionRoute = (hashBody: string) => {
+    if (typeof window === 'undefined') return;
+    const next = hashBody ? `#${hashBody.replace(/^#/, '')}` : '';
+    const current = window.location.hash;
+    if (current.toLowerCase() === next.toLowerCase()) {
+      appliedSectionHashRef.current = current.replace('#', '').toLowerCase();
+      return;
+    }
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${next}`);
+    appliedSectionHashRef.current = next.replace('#', '').toLowerCase();
   };
   const previousMarketSectionRef = useRef<MarketSectionType>('pg_hostels');
 
@@ -445,6 +471,7 @@ function MarketplaceAppContent() {
 
   // Premium location selector (state → district → city) shared by all modules
   const [isLocationSelectorOpen, setIsLocationSelectorOpen] = useState<boolean>(false);
+  useLocationPickerHistory(isLocationSelectorOpen, setIsLocationSelectorOpen);
   const [selectedLocationLabel, setSelectedLocationLabel] = useState<string>('');
   const [selectedPincode, setSelectedPincode] = useState<string | null>(null);
   const sharedSelectedCity = (() => {
@@ -558,49 +585,54 @@ function MarketplaceAppContent() {
 
   useEffect(() => {
     const applySectionHash = () => {
+      const pathToken = readPublicTrackingToken(window.location);
+      if (pathToken) setPublicTrackToken(pathToken);
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (hash === 'login') {
+      const decision = resolveSectionHashNavigation(window.location.hash, appliedSectionHashRef.current);
+      appliedSectionHashRef.current = hash;
+      if (decision.action === 'track') {
+        setPublicTrackToken(decision.token);
+        return;
+      }
+      if (!pathToken && decision.action !== 'keep-open') setPublicTrackToken(null);
+      if (decision.action === 'login') {
         setIsLoginPageOpen(true);
         return;
       }
       setIsLoginPageOpen(false);
-      const [, rawStyle = ''] = hash.split('/');
-        const routeStyleNumber = rawStyle === '1' || rawStyle === 'style1' ? 1
-        : rawStyle === '2' || rawStyle === 'style2' ? 2
-          : rawStyle === '3' || rawStyle === 'style3' ? 3
-            : rawStyle === '4' || rawStyle === 'style4' ? 4
-            : 0;
-      if (hash === 'pg' || hash.startsWith('pg/')) {
+      if (decision.action === 'open' && decision.section === 'pg_hostels') {
         setActiveMarketSection('pg_hostels');
         setOpenSection('pg_hostels');
-      } else if (hash === 'services' || hash.startsWith('services/')) {
-        if (routeStyleNumber) {
-          setSectionStylesState((previous) => ({ ...previous, services: 'triangle' }));
-        }
+      } else if (decision.action === 'open' && decision.section === 'services') {
+        canonicalizeServicesHash();
+        setSectionStylesState((previous) => ({ ...previous, services: 'triangle' }));
         setActiveMarketSection('services');
         setOpenSection('services');
-      } else if (hash === 'stays' || hash === 'hotels' || hash.startsWith('stays/') || hash.startsWith('hotels/')) {
+      } else if (decision.action === 'open' && decision.section === 'hotel_stay') {
         setActiveMarketSection('hotel_stay');
         setOpenSection('hotel_stay');
-      } else if (hash === 'classes' || hash.startsWith('classes/')) {
-        if (routeStyleNumber) {
-          setSectionStylesState((previous) => ({ ...previous, classes: routeStyleNumber === 4 ? 'style4' : 'style3' }));
+      } else if (decision.action === 'open' && decision.section === 'classes') {
+        if (decision.classesStyle) {
+          setSectionStylesState((previous) => ({ ...previous, classes: decision.classesStyle === 'style4' ? 'style4' : 'style3' }));
         }
         setActiveMarketSection('classes');
         setOpenSection('classes');
-      } else if (hash === 'venues' || hash === 'halls' || hash.startsWith('venues/') || hash.startsWith('halls/')) {
-        if (routeStyleNumber) {
-          setSectionStylesState((previous) => ({ ...previous, venues: 'agenda' }));
-        }
+      } else if (decision.action === 'open' && decision.section === 'venues') {
+        setSectionStylesState((previous) => ({ ...previous, venues: 'agenda' }));
         setActiveMarketSection('venues');
         setOpenSection(null);
-      } else if (hash === 'movies' || hash === 'cinema' || hash.startsWith('movies/') || hash.startsWith('cinema/')) {
+      } else if (decision.action === 'open' && decision.section === 'movies') {
+        const [, rawStyle = ''] = hash.split('/');
+        const routeStyleNumber = rawStyle === '1' || rawStyle === 'style1' ? 1
+          : rawStyle === '2' || rawStyle === 'style2' ? 2
+            : rawStyle === '3' || rawStyle === 'style3' ? 3
+              : 0;
         if (routeStyleNumber) {
           setSectionStylesState((previous) => ({ ...previous, movies: routeStyleNumber === 1 ? 'experience' : routeStyleNumber === 2 ? 'classic' : 'style3' }));
         }
         setActiveMarketSection('movies');
         setOpenSection(null);
-      } else if (hash === 'provider' || hash === 'provider_portal' || hash === 'provider_portal1' || hash.startsWith('provider/')) {
+      } else if (decision.action === 'provider') {
         // A URL hash is unauthenticated input and must never grant a role.
         // Signed-out visitors keep the hash so it applies once the session
         // hydrates; a signed-in non-provider is redirected to the marketplace.
@@ -613,13 +645,13 @@ function MarketplaceAppContent() {
         // Older local preview links occasionally appended a trailing `1`.
         // Normalize that harmless alias so the protected provider route loads
         // instead of falling through to the marketplace screen.
-        if (hash === 'provider_portal1') {
+        if (decision.normalizePortal1) {
           window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#provider_portal`);
         }
         setUserRole('provider');
         setActiveView('provider_portal');
         setOpenSection(null);
-      } else if (hash === 'admin' || hash.startsWith('admin/')) {
+      } else if (decision.action === 'admin') {
         // A URL hash is unauthenticated input and must never grant a role.
         // Keep the hash while the persisted session is still hydrating or
         // being replaced: erasing it as soon as a stale non-admin identity is
@@ -634,13 +666,17 @@ function MarketplaceAppContent() {
         setUserRole('admin');
         setActiveView('admin_console');
         setOpenSection(null);
-      } else if (!hash.startsWith('venue-')) {
+      } else if (decision.action === 'close-sections') {
         setOpenSection(null);
       }
     };
     applySectionHash();
     window.addEventListener('hashchange', applySectionHash);
-    return () => window.removeEventListener('hashchange', applySectionHash);
+    window.addEventListener('popstate', applySectionHash);
+    return () => {
+      window.removeEventListener('hashchange', applySectionHash);
+      window.removeEventListener('popstate', applySectionHash);
+    };
   }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess]);
 
   // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
@@ -702,6 +738,7 @@ function MarketplaceAppContent() {
       setIsClassesTimingsOpen(section === 'classes');
       setIsHomeServicesOpen(section === 'services');
       setIsHotelsStayExperienceOpen(section === 'hotel_stay');
+      pinSectionRoute(approvedHashForSection(section as MarketSectionType, loadSectionStyles().classes));
     };
     if (bootWindow.__bosQuickHomeModule) applyQuickModule(bootWindow.__bosQuickHomeModule);
     if (typeof bootWindow.__bosQuickHomeSearch === 'string') setSearchQuery(bootWindow.__bosQuickHomeSearch);
@@ -767,7 +804,9 @@ function MarketplaceAppContent() {
           returnSection = savedSection as MarketSectionType;
         }
         const savedHash = sessionStorage.getItem('bos_oauth_return_hash_v1') || '';
-        if (savedHash.startsWith('#') && !savedHash.startsWith('#//')) returnHash = savedHash;
+        if (savedHash.startsWith('#') && !savedHash.startsWith('#//')) {
+          returnHash = sanitizeServicesReturnHash(savedHash);
+        }
         const savedPath = sessionStorage.getItem('bos_oauth_return_path_v1') || '/';
         if (savedPath.startsWith('/') && !savedPath.startsWith('//') && !savedPath.startsWith('/auth/callback')) {
           returnPath = savedPath;
@@ -1249,6 +1288,17 @@ function MarketplaceAppContent() {
   };
 
   const handleSelectLocation = (loc: SelectedLocation) => {
+    // Location is a filter only. Never rewrite the section hash, home layout,
+    // or approved Services Triangle / Classes Style 4 screens.
+    if (isClearedLocationCity(loc.city)) {
+      setSelectedLocationLabel('');
+      setSelectedCity('All Cities');
+      setSelectedArea('all');
+      setSelectedPincode(null);
+      persistLocation(null);
+      showToast(currentLang === 'te' ? 'లొకేషన్ క్లియర్ చేయబడింది' : 'Location cleared');
+      return;
+    }
     setSelectedLocationLabel(loc.label ?? loc.city);
     setSelectedCity(loc.city);
     setSelectedArea(loc.area && loc.area !== loc.city ? loc.area : 'all');
@@ -1910,6 +1960,7 @@ function MarketplaceAppContent() {
         : activeMarketSection;
       setActiveMarketSection('hotel_stay');
       setOpenSection('hotel_stay');
+      pinSectionRoute(approvedHashForSection('hotel_stay'));
       return;
     }
     if (section === 'pg_hostels') {
@@ -1918,6 +1969,7 @@ function MarketplaceAppContent() {
         : activeMarketSection;
       setActiveMarketSection('pg_hostels');
       setOpenSection('pg_hostels');
+      pinSectionRoute(approvedHashForSection('pg_hostels'));
       return;
     }
     if (section === 'services') {
@@ -1926,10 +1978,12 @@ function MarketplaceAppContent() {
         : activeMarketSection;
       setActiveMarketSection('services');
       setOpenSection('services');
+      pinSectionRoute(approvedHashForSection('services'));
       return;
     }
     setOpenSection(null);
     setActiveMarketSection(section);
+    pinSectionRoute(approvedHashForSection(section, sectionStyles.classes));
   };
 
   // Active Area Label for headline
@@ -2027,6 +2081,7 @@ function MarketplaceAppContent() {
               if (section === 'hotel_stay') returnSectionAfterStayRef.current = activeMarketSection;
               if (section === 'services') returnSectionAfterServicesRef.current = activeMarketSection;
               setActiveMarketSection(section);
+              pinSectionRoute(approvedHashForSection(section, sectionStyles.classes));
           }}
         />
       </div>
@@ -2079,6 +2134,7 @@ function MarketplaceAppContent() {
                 setIsClassesTimingsOpen(false);
               }
               setActiveMarketSection(sec);
+              pinSectionRoute(approvedHashForSection(sec, sectionStyles.classes));
               showToast(
                 sec === 'pg_hostels'
                   ? currentLang === 'te'
@@ -2274,6 +2330,7 @@ function MarketplaceAppContent() {
             }}
             onOpenServicesDiscovery={() => {
               setOpenSection('services');
+              pinSectionRoute(approvedHashForSection('services'));
             }}
           />
           </Suspense>
@@ -2416,6 +2473,7 @@ function MarketplaceAppContent() {
             setIsClassesTimingsOpen(sec === 'classes');
             setIsHomeServicesOpen(sec === 'services');
             setIsHotelsStayExperienceOpen(sec === 'hotel_stay');
+            pinSectionRoute(approvedHashForSection(sec, sectionStyles.classes));
             if (isTemplateEnabled('category_rail_stream_explorer')) {
               setIsRailStreamExplorerOpen(true);
             }
@@ -6869,6 +6927,16 @@ function MarketplaceAppContent() {
         <Suspense fallback={null}>
           <SiteChrome onOpenHelp={() => setActiveQuickModal('help_centre')} />
         </Suspense>
+      )}
+      {publicTrackToken && (
+        <PublicTrackingPanel
+          token={publicTrackToken}
+          onClose={() => {
+            setPublicTrackToken(null);
+            const nextPath = window.location.pathname.startsWith('/track/') ? '/' : window.location.pathname;
+            window.history.replaceState(window.history.state, '', `${nextPath}${window.location.search}`);
+          }}
+        />
       )}
 
     </div>

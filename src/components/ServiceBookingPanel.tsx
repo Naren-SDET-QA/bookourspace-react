@@ -35,6 +35,8 @@ import {
   type ServicePaymentIntent,
   type ServiceProviderProfile,
 } from '../lib/serviceCommerceClient';
+import { getCurrentBrowserPosition } from '../lib/currentLocation';
+import { isValidCoordinate } from '../lib/deliveryTracking';
 
 interface ServiceBookingPanelProps {
   listing: { id: string; title: string; providerName: string };
@@ -65,6 +67,7 @@ export function ServiceBookingPanel({ listing, categoryConfig, onClose, onBooked
   const [serviceAddress, setServiceAddress] = useState('');
   const [addressNotes, setAddressNotes] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [whatsappOptIn, setWhatsappOptIn] = useState(false);
   const [notes, setNotes] = useState('');
   const [paymentMode, setPaymentMode] = useState<'pay_after_service' | 'upi_intent'>('pay_after_service');
   const [deliveryMode, setDeliveryMode] = useState('on_site');
@@ -198,6 +201,17 @@ export function ServiceBookingPanel({ listing, categoryConfig, onClose, onBooked
           return;
         }
       }
+      let destinationLatitude: number | null = null;
+      let destinationLongitude: number | null = null;
+      try {
+        const current = await getCurrentBrowserPosition();
+        if (isValidCoordinate(current.latitude, current.longitude)) {
+          destinationLatitude = current.latitude;
+          destinationLongitude = current.longitude;
+        }
+      } catch {
+        /* Booking still proceeds; live tracking waits for a real GPS destination. */
+      }
       const result = await createServiceBooking({
         listingId: listing.id,
         scheduledDate,
@@ -206,9 +220,12 @@ export function ServiceBookingPanel({ listing, categoryConfig, onClose, onBooked
         serviceAddress,
         addressNotes,
         customerPhone,
+        whatsappOptIn,
         notes,
         paymentMode: dynamicPayload.paymentMode || paymentMode,
         idempotencyKey,
+        destinationLatitude,
+        destinationLongitude,
         ...dynamicPayload,
       });
       setCreated(result.booking);
@@ -409,6 +426,10 @@ export function ServiceBookingPanel({ listing, categoryConfig, onClose, onBooked
             <label className="block text-xs font-bold text-slate-600 dark:text-slate-300">
               <span className="mb-1 block">Contact phone</span>
               <input type="tel" required value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} placeholder="+91 98765 43210" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
+            </label>
+            <label className="flex items-start gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+              <input type="checkbox" checked={whatsappOptIn} onChange={(event) => setWhatsappOptIn(event.target.checked)} className="mt-0.5" />
+              Send WhatsApp booking updates, including a tracking link after the provider accepts.
             </label>
 
             <label className="block text-xs font-bold text-slate-600 dark:text-slate-300">

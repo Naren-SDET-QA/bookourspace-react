@@ -10,7 +10,7 @@ export interface ServiceBooking {
   listingId: string;
   listingTitle: string;
   categoryId: string;
-  status: 'requested' | 'accepted' | 'in_progress' | 'completed' | 'cancelled' | 'rejected';
+  status: 'requested' | 'accepted' | 'assigned' | 'travelling' | 'arrived' | 'started' | 'in_progress' | 'completed' | 'cancelled' | 'rejected';
   paymentMode: 'pay_after_service' | 'upi_qr' | 'upi_intent' | 'razorpay';
   paymentStatus: 'due' | 'declared' | 'settled' | 'refunded' | 'failed' | 'waived';
   scheduledDate: string;
@@ -151,6 +151,9 @@ export function createServiceBooking(input: {
   recurrence?: { frequency: 'none' | 'daily' | 'weekly' | 'monthly'; occurrences?: number | null } | null;
   fieldValues?: Record<string, string | number | boolean | string[] | null>;
   documents?: Array<{ key: string; reference: string; fileName?: string; mimeType?: string }>;
+  destinationLatitude?: number | null;
+  destinationLongitude?: number | null;
+  whatsappOptIn?: boolean;
 }): Promise<{ booking: ServiceBooking; idempotent: boolean }> {
   return request('/api/services/bookings', { method: 'POST', body: JSON.stringify(input) });
 }

@@ -776,7 +776,7 @@ const STYLE_FOUR_GROUPS = Object.fromEntries(
 export function ClassesTimingsExperience({ onClose, inline = false, listings = [], style = 'cards' }: ClassesTimingsExperienceProps) {
   const [style4Group, setStyle4Group] = useState<Style4Group>(readSavedStyle4Group);
   const style4DeepLink = typeof window !== 'undefined' && /#classes\/(?:4|style4)/i.test(window.location.hash);
-  const activeStyle = style4DeepLink || style4Group !== 'All' ? 'style4' : style;
+  const activeStyle = style === 'style4' || style4DeepLink || style4Group !== 'All' ? 'style4' : style;
   const [mode, setMode] = useState<'All' | CourseMode>('All');
   const [timing, setTiming] = useState<'All' | TimingSlot>('All');
   const [feeBand, setFeeBand] = useState<'All' | 'Free' | 'Under3k' | '3k8k' | '8kPlus'>('All');

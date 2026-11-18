@@ -32,7 +32,7 @@ import { ServiceBookingPanel } from './ServiceBookingPanel';
 import { ServiceOperationsWorkspace } from './ServiceOperationsWorkspace';
 import { ServiceCustomerBookings } from './ServiceCustomerBookings';
 import { useMarketplace } from '../context/MarketplaceContext';
-import { getServicesStyle, saveStylePreference, styleFromHash, type ServicesStyle } from '../lib/sectionStyleSettings';
+import { canonicalizeServicesHash, type ServicesStyle } from '../lib/sectionStyleSettings';
 import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
 import { categoryConfigForListing, serviceCategoryIconEmoji } from '../lib/serviceCatalog';
 import type { PageCopyOverrides } from '../utils/livePageEditorStore';
@@ -76,31 +76,14 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
   const { categories: serviceCatalog } = usePublicServiceCatalog();
   const viewerRole = ((supabaseProfile?.role || authUser?.role || 'customer') as 'customer' | 'provider' | 'admin');
   const canManageJobs = viewerRole === 'provider' || viewerRole === 'admin';
-  const [experienceTab, setExperienceTab] = useState<'old' | 'triangle' | 'noddyy'>(() => {
-    const routeStyle = styleFromHash('services');
-    if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1') return 'old';
-    if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') return 'triangle';
-    if (routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') return 'noddyy';
-    if (style) return style;
-    return getServicesStyle();
-  });
+  // Services ships only Triangle. Retired hashes (#services/old) must not
+  // reopen Style 1, including after refresh, login return, or a stale cache.
+  const experienceTab = 'triangle' as const;
+  void style;
 
   useEffect(() => {
-    const onHash = () => {
-      const routeStyle = styleFromHash('services');
-      if (routeStyle === '1' || routeStyle === 'old' || routeStyle === 'services1') setExperienceTab('old');
-      else if (routeStyle === '2' || routeStyle === 'triangle' || routeStyle === 'services2') setExperienceTab('triangle');
-      else if (routeStyle === '3' || routeStyle === 'noddyy' || routeStyle === 'services3') setExperienceTab('noddyy');
-    };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    canonicalizeServicesHash();
   }, []);
-
-  // Centrally published style changes apply without a reload.
-  useEffect(() => {
-    if (!style || styleFromHash('services')) return;
-    setExperienceTab(style);
-  }, [style]);
   const owner = useOwnerContact('services');
 
   useEffect(() => {
@@ -188,12 +171,6 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       ? 'Provider contact is disabled for this service right now.'
       : owner.message;
 
-  const switchTo = (tab: 'old' | 'triangle' | 'noddyy') => {
-    saveStylePreference('services', tab);
-    setExperienceTab(tab);
-    window.location.hash = `services/${tab}`;
-  };
-
   return (
     <div
       className={
@@ -212,13 +189,16 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
         <HomeTriangleExperience
           inline={inline}
           onClose={onClose}
-          onSwitchToOld={() => switchTo('old')}
+          onSwitchToOld={() => undefined}
+          viewerRole={viewerRole}
+          onOpenCustomerBookings={() => setCustomerBookingsOpen(true)}
+          onOpenProviderJobs={() => setWorkspaceOpen(true)}
         />
       ) : experienceTab === 'noddyy' ? (
         <NoddyyExperience
           inline={inline}
           onClose={onClose}
-          onSwitchToOld={() => switchTo('old')}
+          onSwitchToOld={() => undefined}
         />
       ) : (
         <>
@@ -629,6 +609,16 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
         <ServiceCustomerBookings onClose={() => setCustomerBookingsOpen(false)} />
       )}
         </>
+      )}
+
+      {workspaceOpen && (
+        <ServiceOperationsWorkspace
+          role={viewerRole === 'admin' ? 'admin' : 'provider'}
+          onClose={() => setWorkspaceOpen(false)}
+        />
+      )}
+      {customerBookingsOpen && (
+        <ServiceCustomerBookings onClose={() => setCustomerBookingsOpen(false)} />
       )}
     </div>
   );

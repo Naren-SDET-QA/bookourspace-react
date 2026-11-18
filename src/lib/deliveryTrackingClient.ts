@@ -1,10 +1,18 @@
 import { supabase } from './supabaseClient';
-import type { DeliveryKind, DeliveryStatus } from './deliveryTracking';
+import {
+  deriveJourneyMetrics,
+  isTerminalDeliveryStatus,
+  type DeliveryKind,
+  type DeliveryStatus,
+  type JourneyStatus,
+} from './deliveryTracking';
 
 export interface TrackingPoint {
   latitude: number;
   longitude: number;
   accuracyMeters: number | null;
+  headingDegrees?: number | null;
+  speedMps?: number | null;
   capturedAt: string;
 }
 
@@ -35,11 +43,25 @@ export interface DeliveryTrackingSnapshot {
   deliveryConfirmedAt: string | null;
   prescriptionStatus: 'not_required' | 'pending' | 'verified' | 'rejected';
   recurrenceRule: 'none' | 'daily' | 'weekly' | 'custom';
+  assigneeKind: 'provider' | 'worker' | 'driver';
+  assigneeId: string | null;
+  assigneeLabel: string | null;
+  vehicleLabel: string | null;
+  journeyStatus: JourneyStatus;
+  distanceMeters: number | null;
+  etaSeconds: number | null;
+  lastAccuracyMeters: number | null;
+  destination: TrackingPoint | null;
   latestLocation: TrackingPoint | null;
   events: TrackingEvent[];
 }
 
-export const hasRealtimeTransport = Boolean(supabase);
+/**
+ * Hosted Supabase Realtime only sees GPS that lands in that project. Local
+ * DEV writes tracking rows to loopback Postgres, so a configured client URL
+ * is not a live transport. Production keeps Realtime as a primary push.
+ */
+export const hasRealtimeTransport = Boolean(supabase) && Boolean(import.meta.env?.PROD);
 
 const configured = () => {
   if (!supabase) throw new Error('SUPABASE_UNAVAILABLE');
@@ -71,8 +93,28 @@ async function serviceRequest<T>(path: string, init: RequestInit = {}): Promise<
 }
 
 function mapStatus(value: unknown): DeliveryStatus {
-  const allowed: DeliveryStatus[] = ['requested', 'accepted', 'in_progress', 'completed', 'cancelled', 'rejected'];
+  const allowed: DeliveryStatus[] = [
+    'requested', 'accepted', 'assigned', 'travelling', 'arrived', 'started',
+    'in_progress', 'completed', 'cancelled', 'rejected',
+  ];
   return allowed.includes(value as DeliveryStatus) ? value as DeliveryStatus : 'requested';
+}
+
+function mapJourney(value: unknown): JourneyStatus {
+  const allowed: JourneyStatus[] = ['idle', 'awaiting_permission', 'en_route', 'arriving', 'arrived', 'stopped'];
+  return allowed.includes(value as JourneyStatus) ? value as JourneyStatus : 'idle';
+}
+
+function optionalCoordinate(lat: unknown, lng: unknown, capturedAt?: unknown, accuracy?: unknown): TrackingPoint | null {
+  const latitude = Number(lat);
+  const longitude = Number(lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return {
+    latitude,
+    longitude,
+    accuracyMeters: accuracy === null || accuracy === undefined ? null : Number(accuracy),
+    capturedAt: capturedAt ? String(capturedAt) : '',
+  };
 }
 
 function mapKind(value: unknown): DeliveryKind {
@@ -88,7 +130,22 @@ function mapPoint(row: any): TrackingPoint | null {
     latitude,
     longitude,
     accuracyMeters: row.accuracy_meters === null || row.accuracy_meters === undefined ? null : Number(row.accuracy_meters),
+    headingDegrees: row.heading_degrees == null ? null : Number(row.heading_degrees),
+    speedMps: row.speed_mps == null ? null : Number(row.speed_mps),
     capturedAt: String(row.captured_at || ''),
+  };
+}
+
+function applyLiveMetrics(snapshot: DeliveryTrackingSnapshot): DeliveryTrackingSnapshot {
+  if (isTerminalDeliveryStatus(snapshot.status) || snapshot.journeyStatus === 'stopped') {
+    return snapshot;
+  }
+  const metrics = deriveJourneyMetrics(snapshot.latestLocation, snapshot.destination, snapshot.latestLocation?.speedMps);
+  return {
+    ...snapshot,
+    distanceMeters: metrics.distanceMeters,
+    etaSeconds: metrics.etaSeconds,
+    journeyStatus: metrics.journeyStatus,
   };
 }
 
@@ -103,13 +160,13 @@ async function fetchDeliveryTrackingFromSupabase(bookingId: string): Promise<Del
   if (!booking) throw new Error('BOOKING_NOT_FOUND');
 
   const [{ data: profile }, { data: locations }, { data: events }] = await Promise.all([
-    client.from('service_delivery_profiles').select('service_kind, category_id, tracking_enabled, live_map_enabled, otp_enabled, delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule').eq('booking_id', bookingId).maybeSingle(),
+    client.from('service_delivery_profiles').select('service_kind, category_id, tracking_enabled, live_map_enabled, otp_enabled, delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule, assignee_kind, assignee_id, assignee_label, vehicle_label, journey_status, distance_meters, eta_seconds, last_accuracy_meters, destination_latitude, destination_longitude').eq('booking_id', bookingId).maybeSingle(),
     client.from('service_tracking_locations').select('latitude, longitude, accuracy_meters, captured_at').eq('booking_id', bookingId).order('captured_at', { ascending: false }).limit(1),
     client.from('service_tracking_events').select('id, event_type, note, created_at').eq('booking_id', bookingId).order('created_at', { ascending: false }).limit(20),
   ]);
 
   const listing = Array.isArray((booking as any).listings) ? (booking as any).listings[0] : (booking as any).listings;
-  return {
+  const mapped: DeliveryTrackingSnapshot = {
     bookingId: String(booking.id),
     bookingRef: String(booking.booking_ref || ''),
     title: String(listing?.title || booking.subcategory || 'Delivery booking'),
@@ -129,6 +186,15 @@ async function fetchDeliveryTrackingFromSupabase(bookingId: string): Promise<Del
     deliveryConfirmedAt: profile?.delivery_confirmed_at ? String(profile.delivery_confirmed_at) : null,
     prescriptionStatus: (profile?.prescription_status || 'not_required') as DeliveryTrackingSnapshot['prescriptionStatus'],
     recurrenceRule: (profile?.recurrence_rule || 'none') as DeliveryTrackingSnapshot['recurrenceRule'],
+    assigneeKind: profile?.assignee_kind === 'worker' || profile?.assignee_kind === 'driver' ? profile.assignee_kind : 'provider',
+    assigneeId: profile?.assignee_id ? String(profile.assignee_id) : null,
+    assigneeLabel: profile?.assignee_label ? String(profile.assignee_label) : null,
+    vehicleLabel: profile?.vehicle_label ? String(profile.vehicle_label) : null,
+    journeyStatus: mapJourney(profile?.journey_status),
+    distanceMeters: profile?.distance_meters == null ? null : Number(profile.distance_meters),
+    etaSeconds: profile?.eta_seconds == null ? null : Number(profile.eta_seconds),
+    lastAccuracyMeters: profile?.last_accuracy_meters == null ? null : Number(profile.last_accuracy_meters),
+    destination: optionalCoordinate(profile?.destination_latitude, profile?.destination_longitude),
     latestLocation: mapPoint(Array.isArray(locations) ? locations[0] : null),
     events: (events || []).map((event: any) => ({
       id: Number(event.id),
@@ -137,11 +203,12 @@ async function fetchDeliveryTrackingFromSupabase(bookingId: string): Promise<Del
       createdAt: String(event.created_at || ''),
     })),
   };
+  return applyLiveMetrics(mapped);
 }
 
 function normalizeServerSnapshot(payload: any): DeliveryTrackingSnapshot {
   const location = payload?.latestLocation;
-  return {
+  const mapped: DeliveryTrackingSnapshot = {
     bookingId: String(payload?.bookingId || ''),
     bookingRef: String(payload?.bookingRef || ''),
     title: String(payload?.title || 'Delivery booking'),
@@ -161,11 +228,22 @@ function normalizeServerSnapshot(payload: any): DeliveryTrackingSnapshot {
     deliveryConfirmedAt: payload?.deliveryConfirmedAt || null,
     prescriptionStatus: (payload?.prescriptionStatus || 'not_required') as DeliveryTrackingSnapshot['prescriptionStatus'],
     recurrenceRule: (payload?.recurrenceRule || 'none') as DeliveryTrackingSnapshot['recurrenceRule'],
+    assigneeKind: payload?.assigneeKind === 'worker' || payload?.assigneeKind === 'driver' ? payload.assigneeKind : 'provider',
+    assigneeId: payload?.assigneeId ? String(payload.assigneeId) : null,
+    assigneeLabel: payload?.assigneeLabel ? String(payload.assigneeLabel) : null,
+    vehicleLabel: payload?.vehicleLabel ? String(payload.vehicleLabel) : null,
+    journeyStatus: mapJourney(payload?.journeyStatus),
+    distanceMeters: payload?.distanceMeters == null ? null : Number(payload.distanceMeters),
+    etaSeconds: payload?.etaSeconds == null ? null : Number(payload.etaSeconds),
+    lastAccuracyMeters: payload?.lastAccuracyMeters == null ? null : Number(payload.lastAccuracyMeters),
+    destination: optionalCoordinate(payload?.destination?.latitude, payload?.destination?.longitude),
     latestLocation: location && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude))
       ? {
           latitude: Number(location.latitude),
           longitude: Number(location.longitude),
           accuracyMeters: location.accuracyMeters === null || location.accuracyMeters === undefined ? null : Number(location.accuracyMeters),
+          headingDegrees: location.headingDegrees == null ? null : Number(location.headingDegrees),
+          speedMps: location.speedMps == null ? null : Number(location.speedMps),
           capturedAt: String(location.capturedAt || ''),
         }
       : null,
@@ -178,6 +256,7 @@ function normalizeServerSnapshot(payload: any): DeliveryTrackingSnapshot {
         }))
       : [],
   };
+  return applyLiveMetrics(mapped);
 }
 
 /**
@@ -231,14 +310,56 @@ export async function verifyDeliveryOtp(bookingId: string, code: string): Promis
   }
 }
 
+export async function startTrackingSession(
+  bookingId: string,
+  input: { destinationLatitude?: number | null; destinationLongitude?: number | null; vehicleLabel?: string | null; assigneeLabel?: string | null } = {},
+): Promise<void> {
+  await serviceRequest(`/api/services/bookings/${encodeURIComponent(bookingId)}/tracking/session/start`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function stopTrackingSession(bookingId: string, reason = 'provider_stopped'): Promise<void> {
+  await serviceRequest(`/api/services/bookings/${encodeURIComponent(bookingId)}/tracking/session/stop`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function issueTrackingShareLink(bookingId: string, whatsappOptIn = false): Promise<{ url: string; expiresAt: string; bookingRef: string; whatsappOptIn: boolean }> {
+  const response = await serviceRequest<{ ok: true; url: string; expiresAt: string; bookingRef: string; whatsappOptIn: boolean }>(
+    `/api/services/bookings/${encodeURIComponent(bookingId)}/tracking/share-link`,
+    { method: 'POST', body: JSON.stringify({ whatsappOptIn }) },
+  );
+  return {
+    url: String(response.url || ''),
+    expiresAt: String(response.expiresAt || ''),
+    bookingRef: String(response.bookingRef || ''),
+    whatsappOptIn: response.whatsappOptIn === true,
+  };
+}
+
+export async function fetchPublicTracking(token: string): Promise<DeliveryTrackingSnapshot> {
+  const response = await fetch(`/api/track/${encodeURIComponent(token)}`, { credentials: 'include', cache: 'no-store' });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(String(payload?.error || 'TRACKING_LINK_NOT_FOUND'));
+  }
+  return normalizeServerSnapshot(payload.snapshot);
+}
+
 export async function publishTrackingLocation(bookingId: string, point: TrackingPoint): Promise<void> {
   try {
     await serviceRequest(`/api/services/bookings/${encodeURIComponent(bookingId)}/tracking/location`, {
       method: 'POST',
       body: JSON.stringify({
+        consentGranted: true,
         latitude: point.latitude,
         longitude: point.longitude,
         accuracyMeters: point.accuracyMeters,
+        headingDegrees: point.headingDegrees,
+        speedMps: point.speedMps,
         capturedAt: point.capturedAt,
       }),
     });
@@ -268,9 +389,9 @@ export function subscribeToDeliveryTracking(
   onChange: () => void,
   onStatus?: (status: string) => void,
 ): () => void {
-  if (!supabase) {
-    // The adaptive server poll in useDeliveryTracking is the fallback. Do not
-    // create a second fixed timer here; that would double database reads.
+  if (!hasRealtimeTransport || !supabase) {
+    // Local DEV GPS lives on loopback Postgres. Hosted Realtime cannot see
+    // those inserts; the adaptive poll is the live transport.
     return () => {};
   }
   const client = configured();

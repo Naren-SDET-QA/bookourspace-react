@@ -21,6 +21,13 @@ const HYDERABAD_LOCALITY_CENTRES: ReadonlyArray<{ match: string; lat: number; ln
   { match: 'secunderabad', lat: 17.4399, lng: 78.4983 },
 ];
 
+export function resolveLocalityCoordinates(text: string | null | undefined): { latitude: number; longitude: number } | null {
+  const locationText = String(text || '').toLocaleLowerCase('en-IN');
+  if (!locationText.trim()) return null;
+  const match = HYDERABAD_LOCALITY_CENTRES.find((centre) => locationText.includes(centre.match));
+  return match ? { latitude: match.lat, longitude: match.lng } : null;
+}
+
 export function resolveListingMapLocation(listing: MarketplaceListing): ListingMapLocation | null {
   const { lat, lng } = listing.location;
   if (Number.isFinite(lat) && Number.isFinite(lng)) {

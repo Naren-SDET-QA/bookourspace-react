@@ -1,17 +1,78 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, MapPin, Navigation, ShieldCheck, X } from 'lucide-react';
 import { DeliveryTrackingMap } from './DeliveryTrackingMap';
 import { useDeliveryTracking, useHelperLocationPublisher } from '../../hooks/useDeliveryTracking';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
-import { verifyDeliveryOtp } from '../../lib/deliveryTrackingClient';
+import { startTrackingSession, stopTrackingSession, verifyDeliveryOtp } from '../../lib/deliveryTrackingClient';
 import { confirmServiceDelivery, serviceBookingErrorMessage } from '../../lib/servicesBookingClient';
-import { DELIVERY_TRACKING_CONFIG, isTerminalDeliveryStatus, isLiveDeliveryStatus, normalizeOtp, trackingStatusLabel } from '../../lib/deliveryTracking';
+import {
+  DELIVERY_TRACKING_CONFIG,
+  formatDistance,
+  formatEta,
+  isLiveDeliveryStatus,
+  isTerminalDeliveryStatus,
+  journeyStatusLabel,
+  normalizeOtp,
+  trackingStatusLabel,
+} from '../../lib/deliveryTracking';
+import { gpsShareState, gpsShareStateLabel } from '../../lib/gpsPolicy';
+
+function gpsErrorCopy(code: string | null): string {
+  if (code === 'PERMISSION_DENIED') return 'Permission denied. Allow location access in the browser settings. BookOurSpace never uses a phone number to find you.';
+  if (code === 'INACCURATE') return 'GPS accuracy is low. Keep sharing; a better fix will replace this point.';
+  if (code === 'INSECURE_CONTEXT') return 'Location sharing needs HTTPS or localhost.';
+  if (code === 'UNSUPPORTED') return 'This browser cannot share GPS.';
+  if (code === 'POSITION_UNAVAILABLE' || code === 'TIMEOUT') return 'Device GPS is unavailable or timed out. Move outdoors and try again.';
+  return code || '';
+}
 
 export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: string; onClose: () => void }) {
   const { snapshot, error, refresh } = useDeliveryTracking(bookingId);
   const [sharing, setSharing] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [sessionError, setSessionError] = useState('');
   const { point, error: gpsError, watching, backgroundPaused } = useDeviceLocation(sharing);
-  const { publishedAt, publishError } = useHelperLocationPublisher(bookingId, sharing, point, snapshot?.status);
+  const { publishedAt, publishError } = useHelperLocationPublisher(
+    bookingId,
+    sharing && sessionReady,
+    point,
+    snapshot?.status,
+  );
+
+  useEffect(() => {
+    if (!sharing) {
+      setSessionReady(false);
+      return;
+    }
+    if (gpsError === 'PERMISSION_DENIED') {
+      setSharing(false);
+      setSessionReady(false);
+    }
+  }, [sharing, gpsError]);
+
+  useEffect(() => {
+    if (!sharing || !point || sessionReady || !snapshot) return;
+    let cancelled = false;
+    setSessionBusy(true);
+    void startTrackingSession(bookingId, {
+      vehicleLabel: snapshot.vehicleLabel,
+      assigneeLabel: snapshot.assigneeLabel,
+      destinationLatitude: snapshot.destination?.latitude,
+      destinationLongitude: snapshot.destination?.longitude,
+    }).then(async () => {
+      if (cancelled) return;
+      setSessionReady(true);
+      await refresh();
+    }).catch((caught) => {
+      if (cancelled) return;
+      setSessionError(caught instanceof Error ? caught.message : 'TRACKING_SESSION_FAILED');
+      setSharing(false);
+    }).finally(() => {
+      if (!cancelled) setSessionBusy(false);
+    });
+    return () => { cancelled = true; };
+  }, [sharing, point, sessionReady, snapshot, bookingId, refresh]);
   const [otp, setOtp] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
@@ -19,6 +80,38 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
   const [confirmMessage, setConfirmMessage] = useState('');
   const config = snapshot ? DELIVERY_TRACKING_CONFIG[snapshot.serviceKind] : null;
   const live = Boolean(snapshot && isLiveDeliveryStatus(snapshot.status) && snapshot.trackingEnabled && !isTerminalDeliveryStatus(snapshot.status));
+  const shareState = snapshot
+    ? gpsShareState({
+      trackingEnabled: snapshot.trackingEnabled,
+      status: snapshot.status,
+      hasLocation: Boolean(point || snapshot.latestLocation),
+      stale: point ? false : !snapshot.latestLocation,
+      trackingStartedAt: snapshot.trackingStartedAt,
+      trackingStoppedAt: sharing ? null : snapshot.trackingStoppedAt,
+      capturedAt: point?.capturedAt || snapshot.latestLocation?.capturedAt,
+    })
+    : 'waiting';
+  const shareLabel = gpsShareStateLabel(shareState);
+
+  const toggleSharing = async () => {
+    if (!snapshot) return;
+    setSessionBusy(true);
+    setSessionError('');
+    try {
+      if (sharing) {
+        if (sessionReady) await stopTrackingSession(bookingId, 'provider_stopped');
+        setSharing(false);
+        setSessionReady(false);
+        await refresh();
+      } else {
+        setSharing(true);
+      }
+    } catch (caught) {
+      setSessionError(caught instanceof Error ? caught.message : 'TRACKING_SESSION_FAILED');
+    } finally {
+      setSessionBusy(false);
+    }
+  };
 
   const verify = async () => {
     const normalized = normalizeOtp(otp);
@@ -45,7 +138,7 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
         <header className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"><Navigation className="h-4 w-4" /></span>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-black text-[#1f1650] dark:text-white">{snapshot?.categoryName || config?.label || 'Delivery'} tracking</h2>
+            <h2 className="truncate text-sm font-black text-[#1f1650] dark:text-white">{snapshot?.categoryName || snapshot?.title || config?.label || 'Service'} tracking</h2>
             <p className="truncate text-[10px] font-semibold text-slate-500">{snapshot?.bookingRef || bookingId}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close helper tracking" className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="h-5 w-5" /></button>
@@ -59,30 +152,39 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Booking status</p>
                   <p className="text-[14px] font-black text-[#1f1650] dark:text-white">{trackingStatusLabel(snapshot.status)}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-slate-500">{journeyStatusLabel(snapshot.journeyStatus)} · {formatDistance(snapshot.distanceMeters)} · {formatEta(snapshot.etaSeconds)}</p>
+                  {snapshot.assigneeLabel && <p className="mt-1 text-[10px] font-semibold text-slate-500">Assigned: {snapshot.assigneeLabel}{snapshot.vehicleLabel ? ` · ${snapshot.vehicleLabel}` : ''}</p>}
                 </div>
-                <span className="rounded-full bg-violet-50 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-violet-700">{live ? 'Tracking allowed' : 'Tracking stopped'}</span>
+                <span data-gps-state={shareState} className="rounded-full bg-violet-50 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-violet-700">{shareLabel}</span>
               </div>
 
               {!live ? (
                 <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                   {snapshot.trackingEnabled === false
                     ? 'Live GPS is turned off for this service. Use the handover confirmation below instead.'
-                    : 'GPS sharing is available only while this booking is accepted or in progress. It stops automatically when the booking completes or is cancelled.'}
+                    : 'GPS sharing is available only while this booking is assigned and in progress. It stops automatically when the booking completes or is cancelled.'}
                 </p>
               ) : (
                 <>
                   <section className="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
                     <h3 className="flex items-center gap-1.5 text-[12px] font-black text-[#1f1650] dark:text-white"><MapPin className="h-4 w-4 text-violet-600" /> Real device GPS</h3>
-                    <p className="mt-1 text-[10px] font-semibold leading-4 text-slate-500">Your browser will ask for location permission. BookOurSpace never invents a location. Keep this screen open while travelling.</p>
-                    <button type="button" onClick={() => setSharing((value) => !value)} className={`mt-2 h-10 w-full rounded-xl text-[11px] font-black text-white ${sharing ? 'bg-rose-600' : 'bg-emerald-600'}`}>
-                      {sharing ? 'Stop sharing location' : 'Share live location'}
+                    <p className="mt-1 text-[10px] font-semibold leading-4 text-slate-500">Your browser will ask for location permission. BookOurSpace never invents a location and never uses a phone number to locate you. Keep this screen open while travelling.</p>
+                    <button type="button" disabled={sessionBusy} onClick={() => void toggleSharing()} className={`mt-2 h-10 w-full rounded-xl text-[11px] font-black text-white disabled:opacity-50 ${sharing ? 'bg-rose-600' : 'bg-emerald-600'}`}>
+                      {sessionBusy ? 'Updating…' : sharing ? 'Stop sharing location' : 'Share live location'}
                     </button>
-                    {gpsError && <p className="mt-2 text-[10px] font-semibold text-rose-600">GPS: {gpsError === 'PERMISSION_DENIED' ? 'Permission denied. Allow location access in the browser settings.' : gpsError}</p>}
+                    {gpsError && <p className="mt-2 text-[10px] font-semibold text-rose-600">GPS: {gpsErrorCopy(gpsError)}</p>}
+                    {sessionError && <p className="mt-2 text-[10px] font-semibold text-rose-600">Session: {sessionError}</p>}
                     {backgroundPaused && <p className="mt-2 rounded-lg bg-amber-50 p-2 text-[10px] font-semibold text-amber-800">This browser paused GPS while the tab is in the background. Reopen the screen to resume live updates.</p>}
                     {publishError && <p className="mt-2 text-[10px] font-semibold text-rose-600">Publish failed: {publishError}</p>}
                     {watching && !gpsError && <p className="mt-2 text-[10px] font-semibold text-emerald-700">Watching device GPS…{publishedAt ? ' last update sent' : ' waiting for first fix'}</p>}
                   </section>
-                  <DeliveryTrackingMap point={point} stale={false} label="Your live location" />
+                  <DeliveryTrackingMap
+                    point={point}
+                    destination={snapshot.destination}
+                    stale={false}
+                    label="Your live location"
+                    waitingMessage="Waiting for your device GPS…"
+                  />
                 </>
               )}
 
@@ -126,7 +228,7 @@ export function HelperTrackingPublisher({ bookingId, onClose }: { bookingId: str
                   <input value={otp} onChange={(event) => setOtp(event.target.value)} inputMode="numeric" maxLength={6} placeholder="000000" aria-label="Customer delivery OTP" className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-center text-lg font-black tracking-[0.2em] outline-none focus:border-violet-500 dark:border-slate-700 dark:bg-slate-900" />
                   <button type="button" onClick={() => void verify()} disabled={otpBusy} className="rounded-xl bg-[#5b21b6] px-4 text-[11px] font-black text-white disabled:opacity-50">{otpBusy ? 'Checking…' : 'Verify'}</button>
                 </div>
-                {otpMessage && <p className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${otpMessage.startsWith('OTP verified') ? 'text-emerald-700' : 'text-rose-600'}`}><CheckCircle2 className="h-3 w-3" /> {otpMessage}</p>}
+                {otpMessage && <p className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${otpMessage.startsWith('OTP verified') ? 'text-emerald-700' : 'text-rose-600'}`}><CheckCircle2 className="h-3.5 w-3.5" /> {otpMessage}</p>}
               </section>
               ) : (
                 <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">

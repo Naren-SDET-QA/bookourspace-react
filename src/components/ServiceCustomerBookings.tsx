@@ -11,6 +11,7 @@ import {
 import { DeliveryTrackingPanel } from './tracking/DeliveryTrackingPanel';
 import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
 import { categoryConfigForListing } from '../lib/serviceCatalog';
+import { isLiveDeliveryStatus } from '../lib/deliveryTracking';
 import {
   createServicePaymentIntent,
   fetchServicePaymentStatus,
@@ -188,13 +189,13 @@ export function ServiceCustomerBookings({ onClose }: { onClose: () => void }) {
               )}
 
               <div className="mt-3 flex flex-wrap gap-2">
-                {['accepted', 'in_progress'].includes(booking.status) && booking.trackingEnabled && (
+                {isLiveDeliveryStatus(booking.status) && booking.trackingEnabled && (
                   <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-700 px-4 text-xs font-bold text-white">
                     <Navigation className="h-3.5 w-3.5" aria-hidden="true" /> Track live
                   </button>
                 )}
-                {['accepted', 'in_progress'].includes(booking.status) && !booking.trackingEnabled && (
-                  <span className="rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">Live GPS is not enabled for this service.</span>
+                {isLiveDeliveryStatus(booking.status) && !booking.trackingEnabled && (
+                  <span className="rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">GPS tracking is disabled for this service.</span>
                 )}
                 {['requested', 'accepted'].includes(booking.status) && (
                   <button type="button" disabled={busyId === booking.id} onClick={() => void cancel(booking)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-rose-300 px-4 text-xs font-bold text-rose-700 disabled:opacity-60 dark:border-rose-900 dark:text-rose-300">

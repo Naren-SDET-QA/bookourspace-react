@@ -24,6 +24,7 @@ import {
 } from '../lib/locationSearch';
 import { getNativePosition } from '../lib/nativeLocation';
 import type { NativeLocationDiagnostic } from '../lib/nativeLocationPermission';
+import { isClearedLocationCity } from '../lib/sectionRouteHash';
 
 export interface SelectedLocation {
   city: string;
@@ -370,6 +371,12 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
     onClose();
   };
 
+  const clearSelectedLocation = () => {
+    persistLocation(null);
+    onSelect({ city: 'All Cities', area: 'all', label: 'All Cities' });
+    onClose();
+  };
+
   const detect = async () => {
     if (Capacitor.isNativePlatform()) {
       setGps('locating');
@@ -581,6 +588,16 @@ export function LocationSelector({ open, onClose, selected, onSelect }: Location
                 </span>
                 <Navigation className="h-4 w-4 shrink-0 text-[#7C3AED]" />
               </button>
+              {selected?.city && !isClearedLocationCity(selected.city) && (
+                <button
+                  type="button"
+                  onClick={clearSelectedLocation}
+                  aria-label="Clear selected location"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-[12px] font-bold text-slate-700 transition hover:border-purple-300 hover:bg-purple-50/50"
+                >
+                  Show all cities
+                </button>
+              )}
               {gps === 'denied' && (
                 <p className="-mt-2 rounded-lg bg-rose-50 px-2.5 py-1.5 text-[10.5px] font-semibold text-rose-600">
                   Allow location in device Settings to retry. You can always pick a city manually.

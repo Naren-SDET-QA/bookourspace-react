@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BOS_CALL_HREF, BOS_CONTACT_PHONE, whatsappHref } from '../lib/contactNumbers';
+import { DeliveryTrackingMap } from './tracking/DeliveryTrackingMap';
+import { useDeliveryTracking } from '../hooks/useDeliveryTracking';
+import { useDeviceLocation } from '../hooks/useDeviceLocation';
+import {
+  deriveJourneyMetrics,
+  formatDistance,
+  formatEta,
+  isLiveDeliveryStatus,
+  isLocationStale,
+  isValidCoordinate,
+} from '../lib/deliveryTracking';
+import { fetchServiceBookings } from '../lib/servicesBookingClient';
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,7 +32,6 @@ import {
   Star,
   Ticket,
   Timer,
-  Truck,
   Users,
   Wallet,
   X,
@@ -238,6 +249,53 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
 
   const duration = DURATIONS.find((d) => d.id === durationId) ?? DURATIONS[1];
   const activeTask = TASK_TYPES.find((t) => t.id === taskType) ?? TASK_TYPES[0];
+  const { point: customerPoint, error: gpsError, watching, backgroundPaused, retry: retryGps } = useDeviceLocation(step === 3);
+  const [assignedBookingId, setAssignedBookingId] = useState<string | null>(null);
+  useEffect(() => {
+    if (step !== 3) return;
+    let cancelled = false;
+    void fetchServiceBookings()
+      .then((result) => {
+        if (cancelled) return;
+        const live = result.bookings.find((booking) => booking.trackingEnabled && isLiveDeliveryStatus(booking.status));
+        setAssignedBookingId(live?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignedBookingId(null);
+      });
+    return () => { cancelled = true; };
+  }, [step]);
+  const { snapshot: assignedSnapshot } = useDeliveryTracking(assignedBookingId);
+  const providerPoint = assignedSnapshot?.latestLocation ?? null;
+  const customerCoords = customerPoint && isValidCoordinate(customerPoint.latitude, customerPoint.longitude) ? customerPoint : null;
+  const providerCoords = providerPoint && isValidCoordinate(providerPoint.latitude, providerPoint.longitude) ? providerPoint : null;
+  const journey = useMemo(
+    () => deriveJourneyMetrics(providerCoords, customerCoords, providerCoords?.speedMps),
+    [providerCoords, customerCoords],
+  );
+  const customerStale = customerCoords ? isLocationStale(customerCoords.capturedAt) : true;
+  const providerStale = providerCoords ? isLocationStale(providerCoords.capturedAt) : true;
+  const gpsStale = Boolean((customerCoords && customerStale) || (providerCoords && providerStale));
+  const distanceLabel = formatDistance(journey.distanceMeters);
+  const etaLabel = formatEta(journey.etaSeconds);
+  const timeTakenLabel = journey.etaSeconds != null
+    ? `${etaLabel} from live GPS${gpsStale ? ' · location stale' : ''}`
+    : gpsError === 'PERMISSION_DENIED'
+      ? 'Location permission denied'
+      : gpsError === 'INSECURE_CONTEXT'
+        ? 'Location needs HTTPS or localhost'
+        : gpsError === 'UNSUPPORTED'
+          ? 'This browser cannot read GPS'
+          : gpsError === 'TIMEOUT' || gpsError === 'POSITION_UNAVAILABLE'
+            ? 'Device GPS unavailable'
+            : !customerCoords
+              ? 'Waiting for device GPS'
+              : !providerCoords
+                ? 'Waiting for assigned helper GPS'
+                : 'Distance unavailable';
+  const mapWaitingMessage = !customerCoords
+    ? (gpsError === 'PERMISSION_DENIED' ? 'Location permission denied. Allow location in the browser.' : 'Waiting for your device GPS…')
+    : 'Waiting for the assigned helper\'s real device GPS…';
 
   const totals = useMemo(() => {
     const labour = duration.hours * HELPER_RATE * helpers;
@@ -562,30 +620,22 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
             Add locations, choose time &amp; leave the rest to us.
           </p>
 
-          {/* Map */}
-          <div className="relative mt-4 h-56 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-[#e8e3f8] via-[#f3efff] to-[#dbeafe]">
-            <div className="absolute inset-0 opacity-60" style={{ backgroundImage: 'radial-gradient(#7c3aed33 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
-            <div className="absolute left-[22%] top-[30%] flex flex-col items-center">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7c3aed] text-white shadow-lg">
-                <MapPin className="h-4 w-4" />
-              </span>
-              <span className="mt-1 rounded bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 shadow">Home</span>
-            </div>
-            <div className="absolute left-[62%] top-[48%] flex flex-col items-center">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f97316] text-white shadow-lg">
-                <Truck className="h-4 w-4" />
-              </span>
-              <span className="mt-1 rounded bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 shadow">Helper</span>
-            </div>
-            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <path d="M 24 34 Q 40 56 62 52" fill="none" stroke="#7c3aed" strokeWidth="1.4" strokeDasharray="3 2" />
-            </svg>
-            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between rounded-xl bg-white/95 px-3 py-2 shadow">
+          {/* Map — live device GPS vs destination, same haversine as Time Taken */}
+          <div className="relative mt-4 h-56 overflow-hidden rounded-2xl border border-slate-200">
+            <DeliveryTrackingMap
+              point={providerCoords}
+              destination={customerCoords}
+              stale={gpsStale}
+              label="Journey map"
+              className="h-full rounded-none border-0"
+              waitingMessage={mapWaitingMessage}
+            />
+            <div className="pointer-events-none absolute bottom-3 left-3 right-3 z-[400] flex items-center justify-between rounded-xl bg-white/95 px-3 py-2 shadow">
               <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
-                <Navigation className="h-3.5 w-3.5 text-[#7c3aed]" /> 2.4 km away
+                <Navigation className="h-3.5 w-3.5 text-[#7c3aed]" /> {distanceLabel}
               </span>
               <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
-                <Clock className="h-3.5 w-3.5 text-[#7c3aed]" /> ~12 min
+                <Clock className="h-3.5 w-3.5 text-[#7c3aed]" /> {etaLabel}
               </span>
             </div>
           </div>
@@ -599,10 +649,34 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
             <MapPin className="h-4 w-4" /> {locations === 'multiple' ? 'Using Multiple Locations' : 'Add Multiple Locations'}
           </button>
 
+          {(gpsError === 'PERMISSION_DENIED' || gpsError === 'TIMEOUT' || gpsError === 'POSITION_UNAVAILABLE' || gpsError === 'INSECURE_CONTEXT' || gpsError === 'UNSUPPORTED') && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[12px] font-semibold text-amber-900">{timeTakenLabel}</p>
+              {gpsError === 'PERMISSION_DENIED' ? (
+                <p className="mt-1 text-[11px] font-semibold text-amber-800">Allow location access for this site in the browser, then retry. BookOurSpace never invents a location.</p>
+              ) : null}
+              {gpsError !== 'UNSUPPORTED' && gpsError !== 'INSECURE_CONTEXT' ? (
+                <button type="button" onClick={retryGps} className="mt-2 h-9 rounded-lg bg-[#5b21b6] px-3 text-[11px] font-bold text-white">
+                  Retry device GPS
+                </button>
+              ) : null}
+            </div>
+          )}
+          {backgroundPaused && (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-800">
+              This browser paused GPS while the tab is in the background. Reopen this screen to resume live updates.
+            </p>
+          )}
+          {gpsStale && (customerCoords || providerCoords) && (
+            <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600">
+              A GPS point is stale. Distance uses the last valid coordinates until a fresh fix arrives.
+            </p>
+          )}
+
           <div className="mt-4 space-y-2.5">
             {[
-              { icon: <MapPin className="h-4 w-4" />, title: 'Your Location', sub: 'Distance calculated from your saved address' },
-              { icon: <Timer className="h-4 w-4" />, title: 'Time Taken', sub: '47 min from your location' },
+              { icon: <MapPin className="h-4 w-4" />, title: 'Your Location', sub: customerCoords ? `${address.trim() || 'Current location'}${watching ? ' · live GPS' : ' · GPS fix'}` : (address.trim() || 'Waiting for your device GPS') },
+              { icon: <Timer className="h-4 w-4" />, title: 'Time Taken', sub: timeTakenLabel },
               { icon: <BadgeCheck className="h-4 w-4" />, title: 'Confirm Your Match', sub: 'Matching based on task type & rating' },
               { icon: <Star className="h-4 w-4" />, title: 'Hire The Right Helper', sub: 'Verified & trained professionals' },
             ].map((row) => (
@@ -610,7 +684,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#f5f3ff] text-[#5b21b6]">{row.icon}</span>
                 <div>
                   <p className="text-[13px] font-bold text-[#1f1650]">{row.title}</p>
-                  <p className="text-[11px] text-slate-500">{row.sub}</p>
+                  <p className="text-[11px] text-slate-500" {...(row.title === 'Time Taken' ? { 'data-time-taken': row.sub } : {})}>{row.sub}</p>
                 </div>
               </div>
             ))}

@@ -6,6 +6,8 @@ import {
   closeSharedPostgresPool,
   getSharedPostgresPool,
   initializePostgresRuntime,
+  postgresPoolOptions,
+  resolvePostgresPoolMax,
   resolvePostgresTlsConnectionString,
 } from '../src/server/postgresPool.ts';
 import { registerStaySearchApi } from '../src/server/staySearchApi.ts';
@@ -42,6 +44,15 @@ test('PostgreSQL startup requires one canonical URL and rejects invalid target c
   await assert.rejects(initializePostgresRuntime({ NODE_ENV: 'development' }), /BOS_LISTINGS_DATABASE_URL_REQUIRED/);
   await assert.rejects(initializePostgresRuntime({ ...LOOPBACK, BOS_LISTINGS_DATABASE_URL: 'https://db.example.test' }), /BOS_LISTINGS_DATABASE_URL_INVALID/);
   await assert.rejects(initializePostgresRuntime({ ...LOOPBACK, BOS_PG_URL: 'postgres://127.0.0.1/other' }), /BOS_PG_URL_UNSUPPORTED_USE_BOS_LISTINGS_DATABASE_URL|BOS_LISTINGS_DATABASE_URL_CONFLICT/);
+});
+
+test('GPS-ready pool defaults to 40 connections and clamps BOS_PG_POOL_MAX', () => {
+  assert.equal(resolvePostgresPoolMax({}), 40);
+  assert.equal(resolvePostgresPoolMax({ BOS_PG_POOL_MAX: '8' }), 8);
+  assert.equal(resolvePostgresPoolMax({ BOS_PG_POOL_MAX: '200' }), 80);
+  assert.equal(resolvePostgresPoolMax({ BOS_PG_POOL_MAX: '2' }), 8);
+  assert.equal(postgresPoolOptions(LOOPBACK.BOS_LISTINGS_DATABASE_URL, LOOPBACK).max, 40);
+  assert.equal(postgresPoolOptions(LOOPBACK.BOS_LISTINGS_DATABASE_URL, LOOPBACK).connectionTimeoutMillis, 5_000);
 });
 
 test('one canonical database URL reuses one shared pool instead of duplicating initialization', async () => {

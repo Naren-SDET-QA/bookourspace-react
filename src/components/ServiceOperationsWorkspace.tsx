@@ -29,6 +29,7 @@ import {
   type ServicePaymentClaim,
 } from '../lib/servicesBookingClient';
 import { HelperTrackingPublisher } from './tracking/HelperTrackingPublisher';
+import { isLiveDeliveryStatus } from '../lib/deliveryTracking';
 import { usePublicServiceCatalog } from '../hooks/usePublicServiceCatalog';
 import { categoryConfigForListing, isMedicineServiceCategory } from '../lib/serviceCatalog';
 import {
@@ -50,6 +51,10 @@ interface ServiceOperationsWorkspaceProps {
 const STATUS_TONE: Record<ServiceBooking['status'], string> = {
   requested: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
   accepted: 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200',
+  assigned: 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200',
+  travelling: 'bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200',
+  arrived: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+  started: 'bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200',
   in_progress: 'bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200',
   completed: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
   cancelled: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
@@ -479,14 +484,21 @@ export function ServiceOperationsWorkspace({ role, onClose }: ServiceOperationsW
                       )}
                       {role !== 'admin' && booking.status === 'accepted' && (
                         <>
-                          <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
+                          {booking.trackingEnabled && (
+                            <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
+                          )}
                           <button type="button" disabled={busy} onClick={() => void act(booking, 'start')} className="min-h-10 rounded-xl bg-violet-700 px-4 text-xs font-bold text-white hover:bg-violet-800 disabled:opacity-60">Start service</button>
                           <button type="button" disabled={busy} onClick={() => void act(booking, 'cancel')} className="min-h-10 rounded-xl border border-slate-300 px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>
                         </>
                       )}
+                      {role !== 'admin' && isLiveDeliveryStatus(booking.status) && booking.status !== 'accepted' && booking.trackingEnabled && (
+                        <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
+                      )}
+                      {role !== 'admin' && isLiveDeliveryStatus(booking.status) && !booking.trackingEnabled && (
+                        <span className="rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">GPS tracking is disabled for this service.</span>
+                      )}
                       {role !== 'admin' && booking.status === 'in_progress' && (
                         <>
-                          <button type="button" onClick={() => setTrackingBookingId(booking.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white"><Navigation className="h-3.5 w-3.5" /> Share live GPS</button>
                           {booking.deliveryConfirmationEnabled && !booking.deliveryConfirmedAt && !booking.otpEnabled && (
                             <button type="button" disabled={busy} onClick={() => void confirmDelivery(booking)} className="min-h-10 rounded-xl bg-amber-600 px-4 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-60">Confirm handover</button>
                           )}

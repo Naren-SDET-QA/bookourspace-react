@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import {defineConfig} from 'vite';
+import {VITE_ALLOWED_HOSTS} from './src/server/viteAllowedHosts';
 
 export default defineConfig(() => {
   // Demo fixtures are never injected by the build. Every build — including the
@@ -73,6 +74,7 @@ export default defineConfig(() => {
       },
     },
     server: {
+      allowedHosts: [...VITE_ALLOWED_HOSTS],
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
@@ -87,6 +89,7 @@ export default defineConfig(() => {
       },
     },
     preview: {
+      allowedHosts: [...VITE_ALLOWED_HOSTS],
       // `vite preview` serves the built app on its own, but the app calls
       // same-origin /api routes that live in the separate API server. Without
       // this proxy the preview answers /api with index.html, so listings,

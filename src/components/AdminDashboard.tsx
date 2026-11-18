@@ -61,6 +61,7 @@ const AdminIntegrationsSection = lazy(() => import('./AdminIntegrationsSection')
 const AdminDataManagementSection = lazy(() => import('./AdminDataManagementSection').then((module) => ({ default: module.AdminDataManagementSection })));
 const AdminAnnouncementsSection = lazy(() => import('./AdminAnnouncementsSection').then((module) => ({ default: module.AdminAnnouncementsSection })));
 const AdminPlatformModuleSettings = lazy(() => import('./AdminPlatformModuleSettings').then((module) => ({ default: module.AdminPlatformModuleSettings })));
+const AdminGpsTrackingPanel = lazy(() => import('./admin/AdminGpsTrackingPanel').then((module) => ({ default: module.AdminGpsTrackingPanel })));
 const AdminAuthAccessSettings = lazy(() => import('./AdminAuthAccessSettings').then((module) => ({ default: module.AdminAuthAccessSettings })));
 const AdminUserPermissions = lazy(() => import('./AdminUserPermissions').then((module) => ({ default: module.AdminUserPermissions })));
 const AdminMarketplaceListings = lazy(() => import('./AdminMarketplaceListings').then((module) => ({ default: module.AdminMarketplaceListings })));
@@ -166,6 +167,7 @@ export type SuperAdminSectionId =
   | 'pg_hostels'
   | 'bookings_events'
   | 'feature_management'
+  | 'gps_tracking'
   | 'audit_logs'
   | 'notifications_mgmt'
   | 'app_settings'
@@ -1490,6 +1492,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       label: 'Feature Management',
       badge: `${modularTemplates.filter((m) => m.enabled).length}/${modularTemplates.length}`,
       icon: Sliders,
+    },
+    {
+      id: 'gps_tracking',
+      label: 'GPS Tracking',
+      badge: 'Live',
+      icon: MapPin,
     },
     {
       id: 'audit_logs',
@@ -3388,7 +3396,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div>
                     <h4 className="text-[13px] font-black text-slate-900 dark:text-white">BookOurSpace section display styles</h4>
                     <p className="text-[11px] text-slate-500">Choose which design each section opens with. Applies to every visitor.</p>
-                    <p className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">PG and Classes are locked to Style 3. Halls is locked to Style 2. The other styles are disabled.</p>
+                    <p className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">PG and Classes are locked to Style 3. Halls and Services are locked to Style 2. The other styles are disabled.</p>
                   </div>
                   <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">Layout</span>
                 </div>
@@ -3419,21 +3427,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
-                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100">BookOurSpace Services</span>
-                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
-                          {[['old', 'Style 1'], ['triangle', 'Style 2'], ['noddyy', 'Style 3']].map(([val, label]) => (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => {
-                            const next = { ...sectionStyles, services: val as SectionStyles['services'] };
-                            void commitSectionStyles(next);
-                          }}
-                          className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${sectionStyles.services === val ? 'bg-[#7c3aed] text-white' : 'text-slate-600 dark:text-slate-300'}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                    <span className="flex items-center gap-1.5 text-[12px] font-bold text-slate-800 dark:text-slate-100"><Lock className="h-3.5 w-3.5 text-amber-600" /> BookOurSpace Services</span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md bg-[#7c3aed] px-2.5 py-1 text-[11px] font-bold text-white">Style 2</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">Style 1 &amp; 3 disabled</span>
                     </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
                     <span className="flex items-center gap-1.5 text-[12px] font-bold text-slate-800 dark:text-slate-100"><Lock className="h-3.5 w-3.5 text-amber-600" /> BookOurSpace Classes</span>
@@ -5309,8 +5306,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* =====================================================================
               SECTION 9: FEATURE MANAGEMENT (Enable/Disable Modules + Supreme Builder)
              ===================================================================== */}
+          {activeSection === 'gps_tracking' && (
+            <AdminGpsTrackingPanel />
+          )}
+
           {activeSection === 'feature_management' && (
             <div className="space-y-5">
+              <AdminGpsTrackingPanel />
               <AdminPlatformModuleSettings />
               <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-4">
                 <div>

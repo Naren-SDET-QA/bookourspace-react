@@ -159,6 +159,10 @@ export function registerServiceBookingApi(
         void repository.notificationContext(actor, result.booking.id)
           .then((context) => dispatchServiceNotification(context, kind, env))
           .catch((error) => logSafeError('service-bookings', `load ${kind} notification context`, error));
+        if (action === 'accept') {
+          const { notifyBookingConfirmedIfNeeded } = await import('./trackingShareApi');
+          void notifyBookingConfirmedIfNeeded(repository, result.booking.id, env);
+        }
       }
       response.json({ ok: true, ...result, source: 'postgres' });
     } catch (error) {
@@ -185,6 +189,36 @@ export function registerServiceBookingApi(
       const point = await repository.publishTrackingLocation(actor, String(request.params.id || ''), request.body || {});
       response.setHeader('cache-control', 'no-store');
       response.status(201).json({ ok: true, point, source: 'postgres' });
+      const { notifyProviderOnTheWayIfNeeded } = await import('./trackingShareApi');
+      void notifyProviderOnTheWayIfNeeded(repository, String(request.params.id || ''), '', env);
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/tracking/session/start', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
+    if (!actor) return;
+    try {
+      const session = await repository.startTrackingSession(actor, String(request.params.id || ''), request.body || {});
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, session, source: 'postgres' });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/services/bookings/:id/tracking/session/stop', async (request, response) => {
+    const actor = sessionOrReject(request, response, verifySession, ['provider', 'admin']);
+    if (!actor) return;
+    try {
+      const session = await repository.stopTrackingSession(
+        actor,
+        String(request.params.id || ''),
+        String(request.body?.reason || 'provider_stopped'),
+      );
+      response.setHeader('cache-control', 'no-store');
+      response.json({ ok: true, session, source: 'postgres' });
     } catch (error) {
       sendError(response, error);
     }

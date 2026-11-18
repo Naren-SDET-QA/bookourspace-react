@@ -7,10 +7,17 @@ import {
   canPublishHelperLocation,
   canViewBookingTracking,
   deliveryKindFor,
+  deriveJourneyMetrics,
+  etaSecondsFromDistance,
+  formatDistance,
+  formatEta,
+  haversineMeters,
+  isGpsInaccurate,
   isLiveDeliveryStatus,
   isLocationStale,
   isValidCoordinate,
   isTerminalDeliveryStatus,
+  journeyStatusFromDistance,
   nextTrackingPollDelay,
   normalizeOtp,
   trackingStatusLabel,
@@ -47,7 +54,9 @@ test('booking-specific access and helper publishing rules are enforced', () => {
   assert.equal(canPublishHelperLocation({ actorId: 'helper', providerId: 'helper', status: 'completed', trackingEnabled: false }), false);
   assert.equal(isTerminalDeliveryStatus('completed'), true);
   assert.equal(isLiveDeliveryStatus('in_progress'), true);
-  assert.equal(trackingStatusLabel('accepted'), 'Helper assigned');
+  assert.equal(isLiveDeliveryStatus('travelling'), true);
+  assert.equal(isLiveDeliveryStatus('assigned'), true);
+  assert.equal(trackingStatusLabel('accepted'), 'Assigned');
 });
 
 test('OTP generation is customer-only, single-use and prescription gated', () => {
@@ -69,7 +78,7 @@ test('adaptive fallback polling stops for inactive tracking and backs off offlin
   assert.equal(nextTrackingPollDelay({ ...base, trackingEnabled: false }), null);
   assert.equal(nextTrackingPollDelay({ ...base, online: false }), 30_000);
   assert.equal(nextTrackingPollDelay({ ...base, visible: false }), 30_000);
-  assert.equal(nextTrackingPollDelay({ ...base, realtime: true }), 60_000);
+  assert.equal(nextTrackingPollDelay({ ...base, realtime: true }), 8_000);
   assert.equal(nextTrackingPollDelay({ ...base, hasLocation: false, capturedAt: null }), 4_000);
   assert.equal(nextTrackingPollDelay({ ...base, capturedAt: new Date(Date.now() - 120_000).toISOString() }), 5_000);
   assert.equal(nextTrackingPollDelay(base), 8_000);
@@ -100,16 +109,48 @@ test('client uses real browser GPS and Leaflet OSM, never a simulated path', () 
   const hook = source('src/hooks/useDeviceLocation.ts');
   const map = source('src/components/tracking/DeliveryTrackingMap.tsx');
   const client = source('src/lib/deliveryTrackingClient.ts');
-  assert.match(hook, /navigator\.geolocation\.watchPosition/);
+  const currentLocation = source('src/lib/currentLocation.ts');
+  assert.match(hook, /watchPosition/);
+  assert.match(hook, /getCurrentPosition/);
   assert.match(hook, /enableHighAccuracy: true/);
   assert.match(hook, /visibilitychange/);
+  assert.match(hook, /PERMISSION_DENIED/);
+  assert.match(hook, /permissions\.query/);
   assert.match(map, /tile\.openstreetmap\.org/);
   assert.match(map, /openstreetmap\.org\/copyright/);
+  assert.match(map, /data-customer-lat/);
   assert.match(client, /service_tracking_locations/);
   assert.match(client, /create_delivery_otp/);
   assert.match(client, /verify_delivery_otp/);
   assert.match(client, /postgres_changes/);
+  assert.match(currentLocation, /getCurrentPosition/);
   assert.doesNotMatch(hook, /Math\.random\(\).*latitude|mock.*location|fake.*gps/i);
+});
+
+test('GPS engine computes distance, ETA and journey without an external maps API', () => {
+  const metres = haversineMeters(
+    { latitude: 17.4485, longitude: 78.3748 },
+    { latitude: 17.4505, longitude: 78.3800 },
+  );
+  assert.ok(metres > 400 && metres < 900);
+  assert.equal(journeyStatusFromDistance(50), 'arrived');
+  assert.equal(journeyStatusFromDistance(200), 'arriving');
+  assert.equal(journeyStatusFromDistance(2000), 'en_route');
+  assert.equal(etaSecondsFromDistance(1222, 6.11), 200);
+  const live = deriveJourneyMetrics(
+    { latitude: 17.4485, longitude: 78.3748 },
+    { latitude: 17.4505, longitude: 78.3800 },
+    6.11,
+  );
+  assert.equal(live.distanceMeters, metres);
+  assert.equal(live.etaSeconds, etaSecondsFromDistance(metres, 6.11));
+  assert.equal(live.journeyStatus, journeyStatusFromDistance(metres));
+  assert.match(formatDistance(850), /850 m/);
+  assert.match(formatEta(180), /3 min/);
+  assert.equal(isGpsInaccurate(40), false);
+  assert.equal(isGpsInaccurate(180), true);
+  assert.equal(canPublishHelperLocation({ actorId: 'helper', providerId: 'helper', status: 'travelling', trackingEnabled: true }), true);
+  assert.equal(canPublishHelperLocation({ actorId: 'stranger', providerId: 'helper', status: 'travelling', trackingEnabled: true }), false);
 });
 
 test('customer and provider booking surfaces expose real tracking entry points', () => {
@@ -120,4 +161,32 @@ test('customer and provider booking surfaces expose real tracking entry points',
   assert.match(customer, /Track live/);
   assert.match(provider, /HelperTrackingPublisher/);
   assert.match(provider, /Share live GPS/);
+  const engineSql = source('supabase/migrations/20261118180000_universal_gps_engine.sql');
+  assert.match(engineSql, /start_service_tracking/);
+  assert.match(engineSql, /gps_haversine_meters/);
+  assert.match(engineSql, /destination_latitude/);
+  assert.doesNotMatch(engineSql, /create table if not exists public\.service_tracking_locations/);
+  const publisher = source('src/components/tracking/HelperTrackingPublisher.tsx');
+  assert.match(publisher, /never uses a phone number/);
+  assert.match(publisher, /startTrackingSession/);
+  const panel = source('src/components/tracking/DeliveryTrackingPanel.tsx');
+  assert.doesNotMatch(panel, /openstreetmap\.org\/\?mlat/);
+  assert.match(panel, /formatEta/);
+  const journey = source('src/components/HelperJourney.tsx');
+  assert.doesNotMatch(journey, /2\.4 km away/);
+  assert.doesNotMatch(journey, /47 min from your location/);
+  assert.doesNotMatch(journey, /~12 min/);
+  assert.doesNotMatch(journey, /resolveLocalityCoordinates/);
+  assert.match(journey, /deriveJourneyMetrics/);
+  assert.match(journey, /DeliveryTrackingMap/);
+  assert.match(journey, /fetchServiceBookings/);
+  assert.match(journey, /Waiting for assigned helper GPS/);
+  assert.match(journey, /Location permission denied/);
+  const bookingPanel = source('src/components/ServiceBookingPanel.tsx');
+  assert.match(bookingPanel, /destinationLatitude/);
+  assert.match(bookingPanel, /getCurrentBrowserPosition/);
+  const clientGps = source('src/lib/deliveryTrackingClient.ts');
+  assert.match(clientGps, /import\.meta\.env\?\.PROD/);
+  assert.match(publisher, /PERMISSION_DENIED/);
+  assert.match(source('src/components/tracking/DeliveryTrackingMap.tsx'), /data-provider-lat/);
 });

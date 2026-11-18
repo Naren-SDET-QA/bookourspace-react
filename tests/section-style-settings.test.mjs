@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyRemoteSectionStyles, loadSectionStyles, saveSectionStyles, saveStylePreference } from '../src/lib/sectionStyleSettings.ts';
+import { applyRemoteSectionStyles, canonicalizeServicesHash, loadSectionStyles, sanitizeServicesReturnHash, saveSectionStyles, saveStylePreference } from '../src/lib/sectionStyleSettings.ts';
 
 const styles = {
   pg: 'style2',
@@ -58,25 +58,23 @@ test('missing server identity fails closed outside a development preview', async
 });
 
 
-test('legacy published defaults open PG and Classes as Style 3', () => {
+test('legacy published defaults open PG as Style 3 and Services as Triangle', () => {
   const applied = applyRemoteSectionStyles({
     pg: 'style2', stay: 'airbnb', services: 'old', classes: 'cards', venues: 'showcase', movies: 'experience',
   });
   assert.equal(applied?.pg, 'style3');
-  assert.equal(applied?.classes, 'style3');
   assert.equal(applied?.stay, 'old');
   assert.equal(applied?.venues, 'agenda');
   assert.equal(applied?.services, 'triangle');
 });
 
-test('PG and Classes stay Style 3 while other sections keep their published choices', () => {
+test('PG stays Style 3 and Services stay Triangle while other sections keep published choices', () => {
   const applied = applyRemoteSectionStyles({
     pg: 'style2', stay: 'airbnb', services: 'noddyy', classes: 'timetable', venues: 'agenda', movies: 'classic',
   }, 2);
   assert.equal(applied?.pg, 'style3');
-  assert.equal(applied?.classes, 'style3');
+  assert.equal(applied?.classes, 'timetable');
   assert.equal(applied?.stay, 'airbnb');
-  // Services ships only Style 2; Style 1 and Style 3 are disabled.
   assert.equal(applied?.services, 'triangle');
   assert.equal(applied?.venues, 'agenda');
   assert.equal(applied?.movies, 'classic');
@@ -106,15 +104,16 @@ test('an explicit style choice survives reloads and later remote configs', () =>
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   try {
     saveStylePreference('pg', 'style3');
-    saveStylePreference('classes', 'timetable');
+    saveStylePreference('classes', 'style4');
     assert.equal(loadSectionStyles().pg, 'style3');
-    assert.equal(loadSectionStyles().classes, 'style3');
+    assert.equal(loadSectionStyles().classes, 'style4');
 
     const remote = applyRemoteSectionStyles({
-      pg: 'style1', stay: 'old', services: 'old', classes: 'cards', venues: 'showcase', movies: 'experience',
+      pg: 'style1', stay: 'old', services: 'old', classes: 'style4', venues: 'showcase', movies: 'experience',
     }, 2);
     assert.equal(remote?.pg, 'style3');
-    assert.equal(remote?.classes, 'style3');
+    assert.equal(remote?.classes, 'style4');
+    assert.equal(remote?.services, 'triangle');
     assert.equal(remote?.stay, 'old');
 
     storage.setItem('bos_section_style_prefs_v1', JSON.stringify({ pg: 'not-a-style' }));
@@ -128,6 +127,57 @@ test('an explicit style choice survives reloads and later remote configs', () =>
 });
 
 
+test('retired Services hashes and stored Style 1 cannot reopen the old layout', () => {
+  assert.equal(sanitizeServicesReturnHash('#services/old'), '#services');
+  assert.equal(sanitizeServicesReturnHash('#services/style1'), '#services');
+  assert.equal(sanitizeServicesReturnHash('#services/noddyy'), '#services');
+  assert.equal(sanitizeServicesReturnHash('#classes/style4'), '#classes/style4');
+  assert.equal(sanitizeServicesReturnHash('#classes/old'), '#classes/style4');
+  assert.equal(sanitizeServicesReturnHash('#classes/style3'), '#classes/style3');
+  assert.equal(sanitizeServicesReturnHash('#stays/old'), '#stays/old');
+
+  const store = new Map();
+  store.set('bos_section_styles_v2', JSON.stringify({
+    pg: 'style3', stay: 'airbnb', services: 'old', classes: 'style4', venues: 'agenda', movies: 'experience',
+  }));
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, String(value)),
+    removeItem: (key) => store.delete(key),
+  };
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const previousLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  let replaced = '';
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      localStorage: storage,
+      dispatchEvent() {},
+      location: { hash: '#services/old', pathname: '/', search: '' },
+      history: { replaceState(_s, _t, url) { replaced = String(url); } },
+    },
+  });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { hash: '#services/old', pathname: '/', search: '' },
+  });
+  try {
+    assert.equal(loadSectionStyles().services, 'triangle');
+    assert.equal(JSON.parse(store.get('bos_section_styles_v2')).services, 'triangle');
+    canonicalizeServicesHash();
+    assert.equal(replaced, '/#services');
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
+    else delete globalThis.localStorage;
+    if (previousLocation) Object.defineProperty(globalThis, 'location', previousLocation);
+    else delete globalThis.location;
+  }
+});
+
 test('PG and Classes cannot be published or preferred as Style 1/2', async () => {
   let publishedBody = null;
   await withBrowser({
@@ -136,10 +186,11 @@ test('PG and Classes cannot be published or preferred as Style 1/2', async () =>
       return { ok: true, json: async () => ({ ok: true, okStyles: true }) };
     },
   }, async () => {
-    assert.equal(await saveSectionStyles({ ...styles, pg: 'style1', classes: 'cards' }), 'published');
+    assert.equal(await saveSectionStyles({ ...styles, pg: 'style1', services: 'old', classes: 'style4' }), 'published');
   });
   assert.equal(publishedBody?.styles.pg, 'style3');
-  assert.equal(publishedBody?.styles.classes, 'style3');
+  assert.equal(publishedBody?.styles.services, 'triangle');
+  assert.equal(publishedBody?.styles.classes, 'style4');
 
   const store = new Map();
   const storage = {
@@ -152,9 +203,11 @@ test('PG and Classes cannot be published or preferred as Style 1/2', async () =>
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   try {
     saveStylePreference('pg', 'style1');
-    saveStylePreference('classes', 'cards');
+    saveStylePreference('services', 'old');
+    saveStylePreference('classes', 'style4');
     assert.equal(loadSectionStyles().pg, 'style3');
-    assert.equal(loadSectionStyles().classes, 'style3');
+    assert.equal(loadSectionStyles().services, 'triangle');
+    assert.equal(loadSectionStyles().classes, 'style4');
   } finally {
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
     else delete globalThis.window;

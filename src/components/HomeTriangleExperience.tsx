@@ -22,6 +22,9 @@ interface HomeTriangleExperienceProps {
   onSwitchToOld: () => void;
   /** Render in the page flow under the common header instead of as a full-screen dialog. */
   inline?: boolean;
+  viewerRole?: 'customer' | 'provider' | 'admin';
+  onOpenCustomerBookings?: () => void;
+  onOpenProviderJobs?: () => void;
 }
 
 /* ---------------------------------- Data ---------------------------------- */
@@ -812,7 +815,14 @@ function ProviderDetailView({ provider, onBack }: { provider: Provider; onBack: 
 
 /* --------------------------------- Main --------------------------------- */
 
-export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false }: HomeTriangleExperienceProps) {
+export function HomeTriangleExperience({
+  onClose,
+  onSwitchToOld: _onSwitchToOld,
+  inline = false,
+  viewerRole = 'customer',
+  onOpenCustomerBookings,
+  onOpenProviderJobs,
+}: HomeTriangleExperienceProps) {
   const [bottomTab, setBottomTab] = useState<'home' | 'orders' | 'account'>('home');
   const [view, setView] = useState<'home' | 'categories'>('home');
   const [query, setQuery] = useState('');
@@ -888,29 +898,40 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
               <ArrowLeft className="h-4 w-4" />
             </button>
             <span className="text-[15px] font-black text-[#1d4ed8]">Services</span>
-            <span className="ml-auto rounded-full bg-[#eff6ff] px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.12em] text-[#1d4ed8]">
-              BookOurSpace Services 2
-            </span>
+            <div className="ml-auto flex items-center gap-2">
+              {viewerRole === 'customer' && onOpenCustomerBookings && (
+                <button
+                  type="button"
+                  onClick={onOpenCustomerBookings}
+                  className="inline-flex min-h-9 items-center rounded-full bg-[#5b21b6] px-3 text-[11px] font-bold text-white"
+                >
+                  My service bookings
+                </button>
+              )}
+              {(viewerRole === 'provider' || viewerRole === 'admin') && onOpenProviderJobs && (
+                <button
+                  type="button"
+                  onClick={onOpenProviderJobs}
+                  className="inline-flex min-h-9 items-center rounded-full bg-[#047857] px-3 text-[11px] font-bold text-white"
+                >
+                  {viewerRole === 'admin' ? 'Service oversight' : 'My service jobs'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       ) : (
-        <div className="flex shrink-0 items-center justify-center border-b border-[#ebebeb] bg-[#f7f7f7] px-4 py-2">
-          <div className="inline-flex items-center rounded-full border border-[#dddddd] bg-white p-1 shadow-sm">
-            <button type="button" onClick={onSwitchToOld} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold text-[#717171] transition hover:bg-[#f7f7f7]">
-              BookOurSpace Services 1
-            </button>
+        <div className="border-b border-[#e5e7eb] bg-white">
+          <div className="mx-auto flex h-12 max-w-[640px] items-center gap-2 px-4">
             <button
               type="button"
-              onClick={() => {
-                setQuery('');
-                setSelectedSub(null);
-                setView('home');
-              }}
-              aria-current="true"
-              className="inline-flex h-9 items-center rounded-full bg-[#3b82f6] px-4 text-sm font-semibold text-white transition"
+              onClick={onClose}
+              aria-label="Back to all sections"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#e5e7eb] text-[#374151] transition hover:bg-[#eff6ff]"
             >
-              BookOurSpace Services 2
+              <ArrowLeft className="h-4 w-4" />
             </button>
+            <span className="text-[15px] font-black text-[#1d4ed8]">Services</span>
           </div>
         </div>
       )}
@@ -1054,7 +1075,21 @@ export function HomeTriangleExperience({ onClose, onSwitchToOld, inline = false 
             <div className="flex flex-col items-center justify-center gap-3 px-6 py-24 text-center">
               <ClipboardList className="h-12 w-12 text-[#94a3b8]" aria-hidden="true" />
               <h2 className="text-lg font-bold">My Orders</h2>
-              <p className="max-w-xs text-sm text-[#64748b]">You have no orders yet. Book a service to see it here — this sample preview does not create real orders.</p>
+              <p className="max-w-xs text-sm text-[#64748b]">
+                {viewerRole === 'provider' || viewerRole === 'admin'
+                  ? 'Open your assigned jobs to share live GPS and complete the booking.'
+                  : 'Open your bookings to track the assigned person live on the map.'}
+              </p>
+              {viewerRole === 'customer' && onOpenCustomerBookings && (
+                <button type="button" onClick={onOpenCustomerBookings} className="mt-2 inline-flex min-h-10 items-center rounded-full bg-[#5b21b6] px-5 text-sm font-bold text-white">
+                  My service bookings
+                </button>
+              )}
+              {(viewerRole === 'provider' || viewerRole === 'admin') && onOpenProviderJobs && (
+                <button type="button" onClick={onOpenProviderJobs} className="mt-2 inline-flex min-h-10 items-center rounded-full bg-[#047857] px-5 text-sm font-bold text-white">
+                  {viewerRole === 'admin' ? 'Service oversight' : 'My service jobs'}
+                </button>
+              )}
             </div>
           )}
 

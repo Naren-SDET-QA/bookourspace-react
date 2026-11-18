@@ -21,6 +21,15 @@ import {
   type ServiceRecurrenceFrequency,
 } from '../lib/serviceCatalog';
 import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
+import { deriveJourneyMetrics, isTerminalDeliveryStatus, type DeliveryStatus } from '../lib/deliveryTracking';
+import { overlayBookingGps, parseGpsToggleMap, type GpsPolicySnapshot } from '../lib/gpsPolicy';
+import {
+  canAccessTrackingLink,
+  publicTrackingUrl,
+  sanitizePublicTrackingSnapshot,
+  trackingLinkExpiryIso,
+} from '../lib/trackingShare';
+import { generateTrackingToken, hashTrackingToken } from './trackingToken';
 
 /**
  * Server-authoritative Services booking repository.
@@ -35,7 +44,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const PAYMENT_MODES = new Set(['pay_after_service', 'upi_qr', 'upi_intent', 'razorpay']);
 const LIVE_STATUSES = ['requested', 'accepted', 'in_progress'];
 
-export type ServiceBookingStatus = 'requested' | 'accepted' | 'in_progress' | 'completed' | 'cancelled' | 'rejected';
+export type ServiceBookingStatus = 'requested' | 'accepted' | 'assigned' | 'travelling' | 'arrived' | 'started' | 'in_progress' | 'completed' | 'cancelled' | 'rejected';
 export type ServicePaymentStatus = 'due' | 'declared' | 'settled' | 'refunded' | 'failed' | 'waived';
 export type ServiceBookingAction = 'accept' | 'reject' | 'start' | 'complete' | 'cancel' | 'reschedule';
 
@@ -327,6 +336,31 @@ export class ServiceBookingRepository {
     }
   }
 
+  private async privileged<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await operation(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve the original database failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private missingTrackingLinks(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('42P01')
+      || /service_tracking_links|issue_service_tracking_link|resolve_service_tracking_link|whatsapp_opt_in/i.test(message);
+  }
+
   private async requireActiveProfile(client: PoolClient, actor: ProviderListingActor): Promise<any> {
     if (!hasVerifiedSupabaseIdentity(actor)) {
       throw new ServiceBookingRepositoryError('VERIFIED_AUTH_ID_REQUIRED', 401);
@@ -416,12 +450,54 @@ export class ServiceBookingRepository {
     }
     const deliveryMap = new Map<string, any>();
     for (const row of deliveryResult.rows) deliveryMap.set(String(row.booking_id), row);
-    return rows.map((row) => toBooking({
+    const bookings = rows.map((row) => toBooking({
       ...row,
       field_values: fieldMap.get(String(row.id)) || {},
       documents: documentMap.get(String(row.id)) || [],
       delivery_profile: deliveryMap.get(String(row.id)) || null,
     }));
+    const policy = await this.loadGpsPolicy(client);
+    return bookings.map((booking) => {
+      const flags = overlayBookingGps(policy, booking);
+      return { ...booking, trackingEnabled: flags.trackingEnabled, liveMapEnabled: flags.liveMapEnabled };
+    });
+  }
+
+  private async loadGpsPolicy(client: PoolClient): Promise<GpsPolicySnapshot> {
+    try {
+      const [policyResult, catalogResult] = await Promise.all([
+        client.query(
+          `select global_enabled, coalesce(category_overrides, '{}'::jsonb) as category_overrides
+             from public.service_gps_policy where id = 'global' limit 1`,
+        ),
+        client.query(
+          `select category.id,
+                  jsonb_build_object(
+                    'gpsTracking', coalesce((version.config->'toggles'->>'gpsTracking')::boolean, true),
+                    'liveMap', coalesce((version.config->'toggles'->>'liveMap')::boolean, true)
+                  ) as toggles
+             from public.service_category_configs category
+             join public.service_category_config_versions version
+               on version.id = category.current_version_id
+            where version.status = 'published'`,
+        ),
+      ]);
+      const catalogToggles: GpsPolicySnapshot['catalogToggles'] = {};
+      for (const row of catalogResult.rows) {
+        const parsed = parseGpsToggleMap({ [String(row.id)]: row.toggles });
+        Object.assign(catalogToggles, parsed);
+      }
+      return {
+        globalEnabled: policyResult.rows[0]?.global_enabled !== false,
+        categoryOverrides: parseGpsToggleMap(policyResult.rows[0]?.category_overrides),
+        catalogToggles,
+      };
+    } catch (error) {
+      if ((error as { code?: string }).code === '42P01') {
+        return { globalEnabled: true, categoryOverrides: {}, catalogToggles: {} };
+      }
+      throw error;
+    }
   }
 
   private async hydrateBooking(client: PoolClient, row: any): Promise<ServiceBookingRecord> {
@@ -663,6 +739,34 @@ export class ServiceBookingRepository {
           ],
         );
         const bookingId = String(inserted.rows[0].id);
+        const destLat = input.destinationLatitude === null || input.destinationLatitude === undefined
+          ? null
+          : Number(input.destinationLatitude);
+        const destLng = input.destinationLongitude === null || input.destinationLongitude === undefined
+          ? null
+          : Number(input.destinationLongitude);
+        if (destLat != null && destLng != null
+            && Number.isFinite(destLat) && destLat >= -90 && destLat <= 90
+            && Number.isFinite(destLng) && destLng >= -180 && destLng <= 180) {
+          await client.query(
+            `update public.service_delivery_profiles
+                set destination_latitude = $2, destination_longitude = $3, updated_at = now()
+              where booking_id = $1`,
+            [bookingId, destLat, destLng],
+          );
+        }
+        if (input.whatsappOptIn === true) {
+          try {
+            await client.query(
+              `update public.service_delivery_profiles
+                  set whatsapp_opt_in = true, updated_at = now()
+                where booking_id = $1`,
+              [bookingId],
+            );
+          } catch (error) {
+            if (!this.missingTrackingLinks(error)) throw error;
+          }
+        }
         if (configSnapshot) {
           await client.query(
             `insert into public.service_booking_field_values (booking_id, data)
@@ -946,11 +1050,15 @@ export class ServiceBookingRepository {
     return this.transaction(actor, async (client) => {
       await this.requireActiveProfile(client, actor);
       const bookingResult = await client.query(
-        `select b.id, b.booking_ref, b.status, b.customer_id, b.provider_id,
+        `select b.id, b.booking_ref, b.status, b.customer_id, b.provider_id, b.worker_id,
+                b.category_id, b.category_config_id,
                 b.helper_assigned_at, b.tracking_started_at, b.tracking_stopped_at,
-                l.title as listing_title, category_version.config->>'name' as category_name
+                l.title as listing_title, category_version.config->>'name' as category_name,
+                coalesce(worker.full_name, provider.full_name) as assignee_name
            from public.service_bookings b
            join public.listings l on l.id = b.listing_id
+           left join public.profiles provider on provider.id = b.provider_id
+           left join public.service_workers worker on worker.id = b.worker_id
            left join public.service_category_configs category on category.id = b.category_config_id
            left join public.service_category_config_versions category_version on category_version.id = category.current_version_id
           where b.id = $1
@@ -959,15 +1067,23 @@ export class ServiceBookingRepository {
       );
       const booking = bookingResult.rows[0];
       if (!booking) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+      const actorId = actor.supabaseUserId;
+      const ownsBooking = actor.role === 'admin'
+        || booking.customer_id === actorId
+        || booking.provider_id === actorId;
+      if (!ownsBooking) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
       const [profileResult, locationResult, eventResult] = await Promise.all([
         client.query(
           `select service_kind, category_id, tracking_enabled, live_map_enabled, otp_enabled,
-                  delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule
+                  delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule,
+                  assignee_kind, assignee_id, assignee_label, vehicle_label, journey_status,
+                  distance_meters, eta_seconds, last_accuracy_meters,
+                  destination_latitude, destination_longitude
              from public.service_delivery_profiles where booking_id = $1 limit 1`,
           [bookingId],
         ),
         client.query(
-          `select latitude, longitude, accuracy_meters, captured_at
+          `select latitude, longitude, accuracy_meters, heading_degrees, speed_mps, captured_at
              from public.service_tracking_locations
             where booking_id = $1
             order by captured_at desc
@@ -985,11 +1101,35 @@ export class ServiceBookingRepository {
       ]);
       const profile = profileResult.rows[0] || {};
       const location = locationResult.rows[0] || null;
+      const status = String(booking.status) as DeliveryStatus;
+      const destination = profile.destination_latitude != null && profile.destination_longitude != null ? {
+        latitude: Number(profile.destination_latitude),
+        longitude: Number(profile.destination_longitude),
+      } : null;
+      const latestLocation = location ? {
+        latitude: Number(location.latitude),
+        longitude: Number(location.longitude),
+        accuracyMeters: location.accuracy_meters === null ? null : Number(location.accuracy_meters),
+        headingDegrees: location.heading_degrees === null || location.heading_degrees === undefined ? null : Number(location.heading_degrees),
+        speedMps: location.speed_mps === null || location.speed_mps === undefined ? null : Number(location.speed_mps),
+        capturedAt: iso(location.captured_at),
+      } : null;
+      const liveMetrics = deriveJourneyMetrics(latestLocation, destination, latestLocation?.speedMps);
+      const trackingStopped = isTerminalDeliveryStatus(status) || String(profile.journey_status || '') === 'stopped';
+      const policy = await this.loadGpsPolicy(client);
+      const flags = overlayBookingGps(policy, {
+        categoryId: String(booking.category_id || profile.category_id || ''),
+        categoryConfigId: booking.category_config_id ? String(booking.category_config_id) : null,
+        trackingEnabled: profile.tracking_enabled !== false,
+        liveMapEnabled: profile.live_map_enabled !== false,
+        status,
+      });
+      const hideCoordinates = !flags.trackingEnabled && actor.role !== 'admin';
       return {
         bookingId: String(booking.id),
         bookingRef: String(booking.booking_ref || ''),
         title: String(booking.listing_title || 'Delivery booking'),
-        status: String(booking.status),
+        status,
         customerId: String(booking.customer_id),
         providerId: String(booking.provider_id),
         helperAssignedAt: iso(booking.helper_assigned_at),
@@ -998,19 +1138,27 @@ export class ServiceBookingRepository {
         serviceKind: String(profile.service_kind || 'human_help'),
         categoryId: profile.category_id ? String(profile.category_id) : null,
         categoryName: booking.category_name ? String(booking.category_name) : null,
-        trackingEnabled: profile.tracking_enabled !== false,
-        liveMapEnabled: profile.live_map_enabled !== false,
+        trackingEnabled: flags.trackingEnabled,
+        liveMapEnabled: flags.liveMapEnabled,
         otpEnabled: profile.otp_enabled !== false,
         deliveryConfirmationEnabled: profile.delivery_confirmation_enabled === true,
         deliveryConfirmedAt: iso(profile.delivery_confirmed_at),
         prescriptionStatus: String(profile.prescription_status || 'not_required'),
         recurrenceRule: String(profile.recurrence_rule || 'none'),
-        latestLocation: location ? {
-          latitude: Number(location.latitude),
-          longitude: Number(location.longitude),
-          accuracyMeters: location.accuracy_meters === null ? null : Number(location.accuracy_meters),
-          capturedAt: iso(location.captured_at),
-        } : null,
+        assigneeKind: String(profile.assignee_kind || (booking.worker_id ? 'worker' : 'provider')),
+        assigneeId: profile.assignee_id ? String(profile.assignee_id) : (booking.worker_id ? String(booking.worker_id) : String(booking.provider_id)),
+        assigneeLabel: profile.assignee_label ? String(profile.assignee_label) : (booking.assignee_name ? String(booking.assignee_name) : null),
+        vehicleLabel: profile.vehicle_label ? String(profile.vehicle_label) : null,
+        journeyStatus: !flags.trackingEnabled || trackingStopped ? 'stopped' : liveMetrics.journeyStatus,
+        distanceMeters: hideCoordinates ? null : liveMetrics.distanceMeters,
+        etaSeconds: hideCoordinates ? null : liveMetrics.etaSeconds,
+        lastAccuracyMeters: hideCoordinates
+          ? null
+          : profile.last_accuracy_meters === null || profile.last_accuracy_meters === undefined
+            ? (latestLocation?.accuracyMeters ?? null)
+            : Number(profile.last_accuracy_meters),
+        destination: hideCoordinates ? null : destination,
+        latestLocation: hideCoordinates ? null : latestLocation,
         events: eventResult.rows.map((row) => ({
           id: Number(row.id),
           eventType: String(row.event_type || ''),
@@ -1028,6 +1176,7 @@ export class ServiceBookingRepository {
   ): Promise<Record<string, unknown>> {
     if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
     if (actor.role !== 'provider') throw new ServiceBookingRepositoryError('PROVIDER_ACTION_REQUIRED', 403);
+    if (input.consentGranted !== true) throw new ServiceBookingRepositoryError('LOCATION_CONSENT_REQUIRED', 400);
     const latitude = Number(input.latitude);
     const longitude = Number(input.longitude);
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
@@ -1040,6 +1189,18 @@ export class ServiceBookingRepository {
     if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 5000)) {
       throw new ServiceBookingRepositoryError('INVALID_LOCATION_ACCURACY', 400);
     }
+    const heading = input.headingDegrees === null || input.headingDegrees === undefined
+      ? null
+      : Number(input.headingDegrees);
+    if (heading !== null && (!Number.isFinite(heading) || heading < 0 || heading >= 360)) {
+      throw new ServiceBookingRepositoryError('INVALID_LOCATION_HEADING', 400);
+    }
+    const speed = input.speedMps === null || input.speedMps === undefined
+      ? null
+      : Number(input.speedMps);
+    if (speed !== null && (!Number.isFinite(speed) || speed < 0 || speed > 200)) {
+      throw new ServiceBookingRepositoryError('INVALID_LOCATION_SPEED', 400);
+    }
     const capturedAt = new Date(String(input.capturedAt || ''));
     if (Number.isNaN(capturedAt.getTime())) {
       throw new ServiceBookingRepositoryError('INVALID_LOCATION_TIME', 400);
@@ -1049,10 +1210,10 @@ export class ServiceBookingRepository {
       try {
         const result = await client.query(
           `insert into public.service_tracking_locations
-            (booking_id, actor_id, actor_role, latitude, longitude, accuracy_meters, captured_at, source)
-           values ($1, auth.uid(), 'helper', $2, $3, $4, $5, 'device_gps')
+            (booking_id, actor_id, actor_role, latitude, longitude, accuracy_meters, heading_degrees, speed_mps, captured_at, source)
+           values ($1, auth.uid(), 'helper', $2, $3, $4, $5, $6, $7, 'device_gps')
            returning id, latitude, longitude, accuracy_meters, captured_at`,
-          [bookingId, latitude, longitude, accuracy, capturedAt.toISOString()],
+          [bookingId, latitude, longitude, accuracy, heading, speed, capturedAt.toISOString()],
         );
         return {
           id: Number(result.rows[0].id),
@@ -1068,6 +1229,82 @@ export class ServiceBookingRepository {
         }
         if (message.includes('row-level security') || message.includes('42501')) {
           throw new ServiceBookingRepositoryError('TRACKING_NOT_ACTIVE', 409);
+        }
+        throw error;
+      }
+    });
+  }
+
+  async startTrackingSession(
+    actor: ProviderListingActor,
+    bookingId: string,
+    input: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'provider' && actor.role !== 'admin') {
+      throw new ServiceBookingRepositoryError('PROVIDER_ACTION_REQUIRED', 403);
+    }
+    const destLat = input.destinationLatitude === null || input.destinationLatitude === undefined
+      ? null
+      : Number(input.destinationLatitude);
+    const destLng = input.destinationLongitude === null || input.destinationLongitude === undefined
+      ? null
+      : Number(input.destinationLongitude);
+    if ((destLat == null) !== (destLng == null)
+        || (destLat != null && (!Number.isFinite(destLat) || destLat < -90 || destLat > 90))
+        || (destLng != null && (!Number.isFinite(destLng) || destLng < -180 || destLng > 180))) {
+      throw new ServiceBookingRepositoryError('INVALID_LOCATION_COORDINATES', 400);
+    }
+    const vehicleLabel = typeof input.vehicleLabel === 'string' ? input.vehicleLabel.trim().slice(0, 80) : null;
+    const assigneeLabel = typeof input.assigneeLabel === 'string' ? input.assigneeLabel.trim().slice(0, 120) : null;
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      try {
+        const { rows } = await client.query(
+          'select public.start_service_tracking($1,$2,$3,$4,$5) as payload',
+          [bookingId, destLat, destLng, vehicleLabel, assigneeLabel],
+        );
+        return rows[0]?.payload || { ok: true, bookingId };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const codes = ['TRACKING_NOT_ACTIVE', 'FORBIDDEN', 'BOOKING_NOT_FOUND', 'INVALID_LOCATION_COORDINATES', 'UNAUTHORIZED'];
+        for (const code of codes) {
+          if (message.includes(code)) {
+            throw new ServiceBookingRepositoryError(
+              code,
+              code === 'BOOKING_NOT_FOUND' ? 404 : code === 'FORBIDDEN' || code === 'UNAUTHORIZED' ? 403 : 409,
+            );
+          }
+        }
+        throw error;
+      }
+    });
+  }
+
+  async stopTrackingSession(
+    actor: ProviderListingActor,
+    bookingId: string,
+    reason?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'provider' && actor.role !== 'admin') {
+      throw new ServiceBookingRepositoryError('PROVIDER_ACTION_REQUIRED', 403);
+    }
+    return this.transaction(actor, async (client) => {
+      await this.requireActiveProfile(client, actor);
+      try {
+        const { rows } = await client.query(
+          'select public.stop_service_tracking($1,$2) as payload',
+          [bookingId, String(reason || 'provider_stopped').slice(0, 120)],
+        );
+        return rows[0]?.payload || { ok: true, bookingId };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const codes = ['FORBIDDEN', 'BOOKING_NOT_FOUND', 'UNAUTHORIZED'];
+        for (const code of codes) {
+          if (message.includes(code)) {
+            throw new ServiceBookingRepositoryError(code, code === 'BOOKING_NOT_FOUND' ? 404 : 403);
+          }
         }
         throw error;
       }
@@ -1305,5 +1542,324 @@ export class ServiceBookingRepository {
         outstandingAmount: Number(row.outstanding_amount || 0),
       };
     });
+  }
+
+  async ensureTrackingShareLinkOnAccept(
+    bookingId: string,
+    origin: string,
+  ): Promise<{ url: string; expiresAt: string; bookingRef: string; whatsappOptIn: boolean } | null> {
+    if (!UUID_PATTERN.test(bookingId)) return null;
+    const token = generateTrackingToken();
+    const tokenHash = hashTrackingToken(token);
+    const expiresAt = trackingLinkExpiryIso();
+    try {
+      return await this.privileged(async (client) => {
+        const { rows } = await client.query(
+          `select b.booking_ref, b.status, b.customer_id,
+                  coalesce(p.whatsapp_opt_in, false) as whatsapp_opt_in
+             from public.service_bookings b
+             left join public.service_delivery_profiles p on p.booking_id = b.id
+            where b.id = $1
+            limit 1`,
+          [bookingId],
+        );
+        const row = rows[0];
+        if (!row) return null;
+        if (!canAccessTrackingLink({ status: String(row.status) as DeliveryStatus })) return null;
+        if (row.whatsapp_opt_in !== true) return null;
+        await client.query(
+          `insert into public.service_tracking_links
+              (booking_id, token_hash, created_by, expires_at, whatsapp_opt_in, revoked_at)
+           values ($1, $2, $3, $4::timestamptz, true, null)
+           on conflict (booking_id) do update
+             set token_hash = excluded.token_hash,
+                 expires_at = excluded.expires_at,
+                 revoked_at = null,
+                 whatsapp_opt_in = true`,
+          [bookingId, tokenHash, row.customer_id, expiresAt],
+        );
+        return {
+          url: publicTrackingUrl(origin, token),
+          expiresAt,
+          bookingRef: String(row.booking_ref || ''),
+          whatsappOptIn: true,
+        };
+      });
+    } catch (error) {
+      if (this.missingTrackingLinks(error)) return null;
+      throw error;
+    }
+  }
+
+  async issueTrackingShareLink(
+    actor: ProviderListingActor,
+    bookingId: string,
+    input: { whatsappOptIn?: boolean; origin: string },
+  ): Promise<{ url: string; expiresAt: string; whatsappOptIn: boolean; bookingRef: string }> {
+    if (!UUID_PATTERN.test(bookingId)) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    if (actor.role !== 'customer' && actor.role !== 'admin') {
+      throw new ServiceBookingRepositoryError('CUSTOMER_SESSION_REQUIRED', 403);
+    }
+    const token = generateTrackingToken();
+    const tokenHash = hashTrackingToken(token);
+    const expiresAt = trackingLinkExpiryIso();
+    try {
+      const issued = await this.transaction(actor, async (client) => {
+        await this.requireActiveProfile(client, actor);
+        await client.query(
+          'select public.issue_service_tracking_link($1,$2,$3::timestamptz,$4) as payload',
+          [bookingId, tokenHash, expiresAt, input.whatsappOptIn === true],
+        );
+        const booking = await client.query(
+          'select booking_ref from public.service_bookings where id = $1',
+          [bookingId],
+        );
+        return { bookingRef: String(booking.rows[0]?.booking_ref || '') };
+      });
+      return {
+        url: publicTrackingUrl(input.origin, token),
+        expiresAt,
+        whatsappOptIn: input.whatsappOptIn === true,
+        bookingRef: issued.bookingRef,
+      };
+    } catch (error) {
+      if (this.missingTrackingLinks(error)) throw new ServiceBookingRepositoryError('TRACKING_LINKS_UNAVAILABLE', 503);
+      const message = error instanceof Error ? error.message : String(error);
+      for (const code of ['TRACKING_LINK_CLOSED', 'FORBIDDEN', 'BOOKING_NOT_FOUND', 'TRACKING_TOKEN_INVALID', 'UNAUTHORIZED']) {
+        if (message.includes(code)) {
+          throw new ServiceBookingRepositoryError(
+            code,
+            code === 'BOOKING_NOT_FOUND' ? 404 : code === 'FORBIDDEN' || code === 'UNAUTHORIZED' ? 403 : 409,
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  async publicTrackingSnapshotByToken(token: string): Promise<Record<string, unknown>> {
+    const { isTrackingTokenFormat } = await import('../lib/trackingShare');
+    if (!isTrackingTokenFormat(token)) throw new ServiceBookingRepositoryError('TRACKING_TOKEN_INVALID', 404);
+    const tokenHash = hashTrackingToken(token);
+    try {
+      return await this.privileged(async (client) => {
+        const resolved = await client.query(
+          'select * from public.resolve_service_tracking_link($1)',
+          [tokenHash],
+        );
+        const row = resolved.rows[0];
+        if (!row) throw new ServiceBookingRepositoryError('TRACKING_LINK_NOT_FOUND', 404);
+        if (!canAccessTrackingLink({
+          status: String(row.status) as DeliveryStatus,
+          revokedAt: row.revoked_at ? iso(row.revoked_at) : null,
+          expiresAt: row.expires_at ? iso(row.expires_at) : null,
+        })) {
+          throw new ServiceBookingRepositoryError('TRACKING_LINK_CLOSED', 410);
+        }
+        await client.query('select public.mark_tracking_link_used($1)', [tokenHash]);
+        const snapshot = await this.privilegedSnapshot(client, String(row.booking_id));
+        return sanitizePublicTrackingSnapshot(snapshot);
+      });
+    } catch (error) {
+      if (error instanceof ServiceBookingRepositoryError) throw error;
+      if (this.missingTrackingLinks(error)) throw new ServiceBookingRepositoryError('TRACKING_LINKS_UNAVAILABLE', 503);
+      throw error;
+    }
+  }
+
+  private async privilegedSnapshot(client: PoolClient, bookingId: string): Promise<Record<string, unknown>> {
+    const bookingResult = await client.query(
+      `select b.id, b.booking_ref, b.status, b.customer_id, b.provider_id, b.worker_id,
+              b.category_id, b.category_config_id,
+              b.helper_assigned_at, b.tracking_started_at, b.tracking_stopped_at,
+              l.title as listing_title, category_version.config->>'name' as category_name,
+              coalesce(worker.full_name, provider.full_name) as assignee_name
+         from public.service_bookings b
+         join public.listings l on l.id = b.listing_id
+         left join public.profiles provider on provider.id = b.provider_id
+         left join public.service_workers worker on worker.id = b.worker_id
+         left join public.service_category_configs category on category.id = b.category_config_id
+         left join public.service_category_config_versions category_version on category_version.id = category.current_version_id
+        where b.id = $1
+        limit 1`,
+      [bookingId],
+    );
+    const booking = bookingResult.rows[0];
+    if (!booking) throw new ServiceBookingRepositoryError('BOOKING_NOT_FOUND', 404);
+    const [profileResult, locationResult] = await Promise.all([
+      client.query(
+        `select service_kind, category_id, tracking_enabled, live_map_enabled, otp_enabled,
+                delivery_confirmation_enabled, delivery_confirmed_at, prescription_status, recurrence_rule,
+                assignee_kind, assignee_id, assignee_label, vehicle_label, journey_status,
+                distance_meters, eta_seconds, last_accuracy_meters,
+                destination_latitude, destination_longitude
+           from public.service_delivery_profiles where booking_id = $1 limit 1`,
+        [bookingId],
+      ),
+      client.query(
+        `select latitude, longitude, accuracy_meters, heading_degrees, speed_mps, captured_at
+           from public.service_tracking_locations
+          where booking_id = $1
+          order by captured_at desc
+          limit 1`,
+        [bookingId],
+      ),
+    ]);
+    const profile = profileResult.rows[0] || {};
+    const location = locationResult.rows[0] || null;
+    const status = String(booking.status) as DeliveryStatus;
+    const destination = profile.destination_latitude != null && profile.destination_longitude != null ? {
+      latitude: Number(profile.destination_latitude),
+      longitude: Number(profile.destination_longitude),
+    } : null;
+    const latestLocation = location ? {
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      accuracyMeters: location.accuracy_meters === null ? null : Number(location.accuracy_meters),
+      headingDegrees: location.heading_degrees == null ? null : Number(location.heading_degrees),
+      speedMps: location.speed_mps == null ? null : Number(location.speed_mps),
+      capturedAt: iso(location.captured_at),
+    } : null;
+    const liveMetrics = deriveJourneyMetrics(latestLocation, destination, latestLocation?.speedMps);
+    const policy = await this.loadGpsPolicy(client);
+    const flags = overlayBookingGps(policy, {
+      categoryId: String(booking.category_id || profile.category_id || ''),
+      categoryConfigId: booking.category_config_id ? String(booking.category_config_id) : null,
+      trackingEnabled: profile.tracking_enabled !== false,
+      liveMapEnabled: profile.live_map_enabled !== false,
+      status,
+    });
+    const hideCoordinates = !flags.trackingEnabled;
+    return {
+      bookingRef: String(booking.booking_ref || ''),
+      title: String(booking.listing_title || 'Delivery booking'),
+      status,
+      helperAssignedAt: iso(booking.helper_assigned_at),
+      trackingStartedAt: iso(booking.tracking_started_at),
+      trackingStoppedAt: iso(booking.tracking_stopped_at),
+      serviceKind: String(profile.service_kind || 'human_help'),
+      categoryName: booking.category_name ? String(booking.category_name) : null,
+      trackingEnabled: flags.trackingEnabled,
+      liveMapEnabled: flags.liveMapEnabled,
+      otpEnabled: false,
+      deliveryConfirmationEnabled: profile.delivery_confirmation_enabled === true,
+      deliveryConfirmedAt: iso(profile.delivery_confirmed_at),
+      prescriptionStatus: String(profile.prescription_status || 'not_required'),
+      recurrenceRule: String(profile.recurrence_rule || 'none'),
+      assigneeKind: String(profile.assignee_kind || (booking.worker_id ? 'worker' : 'provider')),
+      assigneeLabel: null,
+      vehicleLabel: profile.vehicle_label ? String(profile.vehicle_label) : null,
+      journeyStatus: !flags.trackingEnabled || isTerminalDeliveryStatus(status) ? 'stopped' : liveMetrics.journeyStatus,
+      distanceMeters: hideCoordinates ? null : liveMetrics.distanceMeters,
+      etaSeconds: hideCoordinates ? null : liveMetrics.etaSeconds,
+      lastAccuracyMeters: hideCoordinates ? null : (latestLocation?.accuracyMeters ?? null),
+      destination: hideCoordinates ? null : destination,
+      latestLocation: hideCoordinates ? null : latestLocation,
+    };
+  }
+
+  async gpsCapacitySnapshot(): Promise<Record<string, unknown>> {
+    try {
+      return await this.privileged(async (client) => {
+        const [sessions, hour, day, policy] = await Promise.all([
+          client.query('select public.gps_active_session_count() as count').catch(() => ({ rows: [{ count: 0 }] })),
+          client.query(`select count(*)::integer as count from public.service_tracking_locations where received_at > now() - interval '1 hour'`),
+          client.query(`select count(*)::integer as count from public.service_tracking_locations where received_at > now() - interval '1 day'`),
+          client.query(`select max_active_sessions, min_update_interval_seconds, global_enabled from public.service_gps_policy where id = 'global'`).catch(() => ({ rows: [{}] })),
+        ]);
+        return {
+          activeSessions: Number(sessions.rows[0]?.count || 0),
+          updatesLastHour: Number(hour.rows[0]?.count || 0),
+          updatesLastDay: Number(day.rows[0]?.count || 0),
+          maxActiveSessions: policy.rows[0]?.max_active_sessions ?? null,
+          minUpdateIntervalSeconds: Number(policy.rows[0]?.min_update_interval_seconds || 10),
+          globalEnabled: policy.rows[0]?.global_enabled !== false,
+        };
+      });
+    } catch (error) {
+      if (this.missingTrackingLinks(error)) throw new ServiceBookingRepositoryError('GPS_CAPACITY_UNAVAILABLE', 503);
+      throw error;
+    }
+  }
+
+  async trackingWhatsAppDispatchState(bookingId: string): Promise<{
+    bookingRef: string;
+    customerPhone: string;
+    whatsappOptIn: boolean;
+    confirmationSent: boolean;
+    onTheWaySent: boolean;
+    locationCount: number;
+    status: DeliveryStatus;
+    lastTrackingUrl: string | null;
+  } | null> {
+    if (!UUID_PATTERN.test(bookingId)) return null;
+    try {
+      return await this.privileged(async (client) => {
+        const { rows } = await client.query(
+          `select b.booking_ref, b.customer_phone, b.status,
+                  coalesce(l.whatsapp_opt_in, p.whatsapp_opt_in, false) as whatsapp_opt_in,
+                  l.confirmation_sent_at, l.on_the_way_sent_at,
+                  (
+                    select n.tracking_url
+                      from public.service_tracking_notifications n
+                     where n.booking_id = b.id and n.tracking_url is not null
+                     order by n.created_at desc
+                     limit 1
+                  ) as last_tracking_url,
+                  (select count(*)::integer from public.service_tracking_locations loc where loc.booking_id = b.id) as location_count
+             from public.service_bookings b
+             left join public.service_tracking_links l on l.booking_id = b.id
+             left join public.service_delivery_profiles p on p.booking_id = b.id
+            where b.id = $1
+            limit 1`,
+          [bookingId],
+        );
+        const row = rows[0];
+        if (!row) return null;
+        return {
+          bookingRef: String(row.booking_ref || ''),
+          customerPhone: String(row.customer_phone || ''),
+          whatsappOptIn: row.whatsapp_opt_in === true,
+          confirmationSent: Boolean(row.confirmation_sent_at),
+          onTheWaySent: Boolean(row.on_the_way_sent_at),
+          locationCount: Number(row.location_count || 0),
+          status: String(row.status) as DeliveryStatus,
+          lastTrackingUrl: row.last_tracking_url ? String(row.last_tracking_url) : null,
+        };
+      });
+    } catch (error) {
+      if (this.missingTrackingLinks(error)) return null;
+      throw error;
+    }
+  }
+
+  async markWhatsAppSent(
+    bookingId: string,
+    event: 'booking_confirmed' | 'provider_on_the_way',
+    result: { status: 'skipped' | 'sent' | 'failed'; error?: string; providerMessageId?: string; trackingUrl?: string },
+  ): Promise<void> {
+    if (!UUID_PATTERN.test(bookingId)) return;
+    try {
+      await this.privileged(async (client) => {
+        if (result.status === 'sent') {
+          await client.query('select public.mark_tracking_whatsapp_sent($1,$2)', [bookingId, event]);
+        }
+        await client.query(
+          `insert into public.service_tracking_notifications
+            (booking_id, event_type, channel, status, error_code, provider_message_id, tracking_url)
+           values ($1,$2,'whatsapp',$3,$4,$5,$6)
+           on conflict (booking_id, event_type, channel) do update
+             set status = excluded.status,
+                 error_code = excluded.error_code,
+                 provider_message_id = excluded.provider_message_id,
+                 tracking_url = coalesce(excluded.tracking_url, public.service_tracking_notifications.tracking_url),
+                 created_at = now()`,
+          [bookingId, event, result.status, result.error || null, result.providerMessageId || null, result.trackingUrl || null],
+        );
+      });
+    } catch (error) {
+      if (this.missingTrackingLinks(error)) return;
+      throw error;
+    }
   }
 }
