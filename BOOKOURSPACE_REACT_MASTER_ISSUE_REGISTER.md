@@ -2163,7 +2163,7 @@ correct and unchanged.
 (92 s, isolated PostgreSQL, baseline + 127 migrations). `npm run build` exit 0 (development bundle still
 contains the development target, as intended). `node --test tests/production-bundle-guard.test.mjs`
 **13/13** pass. Chromium: 61 passed / 1 failed / 15 skipped / 3 not run before the locator fix; the failing
-classes journey is the subject of defect 3 (see §11.28 for the post-fix result).
+classes journey is the subject of defect 3 and now passes 4/4 (§11.28).
 
 **Remaining blockers are not application logic** — production Supabase project and hosted migration apply
 (B5 signature, B6 PITR/restore), hosted OAuth, deployment/secrets/monitoring, payments intentionally
@@ -2188,14 +2188,27 @@ header's `Switch to Dark Mode` button (strict-mode violation at
 `aria-label={label}` on the select; the page snapshot after the fix reports `combobox "Mode"`, and the spec
 uses `{ exact: true }`.
 
-**Still failing: `classes-journey.spec.ts:292`** (trainer creates a batch → admin approves → student enrols →
-duplicate refused → cancellation persists). After the name fix the locator resolves but `selectOption` never
-becomes actionable and the test hits its 180 s timeout; one instrumented run also logged
-`route.fetch: connect ECONNREFUSED 127.0.0.1:<port>` for the harness API and `[classes-harness] API process
-exited` during cleanup. The control is present and correctly named in the failure snapshot, so this is not the
-earlier naming defect. It is recorded as an **unresolved CODE/harness issue**, not a pass: the journey is
-unverified in this pass. The other classes tests (waitlist ordering, forged-fee/last-seat refusals, multi
-viewport enrolment) did not run because Playwright stops the file after the first failure.
+**Diagnosis of the earlier 180 s timeouts (three hypotheses, tested).** Two throwaway instrumented runs
+measured the journey's exact failure point; both were deleted afterwards.
+1. *Is the select disabled?* **No.** `count = 1`, `isEnabled = true`, `isVisible = true`, `isEditable = true`,
+   `disabled = false`, box 74×15 at (570,328) unchanged across 2 s of sampling, and `document.elementFromPoint`
+   returns the select itself (no overlay, no open dialog, body `overflow: clip visible`).
+2. *Does the page fail to settle?* **No.** Main-thread `evaluate` round trip **4 ms**, DOM mutations steady at
+   **13/s** (ordinary React updates, not a render loop), and `selectOption(..., { trial: true })` passed; the
+   real selection then completed in **23 ms** on a clean page.
+3. *Is the harness API dying?* **Not during the filter step.** The instrumented runs logged no failed API
+   request and no `ECONNREFUSED`; the `[classes-harness] API process exited` lines are the harness's own
+   `restartApi()` (spec line 468) and `stop()` cleanup. The single `ECONNREFUSED` seen earlier coincided with
+   Vite re-optimizing dependencies after `vite.config.ts` was edited mid-session
+   (`[vite] Re-optimizing dependencies because vite config has changed`), i.e. a document reload while the run
+   was in flight.
+
+**Result: the journey passes on a stable tree.** The unmodified committed spec at `classes-journey.spec.ts:292`
+passed (**1 passed, 11.9 s**), and the whole file then passed **4/4 in 51 s**
+(`trainer→admin approval→enrolment→duplicate refusal→cancellation`, waitlist ordering, forged-fee/last-seat
+refusals, and the mobile/tablet/desktop enrolment journey). The earlier timeouts were an artifact of editing
+`vite.config.ts` and component source while that run was live — not a disabled control, not a dead API, not an
+unstable page. The only real defect was the accessible-name ambiguity recorded above, which is fixed.
 
 **Verified this pass:** `npx tsc --noEmit` exit 0; `npm test` 862/862 with 0 failed and 0 skipped; `npm run
 build` exit 0; `node supabase/tests/migration_manifest.mjs` PASS (baseline + 127 migrations); guard suite
@@ -2203,6 +2216,7 @@ build` exit 0; `node supabase/tests/migration_manifest.mjs` PASS (baseline + 127
 and signed-in auth entry points, role/session boundaries, API authorization, admin user authorization, movie
 showtimes, venue booking, service booking and the coupon journey.
 
-**Release impact.** One customer-module browser journey is unverified, so the release verdict stays
-conservative: **READY AFTER EXPLICIT OWNER ACTIONS**, with this journey listed as an open pre-release check to
-re-run on the deployment target rather than evidence of a passing classes flow.
+**Release impact.** The classes module is verified in Chromium. The verdict is unchanged —
+**READY AFTER EXPLICIT OWNER ACTIONS** — because the remaining gates are production environment, hosted
+database, OAuth and recovery evidence, not application behaviour. The journey should still be re-run on the
+deployment target as part of the release smoke tests.

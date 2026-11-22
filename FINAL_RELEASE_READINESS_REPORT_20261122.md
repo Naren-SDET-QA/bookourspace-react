@@ -187,7 +187,7 @@ release-owner security acceptance are release prerequisites that are still open.
 
 ## Production-readiness execution pass — 2026-11-22 (third pass)
 
-**Three defects reproduced and fixed; one browser journey remains unverified.**
+**Three defects reproduced and fixed; the classes browser journey is verified.**
 
 1. **CONFIGURATION — a production build inlined the development Supabase project.** `npm run build` shipped
    `obkfgxjzlscungkhbyvq` in four assets and nothing failed. Added `scripts/verify-production-bundle.mjs`
@@ -210,13 +210,14 @@ release-owner security acceptance are release prerequisites that are still open.
 **Verification.** `npx tsc --noEmit` 0 · `npm test` **862/862, 0 failed, 0 skipped** · `npm run build` 0 ·
 `node --test tests/production-bundle-guard.test.mjs` **13/13** · manifest PASS (baseline + 127) ·
 `git diff --check` 0. Chromium (10 specs, 1 worker): **61 passed, 1 failed, 15 fixture-gated skips, 3 not
-run** — `classes-journey.spec.ts:292` still times out at the filter step after the naming fix (the control is
-present and correctly named in the failure snapshot; one run also logged an API `ECONNREFUSED`). That journey is
-**unverified**, and the three remaining classes tests did not run.
+run** before the classes fix. The failure was then diagnosed rather than assumed: the `Mode` select is enabled,
+visible, editable, uncovered and stable (74×15 box unchanged over 2 s), the main thread answers in 4 ms, and no
+API request fails at that step. The earlier timeouts came from Vite re-optimizing dependencies while
+`vite.config.ts` was being edited mid-run. On the stable tree the unmodified journey passes (**11.9 s**) and
+the whole classes file passes **4/4 in 51 s**.
 
 **Remaining blockers — none are application logic:** production Supabase project and the approved migration
 apply (B5 owner signature, B6 PITR/restore evidence), hosted Google/OTP sign-in, deployment secrets and
-monitoring, payments intentionally disabled, release-owner Gitleaks acceptance, and the unverified classes
-browser journey.
+monitoring, payments intentionally disabled and release-owner Gitleaks acceptance.
 
 **Verdict: READY AFTER EXPLICIT OWNER ACTIONS.** Nothing was deployed, migrated, committed or pushed.

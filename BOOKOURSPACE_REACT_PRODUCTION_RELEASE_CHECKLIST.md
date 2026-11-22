@@ -3,9 +3,9 @@
 **Updated:** 2026-11-22 · **Branch:** `integration/recover-20261115` · **HEAD:** `3113eda`
 **Verdict:** **READY AFTER EXPLICIT OWNER ACTIONS** — the application code is release-capable for the
 verified journeys; the production environment, hosted database state, OAuth and recovery evidence are owner
-gates that cannot be closed from this repository alone. One browser journey
-(`e2e/classes-journey.spec.ts:292`) is unverified in the current pass and must be re-run on the deployment
-target before launch. This document supersedes the 2026-11-21 checklist;
+gates that cannot be closed from this repository alone. The classes browser journey
+(`e2e/classes-journey.spec.ts`) passes 4/4 locally and should be re-run on the deployment target as part of
+the release smoke tests. This document supersedes the 2026-11-21 checklist;
 the history lives in `BOOKOURSPACE_REACT_MASTER_ISSUE_REGISTER.md`.
 
 One Git repository serves development and production. There is no second repository and no second
