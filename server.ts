@@ -86,6 +86,7 @@ import { sendPgQaSampleEmails } from './src/server/pgQaEmailSamples';
 import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
 import { VITE_ALLOWED_HOSTS } from './src/server/viteAllowedHosts';
 import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
+import { configureTrustProxy } from './src/server/trustProxy';
 import { apiNoStoreByDefault } from './src/server/apiCachePrivacy';
 import { logSafeError } from './src/server/safeLogging';
 import crypto from 'crypto';
@@ -491,6 +492,13 @@ async function startServer() {
 
   const app = express();
   app.disable('x-powered-by');
+  // Resolve client addresses from exactly the proxy hops that really exist in
+  // front of this process (one on Cloud Run). Trusting the forwarded chain
+  // blindly would let a caller choose its own rate-limit bucket; ignoring it
+  // would collapse every caller into the proxy's address instead. A production
+  // process that is not on Cloud Run refuses to start without an explicit
+  // BOS_TRUST_PROXY_HOPS value.
+  configureTrustProxy(app);
   app.use(apiNoStoreByDefault);
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

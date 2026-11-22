@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { Pool } from 'pg';
+import { normalizeClientAddress } from './trustProxy';
 
 export interface DistributedRateLimitOptions {
   pool: Pick<Pool, 'query'> | null;
@@ -10,13 +11,17 @@ export interface DistributedRateLimitOptions {
 
 type RateLimitPolicy = { limit: number; windowSeconds: number };
 
-function policyFor(method: string, pathname: string): RateLimitPolicy {
-  if (/^\/api\/auth\//.test(pathname)) return { limit: 12, windowSeconds: 60 };
-  if (/^\/api\/(?:payments|refunds|bookings|stays\/(?:holds|checkout)|seats\/hold)/.test(pathname)) {
+// `route` is the aggregated bucket path (`/api/auth`, `/api/bookings`, …), not
+// the full request path, so these patterns must match the prefix exactly. A
+// pattern requiring a trailing slash would silently fall through to the generic
+// budget and the stricter limit would never be enforced.
+function policyFor(route: string): RateLimitPolicy {
+  if (route === '/api/auth') return { limit: 12, windowSeconds: 60 };
+  if (/^\/api\/(?:payments|refunds|bookings|seats|stays)$/.test(route)) {
     return { limit: 30, windowSeconds: 60 };
   }
-  if (/^\/api\/(?:admin|super-admin)\//.test(pathname)) return { limit: 30, windowSeconds: 60 };
-  if (/^\/api\/builder\//.test(pathname)) return { limit: 30, windowSeconds: 60 };
+  if (/^\/api\/(?:admin|super-admin)$/.test(route)) return { limit: 30, windowSeconds: 60 };
+  if (route === '/api/builder') return { limit: 30, windowSeconds: 60 };
   return { limit: 120, windowSeconds: 60 };
 }
 
@@ -37,11 +42,19 @@ export function createDistributedApiRateLimitMiddleware(options: DistributedRate
     }
 
     const route = bucketPath(req.path);
-    const policy = policyFor(req.method.toUpperCase(), route);
-    // req.ip uses the socket address unless Express trust proxy is explicitly
-    // configured. Deployments behind a proxy must set trust proxy to exact
-    // trusted hops; this code does not trust arbitrary X-Forwarded-For values.
-    const address = String(req.ip || req.socket.remoteAddress || 'unknown');
+    const policy = policyFor(route);
+    // req.ip is resolved by Express from the exact trusted-proxy hop count set
+    // in configureTrustProxy(): on Cloud Run that is the one address appended
+    // by the Google front end, and any client-supplied X-Forwarded-For prefix is
+    // ignored. Without a trusted proxy the socket address is used, so forwarded
+    // headers can neither create extra buckets nor escape the current one.
+    const address = normalizeClientAddress(req.ip || req.socket?.remoteAddress);
+    if (!address) {
+      // A request whose client address cannot be resolved must not share an
+      // 'unknown' bucket with every other caller; fail closed instead.
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({ ok: false, error: 'RATE_LIMIT_SERVICE_UNAVAILABLE' });
+    }
     const bucketHash = createHmac('sha256', options.hmacSecret)
       .update(`${address}\0${req.method.toUpperCase()}\0${route}`)
       .digest('hex');

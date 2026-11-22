@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 122,
+  "migrationCount": 125,
   "migrations": [
     {
       "order": 2,
@@ -990,12 +990,36 @@
       "file": "supabase/migrations/20261118200000_service_tracking_share_links.sql",
       "bytes": 9590,
       "sha256": "0d16336b6d0f623ee5e7ea1dfecb1f664c7187714f04cbde8e3d2d18b322daec"
+    },
+    {
+      "order": 124,
+      "version": "20261119100000",
+      "name": "user_access_control_engine",
+      "file": "supabase/migrations/20261119100000_user_access_control_engine.sql",
+      "bytes": 10118,
+      "sha256": "5e64fec141da205d24267c565f5642094e29efddb7896295346e6e56a884103b"
+    },
+    {
+      "order": 125,
+      "version": "20261120100000",
+      "name": "builder_page_unpublish",
+      "file": "supabase/migrations/20261120100000_builder_page_unpublish.sql",
+      "bytes": 5053,
+      "sha256": "c5f04f1697133770e74213238a434a127996a690baaee17fe5c6b11821aa3d78"
+    },
+    {
+      "order": 126,
+      "version": "20261122100000",
+      "name": "service_assignment_trigger_privileges",
+      "file": "supabase/migrations/20261122100000_service_assignment_trigger_privileges.sql",
+      "bytes": 904,
+      "sha256": "20f600c7e757f2c7e29433c2aad0a50efe892ed70960b6497890f6f09208b7d4"
     }
   ],
   "review": {
-    "at": "2026-11-14T08:30:02.542Z",
-    "note": "Account deletion no longer fails when the user holds customer module grants: the customer module audit trigger no longer writes history for a profile that the same cascade already deleted.",
-    "migrationCount": 118,
+    "at": "2026-11-22T04:16:46.595Z",
+    "note": "Re-pin after adding 20261122100000_service_assignment_trigger_privileges.sql (revokes the default PUBLIC EXECUTE grant on stamp_service_assignment; no existing migration bytes changed).",
+    "migrationCount": 125,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }

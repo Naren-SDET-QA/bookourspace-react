@@ -95,6 +95,12 @@ spec:
             # Exact Capacitor origins; never a wildcard.
             - name: BOS_NATIVE_APP_ORIGINS
               value: "capacitor://localhost,https://localhost"
+            # Exactly one proxy hop: the Google front end that terminates TLS
+            # for Cloud Run and appends the caller address to X-Forwarded-For.
+            # Pinned explicitly so client-IP rate-limit buckets stay per-client
+            # and a client-supplied forwarded prefix cannot move the bucket.
+            - name: BOS_TRUST_PROXY_HOPS
+              value: "1"
             # Production must never accept demo bookings, demo auth or sandbox money.
             - name: BOS_STAY_INCLUDE_DEMO
               value: "0"

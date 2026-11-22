@@ -54,6 +54,7 @@ check(env.get("VITE_ENABLE_DEMO_DATA", {}).get("value") == "false", "demo data d
 for flag in ("BOS_STAY_INCLUDE_DEMO", "BOS_STAY_ALLOW_DEMO_BOOKING", "BOS_LOCAL_DEV_AUTH", "BOS_PAYMENT_SANDBOX", "BOS_UPI_SANDBOX", "BOS_VENUE_PAYMENT_SANDBOX"):
     check(env.get(flag, {}).get("value") == "0", f"{flag}=0")
 check(env.get("BOS_NATIVE_APP_ORIGINS", {}).get("value") == "capacitor://localhost,https://localhost", "native CORS origins exact")
+check(env.get("BOS_TRUST_PROXY_HOPS", {}).get("value") == "1", "trusted proxy hops pinned to the single Cloud Run front end")
 
 docker = DOCKER.read_text()
 check("USER nodejs" in docker, "container runs non-root")
