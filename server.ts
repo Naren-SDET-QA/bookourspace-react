@@ -6431,6 +6431,20 @@ Task:
     res.json({ ok: true, ticket: target, supportTicket: target });
   });
 
+  // An unmatched /api path is not a page. Without this boundary the Vite dev
+  // middleware and the production `*` route both answer a JSON caller with the
+  // SPA shell (200 text/html), so a typo, a removed endpoint or a wrong method
+  // looks like a success and fails later in JSON parsing. Registered after
+  // every real API route and before the page fallbacks, so it cannot shadow one.
+  app.use('/api', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(404).json({
+      ok: false,
+      error: 'API_ROUTE_NOT_FOUND',
+      message: 'This API route does not exist. Nothing was changed.',
+    });
+  });
+
   // Vite dev middleware or production static serving
   const distPath = path.join(__dirname, 'dist');
   const useVitePreviewMiddleware =
