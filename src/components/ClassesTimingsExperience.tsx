@@ -1151,7 +1151,11 @@ function FilterSelect({
   return (
     <label className="inline-flex items-center gap-1 rounded-full border border-[#ece8fb] bg-white px-2.5 py-1.5">
       <span className="text-[9px] font-bold uppercase tracking-wide text-[#94a3b8]">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="max-w-[110px] bg-transparent text-[11px] font-bold text-[#4c1d95] outline-none">
+      {/* The visible label sits inside the same <label> as the select, so the
+          browser would otherwise fold the option text into the control's
+          accessible name ("ModeAllOnlineOfflineHybridRecorded"). An explicit
+          aria-label keeps it readable for assistive tech and unique on the page. */}
+      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="max-w-[110px] bg-transparent text-[11px] font-bold text-[#4c1d95] outline-none">
         {options.map((o) => {
           const [val, text] = Array.isArray(o) ? o : [o, o];
           return <option key={val} value={val}>{text}</option>;

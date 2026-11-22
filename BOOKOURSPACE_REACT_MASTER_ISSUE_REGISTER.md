@@ -2119,3 +2119,90 @@ batches above were re-run this pass).
 **Verdict: NOT READY FOR PRODUCTION.** The application code passed every
 workflow exercised in this pass with one fixed defect; the remaining blockers
 are hosted/operational, not application logic.
+### 11.27 Production-readiness execution — build target guard, production client target, classes locator (2026-11-22)
+
+Branch `integration/recover-20261115`, HEAD `3113eda`, worktree preserved (no reset, clean, stash, add,
+commit or push). No hosted read/write, no migration, no deployment, no payment activation, no credential
+access. SEC-04 and every completed implementation were left untouched.
+
+**Defect 1 (CONFIGURATION → fixed) — a production build shipped the development project.** Reproduced:
+`npm run build` inlines `obkfgxjzlscungkhbyvq` into four shipped assets
+(`index-*.js`, `supabaseClient-*.js`, `emailOtpClient-*.js`, `demoDataPolicy-*.js`), and nothing failed the
+build. The server refuses to *start* in production with a development target, but a bundle served by any
+static host had no such check. Two mechanisms were added:
+1. `scripts/verify-production-bundle.mjs` — pre-build gate (explicit, non-development Supabase target
+   required, development allowlist refused, project id and URL must agree) and post-build scan (development
+   project reference, `sb_secret_` key, PEM private key or credential-bearing PostgreSQL URL → fail).
+   Development refs are read from `src/server/supabaseProductionGuard.ts`, so the two checks cannot drift.
+2. `vite.config.ts` — `BOS_PRODUCTION_BUILD=1` points `envDir` at `deploy/production-env/`, so Vite stops
+   loading the developer's `.env.local` (it is loaded in every mode) into a production build.
+   `npm run build:production` chains prebuild gate → isolated build → bundle scan.
+   Reproduced before the fix: the scan reported 4 development references, exit 1. After the fix: a build with
+   a placeholder production ref while `.env.local` still exists contains **0** development references and the
+   scan passes; `build:production` with no production values fails closed before Vite runs. A false positive
+   was found and fixed during verification — the Supabase client legitimately tests
+   `key.startsWith('sb_secret_')`, so the secret rule matches a complete key, not a bare prefix.
+
+**Defect 2 (CODE → fixed) — the client could not target any production Supabase project.**
+`resolveSupabaseConfig` accepted a hosted target only when it equalled
+`VITE_SUPABASE_DEVELOPMENT_PROJECT_ID`, so a dedicated production project was always rejected
+(`SUPABASE_DEVELOPMENT_PROJECT_NOT_ALLOWLISTED`) and production sign-in could never be configured. Added an
+explicit production declaration: `VITE_SUPABASE_PRODUCTION_PROJECT_ID` is accepted only when it matches the
+URL project, a project cannot be declared as both development and production, and the previous development
+behaviour (including every existing error code) is unchanged when the variable is unset.
+`tests/supabase-config.test.mjs` gained 5 cases; all 22 in that file pass. `deploy/env.production.example`
+and `.env.example` document the variable.
+
+**Defect 3 (CODE → fixed) — the classes browser journey failed on an ambiguous accessible name.** At HEAD the
+header renders a `Switch to Dark Mode` button whose accessible name contains "Mode", so
+`getByLabel('Mode')` matched two controls and the filters test aborted with a strict-mode violation
+(`e2e/classes-journey.spec.ts:382`). Fixed the locator (`{ exact: true }`); the app's accessible names are
+correct and unchanged.
+
+**Verification (this pass).** `npx tsc --noEmit` exit 0. `npm test` **862/862, 0 failed, 0 skipped**
+(92 s, isolated PostgreSQL, baseline + 127 migrations). `npm run build` exit 0 (development bundle still
+contains the development target, as intended). `node --test tests/production-bundle-guard.test.mjs`
+**13/13** pass. Chromium: 61 passed / 1 failed / 15 skipped / 3 not run before the locator fix; the failing
+classes journey is the subject of defect 3 (see §11.28 for the post-fix result).
+
+**Remaining blockers are not application logic** — production Supabase project and hosted migration apply
+(B5 signature, B6 PITR/restore), hosted OAuth, deployment/secrets/monitoring, payments intentionally
+disabled, Gitleaks acceptance. Release checklist: `BOOKOURSPACE_REACT_PRODUCTION_RELEASE_CHECKLIST.md`.
+
+**Verdict: READY AFTER EXPLICIT OWNER ACTIONS.** The application code is release-capable for the verified
+journeys; no production deployment is authorised by this entry.
+
+### 11.28 Browser matrix result and the classes filter control (2026-11-22)
+
+**Chromium run (10 specs, 1 worker, `--retries=0`): 61 passed, 1 failed, 15 skipped, 3 not run.**
+Specs: `mobile-responsive`, `auth-entrypoints`, `auth-role-and-session`, `access-control-api`,
+`admin-users-authorization`, `movies-showtimes`, `venue-booking`, `services-booking`, `classes-journey`,
+`helper-coupon-journey`. The 15 skips are the documented fixture-gated cases; the 3 "not run" are the
+remaining tests in `classes-journey` after its first test failed, which Playwright stops by design.
+
+**Fixed during the run — the classes `Mode` filter select had no usable accessible name.** Its `<label>`
+wraps both the visible text and the `<select>`, so the browser folded the option text into the accessible
+name: `combobox "ModeAllOnlineOfflineHybridRecorded"`. That made `getByLabel('Mode')` ambiguous with the
+header's `Switch to Dark Mode` button (strict-mode violation at
+`e2e/classes-journey.spec.ts:382`). `FilterSelect` in `src/components/ClassesTimingsExperience.tsx` now sets
+`aria-label={label}` on the select; the page snapshot after the fix reports `combobox "Mode"`, and the spec
+uses `{ exact: true }`.
+
+**Still failing: `classes-journey.spec.ts:292`** (trainer creates a batch → admin approves → student enrols →
+duplicate refused → cancellation persists). After the name fix the locator resolves but `selectOption` never
+becomes actionable and the test hits its 180 s timeout; one instrumented run also logged
+`route.fetch: connect ECONNREFUSED 127.0.0.1:<port>` for the harness API and `[classes-harness] API process
+exited` during cleanup. The control is present and correctly named in the failure snapshot, so this is not the
+earlier naming defect. It is recorded as an **unresolved CODE/harness issue**, not a pass: the journey is
+unverified in this pass. The other classes tests (waitlist ordering, forged-fee/last-seat refusals, multi
+viewport enrolment) did not run because Playwright stops the file after the first failure.
+
+**Verified this pass:** `npx tsc --noEmit` exit 0; `npm test` 862/862 with 0 failed and 0 skipped; `npm run
+build` exit 0; `node supabase/tests/migration_manifest.mjs` PASS (baseline + 127 migrations); guard suite
+13/13; `git diff --check` exit 0. The 61 passing browser tests cover mobile responsiveness and CLS, signed-out
+and signed-in auth entry points, role/session boundaries, API authorization, admin user authorization, movie
+showtimes, venue booking, service booking and the coupon journey.
+
+**Release impact.** One customer-module browser journey is unverified, so the release verdict stays
+conservative: **READY AFTER EXPLICIT OWNER ACTIONS**, with this journey listed as an open pre-release check to
+re-run on the deployment target rather than evidence of a passing classes flow.

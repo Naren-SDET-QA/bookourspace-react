@@ -184,3 +184,39 @@ without the database, and the local-dev sign-in guard. `npx tsc --noEmit` 0,
 **Verdict: NOT READY FOR PRODUCTION** — application code is launch-capable for
 the verified journeys, but hosted infrastructure, paid bookings and the
 release-owner security acceptance are release prerequisites that are still open.
+
+## Production-readiness execution pass — 2026-11-22 (third pass)
+
+**Three defects reproduced and fixed; one browser journey remains unverified.**
+
+1. **CONFIGURATION — a production build inlined the development Supabase project.** `npm run build` shipped
+   `obkfgxjzlscungkhbyvq` in four assets and nothing failed. Added `scripts/verify-production-bundle.mjs`
+   (pre-build target gate + post-build scan for development refs, secret keys, PEM keys and credential URLs,
+   with development refs read from the runtime guard so they cannot drift), `BOS_PRODUCTION_BUILD=1` env
+   isolation in `vite.config.ts` (`deploy/production-env/` instead of the developer's `.env.local`), and
+   `npm run build:production`. Evidence: scan of the pre-fix bundle = 4 violations, exit 1; a production build
+   with `.env.local` present = 0 development references, scan PASS; `build:production` without production
+   values fails before Vite runs.
+2. **CODE — the client could not target a production Supabase project.** `resolveSupabaseConfig` accepted a
+   hosted target only when it equalled the development allowlist. Added
+   `VITE_SUPABASE_PRODUCTION_PROJECT_ID`: accepted only when it matches the URL project, refused when the same
+   project is declared as both, development behaviour unchanged when unset. 5 new unit cases, all 22 in the
+   file pass.
+3. **CODE/accessibility — the classes `Mode` filter's accessible name was `ModeAllOnlineOfflineHybridRecorded`**
+   (wrapping label folded option text into it), which made `getByLabel('Mode')` ambiguous with the header's
+   `Switch to Dark Mode` button. `FilterSelect` now sets `aria-label={label}`; the browser snapshot reports
+   `combobox "Mode"`.
+
+**Verification.** `npx tsc --noEmit` 0 · `npm test` **862/862, 0 failed, 0 skipped** · `npm run build` 0 ·
+`node --test tests/production-bundle-guard.test.mjs` **13/13** · manifest PASS (baseline + 127) ·
+`git diff --check` 0. Chromium (10 specs, 1 worker): **61 passed, 1 failed, 15 fixture-gated skips, 3 not
+run** — `classes-journey.spec.ts:292` still times out at the filter step after the naming fix (the control is
+present and correctly named in the failure snapshot; one run also logged an API `ECONNREFUSED`). That journey is
+**unverified**, and the three remaining classes tests did not run.
+
+**Remaining blockers — none are application logic:** production Supabase project and the approved migration
+apply (B5 owner signature, B6 PITR/restore evidence), hosted Google/OTP sign-in, deployment secrets and
+monitoring, payments intentionally disabled, release-owner Gitleaks acceptance, and the unverified classes
+browser journey.
+
+**Verdict: READY AFTER EXPLICIT OWNER ACTIONS.** Nothing was deployed, migrated, committed or pushed.

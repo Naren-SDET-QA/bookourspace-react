@@ -10,6 +10,7 @@
     "dev:ensure": "PORT=3010 bash scripts/ensure-dev-3010.sh",
     "dev:web": "tsx server.ts",
     "build": "vite build",
+    "build:production": "node scripts/verify-production-bundle.mjs --prebuild && BOS_PRODUCTION_BUILD=1 vite build && node scripts/verify-production-bundle.mjs",
     "preview": "vite preview",
     "start": "tsx server.ts",
     "test": "tsx --test",

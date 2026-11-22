@@ -16,8 +16,14 @@ export default defineConfig(() => {
   // section import. Tests may still provide an explicit isolated cache dir.
   const viteCacheDir = process.env.BOS_VITE_CACHE_DIR
     || path.join(process.cwd(), '.local', `vite-cache-${process.env.PORT || '3000'}`);
+  // A production build must not inherit a developer's `.env.local`. Vite loads
+  // `.env.local` in every mode, so a production build reads its env from a
+  // dedicated directory instead; every real value must come from the process
+  // environment (which Vite gives priority) or the committed template there.
+  const productionBuild = process.env.BOS_PRODUCTION_BUILD === '1';
   return {
     plugins: [react(), tailwindcss()],
+    envDir: productionBuild ? path.join(process.cwd(), 'deploy', 'production-env') : undefined,
     // Isolate Playwright's optimized dependency cache from the user's regular
     // dev server so concurrent Vite processes cannot invalidate each other's
     // `/node_modules/.vite/deps/*` imports.

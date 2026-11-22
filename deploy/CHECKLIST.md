@@ -17,7 +17,7 @@ This checklist does not deploy, apply SQL, take payments, push git, or publish a
 - [ ] Create or confirm GCP project + billing account
 - [ ] Create Secret Manager values (never paste into `VITE_*` or git)
 - [ ] `gcloud builds submit` / `gcloud run services replace`
-- [ ] Hosted Mumbai `--apply` of the 21 pending migrations (skip-backup forbidden)
+- [ ] Hosted apply of the approved migration set (currently 51 files; skip-backup forbidden). Readiness today is NOT YET READY TO APPLY — B5 owner signature and B6 PITR/restore evidence are open (`HOSTED_DEV_MIGRATION_EXECUTION_PROPOSAL_20261122.md`, `B5_OWNER_DECISION_RECORD_20261122.md`).
 - [ ] `allUsers` Cloud Run invoker binding
 - [ ] Live Razorpay secrets
 - [ ] Native store publish

@@ -364,9 +364,9 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   await expect(card).toContainText('2 seats left');
 
   // Filters are computed from the live PostgreSQL calendar, not demo data.
-  await student.page.getByLabel('Mode').selectOption('Online');
+  await student.page.getByLabel('Mode', { exact: true }).selectOption('Online');
   await expect(card).toBeHidden();
-  await student.page.getByLabel('Mode').selectOption('Hybrid');
+  await student.page.getByLabel('Mode', { exact: true }).selectOption('Hybrid');
   await expect(card).toBeVisible();
   await student.page.getByLabel('Timing').selectOption('Evening');
   await expect(card).toBeVisible();

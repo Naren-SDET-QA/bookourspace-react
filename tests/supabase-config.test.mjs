@@ -25,6 +25,7 @@ const publishableKey = 'sb_publishable_abcdefghijklmnopqrstuv_ABCDEFGH';
 const hasError = (result, prefix) => result.errors.some((entry) => entry.startsWith(prefix));
 const TEST_DEV_PROJECT_ID = 'abcdefghijklmnopqrst';
 const TEST_REASSIGNED_PROJECT_ID = 'ezrxykyocgbolpaebnqx';
+const TEST_PROD_PROJECT_ID = 'productionref00000000';
 const resolveFixture = (input = {}) => resolveRawSupabaseConfig({
   ...input,
   ...(input.projectId && input.projectId !== 'local' && input.developmentProjectId === undefined
@@ -414,4 +415,66 @@ test('development preflight rejects a local stack and mismatched project identit
   assert.ok(hasError(mismatch, 'SUPABASE_PROJECT_REFERENCE_MISMATCH'));
   assert.equal(local.ok, false);
   assert.equal(mismatch.ok, false);
+});
+
+test('a dedicated production project is accepted when explicitly declared', () => {
+  const result = resolveRawSupabaseConfig({
+    url: `https://${TEST_PROD_PROJECT_ID}.supabase.co`,
+    projectId: TEST_PROD_PROJECT_ID,
+    developmentProjectId: '',
+    productionProjectId: TEST_PROD_PROJECT_ID,
+    publishableKey: anonKeyFor(TEST_PROD_PROJECT_ID),
+  });
+  assert.equal(result.isConfigured, true);
+  assert.equal(result.projectId, TEST_PROD_PROJECT_ID);
+  assert.equal(result.projectUrl, `https://${TEST_PROD_PROJECT_ID}.supabase.co`);
+  assert.deepEqual(result.errors, []);
+});
+
+test('a production declaration that is not the URL project is refused', () => {
+  const result = resolveRawSupabaseConfig({
+    url: `https://${TEST_PROD_PROJECT_ID}.supabase.co`,
+    projectId: TEST_PROD_PROJECT_ID,
+    developmentProjectId: '',
+    productionProjectId: 'differentprodref0000000',
+    publishableKey: anonKeyFor(TEST_PROD_PROJECT_ID),
+  });
+  assert.equal(result.isConfigured, false);
+  assert.equal(result.projectUrl, '');
+  assert.ok(hasError(result, 'SUPABASE_PRODUCTION_PROJECT_REFERENCE_MISMATCH'));
+});
+
+test('the same hosted project cannot be declared as both development and production', () => {
+  const result = resolveRawSupabaseConfig({
+    url: `https://${TEST_PROD_PROJECT_ID}.supabase.co`,
+    projectId: TEST_PROD_PROJECT_ID,
+    developmentProjectId: TEST_PROD_PROJECT_ID,
+    productionProjectId: TEST_PROD_PROJECT_ID,
+    publishableKey: anonKeyFor(TEST_PROD_PROJECT_ID),
+  });
+  assert.equal(result.isConfigured, false);
+  assert.ok(hasError(result, 'SUPABASE_TARGET_DECLARED_AS_BOTH'));
+});
+
+test('the browser environment resolver reads VITE_SUPABASE_PRODUCTION_PROJECT_ID', () => {
+  const result = resolveSupabaseEnvironment({
+    VITE_SUPABASE_URL: `https://${TEST_PROD_PROJECT_ID}.supabase.co`,
+    VITE_SUPABASE_PROJECT_ID: TEST_PROD_PROJECT_ID,
+    VITE_SUPABASE_PRODUCTION_PROJECT_ID: TEST_PROD_PROJECT_ID,
+    VITE_SUPABASE_PUBLISHABLE_KEY: anonKeyFor(TEST_PROD_PROJECT_ID),
+  });
+  assert.equal(result.isConfigured, true);
+  assert.equal(result.projectId, TEST_PROD_PROJECT_ID);
+  assert.deepEqual(result.errors, []);
+});
+
+test('an undeclared hosted project stays refused (no implicit production target)', () => {
+  const result = resolveRawSupabaseConfig({
+    url: `https://${TEST_PROD_PROJECT_ID}.supabase.co`,
+    projectId: TEST_PROD_PROJECT_ID,
+    developmentProjectId: '',
+    publishableKey: anonKeyFor(TEST_PROD_PROJECT_ID),
+  });
+  assert.equal(result.isConfigured, false);
+  assert.ok(hasError(result, 'SUPABASE_DEVELOPMENT_PROJECT_NOT_ALLOWLISTED'));
 });
