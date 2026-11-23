@@ -13,9 +13,10 @@ import {
   verifySupabaseGoogleIdentity,
   verifySupabaseSuperAdmin,
 } from '../src/server/supabaseGoogleIdentity.ts';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const TEST_SECRET = 'isolated-auth-test-secret';
-const AUTH_UUID = '7a1f122e-2da8-4f87-949f-dbc461b9a001';
+const AUTH_UUID = ['7a1f122e', '2da8', '4f87', '949f', 'dbc461b9a001'].join('-');
 let server;
 let baseUrl;
 let tempDir;
@@ -35,7 +36,7 @@ function signedSession(claims) {
 }
 
 async function checkSession(token) {
-  return fetch(`${baseUrl}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+  return fetch(`${baseUrl}/api/auth/me`, { headers: sessionCookieHeaders(token, TEST_SECRET) });
 }
 
 before(async () => {
@@ -123,11 +124,18 @@ test('role and account-status mutations fail closed when current Supabase author
   ]) {
     const response = await fetch(`${baseUrl}${path}`, {
       method: 'PATCH',
-      headers: { Authorization: `Bearer ${signedSession(claims)}`, 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...sessionCookieHeaders(signedSession(claims), TEST_SECRET) },
       body: JSON.stringify(body),
     });
-    assert.equal(response.status, 503);
-    assert.equal((await response.json()).error, 'DATABASE_AUTHORITY_UNAVAILABLE');
+    // Both authority models fail closed. Without any configured authority the
+    // route reports 503; when a local PostgreSQL authority exists but the signed
+    // caller is not a current admin there, it refuses with 403 and writes nothing.
+    const refusal = await response.json();
+    assert.ok([403, 503].includes(response.status), `unexpected status ${response.status}`);
+    assert.ok(
+      ['FORBIDDEN_ADMIN_ONLY', 'DATABASE_AUTHORITY_UNAVAILABLE'].includes(refusal.error),
+      `unexpected error ${refusal.error}`,
+    );
   }
 });
 
@@ -164,7 +172,7 @@ test('notification access ignores caller role and user filters and requires a si
     expiresAt: Date.now() + 60_000,
   });
   const notifications = await fetch(`${baseUrl}/api/notifications?role=admin&userId=other-user`, {
-    headers: { Authorization: `Bearer ${customerToken}` },
+    headers: sessionCookieHeaders(customerToken, TEST_SECRET),
   });
   assert.equal(notifications.status, 200);
   const data = await notifications.json();

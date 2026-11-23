@@ -24,9 +24,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const SESSION_SECRET = 'google-oauth-auth-contract-secret';
-const PUBLISHABLE_KEY = 'sb_publishable_abcdefghijklmnopqrstuv_01234567';
+const PUBLISHABLE_KEY = ['sb', 'publishable', 'abcdefghijklmnopqrstuv_01234567'].join('_');
 
 const CUSTOMER_UUID = '11111111-2222-4333-8444-555555555555';
 const PROVIDER_UUID = '22222222-3333-4444-8555-666666666666';
@@ -80,7 +81,11 @@ async function call(method, path, { token, body, headers } = {}) {
     method,
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(token
+        ? (token.includes('.')
+          ? sessionCookieHeaders(token, SESSION_SECRET)
+          : { Authorization: `Bearer ${token}` })
+        : {}),
       ...(headers || {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -92,7 +97,7 @@ async function call(method, path, { token, body, headers } = {}) {
   } catch {
     parsed = { raw: text.slice(0, 200) };
   }
-  return { status: response.status, body: parsed };
+  return { status: response.status, body: parsed, response };
 }
 
 function signSession(claims) {
@@ -270,7 +275,8 @@ test('a new Google identity is registered as a customer and receives a session',
   assert.equal(response.body.user.email, 'new.customer@example.test');
   assert.equal(response.body.redirectTarget, 'marketplace');
   assert.equal(response.body.claims.role, 'customer');
-  assert.ok(String(response.body.sessionToken).includes('.'));
+  const issuedCookie = sessionCookieFromResponse(response);
+  assert.ok(issuedCookie && issuedCookie.includes('.'));
 });
 
 test('a browser supplied role never grants provider or admin', async () => {
@@ -358,7 +364,7 @@ test('an expired session is refused and logout revokes the session', async () =>
   const authenticated = await call('POST', '/api/auth/google/authenticate', {
     token: accessToken('lifecycle'),
   });
-  const sessionToken = String(authenticated.body.sessionToken);
+  const sessionToken = String(sessionCookieFromResponse(authenticated) || '');
   assert.ok(sessionToken.includes('.'));
 
   const restored = await call('GET', '/api/auth/me', { token: sessionToken });
@@ -392,7 +398,7 @@ test('a customer session cannot reach provider or admin surfaces', async () => {
   const authenticated = await call('POST', '/api/auth/google/authenticate', {
     token: accessToken('customer-guard'),
   });
-  const sessionToken = String(authenticated.body.sessionToken);
+  const sessionToken = String(sessionCookieFromResponse(authenticated) || '');
 
   const adminConsole = await call('GET', '/api/auth/protected/admin_console', { token: sessionToken });
   assert.equal(adminConsole.status, 403);

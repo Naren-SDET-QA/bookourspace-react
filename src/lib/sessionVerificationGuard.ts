@@ -48,3 +48,20 @@ export function verifiedResponseStillApplies(sentToken: string, currentToken: st
   if (!currentToken) return false;
   return String(sentToken || '').trim() === currentToken.trim();
 }
+
+export const MAX_SESSION_RECHECKS = 2;
+
+/**
+ * A verification that exhausted its re-checks is only terminal when the
+ * response cannot be tied to the identity the browser still holds. A verified
+ * response for the same user is a benign concurrent re-sign, so the session is
+ * kept rather than cleared.
+ */
+export function shouldAcceptExhaustedReverify(
+  verifiedUserId: string | null | undefined,
+  storedUserId: string | null | undefined,
+): boolean {
+  const verified = String(verifiedUserId || '').trim();
+  const stored = String(storedUserId || '').trim();
+  return Boolean(verified) && verified === stored;
+}

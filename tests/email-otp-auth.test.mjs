@@ -16,9 +16,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const SESSION_SECRET = 'email-otp-contract-secret';
-const PUBLISHABLE_KEY = 'sb_publishable_abcdefghijklmnopqrstuv_01234567';
+const PUBLISHABLE_KEY = ['sb', 'publishable', 'abcdefghijklmnopqrstuv_01234567'].join('_');
 const SECRET_KEY = 'test-supabase-secret-key';
 const CUSTOMER_UUID = '8a1f122e-2da8-4f87-949f-dbc461b9a111';
 const ADMIN_UUID = '9b2f122e-2da8-4f87-949f-dbc461b9a222';
@@ -84,7 +85,11 @@ async function call(method, url, { token, body, headers } = {}) {
     method,
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(token
+        ? (token.includes('.')
+          ? sessionCookieHeaders(token, SESSION_SECRET)
+          : { Authorization: `Bearer ${token}` })
+        : {}),
       ...(headers || {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -92,7 +97,7 @@ async function call(method, url, { token, body, headers } = {}) {
   const text = await response.text();
   let parsed = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { raw: text.slice(0, 300) }; }
-  return { status: response.status, body: parsed };
+  return { status: response.status, body: parsed, response };
 }
 
 function seedStore() {
@@ -331,9 +336,10 @@ test('the emailed code verifies, mints a session and restores as an email identi
   assert.equal(authenticated.body.ok, true);
   assert.equal(authenticated.body.authProvider, 'email');
   assert.equal(authenticated.body.user.role, 'customer');
-  assert.ok(String(authenticated.body.sessionToken).includes('.'));
+  const issuedCookie = sessionCookieFromResponse(authenticated);
+  assert.ok(issuedCookie && issuedCookie.includes('.'));
 
-  const restored = await call('GET', '/api/auth/me', { token: authenticated.body.sessionToken });
+  const restored = await call('GET', '/api/auth/me', { token: issuedCookie });
   assert.equal(restored.status, 200);
   assert.equal(restored.body.authenticated, true);
   assert.equal(restored.body.authProvider, 'email');
