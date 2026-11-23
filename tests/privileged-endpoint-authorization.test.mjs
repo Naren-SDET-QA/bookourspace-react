@@ -15,6 +15,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const SECRET = 'privileged-endpoint-contract-secret';
 const CUSTOMER_UUID = '7a1f122e-2da8-4f87-949f-dbc461b9a301';
@@ -49,12 +50,24 @@ const customerToken = signSession({
   expiresAt: Date.now() + 60_000,
 });
 
+const providerToken = signSession({
+  userId: '8d2b4a11-9a3e-4f60-9a3c-3c4b9f0d2a11',
+  supabaseUserId: '8d2b4a11-9a3e-4f60-9a3c-3c4b9f0d2a11',
+  email: 'cinema.provider@example.test',
+  name: 'Cinema Provider',
+  role: 'provider',
+  providerId: 'prov-cinema-other',
+  authProvider: 'email',
+  issuedAt: Date.now(),
+  expiresAt: Date.now() + 60_000,
+});
+
 async function call(method, path, { token, body } = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, SECRET) : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -166,4 +179,46 @@ test('resolving a support ticket is closed to anonymous and customer callers', a
   });
   assert.equal(customer.status, 403);
   assert.equal(customer.body.error, 'FORBIDDEN_PROVIDER_OR_ADMIN_ONLY');
+});
+
+test('a provider cannot resolve another cinema provider\'s support ticket', async () => {
+  const created = await call('POST', '/api/movies/support', {
+    token: customerToken,
+    body: { message: 'Seat was double booked', category: 'booking' },
+  });
+  assert.equal(created.status, 201);
+  const ticketId = created.body.ticket.ticketId;
+
+  const otherProvider = await call('PATCH', `/api/movies/support/${encodeURIComponent(ticketId)}`, {
+    token: providerToken,
+    body: { status: 'resolved', resolutionNote: 'Not this cinema' },
+  });
+  assert.equal(otherProvider.status, 403);
+  assert.equal(otherProvider.body.error, 'FORBIDDEN_NOT_TICKET_PROVIDER');
+});
+
+test('a support ticket cannot reference another customer\'s booking', async () => {
+  const response = await call('POST', '/api/movies/support', {
+    token: customerToken,
+    body: { message: 'Attaching to a foreign booking', bookingId: 'forged-booking-id' },
+  });
+  assert.equal(response.status, 404);
+  assert.equal(response.body.error, 'BOOKING_NOT_FOUND');
+});
+
+test('seat holds and releases stay hard-disabled and never trust body identity', async () => {
+  // V1 is display-only: the refusal happens before any handler, so an
+  // anonymous caller can never hold or release inventory. The handlers behind
+  // the refusal additionally require a customer session (defence in depth for
+  // the day booking is re-enabled).
+  const anonymousHold = await call('POST', '/api/seats/hold', {
+    body: { listingId: 'movie-hyd-1', dateIso: '2099-01-10', showtime: '07:55 PM', seats: ['A1'], sessionId: 's-1', userId: 'forged' },
+  });
+  assert.equal(anonymousHold.status, 410);
+  assert.equal(anonymousHold.body.error, 'MOVIES_V1_DISPLAY_ONLY');
+  const anonymousRelease = await call('POST', '/api/seats/release', {
+    body: { listingId: 'movie-hyd-1', dateIso: '2099-01-10', showtime: '07:55 PM', seats: ['A1'], sessionId: 's-1' },
+  });
+  assert.equal(anonymousRelease.status, 410);
+  assert.equal(anonymousRelease.body.error, 'MOVIES_V1_DISPLAY_ONLY');
 });

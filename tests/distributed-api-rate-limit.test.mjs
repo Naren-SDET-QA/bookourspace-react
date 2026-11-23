@@ -78,3 +78,30 @@ test('enabled limiter also limits API reads', async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('disposable auth budget cannot override the production 12/minute policy', async () => {
+  const previousMode = process.env.NODE_ENV;
+  const previousBudget = process.env.BOS_DISPOSABLE_TEST_AUTH_BUDGET;
+  process.env.NODE_ENV = 'production';
+  process.env.BOS_DISPOSABLE_TEST_AUTH_BUDGET = '100';
+  const pool = { async query() { return { rows: [{ allowed: true, retry_after_seconds: 60, remaining: 11 }] }; } };
+  const app = express();
+  app.use(createDistributedApiRateLimitMiddleware({ pool, hmacSecret: 'p'.repeat(32), enabled: true }));
+  app.post('/api/auth/login', (_req, res) => res.json({ ok: true }));
+  app.post('/api/bookings/create', (_req, res) => res.json({ ok: true }));
+  const server = createServer(app);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/auth/login`, { method: 'POST' });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('ratelimit-limit'), '12');
+    const booking = await fetch(`http://127.0.0.1:${server.address().port}/api/bookings/create`, { method: 'POST' });
+    assert.equal(booking.status, 200);
+    assert.equal(booking.headers.get('ratelimit-limit'), '30');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (previousMode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousMode;
+    if (previousBudget === undefined) delete process.env.BOS_DISPOSABLE_TEST_AUTH_BUDGET; else process.env.BOS_DISPOSABLE_TEST_AUTH_BUDGET = previousBudget;
+  }
+});

@@ -135,12 +135,15 @@ test('a Supabase sign-out revokes the authoritative session on the server', asyn
 
 test('the client never treats a Supabase access token as an application session', async () => {
   const client = await readFile(new URL('../src/lib/supabaseClient.ts', import.meta.url), 'utf8');
-  const authHeaders = client.slice(
-    client.indexOf('export function buildAuthHeaders'),
-    client.indexOf('export async function authenticateWithGoogleServer')
-  );
-  assert.match(authHeaders, /getStoredAuthoritativeSessionToken\(\)/);
+  const start = client.indexOf('export function buildAuthHeaders');
+  const authHeaders = client.slice(start, client.indexOf('\n}\n', start));
+  // The session cookie is attached by the browser and cannot be read by
+  // script, so only the CSRF proof is added here.
+  assert.match(authHeaders, /sessionAuthHeaders\(\)/);
   assert.doesNotMatch(authHeaders, /access_token/);
+  assert.doesNotMatch(authHeaders, /Authorization/);
+  assert.doesNotMatch(authHeaders, /bos_session_token_v1/);
+  assert.doesNotMatch(authHeaders, /x-bos-session-token/);
 });
 
 test('Supabase hydration and SIGNED_IN share one authoritative verification per access token', async () => {

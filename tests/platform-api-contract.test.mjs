@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const projectRoot = path.resolve(new URL('..', import.meta.url).pathname);
 const TEST_SECRET = 'isolated-platform-test-secret';
@@ -192,7 +193,7 @@ test('an Admin cannot promote a user by supplying isSuperAdmin in the request bo
   const token = signedSession({ userId: 'admin-actor', role: 'admin', issuedAt: Date.now(), expiresAt: Date.now() + 60_000 });
   const response = await fetch(`${baseUrl}/api/super-admin/users/action`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...sessionCookieHeaders(token, TEST_SECRET) },
     body: JSON.stringify({ userId: 'target-user', action: 'promote', role: 'admin', isSuperAdmin: true, reason: 'approved by owner' }),
   });
   assert.equal(response.status, 403);
@@ -203,7 +204,7 @@ test('a signed Super Admin scope still fails closed when authoritative Supabase 
   const token = signedSession({ userId: 'admin-actor', role: 'admin', scope: 'super_admin', issuedAt: Date.now(), expiresAt: Date.now() + 60_000 });
   const response = await fetch(`${baseUrl}/api/super-admin/users/action`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...sessionCookieHeaders(token, TEST_SECRET) },
     body: JSON.stringify({ userId: 'USR-1004', action: 'promote', role: 'admin', reason: 'approved by owner' }),
   });
   assert.equal(response.status, 403);

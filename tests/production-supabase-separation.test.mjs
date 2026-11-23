@@ -185,3 +185,23 @@ test('production deployment templates require an explicit Supabase project subst
   const nativeBuild = await readFile(path.join(root, 'deploy/native/build-production.sh'), 'utf8');
   assert.match(nativeBuild, /a release build must not target the development Supabase project/);
 });
+
+test('the client production declaration must agree with the production target', () => {
+  assert.doesNotThrow(() =>
+    assertProductionSupabaseEnvironment(productionEnvironment({
+      VITE_SUPABASE_PRODUCTION_PROJECT_ID: PROD_REF,
+    })),
+  );
+  assert.throws(
+    () => assertProductionSupabaseEnvironment(productionEnvironment({
+      VITE_SUPABASE_PRODUCTION_PROJECT_ID: DEV_REF,
+    })),
+    /PRODUCTION_SUPABASE_TARGET_IS_DEVELOPMENT/,
+  );
+  assert.throws(
+    () => assertProductionSupabaseEnvironment(productionEnvironment({
+      VITE_SUPABASE_PRODUCTION_PROJECT_ID: 'otherprodref0000000000000',
+    })),
+    /PRODUCTION_SUPABASE_PROJECT_ID_CONFLICT/,
+  );
+});

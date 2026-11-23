@@ -16,7 +16,19 @@ type RateLimitPolicy = { limit: number; windowSeconds: number };
 // pattern requiring a trailing slash would silently fall through to the generic
 // budget and the stricter limit would never be enforced.
 function policyFor(route: string): RateLimitPolicy {
-  if (route === '/api/auth') return { limit: 12, windowSeconds: 60 };
+  // The Playwright web server owns a disposable database and sets this explicit
+  // test-only budget so one browser matrix cannot poison the next SEC-02 case.
+  // It is ignored in production; the production budget remains 12/minute.
+  const disposableAuthBudget = Number(process.env.BOS_DISPOSABLE_TEST_AUTH_BUDGET || '0');
+  if (route === '/api/auth') {
+    return disposableAuthBudget > 12 && process.env.NODE_ENV !== 'production'
+      ? { limit: disposableAuthBudget, windowSeconds: 60 }
+      : { limit: 12, windowSeconds: 60 };
+  }
+  const disposableApiBudget = Number(process.env.BOS_DISPOSABLE_TEST_API_BUDGET || '0');
+  if (disposableApiBudget > 0 && process.env.NODE_ENV !== 'production') {
+    return { limit: disposableApiBudget, windowSeconds: 60 };
+  }
   if (/^\/api\/(?:payments|refunds|bookings|seats|stays)$/.test(route)) {
     return { limit: 30, windowSeconds: 60 };
   }

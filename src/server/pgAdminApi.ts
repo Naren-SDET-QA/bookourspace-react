@@ -121,7 +121,7 @@ function actorOf(request: express.Request, verifySession: PgAdminApiDependencies
  * server only issues to a verified Google administrator session.
  */
 function requireSuperAdmin(response: express.Response, actor: any): boolean {
-  if (actor?.scope !== 'super_admin') {
+  if (actor?.role !== 'admin' || actor?.scope !== 'super_admin') {
     response.status(403).json({
       ok: false,
       error: 'SUPER_ADMIN_SCOPE_REQUIRED',

@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const SECRET = 'customer-module-access-contract-secret';
 const CUSTOMER_UUID = '7a1f122e-2da8-4f87-949f-dbc461b9a101';
@@ -59,7 +60,7 @@ async function call(method, path, { token, body } = {}) {
     method,
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, SECRET) : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

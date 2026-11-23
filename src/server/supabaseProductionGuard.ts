@@ -9,8 +9,9 @@
  *   - production requires an explicit `BOS_PRODUCTION_SUPABASE_PROJECT_ID`;
  *   - no Supabase variable in the process may name a development reference;
  *   - a project designated for development in the same process is refused;
- *   - the declared reference, `SUPABASE_PROJECT_ID`, `VITE_SUPABASE_PROJECT_ID`
- *     and both project URLs must all describe the same project.
+ *   - the declared reference, `SUPABASE_PROJECT_ID`, `VITE_SUPABASE_PROJECT_ID`,
+ *     the client's `VITE_SUPABASE_PRODUCTION_PROJECT_ID` declaration and both
+ *     project URLs must all describe the same project.
  *
  * Anything else fails closed. The guard is configuration-only: it never
  * contacts Supabase, reads a key, or logs a value.
@@ -74,6 +75,7 @@ export function assertProductionSupabaseEnvironment(
     [PRODUCTION_SUPABASE_PROJECT_ID_VAR, declared],
     ['SUPABASE_PROJECT_ID', cleanProjectRef(environment.SUPABASE_PROJECT_ID)],
     ['VITE_SUPABASE_PROJECT_ID', cleanProjectRef(environment.VITE_SUPABASE_PROJECT_ID)],
+    ['VITE_SUPABASE_PRODUCTION_PROJECT_ID', cleanProjectRef(environment.VITE_SUPABASE_PRODUCTION_PROJECT_ID)],
     ['SUPABASE_URL', projectRefFromUrl(environment.SUPABASE_URL)],
     ['VITE_SUPABASE_URL', projectRefFromUrl(environment.VITE_SUPABASE_URL)],
   ];

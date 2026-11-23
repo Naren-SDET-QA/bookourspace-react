@@ -42,6 +42,10 @@ before(async () => {
       return true;
     },
     signSession: () => 'super-admin-signed-token',
+    issueSessionCookie: (_req, res, token) => {
+      res.append('Set-Cookie', `bos_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`);
+      return 'csrf-proof-for-super-admin';
+    },
     hmacSecret: 'test-hmac-secret',
     findBlockedUser: () => null,
     verifySuperAdmin: async () => ({ id: ACTOR_ID, email: CLAIMS.email }),
@@ -75,7 +79,15 @@ test('Super Admin session is issued from verified identity without reading the J
     body: '{}',
   });
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).sessionToken, 'super-admin-signed-token');
+  const body = await response.json();
+  // The scoped session is a bearer credential: it is delivered only through
+  // the HttpOnly cookie and must never appear in the response body.
+  assert.equal(body.sessionToken, undefined);
+  assert.equal(body.csrfToken, 'csrf-proof-for-super-admin');
+  const setCookie = response.headers.getSetCookie().join(',');
+  assert.match(setCookie, /^bos_session=super-admin-signed-token/);
+  assert.match(setCookie, /HttpOnly/);
+  assert.match(setCookie, /SameSite=Lax/);
 });
 
 test('Super Admin user action completes when the JSON mirror is unavailable', async () => {

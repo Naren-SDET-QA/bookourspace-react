@@ -30,6 +30,21 @@ export interface EmailOtpServiceConfig {
   brandName?: string;
   supportEmail?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * Shared one-time-code budgets. Supplied by the server when a database is
+   * configured, so a limit survives a Cloud Run instance switch instead of
+   * resetting with a cold process. Without it the in-process maps below remain
+   * the development/test fallback.
+   */
+  rateLimiter?: OtpRateLimiter;
+}
+
+export interface OtpRateLimiter {
+  consume(
+    bucketKey: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }>;
 }
 
 export interface EmailOtpRequestResult {
@@ -48,6 +63,7 @@ export interface EmailOtpVerifyResult {
   status: number;
   error?: string;
   message?: string;
+  retryAfterSeconds?: number;
   accessToken?: string;
   refreshToken?: string;
 }
@@ -106,9 +122,11 @@ export class EmailOtpService {
   private readonly verifyBuckets = new Map<string, number[]>();
   private readonly pendingCodes = new Map<string, PendingEmailCode>();
   private readonly enabled: boolean;
+  private readonly rateLimiter?: OtpRateLimiter;
 
   constructor(private readonly config: EmailOtpServiceConfig) {
     this.fetchImpl = config.fetchImpl || fetch;
+    this.rateLimiter = config.rateLimiter;
     this.resendBaseUrl = parseResendBaseUrl(config.resendBaseUrl);
     this.enabled = Boolean(
       config.projectUrl.trim() &&
@@ -154,12 +172,13 @@ export class EmailOtpService {
     }
 
     const now = Date.now();
+    const normalizedIp = String(clientAddress || 'unknown').slice(0, 128);
     const emailBucket = this.emailBuckets.get(email);
     const activePendingCode = this.pendingCodes.get(email);
     // Once a code exists, allow a resend during its 10-minute lifetime so the
     // user receives the same code instead of a confusing cooldown or a new
     // code that invalidates the email already in transit.
-    if (emailBucket && now - emailBucket.lastSentAt < EMAIL_COOLDOWN_MS && !activePendingCode) {
+    if (!this.rateLimiter && emailBucket && now - emailBucket.lastSentAt < EMAIL_COOLDOWN_MS && !activePendingCode) {
       const retryAfterSeconds = Math.ceil((EMAIL_COOLDOWN_MS - (now - emailBucket.lastSentAt)) / 1000);
       return {
         ok: false,
@@ -169,33 +188,81 @@ export class EmailOtpService {
         retryAfterSeconds,
       };
     }
-    if (emailBucket) {
-      emailBucket.events = emailBucket.events.filter((event) => now - event < 60 * 60_000);
-      if (emailBucket.events.length >= EMAIL_HOURLY_LIMIT) {
-        const retryAfterSeconds = Math.max(
-          1,
-          Math.ceil((60 * 60_000 - (now - emailBucket.events[0])) / 1000)
-        );
+
+    if (this.rateLimiter) {
+      try {
+        const emailBudget = await this.rateLimiter.consume(`email:${email}`, EMAIL_HOURLY_LIMIT, 3600);
+        if (!emailBudget.allowed) {
+          return {
+            ok: false,
+            status: 429,
+            error: 'OTP_RATE_LIMITED',
+            message: 'Too many codes requested for this email. Please try again later.',
+            retryAfterSeconds: emailBudget.retryAfterSeconds,
+          };
+        }
+        const ipBudget = await this.rateLimiter.consume(`ip:${normalizedIp}`, IP_HOURLY_LIMIT, 3600);
+        if (!ipBudget.allowed) {
+          return {
+            ok: false,
+            status: 429,
+            error: 'OTP_RATE_LIMITED',
+            message: 'Too many sign-in attempts. Please try again later.',
+            retryAfterSeconds: ipBudget.retryAfterSeconds,
+          };
+        }
+        // Cooldown is charged last: an address-level rejection must not consume
+        // this email's one-per-minute slot and block the retry it suggests.
+        if (!activePendingCode) {
+          const cooldown = await this.rateLimiter.consume(`email-cooldown:${email}`, 1, 60);
+          if (!cooldown.allowed) {
+            return {
+              ok: false,
+              status: 429,
+              error: 'OTP_COOLDOWN',
+              message: `Please wait ${cooldown.retryAfterSeconds}s before requesting another code.`,
+              retryAfterSeconds: cooldown.retryAfterSeconds,
+              cooldownSeconds: cooldown.retryAfterSeconds,
+            };
+          }
+        }
+      } catch (error) {
+        // A limiter outage must not become an unlimited-sign-in window.
+        logSafeError('email-otp', 'distributed rate limit', error);
+        return {
+          ok: false,
+          status: 503,
+          error: 'OTP_RATE_LIMIT_UNAVAILABLE',
+          message: 'Sign-in is temporarily unavailable. Please try again.',
+        };
+      }
+    } else {
+      if (emailBucket) {
+        emailBucket.events = emailBucket.events.filter((event) => now - event < 60 * 60_000);
+        if (emailBucket.events.length >= EMAIL_HOURLY_LIMIT) {
+          const retryAfterSeconds = Math.max(
+            1,
+            Math.ceil((60 * 60_000 - (now - emailBucket.events[0])) / 1000)
+          );
+          return {
+            ok: false,
+            status: 429,
+            error: 'OTP_RATE_LIMITED',
+            message: 'Too many codes requested for this email. Please try again later.',
+            retryAfterSeconds,
+          };
+        }
+      }
+      const ipEvents = (this.ipBuckets.get(normalizedIp) || []).filter((event) => now - event < 60 * 60_000);
+      if (ipEvents.length >= IP_HOURLY_LIMIT) {
         return {
           ok: false,
           status: 429,
           error: 'OTP_RATE_LIMITED',
-          message: 'Too many codes requested for this email. Please try again later.',
-          retryAfterSeconds,
+          message: 'Too many sign-in attempts. Please try again later.',
+          retryAfterSeconds: 600,
         };
       }
-    }
-
-    const normalizedIp = String(clientAddress || 'unknown').slice(0, 128);
-    const ipEvents = (this.ipBuckets.get(normalizedIp) || []).filter((event) => now - event < 60 * 60_000);
-    if (ipEvents.length >= IP_HOURLY_LIMIT) {
-      return {
-        ok: false,
-        status: 429,
-        error: 'OTP_RATE_LIMITED',
-        message: 'Too many sign-in attempts. Please try again later.',
-        retryAfterSeconds: 600,
-      };
     }
 
     const pending = this.pendingCodes.get(email);
@@ -232,7 +299,12 @@ export class EmailOtpService {
     bucket.events = [...bucket.events.filter((event) => now - event < 60 * 60_000), now];
     bucket.lastSentAt = now;
     this.emailBuckets.set(email, bucket);
-    this.ipBuckets.set(normalizedIp, [...ipEvents, now]);
+    if (!this.rateLimiter) {
+      this.ipBuckets.set(normalizedIp, [
+        ...(this.ipBuckets.get(normalizedIp) || []).filter((event) => now - event < 60 * 60_000),
+        now,
+      ]);
+    }
     this.pruneBuckets(now);
 
     return {
@@ -266,18 +338,47 @@ export class EmailOtpService {
 
     const now = Date.now();
     const attemptKey = `${String(clientAddress || 'unknown').slice(0, 128)}\0${email}`;
-    const attempts = (this.verifyBuckets.get(attemptKey) || []).filter(
-      (event) => now - event < VERIFY_ATTEMPT_WINDOW_MS
-    );
-    if (attempts.length >= VERIFY_ATTEMPT_LIMIT) {
-      return {
-        ok: false,
-        status: 429,
-        error: 'OTP_ATTEMPTS_EXCEEDED',
-        message: 'Too many incorrect codes. Request a new code and try again.',
-      };
+    if (this.rateLimiter) {
+      // Shared across instances so rotating a Cloud Run container cannot reset
+      // a brute-force budget mid-attack.
+      try {
+        const attemptBudget = await this.rateLimiter.consume(
+          `verify:${attemptKey}`,
+          VERIFY_ATTEMPT_LIMIT,
+          VERIFY_ATTEMPT_WINDOW_MS / 1000,
+        );
+        if (!attemptBudget.allowed) {
+          return {
+            ok: false,
+            status: 429,
+            error: 'OTP_ATTEMPTS_EXCEEDED',
+            message: 'Too many incorrect codes. Request a new code and try again.',
+            retryAfterSeconds: attemptBudget.retryAfterSeconds,
+          };
+        }
+      } catch (error) {
+        logSafeError('email-otp', 'distributed verify limit', error);
+        return {
+          ok: false,
+          status: 503,
+          error: 'OTP_RATE_LIMIT_UNAVAILABLE',
+          message: 'Sign-in is temporarily unavailable. Please try again.',
+        };
+      }
+    } else {
+      const attempts = (this.verifyBuckets.get(attemptKey) || []).filter(
+        (event) => now - event < VERIFY_ATTEMPT_WINDOW_MS
+      );
+      if (attempts.length >= VERIFY_ATTEMPT_LIMIT) {
+        return {
+          ok: false,
+          status: 429,
+          error: 'OTP_ATTEMPTS_EXCEEDED',
+          message: 'Too many incorrect codes. Request a new code and try again.',
+        };
+      }
+      this.verifyBuckets.set(attemptKey, [...attempts, now]);
     }
-    this.verifyBuckets.set(attemptKey, [...attempts, now]);
 
     let response: Response;
     try {

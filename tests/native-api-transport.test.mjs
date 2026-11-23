@@ -5,16 +5,17 @@ import { createNativeAppCorsMiddleware, parseNativeAppOrigins } from '../src/ser
 
 const currentOrigin = 'capacitor://localhost';
 
-test('native API paths use the configured origin and current authoritative bearer token', () => {
+test('native API paths use the configured origin and never invent a bearer token', () => {
   const [url, init] = routeNativeApiRequest('/api/bookings/atomic?mode=test', { method: 'POST' }, {
     native: true,
     backendOrigin: 'https://api.bookourspace.example',
     isDev: false,
     currentOrigin,
-    sessionToken: 'server-issued-token',
+    sessionToken: 'retired-session-token',
   });
   assert.equal(url, 'https://api.bookourspace.example/api/bookings/atomic?mode=test');
-  assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer server-issued-token');
+  // The session travels in the HttpOnly cookie the platform jar attaches.
+  assert.equal(new Headers(init?.headers).get('Authorization'), null);
   assert.equal(init?.method, 'POST');
 });
 
@@ -29,11 +30,11 @@ test('explicit Supabase or server auth headers are preserved', () => {
   assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer verified-token');
 });
 
-test('native transport reads only the canonical authoritative session key', () => {
+test('native transport never reads a session token from device storage', () => {
   const reads = [];
-  const storage = { getItem(key) { reads.push(key); return key === 'bos_session_token_v1' ? 'current-token' : 'stale-token'; } };
-  assert.equal(readNativeSessionToken(storage), 'current-token');
-  assert.deepEqual(reads, ['bos_session_token_v1']);
+  const storage = { getItem(key) { reads.push(key); return 'device-stored-token'; } };
+  assert.equal(readNativeSessionToken(storage), null);
+  assert.deepEqual(reads, []);
 });
 
 test('web relative routes remain unchanged', () => {
