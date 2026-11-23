@@ -150,6 +150,9 @@ function useIdleReady(enabled: boolean, delayMs = 1000): boolean {
 
 
 import { setStoredAuthoritativeSession } from './lib/supabaseClient';
+import { fetchAuthAccessConfig, type AuthAccessConfig } from './lib/authAccessClient';
+import { isCustomerModuleKey, moduleKeyForSection, sectionForModuleKey, type CustomerModuleKey } from './lib/customerModuleMeta';
+import { accessScopeFrom, actionGranted, permissionGranted, type AccessScope } from './lib/businessAccess';
 import { supabase } from './lib/supabaseClient';
 import { SectionErrorBoundary } from './components/SectionErrorBoundary';
 import { SkipToContent } from './components/SkipToContent';
@@ -157,7 +160,7 @@ import { DEMO_DATA_ENABLED } from './lib/demoDataPolicy';
 import { popularAreasList, distanceRadiuses } from './data/filterOptions';
 
 // Route- and modal-specific surfaces stay out of the initial customer bundle.
-const CraftoTopServicesBar = lazy(() => import('./components/CraftoTopServicesBar').then((module) => ({ default: module.CraftoTopServicesBar })));
+import { CraftoTopServicesBar } from './components/CraftoTopServicesBar';
 import { LocationSelector, loadPersistedLocation, persistLocation, type SelectedLocation } from './components/LocationSelector';
 import { useLocationPickerHistory } from './lib/locationPickerHistory';
 import { filterListingsByLocation, matchesSelectedLocation } from './lib/locationCityFilter';
@@ -197,6 +200,8 @@ const AdminClassBatchReview = lazy(() => import('./components/AdminClassBatchRev
 const PostListingWizard = lazy(() => import('./components/PostListingWizard').then((module) => ({ default: module.PostListingWizard })));
 const ProviderDashboard = lazy(() => import('./components/ProviderDashboard').then((module) => ({ default: module.ProviderDashboard })));
 const ProviderOnboardingForm = lazy(() => import('./components/ProviderOnboardingForm').then((module) => ({ default: module.ProviderOnboardingForm })));
+const VenueOwnerWorkspace = lazy(() => import('./components/VenueOwnerWorkspace').then((module) => ({ default: module.VenueOwnerWorkspace })));
+const ClassBatchManager = lazy(() => import('./components/ClassBatchManager').then((module) => ({ default: module.ClassBatchManager })));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
 const PaymentModal = lazy(() => import('./components/PaymentModal').then((module) => ({ default: module.PaymentModal })));
 const VoiceRegistrationModal = lazy(() => import('./components/VoiceRegistrationModal').then((module) => ({ default: module.VoiceRegistrationModal })));
@@ -505,6 +510,7 @@ function MarketplaceAppContent() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const shouldLoadAuthModal = useLazyAfterOpen(isAuthModalOpen);
   const [isLoginPageOpen, setIsLoginPageOpen] = useState<boolean>(() => window.location.hash.replace('#', '').toLowerCase() === 'login');
+  const [authAccessConfig, setAuthAccessConfig] = useState<AuthAccessConfig | null>(null);
   const [isProviderOnboardingOpen, setIsProviderOnboardingOpen] = useState(false);
   const [entryExperience, setEntryExperience] = useState<'loading' | 'welcome' | 'ready'>(() => {
     try {
@@ -518,7 +524,7 @@ function MarketplaceAppContent() {
   const [homeSearchFocused, setHomeSearchFocused] = useState(false);
   const serverAuthReady = useRef(false);
   const [isMapExplorerOpen, setIsMapExplorerOpen] = useState<boolean>(false);
-  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile } = useMarketplace();
+  const { favoriteIds, toggleFavorite, supabaseUser, authUser, authoritativeSessionChecked, isAccountBlocked, blockedReason, logoutGoogleSession, updateUserProfile, customerModules, customerModuleGrants, customerModulesChecked } = useMarketplace();
   // The admin console is a protected route: only a signed-in admin identity may open it.
   const isAdminSession = canAccessAdminConsole(authUser?.role);
   const [instituteAccessChecked, setInstituteAccessChecked] = useState(false);
@@ -541,6 +547,58 @@ function MarketplaceAppContent() {
     });
     return () => { cancelled = true; };
   }, [authUser, authoritativeSessionChecked, setUserRole]);
+
+  // Section and action detail behind the customer allow-list. Null means the
+  // account holds no grant rows, which keeps the legacy unrestricted contract
+  // (the same rule the server applies in src/server/customerPermissions.ts).
+  const customerAccessScope = useMemo<AccessScope | null>(() => {
+    if (authUser?.role !== 'customer' || !customerModulesChecked) return null;
+    if (customerModuleGrants.length === 0) return null;
+    return accessScopeFrom({
+      allowed_modules: customerModules,
+      allowed_sections: {},
+      allowed_actions: {},
+    });
+  }, [authUser?.role, customerModuleGrants, customerModulesChecked, customerModules]);
+
+  // Sections a signed-in customer is allowed to open. Null means "no customer
+  // restriction in effect" (guest, provider, admin, or not yet resolved).
+  const customerAuthorizedSections = useMemo<MarketSectionType[] | null>(() => {
+    if (authUser?.role !== 'customer' || !customerModulesChecked) return null;
+    return customerModules
+      .filter((key): key is CustomerModuleKey => isCustomerModuleKey(key))
+      .filter((key) => actionGranted(customerAccessScope, key, 'view'))
+      .map((key) => sectionForModuleKey(key))
+      .filter((section): section is MarketSectionType => Boolean(section));
+  }, [authUser?.role, customerModules, customerAccessScope, customerModulesChecked]);
+
+  // Public sign-in switches are administrator-controlled. Fetch once on boot
+  // and refresh whenever an admin changes them in another surface.
+  useEffect(() => {
+    let mounted = true;
+    const applyConfig = (config: AuthAccessConfig) => {
+      if (!mounted) return;
+      setAuthAccessConfig(config);
+      try {
+        if (config.available && config.guestLoginEnabled) {
+          localStorage.setItem('bos_guest_login_enabled_v1', '1');
+        } else {
+          localStorage.removeItem('bos_guest_login_enabled_v1');
+        }
+      } catch {
+        // Private browsing can disable storage; React still gates the button.
+      }
+    };
+    void fetchAuthAccessConfig().then(applyConfig);
+    const refresh = () => {
+      void fetchAuthAccessConfig({ force: true }).then(applyConfig);
+    };
+    window.addEventListener('bos-auth-access-updated', refresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener('bos-auth-access-updated', refresh);
+    };
+  }, []);
 
   // Role-based routing on Google OAuth sign-in, logout redirect, & protected route enforcement
   useEffect(() => {
@@ -589,7 +647,11 @@ function MarketplaceAppContent() {
       if (pathToken) setPublicTrackToken(pathToken);
       const hash = window.location.hash.replace('#', '').toLowerCase();
       const decision = resolveSectionHashNavigation(window.location.hash, appliedSectionHashRef.current);
-      appliedSectionHashRef.current = hash;
+      // A protected deep link that arrives before the session hydrates must not
+      // be recorded as handled: the effect re-runs when authUser resolves, and
+      // the retained hash is what lets #provider/#admin apply then.
+      const deferredForAuth = !authUser && (decision.action === 'provider' || decision.action === 'admin');
+      if (!deferredForAuth) appliedSectionHashRef.current = hash;
       if (decision.action === 'track') {
         setPublicTrackToken(decision.token);
         return;
@@ -600,28 +662,54 @@ function MarketplaceAppContent() {
         return;
       }
       setIsLoginPageOpen(false);
+      // Customer-specific module access: a signed-in customer may open only the
+      // sections whose module an administrator granted. Providers and admins are
+      // not constrained; guests see whatever the global module flags allow.
+      const customerRestricted = authUser?.role === 'customer' && customerModulesChecked;
+      const canEnterSection = (section: MarketSectionType): boolean => {
+        if (!customerRestricted) return true;
+        const key = moduleKeyForSection(section);
+        if (!key) return true;
+        return permissionGranted(customerAccessScope, {
+          moduleKey: key,
+          action: 'view',
+          sectionKey: section,
+        });
+      };
+      const blockSection = () => {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+        setActiveView('marketplace');
+        setOpenSection(null);
+        showToast('🔒 This module is not available for your account.');
+      };
       if (decision.action === 'open' && decision.section === 'pg_hostels') {
+        if (!canEnterSection('pg_hostels')) { blockSection(); return; }
         setActiveMarketSection('pg_hostels');
         setOpenSection('pg_hostels');
       } else if (decision.action === 'open' && decision.section === 'services') {
+        if (!canEnterSection('services')) { blockSection(); return; }
         canonicalizeServicesHash();
         setSectionStylesState((previous) => ({ ...previous, services: 'triangle' }));
         setActiveMarketSection('services');
         setOpenSection('services');
       } else if (decision.action === 'open' && decision.section === 'hotel_stay') {
+        if (!canEnterSection('hotel_stay')) { blockSection(); return; }
         setActiveMarketSection('hotel_stay');
         setOpenSection('hotel_stay');
       } else if (decision.action === 'open' && decision.section === 'classes') {
+        if (!canEnterSection('classes')) { blockSection(); return; }
         if (decision.classesStyle) {
           setSectionStylesState((previous) => ({ ...previous, classes: decision.classesStyle === 'style4' ? 'style4' : 'style3' }));
         }
         setActiveMarketSection('classes');
         setOpenSection('classes');
       } else if (decision.action === 'open' && decision.section === 'venues') {
+        if (!canEnterSection('venues')) { blockSection(); return; }
         setSectionStylesState((previous) => ({ ...previous, venues: 'agenda' }));
         setActiveMarketSection('venues');
         setOpenSection(null);
       } else if (decision.action === 'open' && decision.section === 'movies') {
+        if (!canEnterSection('movies')) { blockSection(); return; }
         const [, rawStyle = ''] = hash.split('/');
         const routeStyleNumber = rawStyle === '1' || rawStyle === 'style1' ? 1
           : rawStyle === '2' || rawStyle === 'style2' ? 2
@@ -677,7 +765,7 @@ function MarketplaceAppContent() {
       window.removeEventListener('hashchange', applySectionHash);
       window.removeEventListener('popstate', applySectionHash);
     };
-  }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess]);
+  }, [isAdminSession, authUser, instituteAccessChecked, hasInstituteAccess, customerModulesChecked, customerAccessScope]);
 
   // Deep link: #venue-<id> opens the venue detail page directly (shareable links).
   useEffect(() => {
@@ -2065,7 +2153,12 @@ function MarketplaceAppContent() {
         <SpotlightModuleTabs
           activeMarketSection={activeMarketSection}
           compact
+          authorizedSections={customerAuthorizedSections}
           onSelectMarketSection={(section) => {
+              if (customerAuthorizedSections && !customerAuthorizedSections.includes(section)) {
+                showToast('🔒 This module is not available for your account.');
+                return;
+              }
               moduleHeaderStateRef.current[activeMarketSection] = { category: selectedCategory, subcategory: selectedSubcategory, search: searchQuery };
               const saved = moduleHeaderStateRef.current[section];
               setSelectedCategory(saved?.category ?? 'all');
@@ -2088,11 +2181,19 @@ function MarketplaceAppContent() {
     </header>
   );
 
-  const sharedMarketplaceHeader = homeEnhancementsReady && !homeSearchFocused ? (
+  // Above-the-fold chrome renders with the first paint. Deferring it behind
+  // useIdleReady swapped a 105px placeholder for the real 280px bar 1.2s later
+  // and pushed the whole page down (measured CLS 0.28 at 375x812).
+  const sharedMarketplaceHeader = !homeSearchFocused ? (
           <Suspense fallback={quickHomeHeader}>
           <CraftoTopServicesBar
             activeMarketSection={activeMarketSection}
+            authorizedSections={customerAuthorizedSections}
             onSelectMarketSection={(sec) => {
+              if (customerAuthorizedSections && !customerAuthorizedSections.includes(sec)) {
+                showToast('🔒 This module is not available for your account.');
+                return;
+              }
               moduleHeaderStateRef.current[activeMarketSection] = {
                 category: selectedCategory,
                 subcategory: selectedSubcategory,
@@ -2352,10 +2453,14 @@ function MarketplaceAppContent() {
       {/* 360° GLOBE-ROTATING 'O' LOADING SCREEN FOR BOS — BookOurSpace */}
       <BOSGlobeLoadingScreen />
 
-      {entryExperience !== 'ready' && !authUser && (
+      {/* `#login` is the same sign-in sheet as a full page. Rendering the
+          first-visit entry underneath it would stack two identical sheets and
+          let Escape close only one, so the entry waits until login closes. */}
+      {entryExperience !== 'ready' && !authUser && !isLoginPageOpen && (
         <Suspense fallback={null}>
           <BookOurSpaceEntryExperience
             mode={entryExperience}
+            guestLoginEnabled={authAccessConfig?.guestLoginEnabled === true}
             onDemoSignIn={async (role) => {
               try {
                 const response = await fetch('/api/dev/demo-session', {
@@ -2364,11 +2469,13 @@ function MarketplaceAppContent() {
                   body: JSON.stringify({ role }),
                 });
                 const data = await response.json().catch(() => ({}));
-                if (!response.ok || !data?.ok || !data.sessionToken || !data.user) {
+                if (!response.ok || !data?.ok || !data.csrfToken || !data.user) {
                   window.alert(data?.message || 'The local demo account is not available. Run npm run dev once to seed it.');
                   return;
                 }
-                setStoredAuthoritativeSession(data.sessionToken, data.user);
+                // The demo session arrives as an HttpOnly cookie; only the CSRF
+                // proof is handed back to the page.
+                setStoredAuthoritativeSession(data.csrfToken, data.user);
                 try { localStorage.setItem('bos_entry_choice_v1', 'signed-in'); } catch { /* ignore */ }
                 window.location.reload();
               } catch {
@@ -2379,6 +2486,21 @@ function MarketplaceAppContent() {
             onContinueAsGuest={() => {
               try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
               setEntryExperience('ready');
+            }}
+            onSelectService={(service) => {
+              // A shortcut on the sign-in screen opens that module as a guest;
+              // browsing never requires an account.
+              try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
+              setEntryExperience('ready');
+              const sectionByService: Record<string, MarketSectionType> = {
+                Movies: 'movies',
+                Classes: 'classes',
+                'Function Halls': 'venues',
+                Hotels: 'hotel_stay',
+                PG: 'pg_hostels',
+              };
+              const section = sectionByService[service];
+              if (section) setOpenSection(section);
             }}
           />
         </Suspense>
@@ -2442,7 +2564,7 @@ function MarketplaceAppContent() {
       )}
 
       {/* SCHEDULED TOP BANNER ANNOUNCEMENTS FROM SUPER ADMIN */}
-      {homeEnhancementsReady && !isBentoHomeScreen && (
+      {!isBentoHomeScreen && (
         <Suspense fallback={null}>
         <LiveScheduledAnnouncementsBanner
           placement="top_banner"
@@ -3104,7 +3226,7 @@ function MarketplaceAppContent() {
             <>
           {/* Main Content Area */}
           <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 space-y-5">
-          <AnimatePresence mode="wait" initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
               key={activeView}
               initial={{ opacity: 0, y: 8 }}
@@ -3149,6 +3271,20 @@ function MarketplaceAppContent() {
                 }
               />
             </SelfHealingBoundary>
+            {/* Module workspaces stay available next to the tabbed provider
+                dashboard: courses/batches and venues have no tab of their
+                own. Each gets its own boundary so one failure cannot hide
+                the other workspace. */}
+            {userRole === 'provider' && (
+              <SelfHealingBoundary moduleId="provider_classes_module" moduleName="Classes Batch Manager">
+                <ClassBatchManager />
+              </SelfHealingBoundary>
+            )}
+            {userRole === 'provider' && (
+              <SelfHealingBoundary moduleId="provider_venues_module" moduleName="Venue Owner Workspace">
+                <VenueOwnerWorkspace />
+              </SelfHealingBoundary>
+            )}
           </div>
         )}
 
@@ -3848,6 +3984,10 @@ function MarketplaceAppContent() {
                 <CategoryRailStreamExplorer
                   activeMarketSection={activeMarketSection}
                   onSelectMarketSection={(sec) => {
+                    if (customerAuthorizedSections && !customerAuthorizedSections.includes(sec)) {
+                      showToast('🔒 This module is not available for your account.');
+                      return;
+                    }
                     setActiveMarketSection(sec);
                     setSelectedCategory('all');
                     setSelectedSubcategory('all');
@@ -6243,8 +6383,8 @@ function MarketplaceAppContent() {
                       body: JSON.stringify({ role: 'admin' }),
                     });
                     const data = await response.json().catch(() => ({}));
-                    if (response.ok && data?.sessionToken) {
-                      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+                    if (response.ok && data?.csrfToken) {
+                      setStoredAuthoritativeSession(String(data.csrfToken || ''), data.user || null);
                       window.location.hash = '#admin';
                       window.location.reload();
                       return;
@@ -6805,6 +6945,13 @@ function MarketplaceAppContent() {
           onGoogle={() => {
             setIsLoginPageOpen(false);
             setIsAuthModalOpen(true);
+          }}
+          config={authAccessConfig}
+          onContinueAsGuest={() => {
+            try { localStorage.setItem('bos_entry_choice_v1', 'guest'); } catch { /* ignore storage failures */ }
+            setEntryExperience('ready');
+            setIsLoginPageOpen(false);
+            showToast('Browsing as guest. Sign in when you are ready to book or save.');
           }}
         />
         </Suspense>

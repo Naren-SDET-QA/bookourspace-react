@@ -8,15 +8,16 @@ async function read(relativePath) {
 
 test('every registry deep link has a handler in the app shell', async () => {
   const registry = await read('../src/modules/registry.ts');
-  const app = await read('../src/App.tsx');
+  // Hash classification moved out of the app shell into the shared router.
+  const router = await read('../src/lib/sectionRouteHash.ts');
 
   const routes = [...registry.matchAll(/route:\s*'#([a-z0-9-]+)'/g)].map((match) => match[1]);
   assert.ok(routes.length >= 6, `expected at least 6 deep links, found ${routes.length}`);
 
   for (const route of routes) {
     assert.ok(
-      app.includes(`hash === '${route}'`),
-      `registry deep link "#${route}" has no matching hash handler in src/App.tsx`
+      router.includes(`'${route}'`),
+      `registry deep link "#${route}" has no matching handler in src/lib/sectionRouteHash.ts`
     );
   }
 });

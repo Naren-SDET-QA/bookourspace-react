@@ -32,12 +32,15 @@ test('refused protected views fall back without granting a role', () => {
 
 test('a hash deep link cannot manufacture an admin role', async () => {
   const { readFile } = await import('node:fs/promises');
+  // Hash classification lives in the shared router; the shell applies guards.
+  const router = await readFile(new URL('../src/lib/sectionRouteHash.ts', import.meta.url), 'utf8');
+  assert.match(router, /current === 'admin' \|\| current\.startsWith\('admin\/'\)/);
   const source = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  const adminStart = source.indexOf("hash === 'admin' || hash.startsWith('admin/')");
+  const adminStart = source.indexOf("decision.action === 'admin'");
   assert.ok(adminStart > 0, 'the admin hash branch must exist');
   // Slice to the branch boundary instead of a fixed character window so a
   // descriptive comment can never hide (or accidentally satisfy) the guard.
-  const adminEnd = source.indexOf("} else if (!hash.startsWith('venue-') && hashChanged)", adminStart);
+  const adminEnd = source.indexOf("decision.action === 'close-sections'", adminStart);
   assert.ok(adminEnd > adminStart, 'the admin hash branch must end before the fallback branch');
   const adminHashBlock = source.slice(adminStart, adminEnd);
 

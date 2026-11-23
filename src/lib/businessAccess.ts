@@ -243,6 +243,7 @@ export const PROVIDER_ROUTE_MODULES: ReadonlyArray<{ prefix: string; module: Acc
   { prefix: '/api/stays/host', module: 'hotel_stay' },
   { prefix: '/api/stays/bookings', module: 'hotel_stay' },
   { prefix: '/api/movies/screens', module: 'movies' },
+  { prefix: '/api/movies/showtimes', module: 'movies' },
   { prefix: '/api/venue-bookings', module: 'venues' },
   { prefix: '/api/pg/bookings', module: 'pg_hostels' },
   { prefix: '/api/provider/pg', module: 'pg_hostels' },
@@ -352,6 +353,7 @@ const PROVIDER_SECTION_PREFIX_ROWS = [
   { prefix: '/api/pg/bookings', moduleKey: 'pg_hostels', sectionKey: 'bookings' },
   // Movies: src/server/moviesShowtimesApi.ts / server.ts
   { prefix: '/api/movies/screens', moduleKey: 'movies', sectionKey: 'screens' },
+  { prefix: '/api/movies/showtimes', moduleKey: 'movies', sectionKey: 'showtimes' },
   { prefix: '/api/movies/support', moduleKey: 'movies', sectionKey: 'support' },
   { prefix: '/api/movies/bookings', moduleKey: 'movies', sectionKey: 'bookings' },
   // Venues: src/server/venueBookingsApi.ts
