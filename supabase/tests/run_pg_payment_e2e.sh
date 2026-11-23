@@ -97,6 +97,7 @@ trap cleanup EXIT
 start_server() {
   BOS_LISTINGS_DATABASE_URL="postgres://postgres@127.0.0.1:$PGPORT/$DB?sslmode=disable" \
   BOS_SERVER_HMAC_SECRET="$SESSION_SECRET" \
+  BOS_GUEST_LOGIN_ENABLED=1 \
   BOS_PAYMENT_SANDBOX=1 \
   BOS_PAYMENT_SANDBOX_SECRET="$SANDBOX_SECRET" \
   BOS_UPI_MERCHANT_VPA="bookourspace@okhdfcbank" \
@@ -268,6 +269,20 @@ insert into public.profiles (id, email, full_name, role, account_status, is_supe
   ('$UUID_C', 'customer.c@example.test', 'Customer C', 'customer', 'active', false)
 on conflict (id) do update set role = excluded.role, account_status = 'active',
   is_super_admin = excluded.is_super_admin;
+
+-- The access-control engine seeds new customer profiles with ["view"] only.
+-- These customers drive booking/payment journeys, so they need the
+-- same explicit grant the PG integration wrapper writes.
+insert into public.customer_module_access (user_id, module_key, allowed_sections, allowed_actions, grant_source)
+values
+  ('$UUID_A', 'pg', '[]'::jsonb, '["view","create","edit","delete"]'::jsonb, 'manual'),
+  ('$UUID_B', 'pg', '[]'::jsonb, '["view","create","edit","delete"]'::jsonb, 'manual'),
+  ('$UUID_C', 'pg', '[]'::jsonb, '["view","create","edit","delete"]'::jsonb, 'manual')
+on conflict (user_id, module_key) do update
+  set allowed_sections = excluded.allowed_sections,
+      allowed_actions = excluded.allowed_actions,
+      grant_source = 'manual',
+      expires_at = null;
 
 insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status)
 values ('$LISTING', '$UUID_PROVIDER', 'Sunrise PG for Women', 'pg-girls', 'Double Sharing', 'pg', 8000, 'per month', 'active')

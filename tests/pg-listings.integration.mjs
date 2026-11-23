@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { sessionCookieHeaders } from './lib/session-cookies.mjs';
 
 /**
  * HTTP-level integration assertions for the PostgreSQL provider listing slice.
@@ -8,7 +9,7 @@ import crypto from 'node:crypto';
  * Usage: node tests/pg-listings.integration.mjs <phase1|phase2> <baseUrl> <secret> <uuidA> <uuidB> <uuidAdmin> <uuidCustomer>
  */
 
-const [, , phase, baseUrl, secret, A, B, ADMIN, CUSTOMER] = process.argv;
+const [, , phase, baseUrl, secret, A, B, ADMIN, CUSTOMER, BIZ_A, BIZ_A_CLASSES, BIZ_B] = process.argv;
 const failures = [];
 let checks = 0;
 
@@ -72,18 +73,35 @@ const tokenCustomer = sign({
   role: 'customer',
   authProvider: 'google',
 });
-// No UUID anywhere: the route must refuse to guess an identity.
-const tokenUnmapped = sign({
-  userId: 'USR-NO-UUID',
+// The route must refuse to guess an identity. Two shapes are covered because
+// the provider gate now answers the documented fail-closed contract for both:
+//   * no subject at all           -> rejected by session-claim validation
+//   * a valid UUID with no profile -> rejected by the gate's authoritative
+//     profile re-read
+// The `POSTGRES_IDENTITY_UNMAPPED` branch in providerListingsApi.ts is no longer
+// reachable for this endpoint: the gate is mounted on /api/provider ahead of the
+// handler, so a caller with no usable identity never reaches that branch.
+const tokenNoSubject = sign({
   email: 'nomap@example.test',
   name: 'No UUID',
   role: 'provider',
   authProvider: 'google',
 });
+const tokenUnknownIdentity = sign({
+  userId: 'USR-UNKNOWN',
+  supabaseUserId: '99999999-9999-4999-8999-999999999999',
+  email: 'unknown@example.test',
+  name: 'Unknown Identity',
+  role: 'provider',
+  authProvider: 'google',
+});
 
-async function call(method, path, token, body) {
+async function call(method, path, token, body, businessId) {
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['x-bos-session-token'] = token;
+  if (token) Object.assign(headers, sessionCookieHeaders(token, secret));
+  // A provider who owns more than one business selects the context explicitly;
+  // a single-business provider has it derived server-side.
+  if (businessId) headers['x-business-id'] = businessId;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers,
@@ -126,7 +144,7 @@ async function phase1() {
     // Hostile client input: must be ignored in favour of the session identity.
     ownerUserId: B,
     userId: B,
-  });
+  }, BIZ_A);
   check('provider A create is 201', created.status === 201, `got ${created.status} ${JSON.stringify(created.body)}`);
   const listing = created.body?.listing || {};
   check('create preserves category', listing.categoryId === 'pg-boys', listing.categoryId);
@@ -146,7 +164,7 @@ async function phase1() {
     categoryId: 'pg-boys',
     subcategory: 'Single Sharing',
     price: 7200,
-  });
+  }, BIZ_A);
   check('same requestId replays the original row', replay.status === 200 && replay.body?.listing?.id === LISTING_A, `${replay.status} ${replay.body?.listing?.id}`);
   check('replay is flagged idempotent', replay.body?.idempotent === true, String(replay.body?.idempotent));
 
@@ -157,7 +175,7 @@ async function phase1() {
     categoryId: 'pg-boys',
     subcategory: 'Double Sharing',
     price: 1,
-  });
+  }, BIZ_A);
   check('duplicate id with a new requestId is 409', duplicateId.status === 409, `got ${duplicateId.status} ${JSON.stringify(duplicateId.body)}`);
 
   const second = await call('POST', '/api/provider/listings', tokenA, {
@@ -168,7 +186,7 @@ async function phase1() {
     subcategory: 'UPSC',
     price: 3500,
     ownerUserId: B,
-  });
+  }, BIZ_A_CLASSES);
   check('A can create a second listing', second.status === 201, `got ${second.status}`);
   check('derived entity type for a course', second.body?.listing?.entityType === 'course', second.body?.listing?.entityType);
   check('second listing still owned by A', second.body?.listing?.ownerUserId === A, second.body?.listing?.ownerUserId);
@@ -198,14 +216,14 @@ async function phase1() {
   const stale = await call('PATCH', `/api/provider/listings/${LISTING_A}`, tokenA, {
     title: 'Stale write',
     expectedUpdatedAt: '2000-01-01T00:00:00.000Z',
-  });
+  }, BIZ_A);
   check('stale expectedUpdatedAt is 409', stale.status === 409, `got ${stale.status}`);
 
   const updated = await call('PATCH', `/api/provider/listings/${LISTING_A}`, tokenA, {
     title: 'A PG Listing (updated)',
     price: 7800,
     payload: { area: 'Gachibowli' },
-  });
+  }, BIZ_A);
   check('owner can update title', updated.status === 200 && updated.body?.listing?.title === 'A PG Listing (updated)', `${updated.status} ${updated.body?.listing?.title}`);
   check('update keeps price unit', updated.body?.listing?.priceUnit === 'per month', updated.body?.listing?.priceUnit);
   check('update keeps entity type', updated.body?.listing?.entityType === 'property', updated.body?.listing?.entityType);
@@ -213,14 +231,25 @@ async function phase1() {
 
   const selfApprove = await call('PATCH', `/api/provider/listings/${LISTING_A}`, tokenA, {
     status: 'active',
-  });
+  }, BIZ_A);
   check('provider cannot self-approve', selfApprove.status === 403, `got ${selfApprove.status}`);
 
   const customer = await call('GET', '/api/provider/listings', tokenCustomer);
   check('customer cannot use provider listings API', customer.status === 403, `got ${customer.status}`);
 
-  const unmapped = await call('GET', '/api/provider/listings', tokenUnmapped);
-  check('unmapped identity is refused', unmapped.status === 403 && unmapped.body?.error === 'POSTGRES_IDENTITY_UNMAPPED', `${unmapped.status} ${unmapped.body?.error}`);
+  const noSubject = await call('GET', '/api/provider/listings', tokenNoSubject);
+  check(
+    'a session with no subject is refused',
+    noSubject.status === 401 && noSubject.body?.error === 'UNAUTHORIZED_SESSION',
+    `${noSubject.status} ${noSubject.body?.error}`
+  );
+
+  const unmapped = await call('GET', '/api/provider/listings', tokenUnknownIdentity);
+  check(
+    'an unprovisioned Auth identity is refused',
+    unmapped.status === 401 && unmapped.body?.error === 'UNAUTHORIZED_SESSION',
+    `${unmapped.status} ${unmapped.body?.error}`
+  );
 
   const adminList = await call('GET', '/api/provider/listings', tokenAdmin);
   const adminIds = (adminList.body?.listings || []).map((entry) => entry.id).sort();
@@ -234,7 +263,7 @@ async function phase1() {
 async function phase2() {
   console.log('PHASE 2 — after server restart: persistence and isolation');
 
-  const aList = await call('GET', '/api/provider/listings', tokenA);
+  const aList = await call('GET', '/api/provider/listings', tokenA, undefined, BIZ_A);
   const ids = (aList.body?.listings || []).map((entry) => entry.id);
   check('listing survives server restart', aList.status === 200 && ids.includes(LISTING_A), `${aList.status} ${JSON.stringify(ids)}`);
   const persisted = (aList.body?.listings || []).find((entry) => entry.id === LISTING_A) || {};
@@ -250,13 +279,21 @@ async function phase2() {
   const deactivateForeign = await call('DELETE', `/api/provider/listings/${LISTING_A}`, tokenB);
   check('provider B still cannot deactivate after restart', deactivateForeign.status === 404, `got ${deactivateForeign.status}`);
 
-  const deactivated = await call('DELETE', `/api/provider/listings/${LISTING_A}`, tokenA);
+  const deactivated = await call('DELETE', `/api/provider/listings/${LISTING_A}`, tokenA, undefined, BIZ_A);
   check('owner can deactivate', deactivated.status === 200 && deactivated.body?.listing?.status === 'archived', `${deactivated.status} ${deactivated.body?.listing?.status}`);
 
-  const after = await call('GET', '/api/provider/listings', tokenA);
+  const after = await call('GET', '/api/provider/listings', tokenA, undefined, BIZ_A);
   const archived = (after.body?.listings || []).find((entry) => entry.id === LISTING_A);
   check('deactivated listing remains visible to its owner as archived', archived?.status === 'archived', archived?.status);
-  check('second listing is untouched by deactivation', (after.body?.listings || []).some((entry) => entry.id === LISTING_A2 && entry.status === 'pending_approval'));
+  // Each business lists only its own module's listings, so the course listing is
+  // read through the classes business rather than the PG one.
+  const afterClasses = await call('GET', '/api/provider/listings', tokenA, undefined, BIZ_A_CLASSES);
+  check(
+    'second listing is untouched by deactivation',
+    (afterClasses.body?.listings || []).some((entry) => entry.id === LISTING_A2 && entry.status === 'pending_approval'),
+    JSON.stringify((afterClasses.body?.listings || []).map((entry) => entry.id))
+  );
+  check('deactivation did not leak into the other business', (after.body?.listings || []).every((entry) => entry.id !== LISTING_A2));
 }
 
 try {

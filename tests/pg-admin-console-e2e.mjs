@@ -5,6 +5,7 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { csrfForSession } from './lib/session-cookies.mjs';
 
 /**
  * Actual Admin console browser journey against the throwaway PostgreSQL server
@@ -48,11 +49,16 @@ ui.use(async (request, response, next) => {
       headers: {
         accept: request.get('accept') || 'application/json',
         ...(request.get('content-type') ? { 'content-type': request.get('content-type') } : {}),
-        ...(request.get('authorization') ? { authorization: request.get('authorization') } : {}),
+        ...(request.get('cookie') ? { cookie: request.get('cookie') } : {}),
+        ...(request.get('x-bos-csrf') ? { 'x-bos-csrf': request.get('x-bos-csrf') } : {}),
       },
       ...(request.method === 'GET' || request.method === 'HEAD' ? {} : { body: JSON.stringify(request.body ?? {}) }),
     });
     response.status(upstream.status);
+    // The session cookie is re-issued by /api/auth/me, so the proxy has to
+    // hand the browser the refreshed value.
+    const setCookie = upstream.headers.getSetCookie?.() ?? [];
+    if (setCookie.length) response.setHeader('set-cookie', setCookie);
     response.type(upstream.headers.get('content-type') || 'application/json');
     response.send(Buffer.from(await upstream.arrayBuffer()));
   } catch {
@@ -72,21 +78,36 @@ let applicantContext;
 let adminContext;
 let providerContext;
 
+async function setSessionCookie(context, token) {
+  // The session is an HttpOnly cookie now: page script cannot set or read it,
+  // so the harness writes it the way the browser does, at the context level.
+  await context.addCookies([
+    { name: 'bos_session', value: token, domain: '127.0.0.1', path: '/', httpOnly: true, sameSite: 'Lax' },
+  ]);
+}
+
 async function contextWithSession(token, viewport = { width: 1440, height: 900 }) {
   const context = await browser.newContext({ viewport });
-  await context.addInitScript((value) => localStorage.setItem('bos_session_token_v1', value), token);
+  await setSessionCookie(context, token);
   return context;
 }
 
 async function assertApi(page, route, method, token, body) {
-  return page.evaluate(async ({ route, method, token, body }) => {
+  const context = page.context();
+  // Pin the identity for this call, then prove it the way the browser does:
+  // the cookie authenticates and an unsafe method carries the CSRF proof.
+  if (token) await setSessionCookie(context, token);
+  const csrf = token ? csrfForSession(token, sessionSecret) : undefined;
+  return page.evaluate(async ({ route, method, csrf, body }) => {
+    const headers = { 'content-type': 'application/json' };
+    if (csrf && method !== 'GET' && method !== 'HEAD') headers['x-bos-csrf'] = csrf;
     const response = await fetch(route, {
       method,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: response.status, body: await response.json().catch(() => null) };
-  }, { route, method, token, body });
+  }, { route, method, csrf, body });
 }
 
 async function gotoMarketplace(page, hash) {
@@ -116,8 +137,25 @@ try {
   await applicationDialog.getByLabel('Business contact phone').fill('+91 90000 55667');
   await applicationDialog.getByLabel('City').fill('E2E Test City');
   await applicationDialog.getByLabel('Area / locality').fill('Browser Test Area');
+  // Strict PG activation requires a complete property application: the browser
+  // blocks the submit until every required field below has a value, so the
+  // journey must fill them the same way a real owner would.
+  await applicationDialog.getByLabel(/Full property address/).fill('12 Browser Test Road, E2E Test City');
+  await applicationDialog.getByLabel(/PIN code/).fill('560001');
+  await applicationDialog.getByLabel(/^For/).selectOption('any');
+  await applicationDialog.getByLabel(/Room type/).selectOption('single');
+  await applicationDialog.getByLabel(/Total beds/).fill('10');
+  await applicationDialog.getByLabel(/Monthly rent/).fill('9000');
+  await applicationDialog.getByPlaceholder('Photo 1 URL').fill('https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=800&q=80');
   await applicationDialog.getByRole('button', { name: 'Submit provider application' }).click();
-  await applicationDialog.getByRole('status').filter({ hasText: 'Pending administrator review.' }).waitFor({ timeout: 20_000 });
+  try {
+    await applicationDialog.getByRole('status').filter({ hasText: 'Pending administrator review.' }).waitFor({ timeout: 20_000 });
+  } catch (reason) {
+    // Diagnose the real dialog state instead of only reporting a locator timeout.
+    const text = await applicationDialog.innerText().catch(() => '<unreadable>');
+    console.error('DIAGNOSTIC provider application dialog:', JSON.stringify(text));
+    throw reason;
+  }
   console.log('PASS provider submits a PG application in the real customer UI');
 
   // Admin activates the applicant using the actual Super Admin console.
@@ -190,10 +228,11 @@ try {
   const refreshed = await assertApi(applicantPage, '/api/auth/me', 'GET', applicantToken);
   assert.equal(refreshed.status, 200, JSON.stringify(refreshed.body));
   assert.equal(refreshed.body?.user?.role, 'provider');
-  assert.ok(refreshed.body?.sessionToken);
-  await applicantPage.evaluate((token) => localStorage.setItem('bos_session_token_v1', token), refreshed.body.sessionToken);
+  assert.equal(refreshed.body?.claims?.role, 'provider');
+  const refreshedCookie = (await applicantContext.cookies()).find((cookie) => cookie.name === 'bos_session');
+  assert.ok(refreshedCookie?.value, 'the refresh re-issues the session cookie');
 
-  const created = await assertApi(applicantPage, '/api/provider/listings', 'POST', refreshed.body.sessionToken, {
+  const created = await assertApi(applicantPage, '/api/provider/listings', 'POST', refreshedCookie.value, {
     id: listingId,
     requestId: crypto.randomUUID(),
     categoryId: 'pg-boys',
@@ -221,15 +260,17 @@ try {
 
   // The owner can now reach the same PostgreSQL editor directly from the
   // authenticated provider portal, without navigating the customer catalogue.
-  providerContext = await contextWithSession(refreshed.body.sessionToken);
+  providerContext = await contextWithSession(refreshedCookie.value);
   const providerPage = await providerContext.newPage();
   await gotoMarketplace(providerPage, '');
   await providerPage.getByRole('button', { name: /Provider Hub/ }).click();
-  await providerPage.getByRole('heading', { name: /Provider & Seller Hub/ }).waitFor({ timeout: 20_000 });
-  await providerPage.getByTestId('provider-pg-inventory-tab').click();
-  const providerPgCard = providerPage.getByTestId(`provider-pg-listing-${listingId}`);
-  await providerPgCard.waitFor({ timeout: 20_000 });
-  const providerInventoryEditor = providerPgCard.locator('details').filter({ has: providerPage.getByText('Manage room and bed inventory') });
+  // The portal opens on the PG owner console; inventory is managed per
+  // property under Rooms & beds, backed by the same PostgreSQL endpoints.
+  await providerPage.getByRole('heading', { name: 'PG Owner Dashboard' }).waitFor({ timeout: 30_000 });
+  await providerPage.locator('select').filter({ hasText: 'All PG properties' }).selectOption(listingId);
+  await providerPage.getByRole('button', { name: 'Rooms & beds', exact: true }).click();
+  await providerPage.getByText('Manage room and bed inventory').waitFor({ timeout: 20_000 });
+  const providerInventoryEditor = providerPage.locator('details').filter({ has: providerPage.getByText('Manage room and bed inventory') });
   await providerInventoryEditor.locator('summary').click();
   await providerInventoryEditor.getByRole('button', { name: 'Add room type' }).click();
   await providerInventoryEditor.getByLabel('Room / sharing type').fill('Provider Portal Twin Sharing');
@@ -238,12 +279,12 @@ try {
   await providerInventoryEditor.getByLabel('Occupants per bed').fill('2');
   await providerInventoryEditor.getByLabel('Bed labels, comma-separated').fill('Portal Bed A, Portal Bed B');
   await providerInventoryEditor.getByRole('button', { name: 'Create room type' }).click();
-  await providerPgCard.getByRole('status').filter({ hasText: 'Availability now comes from PostgreSQL' }).waitFor({ timeout: 20_000 });
-  await providerPgCard.getByText('Provider Portal Twin Sharing', { exact: true }).waitFor();
+  await providerPage.getByRole('status').filter({ hasText: 'Availability now comes from PostgreSQL' }).waitFor({ timeout: 20_000 });
+  await providerPage.getByText('Provider Portal Twin Sharing', { exact: true }).first().waitFor();
   await providerInventoryEditor.getByLabel('Room type to edit').selectOption({ label: 'Provider Portal Twin Sharing · 2 bed(s)' });
   await providerInventoryEditor.getByLabel('Monthly rent (₹)').fill('9500');
   await providerInventoryEditor.getByRole('button', { name: 'Save inventory' }).click();
-  await providerPgCard.getByRole('status').filter({ hasText: 'Availability now comes from PostgreSQL' }).waitFor({ timeout: 20_000 });
+  await providerPage.getByRole('status').filter({ hasText: 'Availability now comes from PostgreSQL' }).waitFor({ timeout: 20_000 });
   const updatedProviderInventory = await assertApi(
     providerPage,
     `/api/pg/listings/${encodeURIComponent(listingId)}/inventory?moveIn=${futureDate(30)}&months=1`,
@@ -252,11 +293,12 @@ try {
   );
   assert.equal(updatedProviderInventory.status, 200, JSON.stringify(updatedProviderInventory.body));
   assert.equal(updatedProviderInventory.body?.roomTypes?.[0]?.monthlyRentPaise, 950000);
-  await providerPgCard.getByLabel('Move-in date').fill(futureDate(30));
-  await providerPgCard.getByRole('button', { name: 'Check live availability' }).click();
-  await providerPgCard.getByText('2 available of 2 beds', { exact: false }).waitFor({ timeout: 20_000 });
-  const providerBlocks = providerPgCard.getByRole('region', { name: 'Block PG bed dates' });
+  await providerPage.getByLabel('Move-in date').fill(futureDate(30));
+  await providerPage.getByRole('button', { name: 'Check live availability' }).click();
+  await providerPage.getByText('2 available of 2 beds', { exact: false }).waitFor({ timeout: 20_000 });
+  const providerBlocks = providerPage.locator('details[aria-label="Block PG bed dates"]');
   await providerBlocks.waitFor({ timeout: 20_000 });
+  await providerBlocks.locator('summary').click();
   const blockStart = futureDate(90);
   await providerBlocks.getByLabel('Bed to block').selectOption({ label: 'Provider Portal Twin Sharing · Portal Bed A' });
   await providerBlocks.getByLabel('Block start date').fill(blockStart);
@@ -356,7 +398,15 @@ try {
   await bookings.getByRole('status').filter({ hasText: /cancelled.*0.*refunded/i }).waitFor({ timeout: 15_000 });
   console.log('PASS customer books unpaid, sees My Bookings, cancels without a refund claim');
 
+  // Resident reservations now live in the owner console's Bookings section.
+  // The provider portal rail and the owner console rail both expose a
+  // "Bookings" button, so the owner console navigation is addressed explicitly.
+  await providerPage
+    .getByRole('navigation', { name: 'Owner sections' })
+    .getByRole('button', { name: 'Bookings', exact: true })
+    .click();
   const providerBookings = providerPage.getByRole('region', { name: 'PG bookings' });
+  await providerBookings.waitFor({ timeout: 20_000 });
   await providerBookings.getByRole('button', { name: 'Refresh', exact: true }).click();
   const ownerReservation = providerBookings.locator('article').filter({ hasText: listingTitle });
   await ownerReservation.waitFor({ timeout: 15_000 });

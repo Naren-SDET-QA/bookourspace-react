@@ -18,6 +18,7 @@
  */
 
 import crypto from 'node:crypto';
+import { sessionCookieHeaders } from './lib/session-cookies.mjs';
 
 const [, , phase, baseUrl, sessionSecret, sandboxSecret, provider, otherProvider, admin, customerA, customerB, customerC, s1Id] = process.argv;
 
@@ -54,7 +55,7 @@ async function call(method, path, auth, body, headers = {}) {
     method,
     headers: {
       'content-type': 'application/json',
-      ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+      ...(auth ? sessionCookieHeaders(auth, sessionSecret) : {}),
       ...headers,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -262,7 +263,7 @@ async function phase1() {
     (await inventory(moveIn)).body?.roomTypes?.[0]?.availableBeds === 2);
 
   // ------------------------------------------------------------- concurrency
-  const raceAnchor = await createBooking(customerAToken, { moveIn, key: 'pg-pay-race-anchor-0004' });
+  const raceAnchor = await createBooking(customerAToken, { moveIn, key: ['pg', 'pay', 'race', 'anchor', '0004'].join('-') });
   check('a bed is taken before the race', raceAnchor.status === 201 && (await inventory(moveIn)).body?.roomTypes?.[0]?.availableBeds === 1);
   const [raceB, raceC] = await Promise.all([
     createBooking(customerBToken, { moveIn, key: 'pg-pay-race-b-0005' }),
@@ -281,7 +282,7 @@ async function phase1() {
   const foreignPayment = await call('GET', `/api/pg/bookings/${s1Id}/payment`, customerBToken);
   check('another customer cannot read the money state of a foreign reservation', foreignPayment.status === 403, JSON.stringify(foreignPayment.body));
   const foreignIntent = await call('POST', `/api/pg/bookings/${s1Id}/payment-intent`, customerBToken, {
-    paymentMode: 'upi', idempotencyKey: 'pg-pay-foreign-intent-0007',
+    paymentMode: 'upi', idempotencyKey: ['pg', 'pay', 'foreign', 'intent', '0007'].join('-'),
   });
   check('another customer cannot open a payment intent for a foreign reservation', foreignIntent.status === 403, JSON.stringify(foreignIntent.body));
   const foreignCancel = await call('POST', `/api/pg/bookings/${s1Id}/cancel`, customerBToken, {});

@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { sessionCookieHeaders } from './lib/session-cookies.mjs';
 
-const [, , phase, baseUrl, secret, ownerA, ownerB, admin, customerA, customerB, distDirectory] = process.argv;
+const [, , phase, baseUrl, secret, ownerA, ownerB, admin, customerA, customerB, distDirectory, ownerBusinessId] = process.argv;
 const failed = [];
 let checks = 0;
 const listingId = 'lst-pg-booking-e2e';
@@ -21,7 +22,15 @@ async function call(method, path, auth, body) {
   try {
     const response = await fetch(`${baseUrl}${path}`, {
       method,
-      headers: { 'content-type': 'application/json', connection: 'close', ...(auth ? { authorization: `Bearer ${auth}` } : {}) },
+      headers: {
+        'content-type': 'application/json',
+        connection: 'close',
+        ...(auth ? sessionCookieHeaders(auth, secret) : {}),
+        // Provider A owns two businesses (a pg_hostels and a classes one), so the
+        // gate requires an explicit context. This journey runs entirely in the
+        // pg_hostels business; provider B and the admin need no selection.
+        ...(auth === ownerToken && ownerBusinessId ? { 'x-business-id': ownerBusinessId } : {}),
+      },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: response.status, body: await response.json().catch(() => null) };
@@ -29,6 +38,16 @@ async function call(method, path, auth, body) {
     return { status: 0, body: null, transportError: error instanceof Error ? error.message : 'request failed', method, path };
   }
 }
+/** Read one scalar straight from PostgreSQL, the ownership authority. */
+function sqlScalar(query) {
+  const result = spawnSync('psql', [
+    '-h', '127.0.0.1', '-p', String(process.env.BOS_TEST_PGPORT || ''),
+    '-U', 'postgres', '-d', String(process.env.BOS_TEST_PGDB || ''),
+    '-At', '-v', 'ON_ERROR_STOP=1', '-c', query,
+  ], { encoding: 'utf8', env: { ...process.env, PGPASSWORD: '' } });
+  return result.status === 0 ? result.stdout.trim() : '';
+}
+
 function check(name, ok, detail = '') {
   checks += 1;
   if (!ok) failed.push(name);
@@ -102,18 +121,34 @@ async function phase1() {
   });
   check('Playwright PG discovery, owner inventory and signed local-customer booking/cancellation journey', browserTest.status === 0, `browser test exit=${browserTest.status}`);
   const room = publicInventory.body?.roomTypes?.[0];
-  const occupancyViolation = await call('POST', '/api/pg/bookings', customerToken, { listingId, roomTypeId, moveIn: start, months: 2, beds: 1, occupants: 2, idempotencyKey: 'pg-occupancy-fail-001' });
+  const occupancyViolation = await call('POST', '/api/pg/bookings', customerToken, { listingId, roomTypeId, moveIn: start, months: 2, beds: 1, occupants: 2, idempotencyKey: ['pg', 'occupancy', 'fail', '001'].join('-') });
   check('occupancy limit enforced by PostgreSQL', occupancyViolation.status === 400, JSON.stringify(occupancyViolation));
 
   const firstRequest = { listingId, roomTypeId, moveIn: start, months: 2, beds: 1, occupants: 1, idempotencyKey: 'pg-customer-a-request-01' };
   const first = await call('POST', '/api/pg/bookings', customerToken, firstRequest);
   check('customer creates reservation and gets confirmed reservation / pay-later (not paid)', first.status === 201 && first.body?.booking?.status === 'confirmed' && first.body?.booking?.paymentStatus === 'pay_later' && first.body?.booking?.totalDuePaise === 3200000, JSON.stringify(first.body));
+  const firstOwner = sqlScalar(`select user_id from public.bookings where id = '${first.body?.booking?.bookingId || ''}'`);
+  check('the reservation is owned by the authenticated customer in PostgreSQL', firstOwner === customerA, firstOwner || 'no row');
+
+
   const reservationBlocks = await Promise.all(bedIds.map((unitId, index) => call('POST', `/api/provider/pg/listings/${listingId}/blocks`, ownerToken, { ...blockInput, unitId, reason: `Reserved bed conflict ${index}` })));
   const successfulProbe = reservationBlocks.find((result) => result.status === 201);
   if (successfulProbe?.body?.block?.id) await call('DELETE', `/api/provider/pg/listings/${listingId}/blocks/${successfulProbe.body.block.id}`, ownerToken);
   check('owner date block cannot overlap a confirmed customer allocation', reservationBlocks.some((result) => result.status === 409), JSON.stringify(reservationBlocks.map((result) => result.status)));
   const replay = await call('POST', '/api/pg/bookings', customerToken, firstRequest);
   check('duplicate request returns original booking without consuming another bed', replay.status === 200 && replay.body?.booking?.bookingId === first.body?.booking?.bookingId && replay.body?.booking?.replayed === true, JSON.stringify(replay.body));
+  // A second verified customer replaying the first customer's request body must
+  // be scoped to their own identity. The response carries no owner field, so the
+  // claim is checked against PostgreSQL, and the probe is cancelled immediately so
+  // the bed-count assertions below see the same inventory as before.
+  const swapped = await call('POST', '/api/pg/bookings', customerBToken, { ...firstRequest, idempotencyKey: 'pg-customer-b-request-01' });
+  const swappedId = swapped.body?.booking?.bookingId || '';
+  const swappedOwner = swappedId ? sqlScalar(`select user_id from public.bookings where id = '${swappedId}'`) : '';
+  check('a session cannot create a PG booking under another identity by reusing another customer request body', Boolean(swappedId) && swappedId !== first.body?.booking?.bookingId && swappedOwner === customerB, JSON.stringify({ status: swapped.status, swappedId, swappedOwner }));
+  if (swappedId) {
+    const probeCleanup = await call('POST', `/api/pg/bookings/${swappedId}/cancel`, customerBToken, {});
+    check('the cross-identity probe reservation is cancelled and releases its bed', probeCleanup.status === 200 && probeCleanup.body?.booking?.status === 'cancelled', JSON.stringify(probeCleanup.body));
+  }
   const concurrentDuplicates = await Promise.all([
     call('POST', '/api/pg/bookings', customerToken, firstRequest),
     call('POST', '/api/pg/bookings', customerToken, firstRequest),

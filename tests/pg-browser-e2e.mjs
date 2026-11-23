@@ -29,11 +29,15 @@ ui.use(async (request, response, next) => {
       headers: {
         accept: request.get('accept') || 'application/json',
         ...(request.get('content-type') ? { 'content-type': request.get('content-type') } : {}),
-        ...(request.get('authorization') ? { authorization: request.get('authorization') } : {}),
+        ...(request.get('cookie') ? { cookie: request.get('cookie') } : {}),
+        ...(request.get('x-bos-csrf') ? { 'x-bos-csrf': request.get('x-bos-csrf') } : {}),
       },
       ...(request.method === 'GET' || request.method === 'HEAD' ? {} : { body: JSON.stringify(request.body ?? {}) }),
     });
     response.status(upstream.status);
+    // /api/auth/me re-issues the session cookie, so the browser must receive it.
+    const setCookie = upstream.headers.getSetCookie?.() ?? [];
+    if (setCookie.length) response.setHeader('set-cookie', setCookie);
     response.type(upstream.headers.get('content-type') || 'application/json');
     response.send(Buffer.from(await upstream.arrayBuffer()));
   } catch {
@@ -103,10 +107,13 @@ function attachBrowserDiagnostics(page, engineName, style) {
 async function printAvailabilityFailure(page, state, error) {
   const dom = await page.locator('body').innerText().catch(() => 'DOM unavailable');
   const auth = await page.evaluate(async () => {
-    const token = localStorage.getItem('bos_session_token_v1');
-    const response = await fetch('/api/auth/me', { headers: token ? { authorization: `Bearer ${token}` } : {} });
+    const response = await fetch('/api/auth/me');
     const body = await response.json().catch(() => ({}));
-    return { localSessionPresent: Boolean(token), status: response.status, authenticated: Boolean(body?.authenticated), role: body?.user?.role ?? body?.claims?.role ?? null };
+    return {
+      status: response.status,
+      authenticated: Boolean(body?.authenticated),
+      role: body?.user?.role ?? body?.claims?.role ?? null,
+    };
   }).catch((cause) => ({ error: String(cause) }));
   state.timeline.push({ ms: Date.now() - state.startedAt, event: 'availability assertion failed' });
   console.error(`  DIAGNOSTIC ${state.engineName}/${state.style} error=${String(error)} auth=${JSON.stringify(auth)}`);
@@ -118,9 +125,11 @@ async function printAvailabilityFailure(page, state, error) {
 
 async function createContext(browser, viewport, token) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
-  await context.addInitScript((sessionToken) => {
-    localStorage.setItem('bos_session_token_v1', sessionToken);
-  }, token);
+  // The session is an HttpOnly cookie: page script can neither set nor read it,
+  // so it is written at the context level exactly as the sign-in flow would.
+  await context.addCookies([
+    { name: 'bos_session', value: token, domain: '127.0.0.1', path: '/', httpOnly: true, sameSite: 'Lax' },
+  ]);
   return context;
 }
 
@@ -302,8 +311,9 @@ async function runCustomerBookingJourney(browser, style) {
   await installLocalOnlyNetwork(page);
   await openLiveListing(page, style);
   const authResult = await page.evaluate(async () => {
-    const token = localStorage.getItem('bos_session_token_v1');
-    const response = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${token}` } });
+    // The browser proves its identity with the HttpOnly cookie alone; page
+    // script never sees or sends the session token.
+    const response = await fetch('/api/auth/me');
     const body = await response.json();
     return { status: response.status, email: body.user?.email, role: body.user?.role };
   });
@@ -367,8 +377,7 @@ async function runCustomerBookingJourney(browser, style) {
   await reservation.getByText('cancelled', { exact: true }).waitFor({ timeout: 10000 });
 
   const afterCancel = await page.evaluate(async (title) => {
-    const token = localStorage.getItem('bos_session_token_v1');
-    const response = await fetch('/api/pg/bookings', { headers: { authorization: `Bearer ${token}` } });
+    const response = await fetch('/api/pg/bookings');
     const body = await response.json();
     const booking = body.bookings?.find((item) => item.bookingId === title);
     return { status: response.status, bookingStatus: booking?.status, paymentStatus: booking?.paymentStatus, paymentMode: booking?.paymentMode };
@@ -388,10 +397,7 @@ async function runCustomerBookingJourney(browser, style) {
     item.method === 'GET' && item.path.startsWith('/api/pg/listings/') && item.path.endsWith('/inventory'))?.path;
   assert.ok(inventoryPath, 'live PostgreSQL inventory endpoint was observed in the browser network trace');
   const restoredInventory = await page.evaluate(async ({ listingId: id, date }) => {
-    const sessionToken = localStorage.getItem('bos_session_token_v1');
-    const response = await fetch(`${id}?moveIn=${encodeURIComponent(date)}&months=1`, {
-      headers: sessionToken ? { authorization: `Bearer ${sessionToken}` } : {},
-    });
+    const response = await fetch(`${id}?moveIn=${encodeURIComponent(date)}&months=1`);
     const body = await response.json().catch(() => ({}));
     return { status: response.status, room: body.roomTypes?.[0] ? { availableBeds: body.roomTypes[0].availableBeds, totalBeds: body.roomTypes[0].totalBeds } : null };
   }, { listingId: inventoryPath, date: moveIn });

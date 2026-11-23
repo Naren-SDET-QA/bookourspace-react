@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 import express from 'express';
 import path from 'node:path';
+import { sessionCookieHeaders } from './lib/session-cookies.mjs';
 
 const [, , baseUrl, distDirectory, listingTitle, customerUuid, sessionSecret] = process.argv;
 if (!distDirectory || !listingTitle || !customerUuid || !sessionSecret) {
@@ -46,6 +47,10 @@ const sessionToken = (() => {
   return `${payload}.${crypto.createHmac('sha256', `${sessionSecret}:SESSION_TOKEN_V2`).update(payload).digest('hex')}`;
 })();
 
+// Direct API assertions are made with the same cookie + CSRF proof the browser
+// client uses; the token is never placed in a header a page script could read.
+const customerSessionHeaders = sessionCookieHeaders(sessionToken, sessionSecret);
+
 const ui = express();
 ui.use(express.static(path.resolve(distDirectory), { fallthrough: true }));
 ui.get('*', (_request, response) => response.sendFile(path.join(path.resolve(distDirectory), 'index.html')));
@@ -67,6 +72,24 @@ async function dismissPrivacyChoices(page) {
   } catch {
     // The explicit local essential-only choice is already stored in this context.
   }
+}
+
+/**
+ * The entry surface is shown over the app until the visitor chooses a route.
+ * The guest control is only rendered when guest login is enabled, so the
+ * helper reports whether the anonymous route was actually taken.
+ */
+async function enterAsGuest(page) {
+  const guestControl = page.getByTestId('customer-login-guest');
+  // The control label has changed across releases; match the stable test id
+  // first and keep the historical labels as a fallback.
+  const legacyControl = page.getByRole('button', { name: /^(Browse as Guest|Explore Spaces as Guest)$/ });
+  const control = guestControl.or(legacyControl).first();
+  const offered = await control.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+  if (!offered) return false;
+  await control.click();
+  await page.getByTestId('bookourspace-welcome').waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
+  return true;
 }
 
 function assertCheck(name, ok, detail = '') {
@@ -105,12 +128,11 @@ try {
 
     await page.goto(`${uiUrl}/#pg`, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Fresh browser contexts start at the welcome screen. Explicitly choose
-    // Guest so this journey exercises public discovery as an anonymous user.
-    const continueAsGuest = page.getByRole('button', { name: 'Explore Spaces as Guest' });
-    if (await continueAsGuest.waitFor({ timeout: 10000 }).then(() => true).catch(() => false)) {
-      await continueAsGuest.click();
-    }
+    // Fresh browser contexts start at the entry surface. Explicitly choose the
+    // guest route so this journey exercises public discovery as an anonymous
+    // user, then wait for the entry surface to detach so it cannot intercept
+    // pointer events on the feed underneath it.
+    await enterAsGuest(page);
     await dismissPrivacyChoices(page);
 
     // -------------------------------------------------- signed-out discovery
@@ -123,6 +145,7 @@ try {
       const body = await page.locator('body').innerText().catch(() => '');
       console.error(`      body: ${body.slice(0, 2500)}`);
       console.error(`      api: ${apiCalls.join(', ')}`);
+      // Reported above: the feed body and the API calls observed so far.
       // A late inventory refresh can still be intercepted when the viewport
     // finishes; unroute before closing so route.fetch cannot outlive the page.
     await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -146,27 +169,15 @@ try {
     }
 
     // --------------------------------------------------- signed-in journey
-    await page.evaluate(([token, uuid]) => {
-      localStorage.setItem('bos_session_token_v1', token);
-      localStorage.setItem('bos_google_auth_user_v1', JSON.stringify({
-        id: uuid,
-        googleSub: uuid,
-        name: 'Browser Customer',
-        email: 'customer.c@example.test',
-        phone: '',
-        role: 'customer',
-        status: 'active',
-        verified: true,
-        city: 'Hyderabad',
-        joinedAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
-        totalBookings: 0,
-        totalListings: 0,
-        walletBalance: 0,
-      }));
-    }, [sessionToken, customerUuid]);
+    // The session is an HttpOnly cookie, so it is written at the context level
+    // exactly as the sign-in response would set it; the signed-in identity is
+    // then read from /api/auth/me rather than from page-visible storage.
+    await context.addCookies([
+      { name: 'bos_session', value: sessionToken, domain: '127.0.0.1', path: '/', httpOnly: true, sameSite: 'Lax' },
+    ]);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.goto(`${uiUrl}/#pg`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('bookourspace-welcome').waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
     await dismissPrivacyChoices(page);
 
     const signedInButton = page
@@ -226,8 +237,7 @@ try {
             assertCheck(`${viewport.name}: the reservation is honestly shown as pending, not paid`, pending);
 
             if (reservationBookingId) {
-              const token = await page.evaluate(() => localStorage.getItem('bos_session_token_v1') || '');
-              const auth = { Authorization: `Bearer ${token}` };
+              const auth = customerSessionHeaders;
               const paymentState = await page.request.get(
                 `${baseUrl}/api/pg/bookings/${encodeURIComponent(reservationBookingId)}/payment`,
                 { headers: auth },
