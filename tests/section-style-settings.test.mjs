@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyRemoteSectionStyles, canonicalizeServicesHash, loadSectionStyles, sanitizeServicesReturnHash, saveSectionStyles, saveStylePreference } from '../src/lib/sectionStyleSettings.ts';
+import { clearSessionCsrfToken, setSessionCsrfToken } from '../src/lib/sessionCsrf.ts';
 
 const styles = {
   pg: 'style2',
@@ -25,9 +26,13 @@ async function withBrowser({ token = 'test-session', fetchImpl }, run) {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: storage, dispatchEvent() {} } });
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   if (fetchImpl) Object.defineProperty(globalThis, 'fetch', { configurable: true, value: fetchImpl });
+  // The browser holds only an in-memory CSRF proof now, so the stub installs it
+  // the same way the auth flow does.
+  setSessionCsrfToken(token);
   try {
     await run(writes);
   } finally {
+    clearSessionCsrfToken();
     for (const [key, descriptor] of Object.entries(previous)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else delete globalThis[key];

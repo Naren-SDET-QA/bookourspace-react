@@ -70,8 +70,12 @@ test('PG sale workflow uses the authenticated provider listing path', () => {
 });
 
 test('provider deep links normalize the legacy provider_portal1 alias', async () => {
+  // The shared router still recognizes the legacy alias and flags it for
+  // normalization; the shell performs the rewrite.
+  const router = await readFile(new URL('../src/lib/sectionRouteHash.ts', import.meta.url), 'utf8');
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(app, /hash === 'provider_portal1'/);
+  assert.match(router, /current === 'provider_portal1'/);
+  assert.match(app, /decision\.normalizePortal1/);
   assert.match(app, /#provider_portal`/);
 });
 

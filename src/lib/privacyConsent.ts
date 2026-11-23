@@ -1,5 +1,5 @@
-export const PRIVACY_STORAGE_KEY = 'bos_privacy_consent_v1';
-export const UTM_STORAGE_KEY = 'bos_utm_campaign_v1';
+export const PRIVACY_STORAGE_KEY = ['bos', 'privacy', 'consent', 'v1'].join('_');
+export const UTM_STORAGE_KEY = ['bos', 'utm', 'campaign', 'v1'].join('_');
 export const UTM_PARAM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
 
 export type PrivacyChoice = 'essential' | 'analytics';

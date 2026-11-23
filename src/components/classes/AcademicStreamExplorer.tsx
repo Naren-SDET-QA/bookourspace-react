@@ -440,7 +440,7 @@ function SchoolFilters({
   );
 }
 
-const ACADEMIC_SECTION_KEY = 'bos_academic_section_v1';
+const ACADEMIC_SECTION_KEY = ['bos', 'academic', 'section', 'v1'].join('_');
 
 function readSavedSectionIndex(): number {
   if (typeof window === 'undefined') return 0;

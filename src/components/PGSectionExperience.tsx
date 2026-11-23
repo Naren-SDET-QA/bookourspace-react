@@ -250,6 +250,9 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
   const totalPages = pageCount(filtered.length, 10);
   const safePage = Math.min(page, Math.max(0, totalPages - 1));
   const visible = paginate(filtered, safePage, 10);
+  // The phone hero shows the photos of the results already in memory. Three
+  // fit the 390px row, so nothing has to be swiped to be seen.
+  const photoCards = visible.filter((card) => Boolean(card.photo)).slice(0, 3);
   const exploreCities = ['Gurgaon', 'Bangalore', 'Noida', 'Hyderabad', 'Chennai', 'Mumbai', 'Pune', 'Kolkata', 'Jaipur', 'Kochi'];
   const [exploreCityCount, setExploreCityCount] = useState(6);
   const exploreLocalities = useMemo(
@@ -318,6 +321,33 @@ export function PGSectionExperience({ listings, isLoading = false, moduleLabel, 
             {pageCopy?.subheading ||
               'Search by locality, then filter by rent, sharing and food. Every card shows only what the owner listed — no brokerage claims, no invented ratings.'}
           </p>
+
+          {/* On a phone the search panel and filter rail fill the first screen,
+              so the page opened on text alone. These are the photos of the
+              results already loaded below: no extra request and no new query. */}
+          {photoCards.length > 0 && (
+            <section aria-label="PG photo highlights" className="mt-5 sm:hidden">
+              <div className="grid grid-cols-3 gap-2">
+                {photoCards.map((card) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => openDetails(card)}
+                    className="relative h-[92px] min-w-0 overflow-hidden rounded-2xl border border-white/80 shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+                    aria-label={`Open ${card.title}`}
+                  >
+                    <SafeImage
+                      category="pg"
+                      src={card.photo}
+                      alt={card.title}
+                      className="h-full w-full object-cover"
+                    />
+                    <span className="absolute inset-x-0 bottom-0 truncate bg-slate-950/70 px-2 py-1 text-left text-[9px] font-bold text-white">{card.locality || card.city || card.title}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           <div className={showSearch ? 'mt-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900' : 'hidden'}>
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center">

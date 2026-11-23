@@ -156,7 +156,7 @@ export default function SiteChrome({ onOpenHelp }: { onOpenHelp: () => void }) {
                   Essential cookies keep sign-in, bookings and payments working. Optional campaign tags (UTM) stay on this device only if you allow them. Nothing is sold to advertisers.
                 </p>
               </div>
-              <button type="button" className="rounded-full p-1 text-slate-500" onClick={() => choosePrivacy('essential')} aria-label="Dismiss privacy notice">
+              <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => choosePrivacy('essential')} aria-label="Dismiss privacy notice">
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>

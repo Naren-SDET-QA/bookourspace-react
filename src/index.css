@@ -398,8 +398,13 @@ html.dark .bos-help-fab {
 .bos-cookie-banner {
   position: fixed;
   z-index: 35;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Centred with inset + auto margins, never with a transform: the motion
+     wrapper animates `y`, and an inline transform from the animation replaces
+     a CSS translateX(-50%), which pushed the panel half a screen right and
+     clipped its buttons on phones. */
+  left: 0;
+  right: 0;
+  margin-inline: auto;
   width: min(36rem, calc(100vw - 1.5rem));
   bottom: calc(5.35rem + env(safe-area-inset-bottom));
   border-radius: 1.25rem;

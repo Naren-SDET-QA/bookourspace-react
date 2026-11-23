@@ -6,6 +6,7 @@ import { fetchStayBookingReceipt, formatPaise, type StayQuote, type StayReceipt 
 import { StayCheckoutPanel } from '../StayCheckoutPanel';
 import SafeImage from '../SafeImage';
 import { StayReceiptModal } from './StayReceiptModal';
+import { getStoredGoogleAuthUser } from '../../lib/supabaseClient';
 
 function formatDate(iso: string): string {
   if (!iso) return 'Add date';
@@ -59,7 +60,7 @@ export function StayCheckoutPage({
   const [qrToken, setQrToken] = useState('');
   const [receiptOpen, setReceiptOpen] = useState(false);
   const nights = quote?.nights || 0;
-  const authEmail = (() => { try { const raw = window.localStorage.getItem('bos_session_token_v1'); if (!raw) return ''; const payload = JSON.parse(atob(raw.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'))); return String(payload?.email || ''); } catch { return ''; } })();
+  const authEmail = getStoredGoogleAuthUser()?.email || '';
   const image = property.images?.[0];
 
   useEffect(() => {

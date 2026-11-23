@@ -886,6 +886,7 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
   }, [allCourses, query, category, style4Group, mode, timing, feeBand, area, distance, duration, age, verifiedOnly]);
   const categoryOptions = useMemo(() => ['All', ...Array.from(new Set(allCourses.map((course) => course.category))).sort()], [allCourses]);
 
+
   // Style 4 uses friendly marketplace labels. Translate them into the real
   // listing taxonomy so every card, shortcut, and category control changes the
   // results instead of silently selecting a category that does not exist.
@@ -1112,10 +1113,10 @@ export function ClassesTimingsExperience({ onClose, inline = false, listings = [
 
 
       {enrolled && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="demo-enquiry-preview-title">
           <div className="w-full max-w-xs rounded-2xl bg-white p-5 text-center">
             <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"><Check className="h-5 w-5" /></span>
-            <h3 className="mt-2 text-[14px] font-extrabold text-[#1e1b4b]">Demo enquiry preview</h3>
+            <h3 id="demo-enquiry-preview-title" className="mt-2 text-[14px] font-extrabold text-[#1e1b4b]">Demo enquiry preview</h3>
             <p className="mt-1 text-[11.5px] text-[#64748b]">No enquiry was sent and no provider will contact you.</p>
             <button type="button" onClick={() => { setEnrolled(null); setSelected(null); }} className="mt-3 h-9 w-full rounded-xl bg-[#7c3aed] text-[12px] font-bold text-white">Done</button>
           </div>

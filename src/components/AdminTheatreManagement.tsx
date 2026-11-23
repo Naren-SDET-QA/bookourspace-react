@@ -79,7 +79,7 @@ export function AdminTheatreManagement() {
   };
 
   return <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
-    <div><h2 className="text-xl font-semibold">Theatre Management</h2><p className="mt-1 text-sm text-slate-500">Live public visibility · Andhra Pradesh · Telangana · Karnataka · Tamil Nadu</p></div>
+    <div><h2 className="text-xl font-semibold">Theatre Management</h2><p className="mt-1 text-sm text-slate-500">Live public visibility · All Indian states and union territories</p></div>
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
     {!access?.canManageVisibility ? <div className="space-y-3">

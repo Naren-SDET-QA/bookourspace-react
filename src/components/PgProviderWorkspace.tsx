@@ -224,10 +224,17 @@ export default function PgProviderWorkspace({ businessId, businessRole, business
   }, [selectedRooms]);
   const navTo = (next: OwnerSection) => { setSection(next); setMobileNavOpen(false); };
 
+  // No business means nothing to scope a workspace to; the portal shell renders
+  // the onboarding notice for that case, and rendering a second copy here made
+  // `provider-context-notice` ambiguous.
+  if (!memberships.length) return null;
+
   if (contextNotice) {
     return <section className="pg-owner-airbnb -mx-1 rounded-[28px] border border-slate-200 bg-[#F4F7FB] p-4 text-slate-900 shadow-sm dark:border-slate-800 dark:bg-[#0b1220] dark:text-white sm:-mx-2 sm:p-6" aria-label="Provider business context">
       <div className="mx-auto max-w-3xl space-y-4">
-        <BusinessContextBar memberships={memberships} activeBusinessId={activeBusinessId} onSelect={selectBusiness} />
+        {/* The portal shell already renders the business selector above this
+            panel; a second copy duplicated the `provider-business-select` id
+            and made every selector lookup ambiguous. */}
         <ProviderContextPanel
           notice={contextNotice}
           memberships={memberships}

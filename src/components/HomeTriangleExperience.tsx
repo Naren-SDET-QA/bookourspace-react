@@ -555,9 +555,9 @@ function BannerCarousel({ index, setIndex, onBook }: { index: number; setIndex: 
   );
 }
 
-function ServiceCard({ item }: { item: ServiceItem }) {
+function ServiceCard({ item, onSelect }: { item: ServiceItem; onSelect: () => void }) {
   return (
-    <button type="button" className="w-[132px] shrink-0 text-left">
+    <button type="button" onClick={onSelect} className="w-[132px] shrink-0 text-left">
       <div className="relative overflow-hidden rounded-xl bg-[#f4f5f7]">
         <SafeImage category="services" src={item.image} alt={item.name} className="aspect-square w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0'; }} />
         {item.off && (
@@ -581,7 +581,7 @@ function SectionRow({ section, onSeeAll }: { section: ServiceSection; onSeeAll: 
       </div>
       <div className="-mx-4 mt-3 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {section.items.map((item) => (
-          <ServiceCard key={item.id} item={item} />
+          <ServiceCard key={item.id} item={item} onSelect={onSeeAll} />
         ))}
       </div>
     </section>
@@ -858,6 +858,17 @@ export function HomeTriangleExperience({
       .filter((section) => section.items.length > 0);
   }, [query]);
 
+  /** Open the category listing that contains this showcase card. */
+  const openServiceCard = (item: ServiceItem, fallbackCategory: string) => {
+    const owner = SERVICE_SECTIONS.find((section) =>
+      section.items.some((candidate) => candidate.id === item.id || candidate.name === item.name),
+    );
+    setSelectedProvider(null);
+    setSelectedSub(null);
+    setActiveCategory(owner?.id || fallbackCategory);
+    setView('categories');
+  };
+
   const openCategory = (id: string) => {
     if (id === 'need-helper') {
       setHelperJourneyOpen(true);
@@ -963,7 +974,7 @@ export function HomeTriangleExperience({
                 <h2 className="text-[18px] font-bold text-[#111827]">Most Booked Services</h2>
                 <div className="-mx-4 mt-3 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {MOST_BOOKED.map((item) => (
-                    <ServiceCard key={item.id} item={item} />
+                    <ServiceCard key={item.id} item={item} onSelect={() => openServiceCard(item, 'cleaning')} />
                   ))}
                 </div>
               </div>
@@ -1034,7 +1045,7 @@ export function HomeTriangleExperience({
                 </div>
                 <div className="-mx-4 mt-3 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {MILK_PRODUCTS.map((item) => (
-                    <ServiceCard key={item.id} item={item} />
+                    <ServiceCard key={item.id} item={item} onSelect={() => openServiceCard(item, 'milk')} />
                   ))}
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2">

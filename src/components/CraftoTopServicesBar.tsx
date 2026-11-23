@@ -795,7 +795,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
                 onClick={() => setShowHamburgerMenu((prev) => !prev)}
                 aria-expanded={showHamburgerMenu}
                 aria-controls="bos-mobile-menu"
-                className={`bos-header-menu-action w-7 h-7 sm:w-9 sm:h-9 rounded-full border flex items-center justify-center shadow-2xs transition-colors shrink-0 cursor-pointer ${
+                className={`bos-header-menu-action h-11 w-11 sm:h-9 sm:w-9 rounded-full border flex items-center justify-center shadow-2xs transition-colors shrink-0 cursor-pointer ${
                   showHamburgerMenu
                     ? 'bg-[#5B21B6] text-white border-[#5B21B6]'
                     : 'bg-white dark:bg-[#17133A] text-[#0F172A] dark:text-white border-slate-200/90 dark:border-indigo-500/40 hover:bg-indigo-50 dark:hover:bg-slate-800'
@@ -886,7 +886,7 @@ export const CraftoTopServicesBar: React.FC<CraftoTopServicesBarProps> = ({
 
           {/* Hamburger Quick Menu Drawer */}
           {showHamburgerMenu && (
-            <div id="bos-mobile-menu" role="menu" className="w-full sm:w-80 sm:ml-auto bg-white dark:bg-slate-900 text-[#0F172A] dark:text-white rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-3.5 z-50 animate-in fade-in slide-in-from-top-1 duration-150 space-y-3">
+            <div id="bos-mobile-menu" role="menu" className="w-full sm:w-80 sm:ml-auto max-h-[60dvh] overflow-y-auto overscroll-contain bg-white dark:bg-slate-900 text-[#0F172A] dark:text-white rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-3.5 z-50 animate-in fade-in slide-in-from-top-1 duration-150 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
                 <span className="text-xs font-black uppercase tracking-wider text-[#5B21B6] dark:text-indigo-300">
                   {ui.menuTitle}

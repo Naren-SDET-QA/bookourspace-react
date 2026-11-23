@@ -180,7 +180,18 @@ export function HomeServicesSection({ listings, isLoading = false, initialCatego
       }
       role={inline ? undefined : 'dialog'}
       aria-modal={inline ? undefined : true}
-      aria-labelledby="services-section-title"
+      /* The triangle presentation (the only live one) renders its own hero, so the
+         heading carrying `services-section-title` below never exists; referencing it
+         left a dangling ARIA reference and, if this screen is ever rendered as a
+         dialog, no accessible name. Name that branch directly instead. */
+      aria-labelledby={
+        experienceTab === 'triangle' || experienceTab === 'noddyy' ? undefined : 'services-section-title'
+      }
+      aria-label={
+        inline || (experienceTab !== 'triangle' && experienceTab !== 'noddyy')
+          ? undefined
+          : 'BookOurSpace Services'
+      }
     >
       {/* No customer-side style switcher: the admin decides which services
           presentation every visitor sees. */}

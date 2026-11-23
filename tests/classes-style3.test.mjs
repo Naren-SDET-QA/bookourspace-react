@@ -43,7 +43,7 @@ test('Classes Style 3 shows eye-catching category cards with real images', () =>
   const rail = source('src/components/classes/ClassesCategoryRail.tsx');
   assert.match(section, /<ClassesCategoryRail/);
   assert.match(section, /activeStyle === 'style3'/);
-  for (const label of ['Dance', 'Education', 'Art', 'Swimming', 'Sports', 'IT & Software', 'Yoga', 'Languages']) {
+  for (const label of ['Medical & MBBS', 'Law & LAWCET', 'MBA & Management', 'Engineering & JEE', 'Degree & Undergraduate', 'Postgraduate', 'PhD & Research', 'School & Intermediate']) {
     assert.match(rail, new RegExp(`label: '${label.replace(/[&]/g, '\\&')}'`), label);
   }
   assert.match(rail, /categories\/ClassesCategoryRail|https:\/\/images\.unsplash\.com/);
