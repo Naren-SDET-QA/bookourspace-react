@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const TEST_SECRET = 'isolated-payment-test-secret-only';
 let server;
@@ -26,6 +27,32 @@ function signSession(userId = 'customer-1', role = 'customer', providerId) {
     userId,
     role,
     ...(providerId ? { providerId } : {}),
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+  };
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', `${TEST_SECRET}:SESSION_TOKEN_V2`)
+    .update(payload)
+    .digest('hex');
+  return `${payload}.${signature}`;
+}
+
+/**
+ * A signed session for a real PostgreSQL identity: the server derives the role
+ * and status from `public.profiles` for `supabaseUserId`, so these tokens must
+ * carry a UUID and a verified auth provider.
+ */
+function databaseSession(supabaseUserId, role) {
+  const claims = {
+    userId: supabaseUserId,
+    supabaseUserId,
+    email: `${supabaseUserId.slice(0, 8)}@example.test`,
+    name: `${role} test`,
+    googleSub: `google-${supabaseUserId}`,
+    phone: '+91 90000 00000',
+    role,
+    authProvider: 'google',
     issuedAt: Date.now(),
     expiresAt: Date.now() + 60_000,
   };
@@ -86,7 +113,7 @@ async function post(route, body, { token = signSession(), headers = {} } = {}) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, TEST_SECRET) : {}),
       ...headers,
     },
     body: JSON.stringify(body),
@@ -448,31 +475,137 @@ test('Movies V1 refuses paid ticket cancellation before state or seat mutation',
   assert.deepEqual(Object.keys(stored.seatLocks), [lock.key]);
 });
 
-test('provider listing approval still requires an administrator', { skip: 'Admin listing review is PostgreSQL-only and is covered by disposable PostgreSQL RBAC/ownership tests; this test server has no configured PostgreSQL database.' }, async () => {
-  writeStore();
-  const created = await post('/api/provider/listings', {
-    id: 'approval-regression-listing',
-    title: 'Pending provider listing',
-    categoryId: 'pg-boys',
-    price: 100,
-  }, { token: signSession('USR-1001', 'provider', 'prov-1') });
-  assert.equal(created.status, 201);
-  assert.equal((await created.json()).listing.status, 'pending_approval');
+test('provider listing approval still requires an administrator', async () => {
+  const connectionString = process.env.BOS_LISTINGS_DATABASE_URL;
+  assert.ok(
+    connectionString,
+    'run via npm test: the disposable PostgreSQL provides BOS_LISTINGS_DATABASE_URL',
+  );
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString });
+  const providerId = crypto.randomUUID();
+  const regularAdminId = crypto.randomUUID();
+  const superAdminId = crypto.randomUUID();
+  const customerId = crypto.randomUUID();
+  const businessId = crypto.randomUUID();
+  const listingId = crypto.randomUUID();
+  const businessRef = `BIZ-APPROVAL-${businessId.slice(0, 8).toUpperCase()}`;
 
-  const ownerApprovalAttempt = await fetch(`${baseUrl}/api/provider/listings/approval-regression-listing`, {
-    method: 'PATCH',
+  const asActor = (token, method, url, body) => fetch(`${baseUrl}${url}`, {
+    method,
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${signSession('USR-1001', 'provider', 'prov-1')}`,
+      ...sessionCookieHeaders(token, TEST_SECRET),
+      'x-business-id': businessId,
     },
-    body: JSON.stringify({ status: 'active' }),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  assert.equal(ownerApprovalAttempt.status, 403);
-  assert.equal((await ownerApprovalAttempt.json()).error, 'FORBIDDEN_ADMIN_APPROVAL_REQUIRED');
 
-  // This server is intentionally running against the isolated JSON compatibility
-  // store. Admin review is a PostgreSQL-only route and is exercised by the
-  // disposable PostgreSQL ownership/RBAC suite, not by this JSON-mode test.
+  try {
+    await pool.query(
+      `insert into auth.users (id, email, raw_user_meta_data) values
+         ($1,$2,'{}'::jsonb), ($3,$4,'{}'::jsonb), ($5,$6,'{}'::jsonb), ($7,$8,'{}'::jsonb)`,
+      [
+        providerId, `prov-${providerId.slice(0, 8)}@example.test`,
+        regularAdminId, `radmin-${regularAdminId.slice(0, 8)}@example.test`,
+        superAdminId, `sadmin-${superAdminId.slice(0, 8)}@example.test`,
+        customerId, `cust-${customerId.slice(0, 8)}@example.test`,
+      ],
+    );
+    await pool.query(
+      `insert into public.profiles (id, email, full_name, role, account_status, is_super_admin) values
+         ($1,$2,'Approval Provider','provider','active',false),
+         ($3,$4,'Regular Admin','admin','active',false),
+         ($5,$6,'Super Admin','admin','active',true),
+         ($7,$8,'Approval Customer','customer','active',false)
+       on conflict (id) do update set
+         role = excluded.role,
+         account_status = excluded.account_status,
+         is_super_admin = excluded.is_super_admin,
+         email = excluded.email`,
+      [
+        providerId, `prov-${providerId.slice(0, 8)}@example.test`,
+        regularAdminId, `radmin-${regularAdminId.slice(0, 8)}@example.test`,
+        superAdminId, `sadmin-${superAdminId.slice(0, 8)}@example.test`,
+        customerId, `cust-${customerId.slice(0, 8)}@example.test`,
+      ],
+    );
+    await pool.query(
+      `insert into public.businesses (id, business_ref, name, module_type, owner_user_id, approval_status)
+       values ($1,$2,'Approval Regression Business','pg_hostels',$3,'approved')`,
+      [businessId, businessRef, providerId],
+    );
+    await pool.query(
+      `insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
+       values ($1,$2,'Pending provider listing','pg-boys','PG','pg_hostel',100,'per month','pending_approval','{}'::jsonb)`,
+      [listingId, providerId],
+    );
+
+    // A provider cannot approve their own listing.
+    const ownerApprovalAttempt = await asActor(
+      databaseSession(providerId, 'provider'),
+      'PATCH',
+      `/api/provider/listings/${listingId}`,
+      { status: 'active' },
+    );
+    assert.equal(ownerApprovalAttempt.status, 403);
+    assert.equal((await ownerApprovalAttempt.json()).error, 'FORBIDDEN_ADMIN_APPROVAL_REQUIRED');
+
+    // A customer cannot reach the admin review route at all.
+    const customerReview = await asActor(
+      databaseSession(customerId, 'customer'),
+      'PATCH',
+      `/api/admin/provider/listings/${listingId}/review`,
+      { decision: 'active' },
+    );
+    assert.equal(customerReview.status, 403);
+    const customerBody = await customerReview.json();
+    // A customer is refused by the shared admin gate before the route's own
+    // admin check; either denial is a 403 and neither reveals listing state.
+    assert.ok(
+      ['FORBIDDEN_ADMIN_REQUIRED', 'FORBIDDEN_PROVIDER_ROLE_REQUIRED'].includes(customerBody.error),
+      `unexpected denial for a customer: ${JSON.stringify(customerBody)}`,
+    );
+
+    // A regular admin with no assignment for this module cannot approve it.
+    const regularAdminReview = await asActor(
+      databaseSession(regularAdminId, 'admin'),
+      'PATCH',
+      `/api/admin/provider/listings/${listingId}/review`,
+      { decision: 'active' },
+    );
+    assert.equal(regularAdminReview.status, 403, JSON.stringify(await regularAdminReview.clone().json()));
+    const regularBody = await regularAdminReview.json();
+    assert.ok(
+      ['LISTING_ASSIGNMENT_REQUIRED', 'SUPER_ADMIN_REQUIRED'].includes(regularBody.error),
+      `unexpected denial for a regular admin: ${JSON.stringify(regularBody)}`,
+    );
+    const stillPending = await pool.query('select status from public.listings where id = $1', [listingId]);
+    assert.equal(stillPending.rows[0].status, 'pending_approval', 'a denied review must not change the listing');
+
+    // A Super Admin can approve it through the real route.
+    const superAdminReview = await asActor(
+      databaseSession(superAdminId, 'admin'),
+      'PATCH',
+      `/api/admin/provider/listings/${listingId}/review`,
+      { decision: 'active' },
+    );
+    assert.equal(superAdminReview.status, 200, JSON.stringify(await superAdminReview.clone().json()));
+    const superBody = await superAdminReview.json();
+    assert.equal(superBody.listing.status, 'active');
+    const approved = await pool.query('select status from public.listings where id = $1', [listingId]);
+    assert.equal(approved.rows[0].status, 'active');
+  } finally {
+    await pool.query('delete from public.listings where id = $1', [listingId]).catch(() => undefined);
+    await pool.query('delete from public.businesses where id = $1', [businessId]).catch(() => undefined);
+    await pool.query('delete from public.profiles where id = any($1::uuid[])', [
+      [providerId, regularAdminId, superAdminId, customerId],
+    ]).catch(() => undefined);
+    await pool.query('delete from auth.users where id = any($1::uuid[])', [
+      [providerId, regularAdminId, superAdminId, customerId],
+    ]).catch(() => undefined);
+    await pool.end();
+  }
 });
 
 test('the Movies UI cannot request ticket creation or payment verification', () => {

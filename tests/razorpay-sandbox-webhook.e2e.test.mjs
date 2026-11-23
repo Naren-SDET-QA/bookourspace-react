@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders } from './lib/session-cookies.mjs';
 
 /**
  * Razorpay booking-boundary tests.
@@ -191,7 +192,7 @@ async function post(pathname, body, headers = {}) {
 }
 
 function auth() {
-  return { Authorization: `Bearer ${sessionToken()}` };
+  return sessionCookieHeaders(sessionToken(), SESSION_SECRET);
 }
 
 function signed(bodyRaw, eventId) {

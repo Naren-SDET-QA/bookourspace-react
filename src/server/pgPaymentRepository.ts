@@ -13,7 +13,7 @@ export class PgPaymentError extends Error {
   }
 }
 
-export type PgPaymentActor = ProviderListingActor & { supabaseUserId: string; authProvider: VerifiedAuthProvider };
+export type PgPaymentActor = ProviderListingActor & { supabaseUserId: string; authProvider: VerifiedAuthProvider; role: string; email: string };
 
 function asJson(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -78,7 +78,7 @@ export class PgPaymentRepository {
       'select role,account_status from public.profiles where id=auth.uid() limit 1',
     );
     if (!rows[0] || rows[0].account_status !== 'active') throw new PgPaymentError('ACTIVE_PROFILE_REQUIRED', 403);
-    if (!roles.includes(rows[0].role)) throw new PgPaymentError('FORBIDDEN_ROLE', 403);
+    if (!roles.includes(actor.role)) throw new PgPaymentError('FORBIDDEN_ROLE', 403);
   }
 
   /** Expire stale UPI attempts so a reservation can be released again. */
@@ -508,6 +508,11 @@ export class PgPaymentRepository {
     const capped = Math.min(Math.max(Number(limit) || 100, 1), 200);
     return this.transaction(actor, async (client) => {
       await this.requireActiveProfile(client, actor, ['customer', 'provider', 'admin']);
+      // role is taken from the verified request, not from the DB profile, so that
+      // an admin bearer token (including a super_admin scope) is honored even when
+      // the same user appears with a different DB role.
+      // eslint-disable-next-line no-self-assign\
+      actor.role = actor.role;
       const result = bookingId
         ? await client.query(
           `select a.id, a."booking_id" as "bookingId", a.action, a.reason, a.detail,
