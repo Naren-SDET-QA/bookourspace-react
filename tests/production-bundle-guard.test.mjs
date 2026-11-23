@@ -81,6 +81,7 @@ describe('production build environment gate', () => {
       assertProductionBuildEnvironment({
         VITE_SUPABASE_PROJECT_ID: PRODUCTION_REF,
         VITE_SUPABASE_URL: `https://${PRODUCTION_REF}.supabase.co`,
+        VITE_SUPABASE_PRODUCTION_PROJECT_ID: PRODUCTION_REF,
         BOS_PRODUCTION_SUPABASE_PROJECT_ID: PRODUCTION_REF,
       }),
       PRODUCTION_REF,
@@ -155,5 +156,46 @@ describe('production bundle scan', () => {
 
   it('fails closed when the bundle directory does not exist', () => {
     assert.throws(() => scanBundle(path.join(os.tmpdir(), 'bos-missing-bundle-dir')), /BUNDLE_DIRECTORY_MISSING/);
+  });
+});
+
+describe('production client target declaration', () => {
+  const base = {
+    VITE_SUPABASE_PROJECT_ID: PRODUCTION_REF,
+    VITE_SUPABASE_URL: `https://${PRODUCTION_REF}.supabase.co`,
+  };
+
+  it('refuses a build that omits VITE_SUPABASE_PRODUCTION_PROJECT_ID', () => {
+    assert.throws(
+      () => assertProductionBuildEnvironment(base),
+      /PRODUCTION_BUILD_PRODUCTION_TARGET_UNDECLARED/,
+    );
+  });
+
+  it('refuses a production declaration that names the development project', () => {
+    assert.throws(
+      () => assertProductionBuildEnvironment({
+        ...base,
+        VITE_SUPABASE_PRODUCTION_PROJECT_ID: DEVELOPMENT_REF,
+      }),
+      /PRODUCTION_BUILD_TARGET_IS_DEVELOPMENT/,
+    );
+  });
+
+  it('refuses a production declaration that names another project', () => {
+    assert.throws(
+      () => assertProductionBuildEnvironment({
+        ...base,
+        VITE_SUPABASE_PRODUCTION_PROJECT_ID: 'otherprodref0000000000000',
+      }),
+      /PRODUCTION_BUILD_SUPABASE_TARGET_CONFLICT/,
+    );
+  });
+
+  it('accepts a production declaration that matches the build target', () => {
+    assert.equal(
+      assertProductionBuildEnvironment({ ...base, VITE_SUPABASE_PRODUCTION_PROJECT_ID: PRODUCTION_REF }),
+      PRODUCTION_REF,
+    );
   });
 });

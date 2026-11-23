@@ -47,6 +47,7 @@ export const BUNDLE_SECRET_MARKERS = [
 ];
 
 const PRIVATE_KEY_PATTERN = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/;
+const PROJECT_REF_PATTERN = /^[a-z0-9][a-z0-9-]{2,62}$/;
 const CREDENTIAL_URL_PATTERN = /postgres(?:ql)?:\/\/[^\s"'`]+:[^\s"'`@/]+@/;
 
 /**
@@ -124,6 +125,32 @@ export function assertProductionBuildEnvironment(env = process.env, developmentR
   if (declared && declared !== effective) {
     throw new Error(
       `PRODUCTION_BUILD_SUPABASE_TARGET_CONFLICT:BOS_PRODUCTION_SUPABASE_PROJECT_ID=${declared},VITE_SUPABASE_PROJECT_ID=${effective}`,
+    );
+  }
+
+  // The browser resolver accepts a hosted target only when it is explicitly
+  // declared as development or as production. Omitting the production
+  // declaration would inline a URL the client rejects at runtime, so the
+  // artifact would ship unable to reach Supabase at all.
+  const productionDeclaration = cleanRef(env.VITE_SUPABASE_PRODUCTION_PROJECT_ID);
+  if (!productionDeclaration) {
+    throw new Error(
+      `PRODUCTION_BUILD_PRODUCTION_TARGET_UNDECLARED: set VITE_SUPABASE_PRODUCTION_PROJECT_ID=${effective} so the built client accepts the production project; without it the client resolver refuses every hosted target.`,
+    );
+  }
+  if (!PROJECT_REF_PATTERN.test(productionDeclaration)) {
+    throw new Error(
+      `PRODUCTION_BUILD_PRODUCTION_TARGET_INVALID:${productionDeclaration}:VITE_SUPABASE_PRODUCTION_PROJECT_ID`,
+    );
+  }
+  if (developmentRefs.includes(productionDeclaration)) {
+    throw new Error(
+      `PRODUCTION_BUILD_TARGET_IS_DEVELOPMENT:${productionDeclaration}:VITE_SUPABASE_PRODUCTION_PROJECT_ID`,
+    );
+  }
+  if (productionDeclaration !== effective) {
+    throw new Error(
+      `PRODUCTION_BUILD_SUPABASE_TARGET_CONFLICT:VITE_SUPABASE_PRODUCTION_PROJECT_ID=${productionDeclaration},VITE_SUPABASE_PROJECT_ID=${effective}`,
     );
   }
   return effective;

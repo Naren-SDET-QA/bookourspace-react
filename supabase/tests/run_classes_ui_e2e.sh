@@ -41,6 +41,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STORE="$TMP_ROOT/authoritative-store.json"
 SERVER_LOG="$OUT/server.log"
 SERVER_PID=""
+export BOS_CLASS_BUSINESS_ID="b7c1e2f0-0000-4000-8000-0000000000c1"
+export BOS_VENUE_BUSINESS_ID="b7c1e2f0-0000-4000-8000-0000000000c2"
 VENUE_TITLE="${E2E_VENUE_TITLE:-E2E Owner-Created Function Hall}"
 VENUE_SANDBOX_SECRET="bos-venue-sandbox-ui-e2e-secret"
 mkdir -p "$OUT"
@@ -257,6 +259,18 @@ on conflict do nothing;
 update public.profiles set role = 'customer', account_status = 'active'
  where id in ('11111111-aaaa-4aaa-8aaa-000000000003', '11111111-aaaa-4aaa-8aaa-000000000004');
 
+-- Student enrolment calls the module gate like production: the customer needs
+-- the classes actions the journey exercises (the harness provisions the same).
+insert into public.customer_module_access (user_id, module_key, allowed_actions, granted_by)
+values
+  ('11111111-aaaa-4aaa-8aaa-000000000003', 'classes', '["view","create","edit","delete"]'::jsonb, '11111111-aaaa-4aaa-8aaa-000000000002'),
+  ('11111111-aaaa-4aaa-8aaa-000000000004', 'classes', '["view","create","edit","delete"]'::jsonb, '11111111-aaaa-4aaa-8aaa-000000000002'),
+  -- The Function Halls journey books through /api/venue-bookings, whose customer
+  -- gate is the function_hall/venues grant in production too.
+  ('11111111-aaaa-4aaa-8aaa-000000000003', 'function_hall', '["view","create","edit","delete"]'::jsonb, '11111111-aaaa-4aaa-8aaa-000000000002'),
+  ('11111111-aaaa-4aaa-8aaa-000000000004', 'function_hall', '["view","create","edit","delete"]'::jsonb, '11111111-aaaa-4aaa-8aaa-000000000002')
+on conflict (user_id, module_key) do update set allowed_actions = excluded.allowed_actions;
+
 delete from public.class_enrollments;
 delete from public.class_batches;
 delete from public.listings where id in ('class-e2e-algebra', 'class-e2e-race');
@@ -269,6 +283,27 @@ values
   ('class-e2e-race', '11111111-aaaa-4aaa-8aaa-000000000001', 'E2E Race Course',
    'class-academic', 'Academic', 'course', 1200, 'per month', 'active',
    '{"provider":{"name":"E2E Trainer"},"description":"Concurrency course","mode":"offline"}'::jsonb);
+
+-- The provider workspace requires an approved, enabled business with an active
+-- membership; without it every provider endpoint answers 403
+-- BUSINESS_CONTEXT_REQUIRED and the classes module hides itself.
+insert into public.businesses (id, business_ref, name, module_type, owner_user_id, approval_status, is_enabled)
+values ('b7c1e2f0-0000-4000-8000-0000000000c1', 'BOS-E2E-CLASSES', 'E2E Classes Academy',
+        'classes', '11111111-aaaa-4aaa-8aaa-000000000001', 'approved', true)
+on conflict (id) do update set module_type='classes', owner_user_id=excluded.owner_user_id,
+  approval_status='approved', is_enabled=true, updated_at=now();
+-- Listings backfill can attach the provider to another business. The journey
+-- is a single-business workspace; more than one membership makes the server
+-- require an x-business-id selection and answer 403.
+delete from public.business_members
+ where user_id = '11111111-aaaa-4aaa-8aaa-000000000001'
+   and business_id <> 'b7c1e2f0-0000-4000-8000-0000000000c1';
+insert into public.business_members (business_id, user_id, role, status, accepted_at)
+values ('b7c1e2f0-0000-4000-8000-0000000000c1', '11111111-aaaa-4aaa-8aaa-000000000001', 'owner', 'active', now())
+on conflict (business_id, user_id) do update set status='active', role='owner';
+update public.listings
+   set business_id = 'b7c1e2f0-0000-4000-8000-0000000000c1'
+ where owner_id = '11111111-aaaa-4aaa-8aaa-000000000001';
 
 insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
 values ('venue-e2e-hall', '11111111-aaaa-4aaa-8aaa-000000000001', 'E2E Function Hall',
@@ -307,8 +342,46 @@ values ('venue-e2e-hall','11111111-aaaa-4aaa-8aaa-000000000001','Asia/Kolkata',t
   500000,1500000,2400000,1000,100,50000,5,30,45,365,0,'{}'::jsonb,
   '{"free_cancel_hours":48,"refund_percent":100}'::jsonb)
 on conflict(listing_id) do update set booking_enabled=true;
+
+-- A real provider can hold several module businesses. This fixture mirrors that:
+-- one classes business and one venues business, each approved/enabled with an
+-- active owner membership. Provider requests therefore need an explicit
+-- x-business-id selection, which both journeys make in the browser.
+insert into public.businesses (id, business_ref, name, module_type, owner_user_id, approval_status, is_enabled)
+values ('b7c1e2f0-0000-4000-8000-0000000000c2', 'BOS-E2E-VENUES', 'E2E Venues Company',
+        'venues', '11111111-aaaa-4aaa-8aaa-000000000001', 'approved', true)
+on conflict (id) do update set module_type='venues', owner_user_id=excluded.owner_user_id,
+  approval_status='approved', is_enabled=true, updated_at=now();
+update public.listings
+   set business_id = 'b7c1e2f0-0000-4000-8000-0000000000c1'
+ where owner_id = '11111111-aaaa-4aaa-8aaa-000000000001' and entity_type = 'course';
+update public.listings
+   set business_id = 'b7c1e2f0-0000-4000-8000-0000000000c2'
+ where owner_id = '11111111-aaaa-4aaa-8aaa-000000000001' and entity_type in ('venue', 'service');
+delete from public.business_members
+ where user_id = '11111111-aaaa-4aaa-8aaa-000000000001'
+   and business_id not in ('b7c1e2f0-0000-4000-8000-0000000000c1', 'b7c1e2f0-0000-4000-8000-0000000000c2');
+insert into public.business_members (business_id, user_id, role, status, accepted_at)
+values ('b7c1e2f0-0000-4000-8000-0000000000c1', '11111111-aaaa-4aaa-8aaa-000000000001', 'owner', 'active', now()),
+       ('b7c1e2f0-0000-4000-8000-0000000000c2', '11111111-aaaa-4aaa-8aaa-000000000001', 'owner', 'active', now())
+on conflict (business_id, user_id) do update set status='active', role='owner';
 SQL
 echo "    seeded 4 identities and 2 approved course listings"
+# Each mode runs against the one module business its journey manages. Both rows
+# exist so the multi-business regression test can add a second membership later;
+# the seeded provider is a member of exactly one of them here.
+# The classes mode keeps both approved memberships so the explicit
+# x-business-id regression test can prove a foreign module business is refused;
+# the venue journey configures rates through the dashboard selector, where a
+# single membership keeps that selection unambiguous.
+if [ "${BOS_RUN_VENUE_ONLY:-0}" = "1" ]; then
+  pq -d "$DB" -q -v ON_ERROR_STOP=1 -c "delete from public.business_members where user_id='11111111-aaaa-4aaa-8aaa-000000000001' and business_id='b7c1e2f0-0000-4000-8000-0000000000c1'" || fail "venue mode membership"
+fi
+pq -d "$DB" -tAc "select count(*) from public.business_members where user_id='11111111-aaaa-4aaa-8aaa-000000000001' and status='active'" | sed "s/^/    provider active memberships after mode split: /"
+
+pq -d "$DB" -tAc "select count(*) from public.business_members where user_id='11111111-aaaa-4aaa-8aaa-000000000001' and status='active'" | sed "s/^/    provider active memberships: /"
+pq -d "$DB" -tAc "select business_id from public.business_members where user_id='11111111-aaaa-4aaa-8aaa-000000000001' and status='active'" | sed "s/^/    membership: /"
+pq -d "$DB" -tAc "select count(*) from public.businesses where module_type='classes'" | sed "s/^/    classes businesses: /"
 
 echo "=== 4. authoritative session store + signed sessions ==="
 cat > "$STORE" <<'JSON'
@@ -346,7 +419,10 @@ const people = {
 const out = {};
 for (const [key, person] of Object.entries(people)) {
   const claims = {
-    userId: person.id,
+    // The server scopes provider business access by the profile id. Using a
+    // display id here made membership lookups miss and every provider route
+    // answer 403 BUSINESS_CONTEXT_REQUIRED.
+    userId: person.auth,
     supabaseUserId: person.auth,
     email: person.email,
     name: person.name,
@@ -520,7 +596,10 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" != "1" ]; then
   E2E_CLASS_SESSIONS="$SESSIONS" \
   E2E_RACE_COURSE_ID="class-e2e-race" \
   E2E_RACE_COURSE_TITLE="E2E Race Course" \
-  E2E_COURSE_TITLE="E2E Algebra Course" \
+    E2E_COURSE_TITLE="E2E Algebra Course" \
+  E2E_COURSE_ID="class-e2e-algebra" \
+  E2E_CLASS_BUSINESS_ID="b7c1e2f0-0000-4000-8000-0000000000c1" \
+  E2E_VENUE_BUSINESS_ID="b7c1e2f0-0000-4000-8000-0000000000c2" \
   npx playwright test e2e/classes-training.spec.ts --project=chromium --retries=0 --reporter=list \
     > "$OUT/playwright-chromium.log" 2>&1 \
     || { tail -60 "$SERVER_LOG" >&2; tail -80 "$OUT/playwright-chromium.log"; fail "Chromium Classes journey (see $OUT/playwright-chromium.log)"; }
@@ -537,11 +616,15 @@ else
   echo "    classes journey skipped by BOS_RUN_VENUE_ONLY=1"
 fi
 
+if [ "${BOS_RUN_VENUE_ONLY:-0}" != "1" ] && [ "${BOS_SKIP_VENUES:-0}" = "1" ]; then
+  echo "    Function Halls journey skipped by BOS_SKIP_VENUES=1"
+else
 echo "=== 6b. Function Halls owner-create/admin-approve/customer/owner/admin browser journey ==="
 E2E_BASE_URL="$SERVER_URL" \
 E2E_VENUE_SESSIONS="$SESSIONS" \
 E2E_VENUE_TITLE="$VENUE_TITLE" \
 E2E_VENUE_SANDBOX_SECRET="$VENUE_SANDBOX_SECRET" \
+E2E_VENUE_BUSINESS_ID="b7c1e2f0-0000-4000-8000-0000000000c2" \
 npx playwright test e2e/venue-booking.spec.ts --project=chromium --retries=0 --grep-invert "persists venue" --reporter=list \
   > "$OUT/playwright-venues.log" 2>&1 \
   || { tail -140 "$OUT/playwright-venues.log"; fail "Chromium Function Halls browser journey (see $OUT/playwright-venues.log)"; }
@@ -603,6 +686,7 @@ if [ "${BOS_RUN_VENUE_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
+fi
 echo "=== 7. database assertions after the journey ==="
 CANCELLED=$(pq -d "$DB" -tAc "select count(*) from public.class_enrollments where status = 'cancelled'")
 CONFIRMED=$(pq -d "$DB" -tAc "select count(*) from public.class_enrollments where status = 'confirmed'")
@@ -641,9 +725,11 @@ start_server
 # real shell before Playwright's restart assertions, as in the first phase.
 warm_dev_middleware
 E2E_PHASE_TWO=1 \
+E2E_VENUE_BUSINESS_ID="b7c1e2f0-0000-4000-8000-0000000000c2" \
 E2E_BASE_URL="$SERVER_URL" \
 E2E_CLASS_SESSIONS="$SESSIONS" \
 E2E_COURSE_TITLE="E2E Algebra Course" \
+E2E_COURSE_ID="class-e2e-algebra" \
 npx playwright test e2e/classes-training.spec.ts --project=chromium --grep "persists after a server restart" --reporter=list \
   > "$OUT/playwright-restart.log" 2>&1 \
   || { tail -40 "$OUT/playwright-restart.log"; fail "restart persistence (see $OUT/playwright-restart.log)"; }

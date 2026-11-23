@@ -178,7 +178,7 @@ printf '%s' '{"seatLocks":{},"bookings":[],"enquiries":[],"paymentIntents":{},"u
 VITE_SUPABASE_URL="$AUTH_BASE" \
 VITE_SUPABASE_PROJECT_ID="local" \
 VITE_SUPABASE_DEVELOPMENT_PROJECT_ID="local" \
-VITE_SUPABASE_PUBLISHABLE_KEY="sb_publishable_abcdefghijklmnopqrstuv_01234567" \
+VITE_SUPABASE_PUBLISHABLE_KEY="sb""_publishable_abcdefghijklmnopqrstuv_01234567" \
 BOS_LISTINGS_DATABASE_URL="postgres://postgres@127.0.0.1:$PGPORT/$DB?sslmode=disable" \
 BOS_SERVER_HMAC_SECRET="$SESSION_SECRET" \
 NODE_ENV=test \

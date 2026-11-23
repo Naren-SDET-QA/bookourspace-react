@@ -4,7 +4,27 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# PostgreSQL 17 on macOS aborts a loopback cluster with "postmaster became
+# multithreaded during startup" when the process has no valid locale (a CI or
+# agent shell commonly has none). Pin a UTF-8 locale for this local cluster.
+if [ -z "${LC_ALL:-}" ] || [ "${LC_ALL}" = "C" ] || [ "${LC_ALL}" = "POSIX" ]; then
+  export LC_ALL="en_US.UTF-8"
+fi
+if [ -z "${LANG:-}" ] || [ "${LANG}" = "C" ]; then
+  export LANG="en_US.UTF-8"
+fi
 CLI_BOS_DEV_DB_PORT="${BOS_DEV_DB_PORT-}"
+# A caller that owns a throwaway cluster (the Playwright webServer and the
+# provider-context harness) must keep its data directory and database URL.
+# `.env.local` is sourced below for credentials, and without these captures it
+# silently redirects the run at the developer's own local cluster, which fails
+# with "psql: connection refused" on the caller's port.
+CLI_BOS_DEV_DB_DATA_DIR="${BOS_DEV_DB_DATA_DIR-}"
+CLI_BOS_LISTINGS_DATABASE_URL="${BOS_LISTINGS_DATABASE_URL-}"
+# A harness that signs its own test sessions must keep its signing key: without
+# this, `.env.local` above silently replaces it and every token is rejected 401.
+CLI_BOS_SERVER_HMAC_SECRET="${BOS_SERVER_HMAC_SECRET-}"
 CLI_PORT="${PORT-}"
 CLI_VITE_ENABLE_DEMO_DATA="${VITE_ENABLE_DEMO_DATA-}"
 CLI_BOS_STAY_INCLUDE_DEMO="${BOS_STAY_INCLUDE_DEMO-}"
@@ -22,6 +42,9 @@ fi
 
 # Preserve explicit command-line environment overrides over .env.local.
 [ -n "$CLI_BOS_DEV_DB_PORT" ] && export BOS_DEV_DB_PORT="$CLI_BOS_DEV_DB_PORT"
+[ -n "$CLI_BOS_DEV_DB_DATA_DIR" ] && export BOS_DEV_DB_DATA_DIR="$CLI_BOS_DEV_DB_DATA_DIR"
+[ -n "$CLI_BOS_LISTINGS_DATABASE_URL" ] && export BOS_LISTINGS_DATABASE_URL="$CLI_BOS_LISTINGS_DATABASE_URL"
+[ -n "$CLI_BOS_SERVER_HMAC_SECRET" ] && export BOS_SERVER_HMAC_SECRET="$CLI_BOS_SERVER_HMAC_SECRET"
 [ -n "$CLI_PORT" ] && export PORT="$CLI_PORT"
 [ -n "$CLI_VITE_ENABLE_DEMO_DATA" ] && export VITE_ENABLE_DEMO_DATA="$CLI_VITE_ENABLE_DEMO_DATA"
 [ -n "$CLI_BOS_STAY_INCLUDE_DEMO" ] && export BOS_STAY_INCLUDE_DEMO="$CLI_BOS_STAY_INCLUDE_DEMO"
@@ -138,5 +161,26 @@ if [ "$MODE" = "ensure" ]; then
   exit 0
 fi
 
-echo "[stays-dev] starting the app (Ctrl+C stops the app; the local database stays for next run)"
-exec npx tsx "$ROOT/server.ts"
+echo "[stays-dev] starting the app (Ctrl+C stops the app; disposable Playwright databases are stopped too)"
+
+# Playwright owns an explicitly named /tmp cluster for each isolated run. The
+# normal developer cluster must remain running, so cleanup is enabled only for
+# that exact disposable naming contract. No data directory is removed.
+DISPOSABLE_DB=0
+case "$DATA_DIR" in
+  /tmp/bookourspace-playwright-db-*) DISPOSABLE_DB=1 ;;
+esac
+APP_PID=""
+cleanup_disposable_db() {
+  if [ "$DISPOSABLE_DB" = 1 ] && [ -n "$APP_PID" ]; then
+    kill -TERM "$APP_PID" 2>/dev/null || true
+    wait "$APP_PID" 2>/dev/null || true
+  fi
+  if [ "$DISPOSABLE_DB" = 1 ]; then
+    pg_ctl -D "$DATA_DIR" -m fast -w stop >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_disposable_db EXIT INT TERM
+npx tsx "$ROOT/server.ts" &
+APP_PID=$!
+wait "$APP_PID"

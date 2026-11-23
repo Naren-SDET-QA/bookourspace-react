@@ -223,6 +223,12 @@ insert into public.profiles (id, email, full_name, role, account_status, verifie
   ('b1c2d3e4-4444-4555-8666-777788889999', 'services.admin@example.test', 'E2E Service Admin', 'admin', 'active', true, '+91 90000 00003')
 on conflict (id) do update set role = excluded.role, account_status = 'active', verified = true;
 
+-- The centralized permission engine gates customer booking actions per module.
+-- Without this grant the seed correctly receives CUSTOMER_ACTION_FORBIDDEN.
+insert into public.customer_module_access (user_id, module_key, allowed_actions, granted_by)
+values ('b1c2d3e4-2222-4333-8444-555566667777', 'services', '["view","create","edit","delete"]'::jsonb, 'b1c2d3e4-4444-4555-8666-777788889999')
+on conflict (user_id, module_key) do update set allowed_actions = excluded.allowed_actions;
+
 delete from public.service_bookings where listing_id = 'svc-ui-listing';
 delete from public.service_provider_schedules where provider_id = 'b1c2d3e4-1111-4222-8333-444455556666';
 

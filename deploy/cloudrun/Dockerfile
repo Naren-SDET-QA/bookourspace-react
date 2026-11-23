@@ -17,15 +17,21 @@ WORKDIR /app
 COPY . .
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_PROJECT_ID
+ARG VITE_SUPABASE_PRODUCTION_PROJECT_ID
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
 ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_ENABLE_DEMO_DATA=false
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_SUPABASE_PROJECT_ID=$VITE_SUPABASE_PROJECT_ID \
+    VITE_SUPABASE_PRODUCTION_PROJECT_ID=$VITE_SUPABASE_PRODUCTION_PROJECT_ID \
     VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY \
     VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY \
     VITE_ENABLE_DEMO_DATA=$VITE_ENABLE_DEMO_DATA
-RUN npm run build
+# build:production, not build: the image build runs the same target gate and
+# post-build scan as a local production build, so the artifact cannot ship a
+# development project reference or a server secret even if the CI checks above
+# are bypassed.
+RUN npm run build:production
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app

@@ -36,6 +36,14 @@ UUID_B="22222222-2222-4222-8222-222222222222"
 UUID_ADMIN="33333333-3333-4333-8333-333333333333"
 UUID_CUSTOMER="44444444-4444-4444-8444-444444444444"
 UUID_CUSTOMER_B="55555555-5555-4555-8555-555555555555"
+# One approved business per provider, matching the provider business gate in
+# server.ts: an admin-approved, enabled business whose module is approved and
+# whose owner holds an active membership. A single active membership is derived
+# server-side, so the tests exercise the derivation path and never send
+# x-business-id for A or B.
+BIZ_A="a1a1a1a1-1111-4111-8111-aaaaaaaaaaa1"
+BIZ_A_CLASSES="c3c3c3c3-3333-4333-8333-ccccccccccc3"
+BIZ_B="b2b2b2b2-2222-4222-8222-bbbbbbbbbbb2"
 
 fail() { echo "FAILED: $*" >&2; exit 1; }
 pq()   { psql -h 127.0.0.1 -p "$PGPORT" -U postgres "$@"; }
@@ -249,7 +257,7 @@ IDEMPOTENCY_INDEX=$(pq -d "$DB" -tAc "select count(*) from pg_indexes where sche
 [ "$IDEMPOTENCY_INDEX" = "1" ] || fail "idempotency index missing"
 echo "    idempotency index present"
 
-echo "=== 4. seed identities ==="
+echo "=== 4. seed identities and provider business context ==="
 pq -d "$DB" -q -v ON_ERROR_STOP=1 <<SQL || fail "seed identities"
 insert into auth.users (id, email, raw_user_meta_data) values
   ('$UUID_A', 'provider.a@example.test', '{}'),
@@ -270,6 +278,51 @@ on conflict (id) do update set role = excluded.role, email = excluded.email, acc
 -- the Live Edit security layer; only a Super Admin is platform-wide. This
 -- fixture is the platform Super Admin used by the "sees every listing" check.
 update public.profiles set is_super_admin = true where id = '$UUID_ADMIN';
+
+-- Provider business context. The gate in server.ts requires an approved, enabled
+-- business, an approved module access row and an active membership before any
+-- provider route runs; without these every provider call answers
+-- 403 BUSINESS_CONTEXT_REQUIRED.
+--
+-- A business is approved for exactly ONE module, and a listing must live in a
+-- business of its own module (providerListingRepository asserts that). Provider
+-- A therefore owns both a pg_hostels and a classes business, which also makes A a
+-- multi-business owner: A's requests send an explicit x-business-id selection,
+-- while provider B's single membership exercises the server-side derivation.
+insert into public.businesses
+  (id, business_ref, name, module_type, owner_user_id, approval_status, is_enabled, backfill_source, created_by, approved_at)
+values
+  ('$BIZ_A', 'it-provider-a-pg', 'Provider A PG', 'pg_hostels', '$UUID_A', 'approved', true, 'integration_test', '$UUID_A', now()),
+  ('$BIZ_A_CLASSES', 'it-provider-a-classes', 'Provider A Classes', 'classes', '$UUID_A', 'approved', true, 'integration_test', '$UUID_A', now()),
+  ('$BIZ_B', 'it-provider-b-pg', 'Provider B PG', 'pg_hostels', '$UUID_B', 'approved', true, 'integration_test', '$UUID_B', now())
+on conflict (business_ref) do update
+  set approval_status = 'approved', is_enabled = true, owner_user_id = excluded.owner_user_id;
+
+insert into public.business_module_access (business_id, module_type, enabled, approval_status, approved_at)
+values
+  ('$BIZ_A', 'pg_hostels', true, 'approved', now()),
+  ('$BIZ_A_CLASSES', 'classes', true, 'approved', now()),
+  ('$BIZ_B', 'pg_hostels', true, 'approved', now())
+on conflict (business_id, module_type) do update
+  set enabled = true, approval_status = 'approved', approved_at = now();
+
+insert into public.business_members (business_id, user_id, role, status, accepted_at)
+values
+  ('$BIZ_A', '$UUID_A', 'owner', 'active', now()),
+  ('$BIZ_A_CLASSES', '$UUID_A', 'owner', 'active', now()),
+  ('$BIZ_B', '$UUID_B', 'owner', 'active', now())
+on conflict (business_id, user_id) do update
+  set role = 'owner', status = 'active', accepted_at = now();
+
+-- Signup defaults grant a new customer VIEW only. The PG booking journey
+-- exercises the booking actions an administrator would grant explicitly, so the
+-- two customer fixtures carry that grant instead of failing at the gate.
+insert into public.customer_module_access (user_id, module_key, allowed_actions, grant_source)
+values
+  ('$UUID_CUSTOMER', 'pg', '["view","create","edit","delete"]'::jsonb, 'manual'),
+  ('$UUID_CUSTOMER_B', 'pg', '["view","create","edit","delete"]'::jsonb, 'manual')
+on conflict (user_id, module_key) do update
+  set allowed_actions = excluded.allowed_actions, grant_source = 'manual';
 SQL
 cat > "$STORE" <<JSON
 {"seatLocks":{},"bookings":[],"enquiries":[],"paymentIntents":{},"usedUtrs":{},"checkedInPasses":{},"users":[
@@ -286,6 +339,7 @@ echo "    listening on 127.0.0.1:$APIPORT"
 echo "=== 6. phase 1: create / ownership / idempotency / conflict safety ==="
 node "$REPO_ROOT/tests/pg-listings.integration.mjs" phase1 \
   "http://127.0.0.1:$APIPORT" "$SECRET" "$UUID_A" "$UUID_B" "$UUID_ADMIN" "$UUID_CUSTOMER" \
+  "$BIZ_A" "$BIZ_A_CLASSES" "$BIZ_B" \
   | tee "$OUT/phase1.out"
 PHASE1_EXIT=${PIPESTATUS[0]}
 [ "$PHASE1_EXIT" = "0" ] || fail "phase 1 HTTP assertions failed"
@@ -318,6 +372,7 @@ echo "    restarted on 127.0.0.1:$APIPORT"
 echo "=== 9. phase 2: persistence and isolation after restart ==="
 node "$REPO_ROOT/tests/pg-listings.integration.mjs" phase2 \
   "http://127.0.0.1:$APIPORT" "$SECRET" "$UUID_A" "$UUID_B" "$UUID_ADMIN" "$UUID_CUSTOMER" \
+  "$BIZ_A" "$BIZ_A_CLASSES" "$BIZ_B" \
   | tee "$OUT/phase2.out"
 PHASE2_EXIT=${PIPESTATUS[0]}
 [ "$PHASE2_EXIT" = "0" ] || fail "phase 2 HTTP assertions failed"
@@ -326,9 +381,23 @@ ARCHIVED_ROWS=$(pq -d "$DB" -tAc "select count(*) from public.listings where id=
 echo "    SQL: deactivated row still present and archived=$ARCHIVED_ROWS (expected 1)"
 [ "$ARCHIVED_ROWS" = "1" ] || fail "deactivation did not persist as a soft delete"
 
+echo "=== 9a. leave provider A with one active business for downstream journeys ==="
+# A's second (classes) business exists only to prove that a listing must live in
+# a business of its own module; the listing assertions above ran with it active.
+# Disabling it afterwards leaves A with exactly one active business, which is the
+# shape the product UI can drive today: the browser client attaches x-business-id
+# from a stored selection and there is no headless way to choose between two
+# businesses. Every downstream journey therefore uses server-side derivation.
+pq -d "$DB" -q -v ON_ERROR_STOP=1 \
+   -c "update public.businesses set is_enabled = false where id = '$BIZ_A_CLASSES';" \
+   || fail "could not deactivate the second business fixture"
+DISABLED=$(pq -d "$DB" -tAc "select count(*) from public.businesses where id='$BIZ_A_CLASSES' and is_enabled=false")
+[ "$DISABLED" = "1" ] || fail "second business fixture still enabled"
+echo "    classes business fixture deactivated; A now has one active business"
+
 echo "=== 9b. PG owner → inventory → reservation / cancellation HTTP integration ==="
 BOS_TEST_PGPORT="$PGPORT" BOS_TEST_PGDB="$DB" node "$REPO_ROOT/tests/pg-bookings.integration.mjs" phase1 \
-  "http://127.0.0.1:$APIPORT" "$SECRET" "$UUID_A" "$UUID_B" "$UUID_ADMIN" "$UUID_CUSTOMER" "$UUID_CUSTOMER_B" "$TMP_ROOT/dist" \
+  "http://127.0.0.1:$APIPORT" "$SECRET" "$UUID_A" "$UUID_B" "$UUID_ADMIN" "$UUID_CUSTOMER" "$UUID_CUSTOMER_B" "$TMP_ROOT/dist" "$BIZ_A" \
   | tee "$OUT/pg-phase1.out"
 PG_PHASE1_EXIT=${PIPESTATUS[0]}
 if [ "$PG_PHASE1_EXIT" != "0" ]; then
@@ -346,7 +415,7 @@ echo "=== 9c. restart API and prove PG reservation persistence ==="
 stop_server
 start_server || fail "API did not restart for PG persistence check"
 BOS_TEST_PGPORT="$PGPORT" BOS_TEST_PGDB="$DB" node "$REPO_ROOT/tests/pg-bookings.integration.mjs" phase2 \
-  "http://127.0.0.1:$APIPORT" "$SECRET" "$UUID_A" "$UUID_B" "$UUID_ADMIN" "$UUID_CUSTOMER" "$UUID_CUSTOMER_B" "$TMP_ROOT/dist" \
+  "http://127.0.0.1:$APIPORT" "$SECRET" "$UUID_A" "$UUID_B" "$UUID_ADMIN" "$UUID_CUSTOMER" "$UUID_CUSTOMER_B" "$TMP_ROOT/dist" "$BIZ_A" \
   | tee "$OUT/pg-phase2.out"
 PG_PHASE2_EXIT=${PIPESTATUS[0]}
 if [ "$PG_PHASE2_EXIT" != "0" ]; then

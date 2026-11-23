@@ -65,6 +65,14 @@ if grep -Eq "['\"]${VITE_SUPABASE_PROJECT_ID}['\"]" src/server/supabaseProductio
   echo "BLOCKER: a release build must not target the development Supabase project." >&2
   exit 2
 fi
+# The client accepts a hosted target only when it is explicitly declared as
+# production. Derive the declaration from the already-validated reference so
+# the two cannot disagree, and refuse a contradicting exported value.
+export VITE_SUPABASE_PRODUCTION_PROJECT_ID="${VITE_SUPABASE_PRODUCTION_PROJECT_ID:-$VITE_SUPABASE_PROJECT_ID}"
+if [[ "$VITE_SUPABASE_PRODUCTION_PROJECT_ID" != "$VITE_SUPABASE_PROJECT_ID" ]]; then
+  echo "BLOCKER: VITE_SUPABASE_PRODUCTION_PROJECT_ID must equal VITE_SUPABASE_PROJECT_ID." >&2
+  exit 2
+fi
 
 # No live-reload server URL may be bundled into a release shell.
 if grep -RIn --include='capacitor.config.*' -E 'url:[[:space:]]*["'"'"']https?://' capacitor.config.ts android ios 2>/dev/null; then
@@ -88,9 +96,10 @@ VITE_ENABLE_DEMO_DATA=false \
 VITE_BOS_LOCAL_DEV_AUTH=0 \
 VITE_SUPABASE_URL="$VITE_SUPABASE_URL" \
 VITE_SUPABASE_PROJECT_ID="$VITE_SUPABASE_PROJECT_ID" \
+VITE_SUPABASE_PRODUCTION_PROJECT_ID="$VITE_SUPABASE_PRODUCTION_PROJECT_ID" \
 VITE_SUPABASE_PUBLISHABLE_KEY="$VITE_SUPABASE_PUBLISHABLE_KEY" \
 VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-$VITE_SUPABASE_PUBLISHABLE_KEY}" \
-npm run build
+npm run build:production
 npx cap sync
 
 case "$MODE" in

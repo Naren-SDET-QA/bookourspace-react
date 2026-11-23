@@ -4,6 +4,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { after, before, test } from 'node:test';
 import pg from 'pg';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const { Pool } = pg;
 const connectionString = process.env.BOS_LISTINGS_DATABASE_URL;
@@ -58,7 +59,7 @@ async function request(method, url, token, body) {
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, TEST_HMAC_SECRET) : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -117,6 +118,20 @@ async function seed() {
       [id, role, status, name, email, role === 'provider', id === admin],
     );
   }
+  // The customer module gate enforces section/action grants, and a new customer
+  // is seeded with view-only defaults. A booking customer needs the module they
+  // are booking in, exactly as a real customer account grants it.
+  await pool.query(
+    `insert into public.customer_module_access
+       (user_id, module_key, allowed_sections, allowed_actions)
+     values ($1,'hotels','[]'::jsonb,'["manage"]'::jsonb),
+            ($2,'hotels','[]'::jsonb,'["manage"]'::jsonb)
+     on conflict (user_id, module_key) do update set
+       allowed_sections = excluded.allowed_sections,
+       allowed_actions = excluded.allowed_actions,
+       expires_at = null`,
+    [customer, otherCustomer],
+  );
   const listingId = `stay-listing-${randomUUID().slice(0, 8)}`;
   const pendingId = `stay-pending-${randomUUID().slice(0, 8)}`;
   await pool.query("update public.platform_module_flags set is_enabled = true, allow_online_booking = true where module_key = 'hotels'");

@@ -4,6 +4,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { after, before, test } from 'node:test';
 import pg from 'pg';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 /**
  * Services booking lifecycle E2E against a live server + disposable PostgreSQL.
@@ -62,7 +63,7 @@ async function request(method, url, token, body) {
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, TEST_HMAC_SECRET) : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(stripHelperFields(body)) } : {}),
@@ -117,6 +118,20 @@ async function seed() {
       [id, role, name, email],
     );
   }
+  // The customer module gate enforces section/action grants, and a new customer
+  // is seeded with view-only defaults. A booking customer needs the module they
+  // are booking in, exactly as a real customer account grants it.
+  await pool.query(
+    `insert into public.customer_module_access
+       (user_id, module_key, allowed_sections, allowed_actions)
+     values ($1,'services','[]'::jsonb,'["manage"]'::jsonb),
+            ($2,'services','[]'::jsonb,'["manage"]'::jsonb)
+     on conflict (user_id, module_key) do update set
+       allowed_sections = excluded.allowed_sections,
+       allowed_actions = excluded.allowed_actions,
+       expires_at = null`,
+    [customer, otherCustomer],
+  );
   await pool.query('delete from public.service_bookings where provider_id = $1', [provider]);
   await pool.query(
     `insert into public.listings (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
@@ -182,7 +197,7 @@ dbTest('public payment config exposes pay-after-service and UPI capability witho
 dbTest('customer creates a pay-after-service booking idempotently', async () => {
   const payload = bookingPayload();
   const created = await request('POST', '/api/services/bookings', customerToken, payload);
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 201, JSON.stringify(created.data));
   assert.equal(created.data.booking.status, 'requested');
   assert.equal(created.data.booking.paymentStatus, 'due');
   assert.equal(created.data.booking.paymentMode, 'pay_after_service');

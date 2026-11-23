@@ -55,6 +55,30 @@ jobs:
             | docker run --rm --network=none -i ghcr.io/gitleaks/gitleaks:v8.24.3 \
                 stdin --no-banner --no-color --redact
 
+  deploy-config:
+    name: Cloud Run deployment configuration audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the pinned YAML parser for the audit
+        run: python3 -m pip install --disable-pip-version-check -r deploy/cloudrun/requirements-verify.txt
+
+      - name: Audit the real deployment configuration
+        run: python3 deploy/cloudrun/verify-deployment-config.py
+
+      - name: Prove an invalid configuration fails the audit
+        run: python3 deploy/cloudrun/test_verify_deployment_config.py -v
+
   chromium:
     name: Chromium E2E
     runs-on: ubuntu-latest

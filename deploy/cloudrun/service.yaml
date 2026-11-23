@@ -71,6 +71,11 @@ spec:
               value: "${SUPABASE_PROJECT_ID}"
             - name: VITE_SUPABASE_PROJECT_ID
               value: "${SUPABASE_PROJECT_ID}"
+            # The client only accepts a hosted target explicitly declared as the
+            # production project; the bundle inlines this at build time and the
+            # server resolver reads the same value.
+            - name: VITE_SUPABASE_PRODUCTION_PROJECT_ID
+              value: "${SUPABASE_PROJECT_ID}"
             - name: VITE_SUPABASE_URL
               value: "https://${SUPABASE_PROJECT_ID}.supabase.co"
             - name: SUPABASE_PUBLISHABLE_KEY

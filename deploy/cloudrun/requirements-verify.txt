@@ -1,0 +1,10 @@
+# Reproducible dependency for the deployment configuration audit.
+# Used by .github/workflows/ci.yml and by local runs of
+# deploy/cloudrun/verify-deployment-config.py:
+#
+#   python3 -m venv /tmp/bos-verify && /tmp/bos-verify/bin/pip install -r deploy/cloudrun/requirements-verify.txt
+#   /tmp/bos-verify/bin/python deploy/cloudrun/verify-deployment-config.py
+#
+# The audit parses YAML, so a real YAML parser is required: PyYAML is pinned to
+# an exact version so CI and a developer machine see identical parsing rules.
+PyYAML==6.0.2
