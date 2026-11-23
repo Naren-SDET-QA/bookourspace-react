@@ -107,6 +107,8 @@ export interface ProviderListingRecord {
   priceUnit: string;
   providerId: string;
   ownerUserId: string;
+  /** Owning business, when the listing has been assigned one. */
+  businessId?: string;
   providerName: string;
   providerPhone: string;
   status: string;
@@ -313,6 +315,9 @@ function toRecord(row: any): ProviderListingRecord {
     priceUnit: String(row.price_unit || 'quote'),
     providerId: safeText(provider.id, `prov-${String(row.owner_id || '').slice(0, 8).toLowerCase()}`),
     ownerUserId: String(row.owner_id || ''),
+    // The owning business, so a multi-business provider can scope a workspace
+    // request to the listing it is acting on instead of a global selection.
+    businessId: row.business_id ? String(row.business_id) : undefined,
     providerName: safeText(row.provider_name, safeText(provider.name)),
     providerPhone: String(row.provider_phone || ''),
     status: String(row.status || 'pending_approval'),

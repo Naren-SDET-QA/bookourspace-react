@@ -150,6 +150,13 @@ export function noticeForProviderError(
         description: 'Your membership is active but no module access has been granted. Ask a business owner or an administrator to enable access for you in User Permissions.',
         action: 'contact-admin',
       };
+    case 'BUSINESS_MODULE_FORBIDDEN':
+      return {
+        kind: 'permission',
+        title: 'You do not have permission for this business',
+        description: 'Your membership does not include this business\'s module. A business owner or an administrator can grant it in User Permissions; until then this workspace stays closed.',
+        action: 'contact-admin',
+      };
     case 'BUSINESS_SECTION_FORBIDDEN':
       return {
         kind: 'permission',

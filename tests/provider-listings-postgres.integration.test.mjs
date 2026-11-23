@@ -10,6 +10,7 @@ import { after, test } from 'node:test';
 import pg from 'pg';
 import { filterServiceListings, parseServiceListing } from '../src/lib/sectionExperiences.ts';
 import { inferLiveEditModule } from '../src/lib/liveEdit/moduleInference.ts';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const { Pool } = pg;
 const databaseAvailable = Boolean(process.env.BOS_LISTINGS_DATABASE_URL);
@@ -161,7 +162,7 @@ async function request(method, url, token, body) {
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, TEST_HMAC_SECRET) : {}),
       ...(businessId ? { 'x-business-id': businessId } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
@@ -308,10 +309,10 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     const unauthenticated = await request('POST', '/api/provider/listings', undefined, { title: 'No auth' });
     assert.equal(unauthenticated.response.status, 401);
     const customerWrite = await request('POST', '/api/provider/listings', customerToken, { title: 'No provider role' });
-    assert.equal(customerWrite.response.status, 403);
-    assert.equal(customerWrite.data.error, 'FORBIDDEN_PROVIDER_ROLE_REQUIRED');
+    assert.equal(customerWrite.response.status, 403, JSON.stringify(customerWrite.data));
+    assert.equal(customerWrite.data.error, 'PROVIDER_ROLE_REQUIRED');
     const forgedRole = await request('GET', '/api/provider/listings', forgedCustomerProviderToken);
-    assert.equal(forgedRole.response.status, 403);
+    assert.equal(forgedRole.response.status, 401, JSON.stringify(forgedRole.data));
     assert.ok(['SESSION_ROLE_MISMATCH','BUSINESS_CONTEXT_REQUIRED'].includes(forgedRole.data.error));
   });
 
@@ -326,8 +327,8 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     const oauth = await oauthResponse.json();
     assert.equal(oauthResponse.status, 200, JSON.stringify(oauth));
     assert.equal(oauth.user.role, 'customer', 'verified Google login provisions a least-privilege profile');
-    assert.ok(oauth.sessionToken);
-    const applicantSession = oauth.sessionToken;
+    const applicantSession = sessionCookieFromResponse(oauthResponse);
+    assert.ok(applicantSession, 'the verified sign-in sets a session cookie');
     const requestId = randomUUID();
     const application = {
       requestId,
@@ -397,8 +398,22 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
         requestId: randomUUID(),
         providerType,
         businessName: `Provider ${providerType}`,
+        // A PG/Hostel application must carry the listing detail contract; the
+        // server rejects an application that cannot become a real listing.
+        ...(providerType === 'pg_hostels' ? {
+          availability: {
+            photos: ['https://example.test/pg-room.jpg'],
+            address: '12 Test Street, Test City',
+            pincode: '500001',
+            monthlyRent: 9000,
+            totalBeds: 4,
+            gender: 'any',
+            roomType: 'single',
+          },
+        } : {}),
       });
-      assert.equal(additionalModule.response.status, 201, `${providerType} provider onboarding is accepted`);
+      assert.equal(additionalModule.response.status, 201,
+        `${providerType} provider onboarding is accepted: ${JSON.stringify(additionalModule.data)}`);
       assert.equal(additionalModule.data.registration.providerType, providerType);
     }
 
@@ -428,8 +443,9 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     const refreshed = await request('GET', '/api/auth/me', applicantSession);
     assert.equal(refreshed.response.status, 200);
     assert.equal(refreshed.data.user.role, 'provider');
-    assert.ok(refreshed.data.sessionToken, 'role refresh is signed by the server');
-    const created = await createListing(refreshed.data.sessionToken, `new-provider-${randomUUID()}`, {
+    const refreshedCookie = sessionCookieFromResponse(refreshed.response);
+    assert.ok(refreshedCookie, 'role refresh is signed by the server');
+    const created = await createListing(refreshedCookie, `new-provider-${randomUUID()}`, {
       categoryId: 'services', subcategory: 'Electrical repair', entityType: 'service',
       title: 'New provider listing', price: 500,
       payload: { location: { city: 'Test City', area: 'North District' } },
@@ -448,7 +464,7 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     const otherProviderEdit = await request('PATCH', `/api/provider/listings/${encodeURIComponent(created.data.listing.id)}`, providerBToken, { title: 'Takeover' });
     assert.equal(otherProviderEdit.response.status, 404);
     globalThis.newProviderListingId = created.data.listing.id;
-    globalThis.newProviderSession = refreshed.data.sessionToken;
+    globalThis.newProviderSession = refreshedCookie;
   });
 
   await t.test('provider creates a pending listing tied to the verified Auth UUID', async () => {

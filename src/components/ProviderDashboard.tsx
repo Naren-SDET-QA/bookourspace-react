@@ -28,6 +28,7 @@ import ServicesProviderDashboard, { serviceSections, type ServiceView } from './
 import ProviderPortalShell, { ProviderStatCard, PROVIDER_MODULE_LABELS, type ProviderPortalModule } from './ProviderPortalShell';
 import { accessScopeFrom, grantedSections, moduleGranted } from '../lib/businessAccess';
 import { BUSINESS_MODULE_LABELS, fetchBusinesses, type BusinessMembership, type BusinessModule } from '../lib/businessClient';
+import { noticeForProviderError } from '../lib/providerBusinessContext';
 import { BusinessCreatePanel } from './pg/BusinessCreatePanel';
 import { BusinessStaffPanel } from './pg/BusinessStaffPanel';
 
@@ -106,7 +107,15 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       .then((rows) => {
         if (!active) return;
         setBusinesses(rows);
-        const preferred = rows.find((row) => row.module_type === 'pg_hostels' && row.approval_status === 'approved') || rows[0];
+        // A provider can hold several module businesses. Honour the business
+        // the user explicitly selected (persisted by the switcher) instead of
+        // always falling back to the PG business or the first row.
+        let storedSelection = '';
+        try { storedSelection = window.localStorage.getItem('bos_business_id_v1') || ''; } catch { /* storage is optional */ }
+        const stored = rows.find((row) => row.id === storedSelection);
+        const preferred = stored
+          || rows.find((row) => row.module_type === 'pg_hostels' && row.approval_status === 'approved')
+          || rows[0];
         // A stored id can belong to another account (or to a business this
         // provider no longer holds), so only keep it when it is still theirs.
         setSelectedBusinessId((current) => (current && rows.some((row) => row.id === current) ? current : preferred?.id || ''));
@@ -134,8 +143,10 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   useEffect(() => {
     try {
+      // Never clear the stored selection on the first empty render: the
+      // business list resolves asynchronously, and wiping it here would discard
+      // the business the user (or a deep link) already chose.
       if (selectedBusinessId) window.localStorage.setItem('bos_business_id_v1', selectedBusinessId);
-      else window.localStorage.removeItem('bos_business_id_v1');
     } catch { /* storage is optional */ }
   }, [selectedBusinessId]);
 
@@ -192,6 +203,10 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   // Access scope of the signed-in member inside the selected business. `null`
   // means unrestricted (owners, and members without a grant row).
   const accessScope = accessScopeFrom(selectedBusiness);
+  // A member whose grant row names no module may use nothing in this business.
+  const selectedBusinessAllowsAnyModule = !accessScope || accessScope.allowedModules.length > 0;
+  const selectedBusinessNotice = selectedBusinessAllowsAnyModule ? null : noticeForProviderError('BUSINESS_MODULE_FORBIDDEN');
+  const noBusinessNotice = noticeForProviderError('BUSINESS_CONTEXT_REQUIRED', { hasBusinesses: false, businessCount: 0 })!;
   const BUSINESS_MODULE_FOR_TAB: Partial<Record<ProviderWorkspaceTab, string>> = {
     pg_inventory: 'pg_hostels', institute: 'classes', stays: 'hotel_stay', services: 'services',
   };
@@ -205,7 +220,10 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   };
   const allowedPortalModules: ProviderPortalModule[] = (Object.keys(PORTAL_MODULE_FOR_TAB) as ProviderWorkspaceTab[])
     .filter((tab) => {
-      if (!tabAllowed(tab) || (tab !== 'team' || !accessScope)) return false;
+      if (!tabAllowed(tab)) return false;
+      // Team & access is a grant-editing surface: it is only offered to a member
+      // who actually holds a grant row.
+      if (tab === 'team' && !accessScope) return false;
       const moduleType = BUSINESS_MODULE_FOR_TAB[tab];
       // A provider only sees workspace modules for businesses they actually
       // belong to. This prevents a PG-only account from being presented with
@@ -375,6 +393,21 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
       }}
     >
     <div className="min-w-0 space-y-6 pb-24">
+      {/* A grant row that names no module is a refusal, not an empty portal.
+          Without this the workspace had nothing to show and nothing to say, so
+          the member saw a blank console instead of the server's answer. */}
+      {!selectedBusinessAllowsAnyModule && (
+        <section
+          role="alert"
+          data-testid="provider-context-notice"
+          data-notice-kind="permission"
+          className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0f1727]"
+        >
+          <h2 className="text-xl font-black text-slate-950 dark:text-white">{selectedBusinessNotice!.title}</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">{selectedBusinessNotice!.description}</p>
+          <p data-testid="provider-contact-admin" className="mt-5 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">Contact your business owner or a platform administrator to request access.</p>
+        </section>
+      )}
       {/* Pending Admin Approval Alert Banner (Display only for Admin) */}
       {pendingListings.length > 0 && onSwitchToAdminReview && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-700 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -422,7 +455,22 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </div>
       )}
 
-      {!businesses.length && !businessError && <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />}
+      {!businesses.length && !businessError && (
+        <>
+          {/* With no business the workspace has nothing to scope a request to;
+              say so instead of only offering the create form. */}
+          <section
+            role="alert"
+            data-testid="provider-context-notice"
+            data-notice-kind="select-business"
+            className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0f1727]"
+          >
+            <h2 className="text-xl font-black text-slate-950 dark:text-white">{noBusinessNotice.title}</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">{noBusinessNotice.description}</p>
+          </section>
+          <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />
+        </>
+      )}
       {businesses.length > 0 && (
         <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-teal-tint bg-brand-teal-soft p-3 dark:border-brand-teal-deep dark:bg-brand-navy/20">
           <div className="flex min-w-0 flex-wrap items-center gap-2">

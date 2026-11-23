@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import pg from 'pg';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 /**
  * Provider business-context and business RLS integration against a disposable
@@ -175,7 +176,7 @@ async function request(method, url, token, businessId, body) {
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, TEST_HMAC_SECRET) : {}),
       ...(businessId ? { 'x-business-id': businessId } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
@@ -657,7 +658,10 @@ dbTest('provider module authorization, services gate and business RLS', async ()
     phone: '+91 90000 00002',
   });
   assert.equal(customerWorker.status, 403, JSON.stringify(customerWorker.data));
-  assert.equal(customerWorker.data.error, 'ACTIVE_PROVIDER_REQUIRED');
+  // The provider business gate is mounted ahead of the handler, so a customer on
+  // a provider-only path is refused by the gate; the handler-level
+  // ACTIVE_PROVIDER_REQUIRED branch is no longer reachable for this request.
+  assert.equal(customerWorker.data.error, 'PROVIDER_ROLE_REQUIRED');
 
   // A services member whose grant omits services is refused; granting it works.
   const staffDenied = await request('GET', '/api/services/provider/schedule', tokens.servicesStaff, servicesBusinessId);

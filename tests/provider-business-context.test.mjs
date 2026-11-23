@@ -173,3 +173,33 @@ test('10. the single-business provider flow is unchanged', () => {
   assert.equal(strictPermissionDefaults({ BOS_STRICT_PERMISSION_DEFAULTS: '1' }), true);
   assert.equal(strictPermissionDefaults({}), false);
 });
+
+test('11. a revoked module grant is explained, not shown as a broken dashboard', () => {
+  // The member keeps the membership row but the module was taken away, so the
+  // server answers BUSINESS_MODULE_FORBIDDEN for every workspace request.
+  const decision = evaluate({ ...business(), member_modules: [] });
+  assert.deepEqual(decision, { ok: false, status: 403, error: 'BUSINESS_MODULE_FORBIDDEN' });
+
+  // The portal must turn that into the same permission panel it shows for
+  // BUSINESS_PERMISSIONS_REQUIRED: a refusal the provider can act on, never an
+  // empty dashboard or a raw error string.
+  const notice = noticeForProviderError('BUSINESS_MODULE_FORBIDDEN');
+  assert.equal(notice.kind, 'permission');
+  assert.equal(notice.action, 'contact-admin');
+  assert.match(notice.title, /permission/i);
+  assert.match(notice.description, /User Permissions/);
+
+  // Every refusal the gate can return has a client explanation.
+  for (const code of [
+    'BUSINESS_CONTEXT_REQUIRED',
+    'BUSINESS_PERMISSIONS_REQUIRED',
+    'BUSINESS_MODULE_FORBIDDEN',
+    'BUSINESS_SECTION_FORBIDDEN',
+    'BUSINESS_ACTION_FORBIDDEN',
+    'BUSINESS_ACCESS_DENIED',
+    'UNAUTHORIZED_SESSION',
+    'BUSINESS_LIST_UNAVAILABLE',
+  ]) {
+    assert.ok(noticeForProviderError(code), `${code} needs a client notice`);
+  }
+});
