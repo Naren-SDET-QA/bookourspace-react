@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import pg from 'pg';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 const { Pool } = pg;
 const connectionString = process.env.BOS_LISTINGS_DATABASE_URL;
@@ -155,7 +156,7 @@ async function request(method, url, sessionToken, body, businessId) {
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(sessionToken ? sessionCookieHeaders(sessionToken, HMAC_SECRET) : {}),
       ...(selectedBusinessId ? { 'x-business-id': selectedBusinessId } : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
@@ -451,11 +452,11 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
 
   await t.test('forged roles are rejected by the database profile check', async () => {
     const forgedProvider = await patchListing(tokens.forgedProvider, LISTING_A, { title: 'Forged provider edit' });
-    assert.equal(forgedProvider.status, 403);
+    assert.equal(forgedProvider.status, 401);
     assert.equal(forgedProvider.data.error, 'SESSION_ROLE_MISMATCH');
 
     const forgedAdmin = await patchListing(tokens.forgedAdmin, LISTING_A, { title: 'Forged admin edit' });
-    assert.equal(forgedAdmin.status, 403);
+    assert.equal(forgedAdmin.status, 401);
     assert.equal(forgedAdmin.data.error, 'SESSION_ROLE_MISMATCH');
 
     assert.equal((await listingRow(LISTING_A)).title, 'Live Edit PG A');
@@ -555,7 +556,7 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
       title: 'Suspended edit',
     });
     assert.equal(response.status, 403);
-    assert.equal(response.data.error, 'ACTIVE_PROFILE_REQUIRED');
+    assert.equal(response.data.error, 'ACCOUNT_NOT_ACTIVE');
 
     // The database guard refuses the write for an inactive profile on purpose;
     // either the trigger error or an RLS-filtered zero-row update is a denial.
@@ -571,14 +572,17 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
       refundPercent: 60,
     });
     assert.equal(movie.status, 403, JSON.stringify(movie.data));
-    assert.equal(movie.data.error, 'ACTIVE_PROFILE_REQUIRED');
+    assert.equal(movie.data.error, 'ACCOUNT_NOT_ACTIVE');
     assert.equal((await listingRow(LISTING_SUSPENDED)).title, 'Suspended listing');
 
     await sql("update public.profiles set account_status = 'suspended' where id = $1", [ADMIN_ASSIGNED]);
-    const suspendedAdmin = await patchListing(tokens.assignedAdmin, LISTING_A, { title: 'Suspended admin edit' });
-    assert.equal(suspendedAdmin.status, 403);
-    assert.equal(suspendedAdmin.data.error, 'ACTIVE_PROFILE_REQUIRED');
-    await sql("update public.profiles set account_status = 'active' where id = $1", [ADMIN_ASSIGNED]);
+    try {
+      const suspendedAdmin = await patchListing(tokens.assignedAdmin, LISTING_A, { title: 'Suspended admin edit' });
+      assert.equal(suspendedAdmin.status, 403);
+      assert.equal(suspendedAdmin.data.error, 'ACCOUNT_NOT_ACTIVE');
+    } finally {
+      await sql("update public.profiles set account_status = 'active' where id = $1", [ADMIN_ASSIGNED]);
+    }
   });
 
   await t.test('admins cannot grant themselves assignments', async () => {
@@ -648,12 +652,15 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
     assert.equal(demoted.data.error, 'SUPER_ADMIN_REQUIRED');
 
     await sql("update public.profiles set role = 'provider' where id = $1", [ADMIN_ASSIGNED]);
-    const roleChanged = await patchListing(tokens.assignedAdmin, LISTING_A, { title: 'Stale admin role' });
-    assert.equal(roleChanged.status, 403);
-    assert.equal(roleChanged.data.error, 'SESSION_ROLE_MISMATCH');
-    await sql("update public.profiles set role = 'admin', is_super_admin = false where id = $1", [
-      ADMIN_ASSIGNED,
-    ]);
+    try {
+      const roleChanged = await patchListing(tokens.assignedAdmin, LISTING_A, { title: 'Stale admin role' });
+      assert.equal(roleChanged.status, 401);
+      assert.equal(roleChanged.data.error, 'SESSION_ROLE_MISMATCH');
+    } finally {
+      await sql("update public.profiles set role = 'admin', is_super_admin = false where id = $1", [
+        ADMIN_ASSIGNED,
+      ]);
+    }
   });
 
   await t.test('providers cannot modify verification, featured, moderation or publication fields', async () => {

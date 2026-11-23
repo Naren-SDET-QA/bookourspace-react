@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import pg from 'pg';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 /**
  * Classes & Training end-to-end HTTP test against a disposable local
@@ -140,7 +141,7 @@ async function request(method, url, token, body) {
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, TEST_HMAC_SECRET) : {}),
       ...(businessId ? { 'x-business-id': businessId } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
@@ -174,6 +175,20 @@ async function seedDatabase() {
   await pool.query(
     `update public.profiles set role = 'customer', account_status = 'active' where id = any($1::uuid[])`,
     [[customerA, customerB, customerC]],
+  );
+  // The customer module gate sits in front of the enrollment handler, so the
+  // students need a classes grant exactly as a real signed-up customer has.
+  await pool.query(
+    `insert into public.customer_module_access
+       (user_id, module_key, allowed_sections, allowed_actions)
+     values ($1,'classes','[]'::jsonb,'["manage"]'::jsonb),
+            ($2,'classes','[]'::jsonb,'["manage"]'::jsonb),
+            ($3,'classes','[]'::jsonb,'["manage"]'::jsonb)
+     on conflict (user_id, module_key) do update set
+       allowed_sections = excluded.allowed_sections,
+       allowed_actions = excluded.allowed_actions,
+       expires_at = null`,
+    [customerA, customerB, customerC],
   );
   await pool.query(`delete from public.class_enrollments`);
   await pool.query(`delete from public.class_batches`);
