@@ -6,15 +6,48 @@
  * signed admin/super-admin/customer sessions. It never touches Supabase or a
  * hosted database.
  *
- * Usage: node tests/universal-builder.integration.mjs <baseUrl> <hmacSecret> <superId> <adminId> <customerId>
+ * Usage:
+ *   node tests/universal-builder.integration.mjs
+ *     Starts its own disposable PostgreSQL cluster and Express server on
+ *     127.0.0.1, waits for a real health check, runs every assertion, then
+ *     removes only what it created.
+ *
+ *   node tests/universal-builder.integration.mjs <baseUrl> <hmacSecret> <superId> <adminId> <customerId>
+ *     Drives an already-running server (used by the shell harness).
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { startDisposableBuilderEnv } from './lib/disposable-builder-env.mjs';
+import { sessionCookieHeaders } from './lib/session-cookies.mjs';
 
-const [base, secret, superId, adminId, customerId] = process.argv.slice(2);
+// Production UUID shape. Fixtures are rejected here rather than failing deep
+// inside an HTTP assertion with an opaque 403.
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+let [base, secret, superId, adminId, customerId] = process.argv.slice(2);
+let environment = null;
+
+if (!base) {
+  // No arguments: own the whole lifecycle so a plain shell run is sufficient.
+  environment = await startDisposableBuilderEnv();
+  ({ baseUrl: base, secret, superId, adminId, customerId } = environment);
+} else {
+  // Ensure IPv4 connectivity: 127.0.0.1, never localhost/::1.
+  base = base.replace(/localhost/g, '127.0.0.1');
+}
+
 if (!base || !secret || !superId || !adminId || !customerId) {
-  console.error('usage: universal-builder.integration.mjs <baseUrl> <hmacSecret> <superId> <adminId> <customerId>');
+  console.error('usage: universal-builder.integration.mjs [<baseUrl> <hmacSecret> <superId> <adminId> <customerId>]');
+  console.error('  no arguments: start a disposable PostgreSQL cluster and API server automatically');
+  console.error('  baseUrl: must use 127.0.0.1 instead of localhost for IPv4 compatibility');
   process.exit(2);
+}
+
+for (const [label, id] of [['super', superId], ['admin', adminId], ['customer', customerId]]) {
+  if (!UUID_V4.test(id)) {
+    console.error(`invalid ${label} fixture id "${id}": expected a version-4 UUID (variant nibble 8/9/a/b)`);
+    process.exit(2);
+  }
 }
 
 let checks = 0;
@@ -41,8 +74,10 @@ const ADMIN = mint(adminId, 'admin', 'Admin');
 const CUSTOMER = mint(customerId, 'customer', 'Customer');
 
 async function call(method, path, { token, body } = {}) {
-  const headers = { 'content-type': 'application/json' };
-  if (token) headers['x-bos-session-token'] = token;
+  // The API authenticates the HttpOnly cookie session only; a token held by the
+  // test is presented the way the browser presents it, with the CSRF proof the
+  // server derives for unsafe methods.
+  const headers = { 'content-type': 'application/json', ...(token ? sessionCookieHeaders(token, secret) : {}) };
   const response = await fetch(`${base}${path}`, {
     method,
     headers,
@@ -125,8 +160,31 @@ let publishedVersion = 0;
   expectedStatus(draft, 200, 'save draft');
   assert.equal(draft.json.page.status, 'draft');
   assert.equal(draft.json.page.versionNumber, 2);
-  const draftId = draft.json.page.versionId;
+  let draftId = draft.json.page.versionId;
   pass('admin (non-super) can save a draft');
+
+  // Draft reload: the saved document must come back from PostgreSQL intact.
+  const reloaded = await call('GET', '/api/builder/pages/pg_hostels?mode=admin', { token: ADMIN });
+  expectedStatus(reloaded, 200, 'draft reload');
+  assert.equal(reloaded.json.draft.versionNumber, 2);
+  assert.equal(reloaded.json.draft.document.blocks.length, 2);
+  assert.equal(reloaded.json.draft.document.blocks[0].props.text, 'Verified PGs near you');
+  pass('a saved draft reloads from PostgreSQL with its document intact');
+
+  // Draft edit: saving against the draft's own version appends the next version.
+  const edited = await call('POST', '/api/builder/pages/pg_hostels/draft', {
+    token: ADMIN,
+    body: {
+      document: { ...document, title: 'PGs and Hostels (edited)' },
+      expectedVersion: 2,
+      summary: 'Second draft edit',
+    },
+  });
+  expectedStatus(edited, 200, 'draft edit');
+  assert.equal(edited.json.page.versionNumber, 3);
+  assert.equal(edited.json.page.document.title, 'PGs and Hostels (edited)');
+  draftId = edited.json.page.versionId;
+  pass('editing an existing draft appends a new version and keeps the edit');
 
   const publishAsAdmin = await call('POST', '/api/builder/pages/pg_hostels/publish', {
     token: ADMIN,
@@ -202,6 +260,14 @@ let publishedVersion = 0;
   assert.equal(publicRollback.json.page.versionNumber, rollback.json.page.versionNumber);
   assert.equal(publicRollback.json.page.document.blocks.length, 0);
   pass('the public client follows a rollback');
+
+  // Retraction semantics: there is no separate "unpublish" verb; a Super Admin
+  // rollback to the baseline is the supported way to retire published content,
+  // and anonymous readers stop seeing it immediately.
+  const retracted = await call('GET', '/api/builder/pages/pg_hostels');
+  expectedStatus(retracted, 200, 'retracted public read');
+  assert.equal(retracted.json.page.document.blocks.length, 0);
+  pass('retracting published content by rollback still requires a Super Admin and is anonymous-safe');
 }
 
 console.log('=== B2. six-page publish and rollback ===');
@@ -246,6 +312,95 @@ console.log('=== B2. six-page publish and rollback ===');
     assert.equal(after.json.page.document.blocks.length, 0);
     pass(`${pageKey}: publish propagated to the public read and rollback restored the baseline`);
   }
+}
+
+console.log('=== B3. page unpublish ===');
+{
+  const versions = await call('GET', '/api/builder/pages/venues/versions', { token: ADMIN });
+  expectedStatus(versions, 200, 'venues versions');
+  const publishedRows = versions.json.versions.filter((version) => version.status === 'published');
+  assert.ok(publishedRows.length > 0, 'venues has a published version to retract');
+  const maxPublished = Math.max(...publishedRows.map((version) => version.versionNumber));
+  const latestVersion = versions.json.versions[0].versionNumber;
+
+  const anon = await call('POST', '/api/builder/pages/venues/unpublish', { body: {} });
+  expectedStatus(anon, 401, 'anonymous unpublish');
+  const customer = await call('POST', '/api/builder/pages/venues/unpublish', { token: CUSTOMER, body: {} });
+  expectedStatus(customer, 403, 'customer unpublish');
+  const adminAttempt = await call('POST', '/api/builder/pages/venues/unpublish', { token: ADMIN, body: {} });
+  expectedStatus(adminAttempt, 403, 'regular admin unpublish');
+  assert.match(String(adminAttempt.json.error), /BUILDER_SUPER_ADMIN_REQUIRED/);
+  pass('unpublishing requires a Super Admin (anonymous 401, customer 403, regular Admin 403)');
+
+  const staleVersion = maxPublished > 1 ? maxPublished - 1 : maxPublished + 1;
+  const stale = await call('POST', '/api/builder/pages/venues/unpublish', {
+    token: SUPER,
+    body: { expectedVersion: staleVersion },
+  });
+  expectedStatus(stale, 409, 'stale unpublish');
+  assert.match(String(stale.json.error), /BUILDER_VERSION_CONFLICT/);
+  pass('unpublish rejects a stale expected version with 409');
+
+  const unpublished = await call('POST', '/api/builder/pages/venues/unpublish', {
+    token: SUPER,
+    body: { expectedVersion: maxPublished },
+  });
+  expectedStatus(unpublished, 200, 'unpublish');
+  assert.equal(unpublished.json.page.status, 'unpublished');
+  assert.equal(unpublished.json.page.publishedAt, null);
+  pass('Super Admin unpublished the live page');
+
+  const gone = await call('GET', '/api/builder/pages/venues');
+  expectedStatus(gone, 404, 'public read after unpublish');
+  assert.equal(gone.json.error, 'BUILDER_PAGE_NOT_FOUND');
+  pass('the public surface stops serving an unpublished page immediately');
+
+  const history = await call('GET', '/api/builder/pages/venues/versions', { token: ADMIN });
+  expectedStatus(history, 200, 'versions after unpublish');
+  assert.ok(history.json.versions.some((version) => version.status === 'unpublished'));
+  assert.equal(history.json.versions.filter((version) => version.status === 'published').length, 0);
+  pass('version history keeps the retracted document and leaves nothing published');
+
+  const audit = await call('GET', '/api/builder/audit', { token: ADMIN });
+  expectedStatus(audit, 200, 'audit after unpublish');
+  const entry = audit.json.entries.find((row) => row.action === 'page_unpublished');
+  assert.ok(entry, 'audit missing page_unpublished');
+  assert.equal(entry.actor_role, 'super_admin');
+  assert.equal(entry.target_key, 'venues');
+  pass('the audit trail records the unpublish with the server-derived role');
+
+  const again = await call('POST', '/api/builder/pages/venues/unpublish', { token: SUPER, body: {} });
+  expectedStatus(again, 409, 'unpublish when nothing is published');
+  assert.match(String(again.json.error), /BUILDER_PAGE_NOT_PUBLISHED/);
+  pass('unpublishing a page that is not published returns 409');
+
+  const restored = await call('POST', '/api/builder/pages/venues/draft', {
+    token: ADMIN,
+    body: {
+      document: {
+        schemaVersion: 1,
+        pageKey: 'venues',
+        title: 'Venues',
+        module: 'venues',
+        description: 'Restored after unpublish',
+        theme: { primaryColor: '#4338CA' },
+        navigation: [],
+        blocks: [block('heading_restore', 'heading', { text: 'Venues are back' })],
+      },
+      expectedVersion: latestVersion,
+      summary: 'Restore venues after unpublish',
+    },
+  });
+  expectedStatus(restored, 200, 'restore draft');
+  const republished = await call('POST', '/api/builder/pages/venues/publish', {
+    token: SUPER,
+    body: { versionId: restored.json.page.versionId },
+  });
+  expectedStatus(republished, 200, 'republish after unpublish');
+  const served = await call('GET', '/api/builder/pages/venues');
+  expectedStatus(served, 200, 'public read after republish');
+  assert.equal(served.json.page.document.blocks[0].props.text, 'Venues are back');
+  pass('an unpublished page can be published again from a fresh draft');
 }
 
 console.log('=== C. module builder and records ===');
@@ -651,3 +806,6 @@ console.log('=== F. approved policy configuration ===');
 }
 
 console.log(`\nALL ${checks} UNIVERSAL BUILDER CHECKS PASSED`);
+
+// Explicit teardown on the success path; the exit handler is the safety net.
+if (environment) environment.stop();

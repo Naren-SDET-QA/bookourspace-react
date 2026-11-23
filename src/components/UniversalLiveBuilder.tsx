@@ -49,6 +49,7 @@ import {
   publishPage,
   rollbackEntity,
   rollbackPage,
+  unpublishPage,
   savePolicies,
   saveEntityDraft,
   savePageDraft,
@@ -328,6 +329,7 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmingUnpublish, setConfirmingUnpublish] = useState(false);
   const [status, setStatus] = useState<string>('');
   const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'desktop'>('desktop');
   const [summary, setSummary] = useState('Updated page configuration');
@@ -348,6 +350,16 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
   const [error, setError] = useState('');
 
   const latestVersion = pageState?.versions?.[0]?.versionNumber ?? 0;
+  // The editor can hold a document with no draft and no live row at all: that is
+  // exactly the state unpublish leaves behind. Deriving the label from the draft
+  // alone told the admin the page was still published after it was retracted.
+  const documentStateLabel = pageState
+    ? pageState.draft
+      ? '(draft)'
+      : pageState.published
+        ? '(published)'
+        : '(unpublished)'
+    : '';
   const selectedBlock = useMemo(() => (doc && selectedBlockId ? findBlock(doc.blocks, selectedBlockId) : null), [doc, selectedBlockId]);
   const canPublish = actor?.role === 'super_admin';
 
@@ -367,7 +379,11 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
     if (!key) return;
     const state = await fetchAdminPage(key);
     setPageState(state);
-    const document = (state.draft?.document ?? state.published?.document ?? null) as NormalizedPageDocument | null;
+    setConfirmingUnpublish(false);
+    // After an unpublish there is neither a draft nor a published row, so the
+    // last version (now status 'unpublished') is the editable starting point.
+    // Without this the editor loses the document and cannot republish.
+    const document = (state.draft?.document ?? state.published?.document ?? state.versions?.[0]?.document ?? null) as NormalizedPageDocument | null;
     setDoc(document);
     setSelectedBlockId(null);
     setError('');
@@ -448,6 +464,27 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
       notify(`Published v${published.versionNumber} to Web, Android and iOS.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Publish failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUnpublish = async () => {
+    if (!pageState?.published) {
+      setError('This page is not currently published.');
+      setConfirmingUnpublish(false);
+      return;
+    }
+    setConfirmingUnpublish(false);
+    setBusy(true);
+    setError('');
+    try {
+      const page = await unpublishPage(pageState.published.pageKey, pageState.published.versionNumber);
+      await loadPages();
+      await loadPage(page.pageKey);
+      notify(`Unpublished v${page.versionNumber}. The public surface no longer serves it.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unpublish failed');
     } finally {
       setBusy(false);
     }
@@ -691,7 +728,7 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
         </header>
 
         {(status || error) ? (
-          <div className={`flex items-center gap-2 border-b px-4 py-2 text-xs ${error ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          <div data-testid={error ? 'builder-error' : 'builder-status'} role="status" className={`flex items-center gap-2 border-b px-4 py-2 text-xs ${error ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
             {error ? <AlertTriangle className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
             <span className="flex-1">{error || status}</span>
             <button onClick={() => { setError(''); setStatus(''); }} className="text-[10px] underline">dismiss</button>
@@ -705,6 +742,7 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
               {pageList.map((page) => (
                 <button
                   key={page.pageKey}
+                  data-testid={`builder-page-${page.pageKey}`}
                   onClick={() => loadPage(page.pageKey)}
                   className={`mb-1 w-full rounded-lg px-2 py-2 text-left text-xs ${selectedKey === page.pageKey ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-white'}`}
                 >
@@ -727,6 +765,9 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
                 <button onClick={handlePublish} disabled={busy || !canPublish || !pageState?.draft} title={canPublish ? '' : 'Super Admin required'} className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">
                   <Send className="h-3.5 w-3.5" /> Publish
                 </button>
+                <button type="button" data-testid="unpublish-page" onClick={() => { setError(''); setConfirmingUnpublish(true); }} disabled={busy || !canPublish || !pageState?.published} title={canPublish ? '' : 'Super Admin required'} className="flex items-center gap-1 rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 disabled:opacity-40">
+                  Unpublish
+                </button>
                 <select
                   onChange={(event) => { if (event.target.value) handleRollback(event.target.value); }}
                   defaultValue=""
@@ -739,6 +780,27 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
                   ))}
                 </select>
               </div>
+
+              {confirmingUnpublish && pageState?.published ? (
+                <div
+                  role="alertdialog"
+                  aria-label="Confirm unpublish"
+                  aria-describedby="unpublish-consequence"
+                  data-testid="unpublish-confirmation"
+                  className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span id="unpublish-consequence" className="min-w-[220px] flex-1">
+                    Take <strong>{pageState.published.pageKey}</strong> v{pageState.published.versionNumber} offline for every visitor? The public page stops serving immediately; version history and the audit trail are kept.
+                  </span>
+                  <button type="button" data-testid="confirm-unpublish" onClick={handleUnpublish} disabled={busy} className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white disabled:opacity-40">
+                    Confirm unpublish
+                  </button>
+                  <button type="button" data-testid="cancel-unpublish" onClick={() => setConfirmingUnpublish(false)} className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 font-medium">
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
 
               <div className="flex min-h-0 flex-1">
                 <div className="w-56 shrink-0 overflow-y-auto border-r border-slate-200 p-2">
@@ -771,7 +833,7 @@ export const UniversalLiveBuilder: React.FC<UniversalLiveBuilderProps> = ({ isOp
                     {(['mobile', 'tablet', 'desktop'] as const).map((device) => (
                       <button key={device} onClick={() => setPreviewDevice(device)} className={`rounded px-2 py-1 ${previewDevice === device ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'}`}>{device}</button>
                     ))}
-                    <span className="ml-auto text-slate-400">{doc ? `v${latestVersion} ${pageState?.draft ? '(draft)' : '(published)'}` : ''}</span>
+                    <span data-testid="builder-document-state" className="ml-auto text-slate-400">{doc ? `v${latestVersion} ${documentStateLabel}` : ''}</span>
                   </div>
                   <div className={`mx-auto space-y-3 rounded-xl bg-white p-4 shadow-sm ${previewDevice === 'mobile' ? 'max-w-[380px]' : previewDevice === 'tablet' ? 'max-w-[720px]' : 'max-w-full'}`}>
                     {doc ? doc.blocks.map((block) => <BlockPreview key={block.id} block={block} />) : <p className="text-sm text-slate-400">Select a page.</p>}

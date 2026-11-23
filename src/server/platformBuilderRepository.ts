@@ -44,6 +44,7 @@ const SQL_ERROR_STATUS: Record<string, number> = {
   BUILDER_VERSION_IMMUTABLE: 409,
   BUILDER_DRAFT_NOT_FOUND: 404,
   BUILDER_TARGET_VERSION_NOT_FOUND: 404,
+  BUILDER_PAGE_NOT_PUBLISHED: 409,
   BUILDER_RECORD_NOT_FOUND: 404,
   BUILDER_ENTITY_NOT_PUBLISHED: 409,
   BUILDER_RELATION_TARGET_UNPUBLISHED: 409,
@@ -79,7 +80,7 @@ export interface BuilderPageView {
   pageKey: string;
   versionId: string;
   versionNumber: number;
-  status: 'draft' | 'published' | 'superseded_draft';
+  status: 'draft' | 'published' | 'superseded_draft' | 'unpublished';
   document: unknown;
   summary: string;
   createdAt: string;
@@ -234,6 +235,28 @@ export class PlatformBuilderRepository {
       const { rows } = await this.pool.query(
         `select public.builder_publish_page($1,$2,$3) as result`,
         [actor.id, pageKey, versionId],
+      );
+      return mapPageRow(rows[0].result);
+    } catch (error) {
+      translateError(error);
+    }
+  }
+
+  /**
+   * Retire the currently published document. The row stays in history with
+   * status 'unpublished'; public reads stop serving it immediately because the
+   * public RLS policy only exposes 'published'. The SQL function re-checks the
+   * actor role, so a repository bug cannot grant this.
+   */
+  async unpublishPage(
+    actor: BuilderActor,
+    pageKey: string,
+    expectedVersion: number | null = null,
+  ): Promise<BuilderPageView> {
+    try {
+      const { rows } = await this.pool.query(
+        `select public.builder_unpublish_page($1,$2,$3) as result`,
+        [actor.id, pageKey, expectedVersion],
       );
       return mapPageRow(rows[0].result);
     } catch (error) {
@@ -612,6 +635,27 @@ export function registerPlatformBuilderApi(app: express.Express, deps: PlatformB
       if (actor.role !== 'super_admin') throw new BuilderError('BUILDER_SUPER_ADMIN_REQUIRED', 403);
       const versionId = String((request.body || {}).versionId || '');
       const page = await requireRepository().publishPage(actor, String(request.params.key || ''), versionId);
+      privateHeaders(response);
+      response.json({ ok: true, page });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  app.post('/api/builder/pages/:key/unpublish', async (request, response) => {
+    try {
+      const actor = await requireActor(request);
+      if (actor.role !== 'super_admin') throw new BuilderError('BUILDER_SUPER_ADMIN_REQUIRED', 403);
+      const raw = (request.body || {}).expectedVersion;
+      const expectedVersion = raw === undefined || raw === null ? null : Number(raw);
+      if (expectedVersion !== null && (!Number.isInteger(expectedVersion) || expectedVersion < 1)) {
+        throw new BuilderError('BUILDER_INVALID_VERSION', 400);
+      }
+      const page = await requireRepository().unpublishPage(
+        actor,
+        String(request.params.key || ''),
+        expectedVersion,
+      );
       privateHeaders(response);
       response.json({ ok: true, page });
     } catch (error) {
