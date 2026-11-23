@@ -153,6 +153,16 @@ async function seedBusinesses(query: ProviderContextHarness['query']) {
      on conflict (business_id, user_id) do nothing`,
     [BUSINESS.alpha.id, AUTH.multi, BUSINESS.solo.id, AUTH.single],
   );
+  // Adding a member seeds a `signup_default` grant for the business's module
+  // (trigger `trg_seed_default_business_member_access`), so "no row at all" is
+  // not what a revoked member looks like. Beta models a member whose module
+  // access was taken away: the row exists and grants nothing.
+  await query(
+    `update public.business_member_access
+        set allowed_modules = '{}'::text[], allowed_sections = '{}'::jsonb, allowed_actions = '{}'::jsonb, grant_source = 'manual'
+      where business_id = $1 and user_id = $2`,
+    [BUSINESS.beta.id, AUTH.multi],
+  );
 
   const listing = async (id: string, title: string, owner: string, businessId: string) => {
     await query(

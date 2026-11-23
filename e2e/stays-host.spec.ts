@@ -6,6 +6,7 @@ import {
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { sessionCookieHeaders, useSessionCookie } from './session-cookie-harness';
 
 /**
  * Host workspace: real owner session → Express → PostgreSQL.
@@ -35,9 +36,7 @@ function isoPlus(days: number): string {
 
 async function openApp(browser: Browser, token: string): Promise<{ page: Page; context: BrowserContext }> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
-  await context.addInitScript(([value]) => {
-    try { window.localStorage.setItem('bos_session_token_v1', String(value)); } catch { /* ignore */ }
-  }, [token]);
+  await useSessionCookie(context, token);
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
     try {
@@ -84,7 +83,7 @@ async function closeApp(context: BrowserContext): Promise<void> {
 async function api(path: string, token: string, init: RequestInit = {}) {
   const response = await fetch(`${harness.apiUrl}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { ...sessionCookieHeaders(token, 'bos-local-stays-browser-e2e-secret', init.body ? 'application/json' : undefined), ...(init.headers || {}) },
   });
   return { status: response.status, body: await response.json().catch(() => ({})) };
 }
@@ -185,7 +184,7 @@ test('host checks a guest in, collects payment, checks out and the guest reviews
       method: 'POST',
       body: JSON.stringify({ rating: 5, comment: 'The host made check-in effortless and the room was spotless.' }),
     });
-    expect(review.status).toBe(201);
+    expect(review.status, JSON.stringify(review.body)).toBe(201);
     const duplicate = await api(`/api/stays/bookings/${bookingId}/review`, guest, {
       method: 'POST',
       body: JSON.stringify({ rating: 4, comment: 'A second review must be rejected by the database.' }),

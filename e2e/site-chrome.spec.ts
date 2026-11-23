@@ -15,8 +15,15 @@ test.describe('site chrome', () => {
 
     await page.evaluate(() => {
       const shell = document.querySelector('.bos-app-shell') as HTMLElement | null;
-      if (shell && shell.scrollHeight > shell.clientHeight + 24) shell.scrollTop = 900;
-      else window.scrollTo(0, 1200);
+      if (shell && shell.scrollHeight > shell.clientHeight + 24) {
+        shell.scrollTop = 900;
+        // Programmatic scrolling is not guaranteed to deliver the event before
+        // the assertion below; notify the same listener the user scroll uses.
+        shell.dispatchEvent(new Event('scroll'));
+      } else {
+        window.scrollTo(0, 1200);
+        window.dispatchEvent(new Event('scroll'));
+      }
     });
     await expect(page.getByRole('button', { name: 'Back to top' })).toBeVisible({ timeout: 5_000 });
 

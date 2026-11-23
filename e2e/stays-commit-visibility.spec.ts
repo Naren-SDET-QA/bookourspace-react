@@ -7,6 +7,7 @@ import {
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { sessionCookieHeaders } from './session-cookie-harness';
 
 /**
  * Read-after-write regression guard for the host inventory API.
@@ -37,7 +38,7 @@ function isoPlus(days: number): string {
 async function api(path: string, token: string, init: RequestInit = {}) {
   const response = await fetch(`${harness.apiUrl}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { ...sessionCookieHeaders(token, 'bos-local-stays-browser-e2e-secret', init.body ? 'application/json' : undefined), ...(init.headers || {}) },
   });
   return { status: response.status, body: await response.json().catch(() => ({})) };
 }

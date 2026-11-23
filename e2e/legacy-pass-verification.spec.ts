@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { STAY, TEST_HMAC_SECRET, USERS, startStaysHarness, type StaysHarness } from './stays-e2e-harness';
+import { sessionCookieHeaders } from './session-cookie-harness';
 
 const FOREIGN_PROVIDER = {
   id: '5a7b0000-1111-4222-8333-000000000006',
@@ -87,7 +88,7 @@ async function scan(token: string, actor?: typeof USERS[keyof typeof USERS] | ty
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(actor ? { authorization: `Bearer ${sessionToken(actor)}` } : {}),
+      ...(actor ? sessionCookieHeaders(sessionToken(actor), TEST_HMAC_SECRET) : {}),
     },
     body: JSON.stringify({ passToken: token, markCheckedIn: true, verifierRole: 'admin', ...extra }),
   });
@@ -106,7 +107,7 @@ test('missing pass token and signature are rejected', async () => {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${sessionToken(USERS.provider)}`,
+      ...sessionCookieHeaders(sessionToken(USERS.provider), TEST_HMAC_SECRET),
     },
     body: JSON.stringify({ markCheckedIn: true }),
   });

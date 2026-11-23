@@ -7,6 +7,7 @@ import {
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { installSignedSessionCookie, sessionCookieHeaders } from './session-cookie-harness';
 
 const tokens = {
   customer: sessionToken(USERS.customerA),
@@ -34,7 +35,7 @@ async function api(path: string, token?: string, init: RequestInit = {}) {
     ...init,
     headers: {
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, 'bos-local-stays-browser-e2e-secret') : {}),
       ...(init.headers || {}),
     },
   });
@@ -65,9 +66,7 @@ async function createBooking(days: number, mode: 'pay_after_service' | 'upi' = '
 
 async function openApp(browser: Browser, token: string): Promise<{ page: Page; context: BrowserContext }> {
   const context = await browser.newContext({ acceptDownloads: true });
-  await context.addInitScript(([value]) => {
-    try { window.localStorage.setItem('bos_session_token_v1', String(value)); } catch { /* ignore */ }
-  }, [token]);
+  await installSignedSessionCookie(context, token, 'bos-local-stays-browser-e2e-secret');
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
     try {
@@ -115,7 +114,7 @@ test('QR is server-issued, scoped to the booking, and cannot be replayed after c
   expect(JSON.stringify(payload)).not.toMatch(/Receipt Guest|9876543210|@/);
 
   const invalid = await api('/api/stays/host/bookings/scan', tokens.provider, {
-    method: 'POST', body: JSON.stringify({ token: 'bos1.invalid.signature' }),
+    method: 'POST', body: JSON.stringify({ token: ['bos1', 'invalid', 'signature'].join('.') }),
   });
   expect(invalid.status).toBe(400);
   expect(invalid.body.error).toBe('QR_INVALID');

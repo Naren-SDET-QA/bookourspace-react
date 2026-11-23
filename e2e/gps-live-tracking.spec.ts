@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { sessionTokenFromSetCookie, useSessionCookie } from './session-cookie-harness';
 
 /**
  * Live GPS: customer map marker must move when the assigned provider location
@@ -16,38 +17,68 @@ async function localSession(baseURL: string, role: 'customer' | 'provider', emai
     body: JSON.stringify({ role, email }),
   });
   const json = await response.json();
-  if (!response.ok || !json?.sessionToken) {
+  // The session token is delivered only as an HttpOnly cookie; the body carries
+  // the CSRF proof instead.
+  const token = sessionTokenFromSetCookie(response.headers.get('set-cookie'));
+  if (!response.ok || !token) {
     throw new Error(`local session failed ${response.status} ${JSON.stringify(json)}`);
   }
-  return json as { sessionToken: string; user: Record<string, unknown> };
+  return {
+    token,
+    csrfToken: String(json?.csrfToken || ''),
+    user: json.user as Record<string, unknown>,
+  };
+}
+
+/** Node-side API call authenticated by the same cookie the browser receives. */
+function sessionFetch(
+  baseURL: string,
+  session: { token: string; csrfToken: string },
+  path: string,
+  init: { method?: string; body?: unknown } = {},
+) {
+  return fetch(`${baseURL}${path}`, {
+    method: init.method || 'GET',
+    headers: {
+      cookie: `bos_session=${session.token}`,
+      ...(init.body === undefined
+        ? {}
+        : { 'content-type': 'application/json', 'x-bos-csrf': session.csrfToken }),
+    },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
 }
 
 async function pageFor(browser: Browser, token: string, user: Record<string, unknown>) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  await context.addInitScript(([sessionToken, authUser]) => {
-    localStorage.setItem('bos_session_token_v1', String(sessionToken));
+  await useSessionCookie(context, token);
+  await context.addInitScript(([authUser]) => {
     localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(authUser));
     localStorage.setItem('bos_entry_choice_v1', 'signed-in');
     localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: '2026-01-01T00:00:00.000Z' }));
     localStorage.removeItem('bos_section_styles_v2');
     localStorage.removeItem('bos_section_style_prefs_v1');
-  }, [token, user]);
+  }, [user]);
   const page = await context.newPage();
   return { context, page };
 }
 
-async function publish(baseURL: string, token: string, latitude: number, longitude: number) {
-  const response = await fetch(`${baseURL}/api/services/bookings/${MAIN}/tracking/location`, {
+async function publish(
+  baseURL: string,
+  session: { token: string; csrfToken: string },
+  latitude: number,
+  longitude: number,
+) {
+  const response = await sessionFetch(baseURL, session, `/api/services/bookings/${MAIN}/tracking/location`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({
+    body: {
       consentGranted: true,
       latitude,
       longitude,
       accuracyMeters: 10,
       speedMps: 6.5,
       capturedAt: new Date().toISOString(),
-    }),
+    },
   });
   const json = await response.json().catch(() => ({}));
   return { status: response.status, json };
@@ -61,17 +92,16 @@ test('customer map marker moves when provider GPS updates without refresh', asyn
   const customer = await localSession(origin, 'customer', 'demo.guest.1@bookourspace.local');
   const provider = await localSession(origin, 'provider', 'demo.services@bookourspace.local');
 
-  const start = await fetch(`${origin}/api/services/bookings/${MAIN}/tracking/session/start`, {
+  const start = await sessionFetch(origin, provider, `/api/services/bookings/${MAIN}/tracking/session/start`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.sessionToken}` },
-    body: JSON.stringify({}),
+    body: {},
   });
   expect(start.ok, `session start ${start.status}`).toBeTruthy();
 
-  const first = await publish(origin, provider.sessionToken, 17.4300, 78.3500);
+  const first = await publish(origin, provider, 17.4300, 78.3500);
   expect(first.status, JSON.stringify(first.json)).toBe(201);
 
-  const { context, page } = await pageFor(browser, customer.sessionToken, customer.user);
+  const { context, page } = await pageFor(browser, customer.token, customer.user);
   await page.goto(`${origin}/#services`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'My service bookings' }).first().click();
   await page.locator('article', { hasText: 'Live GPS Water Can' }).getByRole('button', { name: 'Track live' }).click();
@@ -89,7 +119,7 @@ test('customer map marker moves when provider GPS updates without refresh', asyn
   await page.screenshot({ path: `${OUT}/01-customer-before-move.png`, fullPage: true });
 
   await page.waitForTimeout(13_000);
-  const second = await publish(origin, provider.sessionToken, 17.4460, 78.3800);
+  const second = await publish(origin, provider, 17.4460, 78.3800);
   expect(second.status, JSON.stringify(second.json)).toBe(201);
 
   await expect(map).toHaveAttribute('data-provider-lat', /17\.446/, { timeout: 20_000 });

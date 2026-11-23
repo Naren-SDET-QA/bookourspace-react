@@ -2,6 +2,30 @@ import { expect, test } from '@playwright/test';
 
 const MUMBAI_PROJECT = 'obkfgxjzlscungkhbyvq';
 
+/**
+ * The first-visit entry and `#login` share one sign-in sheet
+ * (`CustomerLoginExperience`). Guest availability is decided by the server's
+ * `/api/auth/config`, so a test pins that response instead of inheriting the
+ * deployment's administrator setting.
+ */
+async function mockAuthConfig(
+  page: import('@playwright/test').Page,
+  { guestLoginEnabled, emailOtpConfigured = true }: { guestLoginEnabled: boolean; emailOtpConfigured?: boolean },
+) {
+  await page.route('**/api/auth/config', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      guestLoginEnabled,
+      emailOtpEnabled: true,
+      googleLoginEnabled: true,
+      emailOtpConfigured,
+      googleConfigured: true,
+    }),
+  }));
+}
+
 /** Hold the Vite entry (dev) or hashed production bundle so the HTML boot shell stays interactive. */
 async function delayAppBootstrap(page: import('@playwright/test').Page, ms = 1200) {
   let delayed = false;
@@ -38,36 +62,31 @@ test.describe('signed-out Google sign-in entry points', () => {
     await expect(page.getByTestId('bos-logo-pin-rotor')).toBeHidden();
   });
 
-  test('lightweight boot welcome is immediately usable and Guest choice persists', async ({ page }) => {
+  test('combined sign-in entry is immediately usable and the Guest choice persists', async ({ page }) => {
+    await mockAuthConfig(page, { guestLoginEnabled: true });
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
-    const officialLogo = page.locator('[data-testid="bookourspace-welcome"] .bos-entry-official-logo');
-    await expect(officialLogo.locator('img')).toHaveAttribute('src', /bos-logo-lockup\.webp$/);
-    await expect(page.getByTestId('bos-logo-pin-rotor')).toBeVisible();
-    const pinRotor = page.locator('.bos-official-logo__spin');
-    await expect(pinRotor).toHaveCSS('animation-name', 'bos-logo-pin-spinner');
-    await expect(pinRotor).toHaveCSS('animation-duration', '2s');
-    await expect(pinRotor).toHaveCSS('animation-timing-function', 'linear');
-    await expect(pinRotor).toHaveCSS('animation-iteration-count', 'infinite');
-    const pinOrigin = (await pinRotor.evaluate((element) => getComputedStyle(element).transformOrigin))
-      .split(/\s+/).map(value => Number.parseFloat(value));
-    expect(pinOrigin[0]).toBeCloseTo(259, 0);
-    expect(pinOrigin[1]).toBeCloseTo(174.5, 0);
-    await expect(officialLogo.locator('.bos-official-logo__face--back')).toHaveCSS('transform', /matrix3d/);
-    const initialTransform = await pinRotor.evaluate((element) => getComputedStyle(element).transform);
-    await page.waitForTimeout(350);
-    const laterTransform = await pinRotor.evaluate((element) => getComputedStyle(element).transform);
-    expect(laterTransform).not.toBe(initialTransform);
-    await expect.poll(async () => officialLogo.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth))
-      .toBeGreaterThanOrEqual(560);
-    await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
-    const welcomeGuest = page.getByTestId('bookourspace-welcome').getByRole('button', { name: 'Explore Spaces as Guest', exact: true });
-    await expect(welcomeGuest).toBeVisible();
+
+    const welcome = page.getByTestId('bookourspace-welcome');
+    await expect(welcome).toBeVisible();
+    const sheet = welcome.getByRole('dialog', { name: 'Sign in or create an account' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute('aria-modal', 'true');
+    await expect(sheet.getByRole('tab', { name: 'Mobile OTP' })).toBeVisible();
+    await expect(sheet.getByRole('tab', { name: 'Email' })).toBeVisible();
+
+    const lockup = sheet.locator('img[src*="bos-logo-lockup"]').first();
+    await expect(lockup).toBeVisible();
+    await expect.poll(async () => lockup.evaluate((image: HTMLImageElement) => image.naturalWidth))
+      .toBeGreaterThan(0);
+
+    await expect(sheet.getByTestId('customer-login-google')).toBeVisible();
+    const welcomeGuest = sheet.getByTestId('customer-login-guest');
+    await expect(welcomeGuest).toBeEnabled();
 
     await welcomeGuest.click();
-    await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0);
+    await expect(welcome).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => localStorage.getItem('bos_entry_choice_v1'))).toBe('guest');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0, { timeout: 10_000 });
@@ -106,26 +125,26 @@ test.describe('signed-out Google sign-in entry points', () => {
     await expect(page.getByTestId('entry-continue-guest')).toBeHidden();
   });
 
-  test('welcome uses the Flutter dark brand surface and stays usable at mobile and desktop sizes', async ({ page }) => {
+  test('the sign-in sheet stays usable at mobile and desktop sizes', async ({ page }) => {
+    await mockAuthConfig(page, { guestLoginEnabled: true });
     await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const welcome = page.getByTestId('bookourspace-welcome');
-    await welcome.waitFor({ state: 'visible', timeout: 10_000 });
-
-    await expect(welcome).toHaveCSS('background-color', 'rgb(11, 14, 26)');
-    await expect(page.getByTestId('bos-logo-pin-rotor')).toBeVisible();
-    await expect(page.getByTestId('entry-google-sign-in')).toHaveCSS('min-height', '56px');
-    await expect(page.getByTestId('entry-continue-guest')).toHaveCSS('min-height', '56px');
-    await expect(page.getByTestId('entry-google-sign-in')).toHaveAccessibleDescription(/New Google accounts get a profile automatically/);
+    const sheet = page.getByRole('dialog', { name: 'Sign in or create an account' });
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    // The dialog is addressed by its accessible name, and the name comes from
+    // the single sign-in title id, never from the hero headline beside it.
+    await expect(sheet).toHaveAttribute('aria-labelledby', 'bos-customer-login-title');
+    await expect(page.locator('#bos-customer-login-title')).toHaveCount(1);
 
     for (const viewport of [{ width: 360, height: 640 }, { width: 1440, height: 900 }]) {
       await page.setViewportSize(viewport);
-      await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
-      await expect(page.getByTestId('entry-continue-guest')).toBeVisible();
+      await expect(sheet.getByTestId('customer-login-google')).toBeVisible();
+      await expect(sheet.getByTestId('customer-login-guest')).toBeVisible();
+      await expect(sheet.getByRole('tab', { name: 'Email' })).toBeVisible();
       const layout = await page.evaluate(() => {
-        const root = document.querySelector('[data-testid="bookourspace-welcome"]') as HTMLElement;
-        const google = document.querySelector('[data-testid="entry-google-sign-in"]') as HTMLElement;
-        const guest = document.querySelector('[data-testid="entry-continue-guest"]') as HTMLElement;
+        const root = document.documentElement;
+        const google = document.querySelector('[data-testid="customer-login-google"]') as HTMLElement;
+        const guest = document.querySelector('[data-testid="customer-login-guest"]') as HTMLElement;
         return {
           scrollWidth: root.scrollWidth,
           clientWidth: root.clientWidth,
@@ -140,79 +159,100 @@ test.describe('signed-out Google sign-in entry points', () => {
   });
 
 
-  test('guest browsing stays hidden when the administrator has not enabled it', async ({ page }) => {
+  test('guest browsing is turned off when the administrator has not enabled it', async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.removeItem('bos_entry_choice_v1');
       localStorage.removeItem('bos_guest_login_enabled_v1');
     });
-    await page.route('**/api/auth/config', (route) => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        guestLoginEnabled: false,
-        emailOtpEnabled: true,
-        googleLoginEnabled: true,
-        emailOtpConfigured: false,
-        googleConfigured: true,
-      }),
-    }));
+    await mockAuthConfig(page, { guestLoginEnabled: false });
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
-    await expect(page.getByTestId('entry-google-sign-in')).toBeVisible();
-    await expect(page.getByTestId('entry-continue-guest')).toHaveCount(0);
-    await expect(page.getByTestId('entry-email-sign-in')).toBeVisible();
+
+    const sheet = page.getByRole('dialog', { name: 'Sign in or create an account' });
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    await expect(sheet.getByTestId('customer-login-google')).toBeVisible();
+
+    // The control stays visible so visitors learn why, but it cannot be used
+    // and the enabled guest action is never mounted.
+    await expect(sheet.getByTestId('customer-login-guest')).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: 'Browse as Guest' })).toBeDisabled();
+    await expect(sheet.getByText('Guest browsing is turned off by the administrator on this deployment.')).toBeVisible();
+
+    await sheet.getByRole('tab', { name: 'Email' }).click();
+    await expect(page.getByLabel('Email address')).toBeEnabled();
   });
 
-  test('the full login page uses email OTP and hides guest when disabled', async ({ page }) => {
-    await page.route('**/api/auth/config', (route) => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        guestLoginEnabled: false,
-        emailOtpEnabled: true,
-        googleLoginEnabled: true,
-        emailOtpConfigured: true,
-        googleConfigured: true,
-      }),
-    }));
+  test('the full login page uses email OTP and turns guest off when disabled', async ({ page }) => {
+    // A returning guest already holds the entry choice, so `#login` renders the
+    // full-page sign-in on its own instead of stacking over the first-visit entry.
+    await page.addInitScript(() => localStorage.setItem('bos_entry_choice_v1', 'guest'));
+    await mockAuthConfig(page, { guestLoginEnabled: false, emailOtpConfigured: true });
     await page.goto('/#login', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('dialog', { name: 'Welcome Back' })).toBeVisible();
+
+    const sheet = page.getByRole('dialog', { name: 'Sign in or create an account' });
+    await expect(sheet).toHaveCount(1);
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    await expect(sheet).toHaveAttribute('aria-modal', 'true');
+    await expect(sheet.getByRole('button', { name: 'Close sign-in' })).toBeVisible();
+
+    await sheet.getByRole('tab', { name: 'Email' }).click();
     await expect(page.getByLabel('Email address')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Browse as guest|Explore spaces as guest/ })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Continue$/ })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Send OTP' })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    await expect(sheet.getByTestId('customer-login-guest')).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: 'Browse as Guest' })).toBeDisabled();
   });
 
-  test('Google opens the shared auth dialog above welcome and Escape returns with focus', async ({ page }) => {
+  test('a first visit to #login shows one sign-in sheet and Escape closes it', async ({ page }) => {
+    // No stored entry choice: this is the visitor who previously got the
+    // first-visit sheet stacked underneath the full-page one.
+    await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
+    await mockAuthConfig(page, { guestLoginEnabled: true });
+    await page.goto('/#login', { waitUntil: 'domcontentloaded' });
+
+    const sheet = page.getByRole('dialog', { name: 'Sign in or create an account' });
+    await expect(sheet).toHaveCount(1);
+    await expect(sheet.first()).toBeVisible({ timeout: 15_000 });
+    // Only the full-page login offers a close control, and the first-visit
+    // entry is not mounted behind it.
+    await expect(page.getByRole('button', { name: 'Close sign-in' })).toHaveCount(1);
+    await expect(page.getByTestId('bookourspace-welcome')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Close sign-in' })).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => window.location.hash)).not.toBe('#login');
+    // Closing the login page returns the visitor to the first-visit entry,
+    // still a single sheet.
+    await expect(page.getByRole('dialog', { name: 'Sign in or create an account' })).toHaveCount(1);
+    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
+  });
+
+  test('Google opens the shared auth dialog above the entry sheet and Escape returns focus', async ({ page }) => {
+    await mockAuthConfig(page, { guestLoginEnabled: true });
     await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const googleButton = page.getByTestId('entry-google-sign-in');
-    await googleButton.waitFor({ state: 'visible', timeout: 10_000 });
+    const googleButton = page.getByTestId('customer-login-google');
+    await expect(googleButton).toBeVisible({ timeout: 15_000 });
     await googleButton.click();
 
     const dialog = page.getByRole('dialog', { name: 'Sign In with Google' });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
-    await expect(dialog).toHaveClass(/\bdark\b/);
-    await expect.poll(
-      () => dialog.evaluate((element) => getComputedStyle(element).backgroundColor)
-    ).not.toBe('rgb(255, 255, 255)');
-    await expect(page.getByRole('button', { name: 'Close sign-in' })).toBeFocused();
+    await expect(page.getByRole('dialog', { name: 'Sign in or create an account' })).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByTestId('bookourspace-welcome')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Sign in or create an account' })).toBeVisible();
     await expect(googleButton).toBeFocused();
   });
 
 
-  test('welcome Google button opens the existing Supabase Google auth flow', async ({ page }) => {
+  test('the entry Google button opens the existing Supabase Google auth flow', async ({ page }) => {
+    await mockAuthConfig(page, { guestLoginEnabled: true });
     await page.addInitScript(() => localStorage.removeItem('bos_entry_choice_v1'));
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await page.getByTestId('entry-google-sign-in').waitFor({ state: 'visible', timeout: 10_000 });
-    await page.getByTestId('entry-google-sign-in').click();
+    const googleButton = page.getByTestId('customer-login-google');
+    await expect(googleButton).toBeVisible({ timeout: 15_000 });
+    await googleButton.click();
     await expect(page.getByRole('heading', { name: 'Sign In with Google' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Continue securely with Google' })).toBeVisible();
   });

@@ -7,6 +7,7 @@ import {
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { installSignedSessionCookie, sessionCookieHeaders } from './session-cookie-harness';
 
 /**
  * Hotels & Stays — real browser → real Express → disposable PostgreSQL.
@@ -42,13 +43,12 @@ test.beforeEach(async () => {
 
 async function openApp(browser: Browser, token: string, viewport?: { width: number; height: number }): Promise<{ page: Page; context: BrowserContext }> {
   const context = await browser.newContext(viewport ? { viewport } : undefined);
+  if (token) {
+    await installSignedSessionCookie(context, token, 'bos-local-stays-browser-e2e-secret');
+  }
   await context.addInitScript(([value]) => {
     try { window.localStorage.setItem('bos_entry_choice_v1', value ? 'signed-in' : 'guest'); } catch { /* ignore */ }
-    try {
-      if (value) window.localStorage.setItem('bos_session_token_v1', String(value));
-      else window.localStorage.removeItem('bos_session_token_v1');
-    } catch { /* ignore */ }
-  }, [token]);
+  }, ['signed-in']);
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
     try {
@@ -94,7 +94,7 @@ async function api(path: string, token?: string, init: RequestInit = {}) {
   const response = await fetch(`${harness.apiUrl}${path}`, {
     ...init,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, 'bos-local-stays-browser-e2e-secret') : {}),
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
       ...(init.headers || {}),
     },
@@ -222,16 +222,29 @@ test('Host browser — provider opens Stay hosting and sees owned PostgreSQL lis
     await page.goto(`${harness.uiUrl}/`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /Provider Hub/i }).click();
     await expect(page.getByText('Approved Live Posts')).toBeVisible({ timeout: 20_000 });
-    // On a mobile viewport the portal navigation sits in a drawer. The PG owner
-    // console embedded in the same hub exposes its own "Open navigation"
-    // button, so scope to the provider portal header.
-    const portalHeader = page.locator('header').filter({ hasText: 'Provider workspace' });
+    // On a mobile viewport the portal navigation sits in a drawer. The portal
+    // header title is the active module's label ("Stays", "PG Hostels", ...)
+    // whenever a module is auto-selected, so locate the header by its drawer
+    // button rather than by the optional "Provider workspace" subtitle.
+    const portalHeader = page.locator('header')
+      .filter({ has: page.getByRole('button', { name: 'Open navigation' }) })
+      .first();
     await portalHeader.getByRole('button', { name: 'Open navigation' }).click();
-    await page.getByRole('navigation', { name: 'Provider portal navigation' }).getByRole('button', { name: 'Stays', exact: true }).click();
+    // The drawer only offers modules the provider actually holds a business for,
+    // so assert the item exists before clicking: a missing stay business is a
+    // fixture failure and must not look like a click that hangs.
+    const portalNav = page.getByRole('navigation', { name: 'Provider portal navigation' });
+    const staysNav = portalNav.getByRole('button', { name: 'Stays', exact: true });
+    await expect(staysNav).toBeVisible();
+    await staysNav.click();
     await expect(page.getByRole('region', { name: 'Stays owner workspace' })).toBeVisible();
     // The host inventory workspace is collapsed by default inside the owner
     // dashboard; open it the way a host does before asserting on its contents.
-    await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
+    // Some layouts render it already expanded, so only click when offered.
+    const openWorkspace = page.getByRole('button', { name: 'Open workspace', exact: true });
+    if (await openWorkspace.count()) {
+      await openWorkspace.first().click({ timeout: 15_000 });
+    }
     const workspace = page.getByRole('region', { name: 'Stay host workspace' });
     await expect(workspace).toBeVisible();
     await expect(workspace).toContainText(STAY.title, { timeout: 20_000 });

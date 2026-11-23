@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { createHmac, randomUUID } from 'node:crypto';
+import { installSignedSessionCookie, sessionCookieHeaders } from './session-cookie-harness';
 
 /**
  * Function Halls & Venues browser journey against the real React app, the
@@ -64,13 +65,7 @@ function isoAt(date: string, time = '00:00') {
 async function signIn(page: Page, role: SessionRole) {
   const session = SESSIONS[role];
   if (!session?.token || !session?.user) throw new Error(`missing venue E2E session: ${role}`);
-  await page.addInitScript(
-    ({ token, user }) => {
-      window.localStorage.setItem('bos_session_token_v1', token);
-      window.localStorage.setItem('bos_google_auth_user_v1', user);
-    },
-    { token: session.token, user: JSON.stringify(session.user) },
-  );
+  await installSignedSessionCookie(page.context(), session.token, process.env.BOS_SERVER_HMAC_SECRET || 'bos-classes-ui-e2e-secret');
 }
 
 /** Retry the first Vite dev-middleware paint; a real mount error is surfaced. */
@@ -145,9 +140,8 @@ async function fillSlot(page: Page, dialog: ReturnType<Page['getByRole']>, date:
 
 async function myBookings(page: Page): Promise<any[]> {
   return page.evaluate(async () => {
-    const token = window.localStorage.getItem('bos_session_token_v1') || '';
     const response = await fetch('/api/venue-bookings?scope=mine', {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP_${response.status}`);
@@ -157,9 +151,8 @@ async function myBookings(page: Page): Promise<any[]> {
 
 async function providerListings(page: Page): Promise<any[]> {
   return page.evaluate(async () => {
-    const token = window.localStorage.getItem('bos_session_token_v1') || '';
     const response = await fetch('/api/provider/listings', {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP_${response.status}`);
@@ -168,7 +161,7 @@ async function providerListings(page: Page): Promise<any[]> {
 }
 
 function bearer(role: SessionRole) {
-  return { Authorization: `Bearer ${SESSIONS[role].token}`, 'content-type': 'application/json' };
+  return sessionCookieHeaders(SESSIONS[role].token, process.env.BOS_SERVER_HMAC_SECRET || 'bos-classes-ui-e2e-secret');
 }
 
 async function sandboxWebhook(

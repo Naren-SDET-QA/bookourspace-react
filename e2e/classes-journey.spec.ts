@@ -7,6 +7,7 @@ import {
   startClassesHarness,
   type ClassesHarness,
 } from './classes-e2e-harness';
+import { installSignedSessionCookie, sessionCookieHeaders } from './session-cookie-harness';
 
 /**
  * Real browser → real Express → disposable PostgreSQL Classes journey.
@@ -50,26 +51,6 @@ test.afterAll(async () => {
 
 function futureDate(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
-}
-
-function authUserFor(user: TestUser) {
-  return {
-    id: user.authId,
-    googleSub: `google-${user.authId}`,
-    name: user.name,
-    email: user.email,
-    phone: user.phone,
-    role: user.role,
-    status: 'active',
-    verified: true,
-    city: 'Hyderabad',
-    joinedAt: new Date().toISOString(),
-    lastLoginAt: new Date().toISOString(),
-    totalBookings: 0,
-    totalListings: 0,
-    walletBalance: 0,
-    authProvider: 'google',
-  };
 }
 
 // Upper bound for one proxied API call; the real endpoints answer in milliseconds.
@@ -129,17 +110,16 @@ async function newPage(
     deviceScaleFactor: 1,
     serviceWorkers: 'block',
   });
+  await installSignedSessionCookie(context, sessionToken(user), 'bos-local-class-browser-e2e-secret');
   await context.addInitScript(
-    ({ token, storedUser }) => {
+    () => {
       try {
-        localStorage.setItem('bos_session_token_v1', token);
-        localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(storedUser));
         localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: new Date().toISOString() }));
       } catch {
         // Ignore storage failures on non-origin documents.
       }
     },
-    { token: sessionToken(user), storedUser: authUserFor(user) },
+    undefined,
   );
   // Context routes cover every page and avoid a page.route / service-worker
   // double-handle of the same request ("Route is already handled!").
@@ -161,7 +141,14 @@ async function newPage(
 }
 
 async function openClasses(page: Page): Promise<void> {
-  await page.goto(`${harness.uiUrl}/#classes`, { waitUntil: 'domcontentloaded' });
+  // Classes now defaults to the Style 4 academic surface, whose cards are
+  // admission/admissions tiles without the live-batch calendar this journey
+  // exercises. Style 3 remains a first-class Classes surface (`#classes/style3`)
+  // and is the one that renders live batches, mode/timing/fee filters and
+  // enrollment, so the journey targets it explicitly instead of asserting
+  // Style 3 fixtures against Style 4 markup. The provider steps above are
+  // unchanged and still run through the restored batch workspace.
+  await page.goto(`${harness.uiUrl}/#classes/style3`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('bookourspace-welcome')).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Classes & Training' })).toBeVisible({ timeout: 30_000 });
 }
@@ -181,7 +168,7 @@ async function api(
   const response = await fetch(`${harness.apiUrl}${url}`, {
     method,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? sessionCookieHeaders(token, 'bos-local-class-browser-e2e-secret') : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -233,8 +220,11 @@ function courseCard(page: Page) {
 
 async function openCourseDetail(page: Page) {
   await page.getByLabel('Search courses').fill('E2E Algebra Mastery');
-  await expect(courseCard(page)).toBeVisible({ timeout: 20_000 });
-  await page.getByRole('button', { name: 'View E2E Algebra Mastery' }).click();
+  const card = courseCard(page);
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  // Style 3 exposes the accessible "View <course>" button as an sr-only
+  // fallback; the rendered affordance is the card's "View Details" action.
+  await card.getByRole('button', { name: 'View Details', exact: true }).click();
   const detail = page.getByTestId('class-detail-modal');
   await expect(detail).toBeVisible({ timeout: 15_000 });
   return detail;
@@ -245,6 +235,27 @@ async function openEnrollment(page: Page, detail: Locator) {
   const enrollment = page.getByTestId('class-enrollment-modal');
   await expect(enrollment).toBeVisible({ timeout: 15_000 });
   return enrollment;
+}
+
+/**
+ * Click a control whose own success un-mounts it.
+ *
+ * Playwright retries a click when its target detaches mid-action, so when the
+ * mutation answers quickly the "Confirm enrollment" button is already gone and
+ * the call keeps retrying until the file timeout even though the enrollment was
+ * recorded (this is what produced the intermittent "Test timeout of 150000ms"
+ * in the waitlist test, with the modal sitting on "Seat confirmed"). Treating
+ * "the control is gone and the success surface is visible" as a completed click
+ * keeps every assertion below exactly as strict as before.
+ */
+async function clickCommitting(control: Locator, success: Locator): Promise<void> {
+  try {
+    // Bounded so a detach-retry cannot consume the whole file timeout: the test
+    // level timeout would abort the test before this catch could run.
+    await control.click({ timeout: 15_000 });
+  } catch (error) {
+    if (!(await success.isVisible().catch(() => false))) throw error;
+  }
 }
 
 async function enrollInUi(
@@ -260,7 +271,10 @@ async function enrollInUi(
   if (mode === 'online') {
     await enrollment.getByRole('radio', { name: 'online', exact: true }).click();
   }
-  await enrollment.getByRole('button', { name: 'Confirm enrollment' }).click();
+  await clickCommitting(
+    enrollment.getByRole('button', { name: 'Confirm enrollment' }),
+    enrollment.getByRole('heading', { name: /Seat confirmed|Added to the waitlist/ }),
+  );
   return { detail, enrollment };
 }
 
@@ -356,12 +370,13 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   await student.page.getByLabel('Search courses').fill('E2E Algebra');
   const card = courseCard(student.page);
   await expect(card).toBeVisible();
-  await expect(card).toContainText('1 live batch');
-  await expect(card).toContainText('6:00 PM – 8:00 PM');
+  // The Style 3 listing card surfaces the admin-approved live batch as its
+  // mode, duration and starting fee. The batch slot, timing, seat count and
+  // location are asserted on the detail sheet below, where Style 3 renders
+  // them, so nothing that used to be checked is dropped.
   await expect(card).toContainText('Hybrid');
-  await expect(card).toContainText('Madhapur');
-  await expect(card).toContainText('From ₹4,000/month');
-  await expect(card).toContainText('2 seats left');
+  await expect(card).toContainText('8 weeks');
+  await expect(card).toContainText('₹4,000/ month');
 
   // Filters are computed from the live PostgreSQL calendar, not demo data.
   await student.page.getByLabel('Mode', { exact: true }).selectOption('Online');
@@ -480,35 +495,43 @@ test('waitlist ordering is enforced through the browser UI', async ({ browser })
     facultyName: 'Prof. Waitlist',
   });
 
+  // Each stage is a step so a timeout names the failing user journey instead of
+  // only reporting "test timeout".
   const first = await newPage(browser, USERS.customerB);
-  await openClasses(first.page);
-  const { enrollment: firstEnrollment } = await enrollInUi(first.page, 'Saturday Waitlist Batch', 'offline');
-  await expect(firstEnrollment.getByRole('heading', { name: 'Seat confirmed' })).toBeVisible();
-  await expect(firstEnrollment).toContainText('#1');
-  await expect(firstEnrollment).toContainText(/₹2,500\s*\/\s*month/i);
+  await test.step('first customer takes the only seat', async () => {
+    await openClasses(first.page);
+    const { enrollment: firstEnrollment } = await enrollInUi(first.page, 'Saturday Waitlist Batch', 'offline');
+    await expect(firstEnrollment.getByRole('heading', { name: 'Seat confirmed' })).toBeVisible();
+    await expect(firstEnrollment).toContainText('#1');
+    await expect(firstEnrollment).toContainText(/₹2,500\s*\/\s*month/i);
+  });
   await first.close();
 
   const second = await newPage(browser, USERS.customerC);
-  await openClasses(second.page);
-  const detail = await openCourseDetail(second.page);
-  const enrollment = await openEnrollment(second.page, detail);
-  await enrollment.getByRole('radio').filter({ hasText: 'Saturday Waitlist Batch' }).click();
-  const waitlistButton = enrollment.getByRole('button', { name: 'Join waitlist' });
-  await expect(waitlistButton).toBeVisible();
-  await waitlistButton.click();
-  await expect(enrollment.getByRole('heading', { name: 'Added to the waitlist' })).toBeVisible();
-  await expect(enrollment).toContainText('Waitlist position');
-  await expect(enrollment).toContainText('#1');
-  await expect(enrollment).toContainText(/₹2,500\s*\/\s*month/i);
+  await test.step('second customer joins the waitlist at position #1', async () => {
+    await openClasses(second.page);
+    const detail = await openCourseDetail(second.page);
+    const enrollment = await openEnrollment(second.page, detail);
+    await enrollment.getByRole('radio').filter({ hasText: 'Saturday Waitlist Batch' }).click();
+    const waitlistButton = enrollment.getByRole('button', { name: 'Join waitlist' });
+    await expect(waitlistButton).toBeVisible();
+    await clickCommitting(waitlistButton, enrollment.getByRole('heading', { name: 'Added to the waitlist' }));
+    await expect(enrollment.getByRole('heading', { name: 'Added to the waitlist' })).toBeVisible();
+    await expect(enrollment).toContainText('Waitlist position');
+    await expect(enrollment).toContainText('#1');
+    await expect(enrollment).toContainText(/₹2,500\s*\/\s*month/i);
+  });
   await second.close();
 
   const third = await newPage(browser, USERS.customerA);
-  await openClasses(third.page);
-  const fullDetail = await openCourseDetail(third.page);
-  const fullEnrollment = await openEnrollment(third.page, fullDetail);
-  const fullBatch = fullEnrollment.getByRole('radio').filter({ hasText: 'Saturday Waitlist Batch' });
-  await expect(fullBatch).toContainText('Full');
-  await expect(fullEnrollment.getByRole('button', { name: 'Confirm enrollment' })).toBeDisabled();
+  await test.step('third customer sees the batch as full', async () => {
+    await openClasses(third.page);
+    const fullDetail = await openCourseDetail(third.page);
+    const fullEnrollment = await openEnrollment(third.page, fullDetail);
+    const fullBatch = fullEnrollment.getByRole('radio').filter({ hasText: 'Saturday Waitlist Batch' });
+    await expect(fullBatch).toContainText('Full');
+    await expect(fullEnrollment.getByRole('button', { name: 'Confirm enrollment' })).toBeDisabled();
+  });
   await third.close();
 
   const availability = await harness.query('select * from public.class_batch_availability($1)', [batch.id]);
@@ -704,7 +727,7 @@ test('the full enrollment and cancellation journey works at mobile, tablet and d
     await expect(card).toBeVisible({ timeout: 20_000 });
     await noHorizontalOverflow(student.page, `${viewport.name} discovery`);
 
-    await student.page.getByRole('button', { name: 'View E2E Algebra Mastery' }).click();
+    await card.getByRole('button', { name: 'View Details', exact: true }).click();
     const detail = student.page.getByTestId('class-detail-modal');
     await expect(detail).toBeVisible();
     await expect(detail).toContainText('Batches & timings');

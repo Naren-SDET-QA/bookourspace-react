@@ -6,6 +6,7 @@ import {
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { installSignedSessionCookie, sessionCookieHeaders } from './session-cookie-harness';
 
 /**
  * Host money actions in Chromium: real owner session → Express → PostgreSQL.
@@ -28,9 +29,7 @@ function isoPlus(days: number): string {
 
 async function openApp(browser: Browser, token: string): Promise<{ page: Page; context: BrowserContext }> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
-  await context.addInitScript(([value]) => {
-    try { window.localStorage.setItem('bos_session_token_v1', String(value)); } catch { /* ignore */ }
-  }, [token]);
+  await installSignedSessionCookie(context, token, 'bos-local-stays-browser-e2e-secret');
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
     try {
@@ -60,7 +59,11 @@ async function closeApp(context: BrowserContext): Promise<void> {
 async function api(path: string, token: string, init: RequestInit = {}) {
   const response = await fetch(`${harness.apiUrl}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: {
+      ...sessionCookieHeaders(token, 'bos-local-stays-browser-e2e-secret'),
+      ...(init.body ? { 'content-type': 'application/json' } : {}),
+      ...(init.headers || {}),
+    },
   });
   return { status: response.status, body: await response.json().catch(() => ({})) };
 }

@@ -5,6 +5,7 @@ import {
   startProviderContextHarness,
   type ProviderContextHarness,
 } from './provider-context-harness';
+import { installSignedSessionCookie } from './session-cookie-harness';
 
 /**
  * Provider business context in the real browser.
@@ -29,13 +30,7 @@ test.afterAll(async () => {
 });
 
 async function openProviderPortal(page: Page, authId: string) {
-  await page.addInitScript(
-    ({ token, user }) => {
-      window.localStorage.setItem('bos_session_token_v1', token);
-      window.localStorage.setItem('bos_google_auth_user_v1', user);
-    },
-    { token: harness.token(authId), user: JSON.stringify(harness.authUser(authId)) },
-  );
+  await installSignedSessionCookie(page.context(), harness.token(authId), 'bos-local-provider-context-e2e-secret');
   await page.goto(harness.url, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#bos-main-content')).toBeAttached({ timeout: 60_000 });
   const contextTarget = page.locator('[data-testid="provider-business-bar"], [data-testid="provider-context-notice"]').first();
@@ -136,9 +131,24 @@ test('a provider with no business sees onboarding instead of a dashboard', async
 });
 
 test('switching back to the granted business works again', async ({ page }) => {
+  // This test owns the authorization precondition it asserts. Beta is
+  // intentionally revoked by the harness baseline and by the preceding
+  // denial test, so relying on serial test mutation makes standalone runs
+  // nondeterministic. The real business-access row is updated before the
+  // product performs its switch request.
+  await harness.query(
+    `insert into public.business_member_access (business_id, user_id, allowed_modules, allowed_sections, allowed_actions, grant_source)
+     values ($1,$2,array['pg_hostels'],'{}'::jsonb,'{}'::jsonb,'manual')
+     on conflict (business_id, user_id) do update
+       set allowed_modules = excluded.allowed_modules,
+           allowed_sections = excluded.allowed_sections,
+           allowed_actions = excluded.allowed_actions,
+           grant_source = excluded.grant_source,
+           updated_at = now()`,
+    [BUSINESS.beta.id, AUTH.multi],
+  );
   await openProviderPortal(page, AUTH.multi);
   const selector = page.getByTestId('provider-business-select');
-
   await selector.selectOption(BUSINESS.beta.id);
   await expect(page.getByRole('navigation', { name: 'Owner sections' })).toBeVisible({ timeout: 30_000 });
 

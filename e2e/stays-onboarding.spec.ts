@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 import {
   STAY,
+  TEST_HMAC_SECRET,
   USERS,
   sessionToken,
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { sessionCookieHeaders } from './session-cookie-harness';
 
 /**
  * Hotel owner draft/submit + Super Admin review.
@@ -36,7 +38,7 @@ function isoPlus(days: number): string {
 async function api(path: string, token: string, init: RequestInit = {}) {
   const response = await fetch(`${harness.apiUrl}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'content-type': 'application/json', ...sessionCookieHeaders(token, TEST_HMAC_SECRET), ...(init.headers || {}) },
   });
   return { status: response.status, body: await response.json().catch(() => ({})) };
 }

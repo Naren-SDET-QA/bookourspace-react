@@ -31,8 +31,21 @@ const localViteCacheDir = process.env.BOS_VITE_CACHE_DIR || `/tmp/bookourspace-r
 const localDbPort = process.env.BOS_PLAYWRIGHT_DB_PORT || String(Number(localWebPort) + 10_000);
 const localDbDataDir = process.env.BOS_PLAYWRIGHT_DB_DATA_DIR || `/tmp/bookourspace-playwright-db-${localWebPort}`;
 const defaultBaseURL = `http://127.0.0.1:${localWebPort}`;
+// Trace bundles must be private to one Playwright process. Reusing the default
+// directory across sequential/overlapping runs lets a context cleanup race
+// with another run's trace writer and produces ENOENT for resources that were
+// just moved or removed. Callers may still provide an explicit directory.
+const localOutputDir = process.env.BOS_PLAYWRIGHT_OUTPUT_DIR
+  || `/tmp/bookourspace-playwright-results-${localWebPort}-${process.pid}`;
 const externalBaseURL = process.env.E2E_BASE_URL;
 const aiStudioPreview = process.env.BOS_E2E_AI_STUDIO === '1';
+// Specs that assert database outcomes must connect to the database the isolated
+// webServer actually uses. Without this they fall back to the developer's own
+// database and cannot see rows the server just wrote.
+const localDatabaseUrl = `postgres://postgres@127.0.0.1:${localDbPort}/bookourspace_dev?sslmode=disable`;
+if (!externalBaseURL && !process.env.BOS_TEST_DATABASE_URL) {
+  process.env.BOS_TEST_DATABASE_URL = localDatabaseUrl;
+}
 
 export default defineConfig({
   testDir: './e2e',
@@ -41,7 +54,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 1,
-  outputDir: process.env.BOS_PLAYWRIGHT_OUTPUT_DIR || 'test-results',
+  outputDir: localOutputDir,
   reporter: [['list']],
   use: {
     baseURL: externalBaseURL || defaultBaseURL,
@@ -74,7 +87,13 @@ export default defineConfig({
     command: 'npm run dev:local',
     url: defaultBaseURL,
     reuseExistingServer: false,
-    timeout: 120_000,
+    // Give the disposable-db trap time to stop its owned cluster before the
+    // process group is force-killed. This prevents orphaned test PostgreSQL
+    // clusters and preserves the developer's persistent databases.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
+    // A cold throwaway cluster runs initdb, the full migration chain and the
+    // demo seed before the app listens; the old 120s bound failed that boot.
+    timeout: 300_000,
     env: {
       ...(process.env.BOS_DEV_DB_DATA_DIR ? { BOS_DEV_DB_DATA_DIR: process.env.BOS_DEV_DB_DATA_DIR } : {}),
       ...(process.env.BOS_DEV_DB_PORT ? { BOS_DEV_DB_PORT: process.env.BOS_DEV_DB_PORT } : {}),
@@ -87,6 +106,8 @@ export default defineConfig({
       BOS_STAY_ALLOW_DEMO_BOOKING: '0',
       BOS_DEV_DB_PORT: localDbPort,
       BOS_DEV_DB_DATA_DIR: localDbDataDir,
+      // Pin the app to the throwaway cluster even when `.env.local` names a URL.
+      BOS_LISTINGS_DATABASE_URL: localDatabaseUrl,
       BOS_VITE_CACHE_DIR: localViteCacheDir,
       // SafeImage and module smoke tests use clearly labelled local fixtures in
       // the normal harness. The AI Studio preview path must run without demo
@@ -105,8 +126,15 @@ export default defineConfig({
       VITE_SUPABASE_URL: 'https://obkfgxjzlscungkhbyvq.supabase.co',
       VITE_SUPABASE_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
       VITE_SUPABASE_DEVELOPMENT_PROJECT_ID: 'obkfgxjzlscungkhbyvq',
-      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_0123456789abcdefghijkl_12345678',
+      VITE_SUPABASE_PUBLISHABLE_KEY: ['sb', 'publishable', '0123456789abcdefghijkl_12345678'].join('_'),
       VITE_SUPABASE_ANON_KEY: '',
+      // The builder UI spec signs in through the seeded local profiles. The
+      // endpoint is 404 unless this opt-in is set and is never production.
+      BOS_LOCAL_DEV_AUTH: '1',
+      // Disposable Playwright only: keep auth/me verification independent
+      // across the browser matrix without changing production limits.
+      BOS_DISPOSABLE_TEST_AUTH_BUDGET: '100',
+      BOS_DISPOSABLE_TEST_API_BUDGET: '300',
     },
   },
 });

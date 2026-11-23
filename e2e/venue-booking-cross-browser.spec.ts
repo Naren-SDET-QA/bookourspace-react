@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installSignedSessionCookie } from './session-cookie-harness';
 
 /**
  * Cross-engine, mobile/tablet venue surface. This does not create bookings; it
@@ -18,13 +19,7 @@ const VENUE_TITLE = process.env.E2E_VENUE_TITLE || 'E2E Owner-Created Function H
 async function signIn(page: Page) {
   const session = SESSIONS.customer;
   if (!session?.token || !session?.user) throw new Error('missing customer E2E session');
-  await page.addInitScript(
-    ({ token, user }) => {
-      window.localStorage.setItem('bos_session_token_v1', token);
-      window.localStorage.setItem('bos_google_auth_user_v1', user);
-    },
-    { token: session.token, user: JSON.stringify(session.user) },
-  );
+  await installSignedSessionCookie(page.context(), session.token, process.env.BOS_SERVER_HMAC_SECRET || '');
 }
 
 async function boot(page: Page) {

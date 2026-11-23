@@ -86,8 +86,10 @@ test.describe('Movies discovery, showtimes and display-only contract', () => {
   });
 
   test('legacy seat and booking endpoints are hard-refused', async ({ request }) => {
-    const token = SESSIONS?.customer?.token;
-    if (!token) test.skip(true, 'E2E_MOVIES_SESSIONS.customer.token is not configured');
+    const sessionResponse = await request.post('/api/auth/local-dev/session', { data: { role: 'customer' } });
+    expect(sessionResponse.ok()).toBe(true);
+    const session = await sessionResponse.json() as { csrfToken: string };
+    const csrf = { 'x-bos-csrf': session.csrfToken };
 
     const inventory = await request.get(`${BASE_URL}/api/movies/showtimes`);
     const screen = (((await inventory.json()).screens || []) as Screen[])[0];
@@ -100,18 +102,18 @@ test.describe('Movies discovery, showtimes and display-only contract', () => {
     const calls = [
       request.get(
         `${BASE_URL}/api/seats/locks?listingId=${encodeURIComponent(listingId)}&dateIso=${dateIso}&showtime=${encodeURIComponent(showtime)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: csrf },
       ),
       request.post(`${BASE_URL}/api/seats/hold`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: csrf,
         data: { listingId, dateIso, showtime, seats: ['A2'], sessionId: `e2e-movies-${Date.now()}` },
       }),
       request.post(`${BASE_URL}/api/movies/bookings/movie-a/cancel`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: csrf,
         data: { reason: 'e2e' },
       }),
       request.post(`${BASE_URL}/api/bookings/atomic`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: csrf,
         data: {
           idempotencyKey: `e2e-movies-${Date.now()}`,
           listingId,

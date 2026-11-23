@@ -252,6 +252,11 @@ export async function startClassesHarness(): Promise<ClassesHarness> {
     apiChild = child;
     child.stdout?.on('data', (chunk) => { apiOutput += String(chunk); });
     child.stderr?.on('data', (chunk) => { apiOutput += String(chunk); });
+    child.once('exit', () => {
+      if (process.env.BOS_E2E_DEBUG_API === '1') {
+        console.error('[classes-harness] API process exited\n' + apiOutput.slice(-6000));
+      }
+    });
 
     const deadline = Date.now() + 35_000;
     while (Date.now() < deadline) {
@@ -313,6 +318,18 @@ export async function startClassesHarness(): Promise<ClassesHarness> {
             set role = $2, account_status = 'active', full_name = $3, phone = $4
           where id = $1`,
         [user.authId, user.role, user.name, user.phone],
+      );
+    }
+
+    // Every account now starts VIEW-only. This journey exercises the customer
+    // booking lifecycle, so the customer identities are provisioned the booking
+    // actions an approved customer holds; the gate still enforces them.
+    for (const user of users.filter((candidate) => candidate.role === 'customer')) {
+      await pool.query(
+        `insert into public.customer_module_access (user_id, module_key, allowed_actions, granted_by)
+         values ($1, 'classes', '["view","create","edit","delete"]'::jsonb, $2)
+         on conflict (user_id, module_key) do update set allowed_actions = excluded.allowed_actions`,
+        [user.authId, USERS.admin.authId],
       );
     }
 

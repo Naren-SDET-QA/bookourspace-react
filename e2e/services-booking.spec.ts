@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { useSessionCookie } from './session-cookie-harness';
 
 /**
  * Home & Local Services browser journey (customer → provider → admin).
@@ -31,10 +32,10 @@ async function pageFor(browser: Browser, key: 'customer' | 'provider' | 'admin')
   const person = sessions[key] as Person | undefined;
   if (!person?.token) throw new Error(`missing ${key} session in E2E_SERVICE_SESSIONS`);
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await useSessionCookie(context, person.token);
   await context.addInitScript(
-    ([token, user]) => {
+    ([user]) => {
       try {
-        window.localStorage.setItem('bos_session_token_v1', String(token));
         window.localStorage.setItem('bos_google_auth_user_v1', String(user));
         window.localStorage.setItem('bos_entry_choice_v1', 'signed-in');
         window.localStorage.setItem(
@@ -49,7 +50,7 @@ async function pageFor(browser: Browser, key: 'customer' | 'provider' | 'admin')
         /* storage unavailable */
       }
     },
-    [person.token, JSON.stringify(person.user)],
+    [JSON.stringify(person.user)],
   );
   const page = await context.newPage();
   return { context, page };
@@ -59,7 +60,13 @@ async function openServices(page: Page) {
   await page.goto('/#services', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#root > *', { timeout: 30_000 });
   await page.waitForFunction(() => document.body.innerText.trim().length > 200, { timeout: 30_000 });
-  await expect(page.getByRole('region', { name: 'Services app' })).toBeVisible({ timeout: 30_000 });
+  // The services surface is mounted either as the full-screen "Services app"
+  // dialog or inline under the marketplace section region. Both are valid; the
+  // journey only needs the section that owns the bookings control.
+  const servicesSurface = page
+    .getByRole('region', { name: 'Services app' })
+    .or(page.getByRole('region', { name: 'services section' }));
+  await expect(servicesSurface.first()).toBeVisible({ timeout: 30_000 });
   if (!(await page.getByRole('button', { name: 'My service bookings' }).isVisible().catch(() => false))) {
     const allServices = page.getByRole('button', { name: /^All Services$/i }).first();
     if (await allServices.isVisible().catch(() => false)) await allServices.click();

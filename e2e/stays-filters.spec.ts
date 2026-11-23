@@ -6,6 +6,7 @@ import {
   startStaysHarness,
   type StaysHarness,
 } from './stays-e2e-harness';
+import { useSessionCookie } from './session-cookie-harness';
 
 /**
  * Hotels & Stays — filters, persistence and detail journey.
@@ -32,9 +33,7 @@ function isoPlus(days: number): string {
 
 async function openApp(browser: Browser, viewport?: { width: number; height: number }): Promise<{ page: Page; context: BrowserContext }> {
   const context = await browser.newContext(viewport ? { viewport } : undefined);
-  await context.addInitScript(([token]) => {
-    try { window.localStorage.setItem('bos_session_token_v1', String(token)); } catch { /* ignore */ }
-  }, [sessionToken(USERS.customerA)]);
+  await useSessionCookie(context, sessionToken(USERS.customerA));
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
     try {

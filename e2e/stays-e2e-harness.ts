@@ -234,6 +234,10 @@ export async function startStaysHarness(options: {
   let apiOutput = '';
   let uiServer: Server | null = null;
   let pool: Pool | null = null;
+  // This invocation may stop only the PostgreSQL instance it successfully
+  // started. In particular, initdb/migration failures must not issue pg_ctl
+  // against a pre-existing or concurrently managed data directory.
+  let postgresStarted = false;
 
   const stopApi = async () => {
     const child = apiChild;
@@ -261,6 +265,10 @@ export async function startStaysHarness(options: {
           BOS_SERVER_HMAC_SECRET: TEST_HMAC_SECRET,
           BOS_TEST_AUTHORITATIVE_STORE_PATH: storePath,
           BOS_LISTINGS_DATABASE_URL: connectionString,
+          // Disposable harnesses use a separate database and an explicit
+          // local-only auth budget so browser setup cannot exhaust production's
+          // 12/minute limit. This does not affect production configuration.
+          BOS_DISPOSABLE_TEST_AUTH_BUDGET: '100',
           // Tests must not inherit a developer's local preview opt-ins: demo rows
           // stay hidden and unbookable by default, exactly as in production.
           BOS_STAY_INCLUDE_DEMO: '0',
@@ -306,6 +314,7 @@ export async function startStaysHarness(options: {
   try {
     await command('initdb', ['-D', pgData, '-U', 'postgres', '--auth=trust']);
     await command('pg_ctl', ['-D', pgData, '-o', `-p ${pgPort} -k /tmp -c listen_addresses=127.0.0.1`, '-l', postgresLog, '-w', 'start']);
+    postgresStarted = true;
 
     await psql(['-c', `drop database if exists ${database}`], 'postgres');
     await psql(['-c', `create database ${database}`], 'postgres');
@@ -346,7 +355,10 @@ export async function startStaysHarness(options: {
             set role = $2, account_status = 'active', full_name = $3, phone = $4,
                 verified = ($2 = 'admin'), is_super_admin = ($2 = 'admin')
           where id = $1`,
-        [user.authId, user.role === 'provider' ? 'customer' : user.role, user.name, user.phone],
+        // The authoritative profile role must match the role the session is
+        // minted with. Seeding a provider as a customer made `/api/auth/me`
+        // report a customer and hid the Provider Hub the journey needs.
+        [user.authId, user.role, user.name, user.phone],
       );
     }
 
@@ -355,20 +367,53 @@ export async function startStaysHarness(options: {
     // bounce every deep link out of the section). Seed the real grant rows the
     // product reads so browser journeys exercise the granted path rather than
     // an empty allow-list.
+    // New accounts now start VIEW-only from the signup trigger, so a plain
+    // `do nothing` would leave these journeys unable to book. The fixture
+    // explicitly upserts the customer booking scope (empty actions = every
+    // action, the stored legacy shape); the gate still enforces it.
     for (const user of users) {
       for (const moduleKey of ['services', 'hotels', 'pg', 'function_hall', 'classes', 'movies']) {
         await pool.query(
-          `insert into public.customer_module_access (user_id, module_key, granted_by)
-           values ($1, $2, $3) on conflict (user_id, module_key) do nothing`,
+          `insert into public.customer_module_access (user_id, module_key, granted_by, grant_source)
+           values ($1, $2, $3, 'manual')
+           on conflict (user_id, module_key) do update
+             set allowed_actions = excluded.allowed_actions,
+                 allowed_sections = excluded.allowed_sections,
+                 updated_at = now()`,
           [user.authId, moduleKey, USERS.admin.authId],
         );
       }
     }
 
+    // The provider gate resolves every workspace call through an active,
+    // approved business of the module the route serves, and the portal only
+    // offers a module whose business exists. A stay host therefore owns a
+    // hotel_stay business here, exactly as production onboarding creates one;
+    // the owner-membership and module-access triggers fill the rest in.
+    const business = await pool.query(
+      `insert into public.businesses
+         (business_ref, name, module_type, owner_user_id, approval_status, is_enabled,
+          backfill_source, created_by, approved_by, approved_at)
+       values ('STAY-E2E-HOSTING', 'E2E Hospitality', 'hotel_stay', $1,
+          'approved', true, 'local_demo', $1, $1, now())
+       on conflict (business_ref) do update
+         set approval_status = 'approved', is_enabled = true, approved_at = now()
+       returning id`,
+      [USERS.provider.authId],
+    );
+    const businessId = String(business.rows[0].id);
+    await pool.query(
+      `insert into public.business_module_access
+         (business_id, module_type, enabled, approval_status, approved_by, approved_at)
+       values ($1, 'hotel_stay', true, 'approved', $2, now())
+       on conflict (business_id, module_type) do update
+         set enabled = true, approval_status = 'approved', approved_at = now()`,
+      [businessId, USERS.admin.authId],
+    );
     await pool.query(
       `insert into public.listings
-         (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload)
-       values ($1, $2, $3, 'stay-hotel', '3-Star Business Hotel', 'stay', $4, '/night', 'pending_approval', $5::jsonb)`,
+         (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit, status, payload, business_id)
+       values ($1, $2, $3, 'hotel', '3-Star Business Hotel', 'stay', $4, '/night', 'pending_approval', $5::jsonb, $6)`,
       [
         STAY.listingId,
         USERS.provider.authId,
@@ -382,6 +427,7 @@ export async function startStaysHarness(options: {
           images: [],
           providerName: 'E2E Hospitality',
         }),
+        businessId,
       ],
     );
 
@@ -625,7 +671,10 @@ export async function startStaysHarness(options: {
         uiServer = null;
       }
       if (pool) { await pool.end().catch(() => {}); pool = null; }
-      await command('pg_ctl', ['-D', pgData, '-m', 'fast', '-w', 'stop']).catch(() => {});
+      if (postgresStarted) {
+        await command('pg_ctl', ['-D', pgData, '-m', 'fast', '-w', 'stop']).catch(() => {});
+        postgresStarted = false;
+      }
       const marker = await fs.readFile(markerPath, 'utf8').catch(() => '');
       if (!marker.startsWith('BookOurSpace Stays browser E2E')) {
         throw new Error('Refusing to remove an unowned scratch directory.');
@@ -690,7 +739,10 @@ export async function startStaysHarness(options: {
     await stopApi();
     if (uiServer) await new Promise<void>((resolve) => uiServer?.close(() => resolve()));
     if (pool) await pool.end().catch(() => {});
-    await command('pg_ctl', ['-D', pgData, '-m', 'fast', '-w', 'stop']).catch(() => {});
+    if (postgresStarted) {
+      await command('pg_ctl', ['-D', pgData, '-m', 'fast', '-w', 'stop']).catch(() => {});
+      postgresStarted = false;
+    }
     await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
     throw new Error(`${(error as Error).message}\npostgres log:\n${postgresTail.slice(-4000)}`);
   }

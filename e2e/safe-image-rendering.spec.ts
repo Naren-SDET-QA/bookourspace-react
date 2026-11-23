@@ -82,14 +82,19 @@ test('visible module imagery is loaded on phone and desktop without demo-host re
           source: image.currentSrc || image.src,
           state: image.dataset.imageState,
         })));
+      // One atomic poll: "the first viewport paints at least one image and every
+      // painted image has loaded". Reading the DOM a second time after a poll
+      // that an empty set satisfies made this flap when a lazy module mounted
+      // between the two reads.
       await expect.poll(async () => {
         const images = await visibleImageState();
+        if (images.length === 0) {
+          const failed = failedImageRequests.slice(-3).join(' | ');
+          return `no painted image yet${failed ? ` (failed: ${failed})` : ''}`;
+        }
         const pending = images.filter((image) => !image.loaded).map((image) => `${image.state} ${image.source || '<no src>'}`);
-        return { route, width, rendered: images.length, pending, failed: failedImageRequests.slice(-3) };
-      }, { message: `${route} at ${width}px has a visible image that did not load`, timeout: 10_000 }).toEqual({ route, width, rendered: expect.any(Number), pending: [], failed: [] });
-      const visibleImages = await visibleImageState();
-      expect(visibleImages.length, `${route} rendered no visible image at ${width}px`).toBeGreaterThan(0);
-      expect(visibleImages.every((image) => image.loaded), `${route} has a broken visible image at ${width}px`).toBe(true);
+        return pending.length === 0 ? 'ok' : `pending: ${pending.join(' | ')}`;
+      }, { message: `${route} at ${width}px must paint a loaded image in the first viewport`, timeout: 15_000 }).toBe('ok');
     }
   }
   expect(imageRequests.filter((url) => /images\.example\.com|cdn\.example\.test|media\.example\.test/i.test(url))).toHaveLength(0);
