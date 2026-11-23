@@ -145,3 +145,48 @@ test('PostgreSQL venue booking concurrency, quote, visibility, idempotency, canc
     await pool.end();
   }
 });
+
+test('venue business isolation: another provider cannot read or manage another listing blocks', {skip:!dbUrl}, async()=>{
+  const pool=new Pool({connectionString:dbUrl});
+  let repo=new VenueBookingRepository(dbUrl);
+  let server; let base='';
+  const ownerId=randomUUID(); const otherOwnerId=randomUUID();
+  const listingId='venue-isolation-it-'+process.pid;
+  try {
+    await pool.query('insert into auth.users(id,email,raw_user_meta_data) values($1,$2,$3) on conflict(id) do nothing',[ownerId,`venue-owner-${process.pid}@example.test`,JSON.stringify({})]);
+    await pool.query('insert into auth.users(id,email,raw_user_meta_data) values($1,$2,$3) on conflict(id) do nothing',[otherOwnerId,`venue-other-${process.pid}@example.test`,JSON.stringify({})]);
+    await pool.query(`update public.profiles set role=$2,account_status='active' where id=$1`,[ownerId,'provider']);
+    await pool.query(`update public.profiles set role=$2,account_status='active' where id=$1`,[otherOwnerId,'provider']);
+    await pool.query(`insert into public.listings(id,owner_id,title,category_id,subcategory,entity_type,price,price_unit,status,payload)
+      values($1,$2,'Venue isolation fixture','venues','Function Hall','venue',1,'per event','active','{}'::jsonb) on conflict(id) do update set status='active'`,[listingId,ownerId]);
+
+    const ownerActor={role:'provider',authProvider:'google',supabaseUserId:ownerId};
+    const otherActor={role:'provider',authProvider:'google',supabaseUserId:otherOwnerId};
+
+    const startHttp=async()=>{const app=express();app.use(express.json({verify:(req,_res,buffer)=>{req.rawBody=Buffer.from(buffer);}}));registerVenueBookingsApi(app,{repository:repo,verifySession:req=>{const token=String(req.headers.authorization||'').replace('Bearer ','');if(token===ownerId)return ownerActor;if(token===otherOwnerId)return otherActor;return null;},env:{NODE_ENV:'test',BOS_VENUE_PAYMENT_SANDBOX:'1',BOS_VENUE_PAYMENT_SANDBOX_SECRET:'venue-local-sandbox-test-secret'}});const s=await new Promise(resolve=>{const instance=app.listen(0,'127.0.0.1',()=>resolve(instance));});base=`http://127.0.0.1:${s.address().port}`;return s;};
+    server=await startHttp();
+    const call=async(path,actor,method='GET',body,withBusinessId)=>fetch(base+path,{method,headers:{'authorization':`Bearer ${actor}`,'content-type':'application/json',...(withBusinessId?{'x-business-id':listingId}:{})},...(body?{body:JSON.stringify(body)}:{})});
+
+    const ownerBlocks=await call(`/api/provider/venues/${listingId}/blocks`,ownerId);
+    assert.equal(ownerBlocks.status,200,'the owning provider can read its own listing blocks');
+
+    const otherBlocksWithHeader=await call(`/api/provider/venues/${listingId}/blocks`,otherOwnerId,'GET',undefined,true);
+    assert.equal(otherBlocksWithHeader.status,403,'another provider cannot read another listing blocks even with a forged x-business-id');
+
+    const otherBlocksNoHeader=await call(`/api/provider/venues/${listingId}/blocks`,otherOwnerId);
+    assert.equal(otherBlocksNoHeader.status,403,'another provider cannot read another listing blocks without a business selection either');
+
+    const createBlockAsOther=await call(`/api/provider/venues/${listingId}/blocks`,otherOwnerId,'POST',{startsAt:'2027-06-01T10:00:00.000Z',endsAt:'2027-06-01T12:00:00.000Z',reason:'unauthorized'},true);
+    assert.equal(createBlockAsOther.status,403,'another provider cannot write another listing blocks');
+  } finally {
+    if(server) await new Promise(resolve=>server.close(resolve));
+    await repo.close().catch(()=>{});
+    await pool.query('delete from public.venue_blocks where listing_id=$1',[listingId]).catch(()=>{});
+    await pool.query('delete from public.listings where id=$1',[listingId]).catch(()=>{});
+    await pool.query('delete from public.profiles where id=$1',[ownerId]).catch(()=>{});
+    await pool.query('delete from public.profiles where id=$1',[otherOwnerId]).catch(()=>{});
+    await pool.query('delete from auth.users where id=$1',[ownerId]).catch(()=>{});
+    await pool.query('delete from auth.users where id=$1',[otherOwnerId]).catch(()=>{});
+    await pool.end();
+  }
+});

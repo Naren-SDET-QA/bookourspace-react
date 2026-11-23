@@ -45,12 +45,74 @@ export class VenueBookingRepository {
     if (!roles.includes(actor.role)) throw new VenueBookingError('FORBIDDEN_ROLE', 403);
   }
 
-  private async assertListingBusiness(client: any, actor: ProviderListingActor | null, listingId: string) {
-    if (!actor?.businessId) return;
-    const result = await client.query('select business_id from public.listings where id=$1 limit 1', [listingId]);
-    if (!result.rows[0] || String(result.rows[0].business_id) !== String(actor.businessId)) {
+  /**
+   * Businesses this actor may act for, read from the server-owned membership
+   * table inside the request transaction. The `x-business-id` header can only
+   * narrow this set; it can never widen it, so a client-sent business is never
+   * the source of truth. RLS on `business_members` already limits the rows to
+   * the actor's own memberships.
+   */
+  private async actorBusinessIds(client: PoolClient, actor: VenueActor): Promise<Set<string>> {
+    const result = await client.query(
+      "select business_id from public.business_members where user_id=$1 and status='active'",
+      [actor.supabaseUserId],
+    );
+    return new Set(result.rows.map((row: Record<string, unknown>) => String(row.business_id)));
+  }
+
+  /**
+   * Listing-scoped business authorization, resolved from the listing itself.
+   *
+   * Admins are global by design (RLS `is_admin()` still restricts what they can
+   * read or write). Customers hold no business context; their access is decided
+   * by `customer_user_id` predicates. A provider may act only on a listing that
+   * belongs to one of their active businesses, and, when the request carries a
+   * business selection, the listing must belong to that same selection. A
+   * pre-business listing (no `business_id`) stays reachable for its own owner,
+   * which is exactly the fallback RLS already grants; everyone else is refused.
+   */
+  private async assertListingBusiness(client: PoolClient, actor: VenueActor | null, listingId: string) {
+    if (!actor || actor.role !== 'provider') return;
+    const result = await client.query('select business_id, owner_id from public.listings where id=$1 limit 1', [listingId]);
+    const row = result.rows[0];
+    if (!row) throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
+    const listingBusiness = row.business_id ? String(row.business_id) : '';
+    if (!listingBusiness) {
+      if (String(row.owner_id) !== actor.supabaseUserId) {
+        throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
+      }
+      return;
+    }
+    const allowed = await this.actorBusinessIds(client, actor);
+    if (!allowed.has(listingBusiness)) throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
+    if (actor.businessId && String(actor.businessId) !== listingBusiness) {
       throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
     }
+  }
+
+  /**
+   * A booking's authorization lives on the listing it was made against, so the
+   * booking id is resolved to its `listing_id` instead of being compared to
+   * `listings.id`. A booking the provider cannot see in RLS is refused rather
+   * than treated as authorized.
+   */
+  private async assertBookingBusiness(client: PoolClient, actor: VenueActor | null, bookingId: string) {
+    if (!actor || actor.role !== 'provider') return;
+    const result = await client.query('select listing_id from public.venue_bookings where id=$1 limit 1', [bookingId]);
+    if (!result.rows[0]) throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
+    await this.assertListingBusiness(client, actor, String(result.rows[0].listing_id));
+  }
+
+  /**
+   * The provider's own business selection for list-style reads. A selection is
+   * accepted only when it is one of the actor's active memberships; anything
+   * else is a refusal, never a silent widening to "every business".
+   */
+  private async scopedBusinessId(client: PoolClient, actor: VenueActor): Promise<string | null> {
+    if (actor.role !== 'provider' || !actor.businessId) return null;
+    const allowed = await this.actorBusinessIds(client, actor);
+    if (!allowed.has(String(actor.businessId))) throw new VenueBookingError('VENUE_BUSINESS_ACCESS_DENIED', 403);
+    return String(actor.businessId);
   }
 
 
@@ -79,6 +141,9 @@ export class VenueBookingRepository {
     finally { client.release(); }
   }
 
+  // Authorization: public. A quote is a price computation for a published
+  // listing, so it carries no business scope and must not be denied because a
+  // signed-in provider happens to send `x-business-id` while browsing.
   async quote(listingId: string, startsAt: string, endsAt: string, slotType: string, guests: number, addons: string[], actor: ProviderListingActor | null) {
     return this.transaction(actor as VenueActor | null, async (client) => {
       const { rows } = await client.query('select public.venue_quote($1,$2::timestamptz,$3::timestamptz,$4,$5,$6::text[]) as quote',
@@ -87,6 +152,8 @@ export class VenueBookingRepository {
     });
   }
 
+  // Authorization: public. `venue_public_calendar` deliberately exposes only
+  // busy intervals, never reservation details, for any published listing.
   async calendar(listingId: string, from: string, to: string, actor: ProviderListingActor | null) {
     return this.transaction(actor as VenueActor | null, async (client) => {
       const result = await client.query('select lower(busy_period) as starts_at, upper(busy_period) as ends_at, busy_type from public.venue_public_calendar($1,$2::timestamptz,$3::timestamptz)', [listingId, from, to]);
@@ -94,6 +161,8 @@ export class VenueBookingRepository {
     });
   }
 
+  // Authorization: public read. Booking terms are part of the listing a customer
+  // is about to book; mutation stays owner-scoped in `saveSettings`.
   async settings(listingId: string, actor: ProviderListingActor | null) {
     return this.transaction(actor as VenueActor | null, async (client) => {
       const result = await client.query('select * from public.venue_booking_settings where listing_id=$1', [listingId]);
@@ -142,6 +211,8 @@ export class VenueBookingRepository {
     if (!/^venue-[a-z0-9-]{2,60}$/.test(id)||label.length<2||label.length>100||emoji.length>16
       ||subcategories.length>100||!Number.isInteger(sortOrder)||sortOrder<0
       ||subcategories.some(x=>x.length<2||x.length>100)) throw new VenueBookingError('INVALID_VENUE_CATEGORY',400);
+    // Authorization: admin-only taxonomy write. `id` is a `venue-...` category
+    // key, not a listing id, so it must never reach a listings lookup.
     return this.transaction(actor, async (client) => {
       const result=await client.query('select public.venue_admin_save_category($1,$2,$3,$4::text[],$5,$6) as category',
         [id,label,emoji,subcategories,active,sortOrder]);
@@ -197,6 +268,10 @@ export class VenueBookingRepository {
   async listBlocks(actor: ProviderListingActor | null, listingId: string) {
     this.assertActor(actor, ['provider','admin']);
     return this.transaction(actor, async (client) => {
+      // Authorization: listing-scoped business check on top of the owner-based
+      // `venue_blocks` RLS, so a provider cannot enumerate another business's
+      // blocked inventory by guessing a listing id.
+      await this.assertListingBusiness(client, actor, listingId);
       const result = await client.query('select id,lower(blocked_period) starts_at,upper(blocked_period) ends_at,reason,created_at from public.venue_blocks where listing_id=$1 order by lower(blocked_period) limit 500', [listingId]);
       return result.rows.map((row) => ({ id: row.id, startsAt: row.starts_at, endsAt: row.ends_at, reason: row.reason, createdAt: row.created_at }));
     });
@@ -221,6 +296,7 @@ export class VenueBookingRepository {
       throw new VenueBookingError('INVALID_SEASONAL_RATE', 400);
     }
     return this.transaction(actor, async (client) => {
+      await this.assertListingBusiness(client, actor, listingId);
       const result = await client.query('select public.venue_owner_manage_seasonal_rate($1,$2,$3::daterange,$4,$5,$6) as result',
         [listingId,id, deleting ? null : `[${start},${end})`, String(input.slotType || ''), Math.round(rate*100), deleting]);
       return record(result.rows[0]?.result);
@@ -237,6 +313,8 @@ export class VenueBookingRepository {
     const idempotencyKey = String(input.idempotencyKey || '');
     if (!listingId || listingId.length > 160 || !Number.isFinite(Date.parse(startsAt)) || !Number.isFinite(Date.parse(endsAt))
       || !Number.isInteger(guests) || !UUID.test(idempotencyKey)) throw new VenueBookingError('INVALID_VENUE_BOOKING', 400);
+    // Authorization: customer. `venue_create_booking` derives the customer from
+    // `auth.uid()`; a business selection on a customer request is never a scope.
     return this.transaction(actor, async (client) => {
       const result = await client.query('select public.venue_create_booking($1,$2::timestamptz,$3::timestamptz,$4,$5,$6::text[],$7,$8::uuid) as booking',
         [listingId,startsAt,endsAt,slotType,guests,addons,paymentMode,idempotencyKey]);
@@ -249,6 +327,11 @@ export class VenueBookingRepository {
     if (scope==='owner' && !['provider','admin'].includes(actor.role)) throw new VenueBookingError('PROVIDER_ROLE_REQUIRED',403);
     if (scope==='admin' && actor.role!=='admin') throw new VenueBookingError('ADMIN_REQUIRED',403);
     return this.transaction(actor, async (client) => {
+      // Authorization: row-scoped in SQL (`customer_user_id`/`owner_user_id`/
+      // `is_admin()`). A list has no single listing to check; a provider's
+      // business selection is validated against their memberships instead, so a
+      // forged `x-business-id` is refused rather than silently ignored.
+      const businessId = await this.scopedBusinessId(client, actor);
       const result = await client.query(
         `select b.*,l.title as listing_title,l.payload->'location' as location,s.time_zone as venue_time_zone,
                 (select coalesce(jsonb_agg(jsonb_build_object('actorRole',e.actor_role,'action',e.action,'reason',e.reason,'details',e.details,'createdAt',e.created_at) order by e.created_at desc),'[]'::jsonb)
@@ -258,7 +341,7 @@ export class VenueBookingRepository {
            from public.venue_bookings b join public.listings l on l.id=b.listing_id
            join public.venue_booking_settings s on s.listing_id=b.listing_id
           where ($1='mine' and b.customer_user_id=auth.uid()) or ($1='owner' and b.owner_user_id=auth.uid() and ($2::uuid is null or b.business_id=$2::uuid)) or ($1='admin' and public.is_admin())
-          order by b.starts_at desc limit 200`, [scope, actor.businessId || null],
+          order by b.starts_at desc limit 200`, [scope, businessId],
       );
       return result.rows.map((row) => ({
         id:row.id, bookingRef:row.booking_ref, listingId:row.listing_id, listingTitle:row.listing_title,
@@ -277,6 +360,9 @@ export class VenueBookingRepository {
     this.assertActor(actor, ['customer','provider','admin']);
     if (!UUID.test(bookingId)) throw new VenueBookingError('INVALID_BOOKING_ID',400);
     return this.transaction(actor, async (client) => {
+      // Authorization: booking-scoped. The booking id is resolved to its
+      // listing's business; a customer is authorized by the RPC's own party check.
+      await this.assertBookingBusiness(client, actor, bookingId);
       const result = await client.query('select public.venue_booking_action($1::uuid,$2,$3) as booking', [bookingId,action,reason]);
       return record(result.rows[0]?.booking);
     });
@@ -290,6 +376,9 @@ export class VenueBookingRepository {
     this.assertActor(actor, ['customer', 'provider', 'admin']);
     if (!UUID.test(bookingId)) throw new VenueBookingError('VENUE_BOOKING_NOT_FOUND', 404);
     return this.transaction(actor, async (client) => {
+      // Authorization: booking-party, enforced by the SQL predicate below
+      // (`customer_user_id`, `owner_user_id` or `is_admin()`). A business header
+      // must not be able to suppress the notification context for a real party.
       const { rows } = await client.query(
         `select b.id, b.booking_ref, b.status, b.starts_at, b.ends_at, b.cancellation_reason,
                 l.title as listing_title,
@@ -329,6 +418,8 @@ export class VenueBookingRepository {
     const trimmed=String(reason||'').trim();
     if(!UUID.test(bookingId) || trimmed.length<10 || trimmed.length>2000) throw new VenueBookingError('INVALID_DISPUTE_REASON',400);
     return this.transaction(actor, async (client) => {
+      // Authorization: booking-scoped, resolved through the booking's listing.
+      await this.assertBookingBusiness(client, actor, bookingId);
       const result=await client.query('select public.venue_open_dispute($1::uuid,$2) as dispute',[bookingId,trimmed]);
       return record(result.rows[0]?.dispute);
     });
@@ -338,6 +429,8 @@ export class VenueBookingRepository {
     this.assertActor(actor, ['admin']);
     const trimmed=String(resolution||'').trim();
     if(!UUID.test(disputeId) || trimmed.length<10 || trimmed.length>2000) throw new VenueBookingError('INVALID_DISPUTE_RESOLUTION',400);
+    // Authorization: admin-only, global by design. A dispute id is not a listing
+    // id; `venue_resolve_dispute` records the resolving admin from `auth.uid()`.
     return this.transaction(actor, async (client) => {
       const result=await client.query('select public.venue_resolve_dispute($1::uuid,$2) as dispute',[disputeId,trimmed]);
       return record(result.rows[0]?.dispute);
@@ -350,11 +443,15 @@ export class VenueBookingRepository {
       throw new VenueBookingError('INVALID_VENUE_RESCHEDULE',400);
     }
     return this.transaction(actor, async (client) => {
+      // Authorization: booking-scoped, resolved through the booking's listing.
+      await this.assertBookingBusiness(client, actor, bookingId);
       const result = await client.query('select public.venue_owner_reschedule_booking($1::uuid,$2::timestamptz,$3::timestamptz,$4) as booking', [bookingId,startsAt,endsAt,slotType]);
       return record(result.rows[0]?.booking);
     });
   }
 
+  // Authorization: customer-owned row (`customer_user_id=auth.uid()`), so a
+  // business selection can never deny a customer their own reservation.
   async customerBooking(actor: ProviderListingActor | null, bookingId: string) {
     this.assertActor(actor, ['customer']);
     return this.transaction(actor, async (client) => {

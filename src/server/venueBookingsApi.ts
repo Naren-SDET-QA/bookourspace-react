@@ -7,6 +7,7 @@ import {
   type BookingNotificationEmailDetails,
 } from './bookingNotificationEmails';
 import { hasVerifiedSupabaseIdentity, type VerifiedAuthProvider } from './authIdentity';
+import { safeErrorCode } from './safeLogging';
 
 export interface VenueBookingsApiDependencies {
   repository?: VenueBookingRepository | null;
@@ -21,6 +22,17 @@ const actorOf = (req: express.Request, verify: VenueBookingsApiDependencies['ver
   const actor = base && businessId ? { ...base, businessId } : base;
   return actor?.supabaseUserId && UUID.test(String(actor.supabaseUserId)) ? actor : null;
 };
+
+/**
+ * Notification dispatch happens after the write has committed, so it stays
+ * best-effort — but it is never silent. Logging the bounded code makes an
+ * authorization refusal (a party the booking RPC accepted but the context query
+ * rejected) visible in operations instead of an opaque error object.
+ */
+function reportNotificationFailure(error: unknown): void {
+  const code = error instanceof VenueBookingError ? error.code : safeErrorCode(error);
+  console.error('[venue-bookings] notification context failed', code);
+}
 
 function sendError(res: express.Response, error: unknown) {
   if (error instanceof VenueBookingError) return res.status(error.status).json({ ok: false, error: error.code });
@@ -160,7 +172,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
           : ['new_booking_received'] as const;
         void repo.notificationContext(actor, bookingId)
           .then((context) => dispatchVenueNotifications(context, [...kinds], env))
-          .catch((error) => console.error('[venue-bookings] notification context failed', error));
+          .catch(reportNotificationFailure);
       }
       res.status(b.idempotent?200:201).json({ok:true,booking:b,source:'postgres'});
     }catch(error){sendError(res,error);}
@@ -186,7 +198,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
           : 'booking_status_changed';
       void repo.notificationContext(actor, bookingId)
         .then((context) => dispatchVenueNotifications(context, [kind], env))
-        .catch((error) => console.error('[venue-bookings] notification context failed', error));
+        .catch(reportNotificationFailure);
       res.json({ok:true,booking,source:'postgres'});
     }catch(error){sendError(res,error);}
   });
@@ -196,7 +208,7 @@ export function registerVenueBookingsApi(app: express.Express, deps: VenueBookin
       const booking = await repo.reschedule(actor,String(req.params.id),String(req.body?.startsAt||''),String(req.body?.endsAt||''),String(req.body?.slotType||''));
       void repo.notificationContext(actor, String(req.params.id))
         .then((context) => dispatchVenueNotifications(context, ['booking_status_changed'], env))
-        .catch((error) => console.error('[venue-bookings] notification context failed', error));
+        .catch(reportNotificationFailure);
       res.json({ok:true,booking,source:'postgres'});
     }catch(error){sendError(res,error);}
   });
