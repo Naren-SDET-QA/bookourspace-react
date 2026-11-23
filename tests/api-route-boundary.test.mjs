@@ -114,17 +114,23 @@ test('real API routes and the page shell are unaffected', async () => {
   assert.match(api.headers.get('content-type') || '', /application\/json/);
   assert.equal((await api.json()).ok, true);
 
-  // The coupon endpoints are not part of the router yet, so this path is an
-  // unknown API route: it must still answer as a JSON boundary error instead
-  // of being handed to the page shell.
-  const unmounted = await fetch(`${baseUrl}/api/coupons/validate`, {
+  // The coupon route is mounted only when the server has a database; without
+  // one the same path must still answer as a JSON boundary error. Either way
+  // an unauthenticated write is refused by the API, never by the page shell.
+  const guarded = await fetch(`${baseUrl}/api/coupons/validate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code: 'HELPER10', durationId: '2', helpers: 1 }),
   });
-  assert.equal(unmounted.status, 404);
-  assert.match(unmounted.headers.get('content-type') || '', /application\/json/);
-  assert.equal((await unmounted.json()).error, 'API_ROUTE_NOT_FOUND');
+  assert.match(guarded.headers.get('content-type') || '', /application\/json/);
+  const guardedBody = await guarded.json();
+  if (process.env.BOS_TEST_DATABASE_URL || process.env.BOS_LISTINGS_DATABASE_URL) {
+    assert.equal(guarded.status, 401);
+    assert.equal(guardedBody.error, 'UNAUTHORIZED_SESSION');
+  } else {
+    assert.equal(guarded.status, 404);
+    assert.equal(guardedBody.error, 'API_ROUTE_NOT_FOUND');
+  }
 
   // A deep link still renders the application.
   const page = await fetch(`${baseUrl}/venues`);

@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import dotenv from 'dotenv';
 import { hasAdminAuthorization } from './src/server/adminAuthorization';
 import { resolveSupabaseConfig } from './src/lib/supabaseConfig';
+import { shouldReuseIncomingSessionToken } from './src/lib/sessionTokenReuse';
 import {
   canLinkSupabaseAuthIdentity,
   isValidSupabaseAuthUserId,
@@ -45,7 +46,6 @@ import { LiveEditValidationError, validateCinemaScreenUpdate } from './src/serve
 import { registerProviderListingsApi } from './src/server/providerListingsApi';
 import { ServiceBookingRepository } from './src/server/serviceBookingRepository';
 import {
-  evaluateProviderBusinessContext,
   permissionForProviderRoute,
   selectBusinessContext,
   strictPermissionDefaults,
@@ -78,6 +78,16 @@ import { registerVenueBookingsApi } from './src/server/venueBookingsApi';
 import { registerMediaValidationApi } from './src/server/mediaValidationApi';
 import { registerPrivateMediaSignApi } from './src/server/privateMediaSignApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
+import { registerCouponApi } from './src/server/couponApi';
+import {
+  AccessControlError,
+  AccessControlRepository,
+  authorize,
+  canManageAccess,
+  registerAccessControlApi,
+  type AccessActor,
+  type AccountSummary,
+} from './src/permissions';
 import { registerResendDevelopmentTestApi } from './src/server/resendEmail';
 import { registerEvolutionDevelopmentTestApi } from './src/server/evolutionWhatsApp';
 import { sendBookingNotificationEmails } from './src/server/bookingNotificationEmails';
@@ -87,6 +97,19 @@ import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
 import { VITE_ALLOWED_HOSTS } from './src/server/viteAllowedHosts';
 import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
 import { configureTrustProxy } from './src/server/trustProxy';
+import { authCallbackUrl, resolveAuthOrigin } from './src/server/authOrigin';
+import { parseNativeAppOrigins } from './src/server/nativeAppCors';
+import {
+  CSRF_HEADER_NAME,
+  isWellFormedCsrfToken,
+  readSessionTokenFromCookie,
+  requiresCsrfCheck,
+  resolveCookiePolicy,
+  serializeClearedSessionCookie,
+  serializeSessionCookie,
+  type CookiePolicy,
+} from './src/server/sessionCookie';
+import { csrfTokensMatch, deriveCsrfToken } from './src/server/sessionCsrfToken';
 import { apiNoStoreByDefault } from './src/server/apiCachePrivacy';
 import { logSafeError } from './src/server/safeLogging';
 import crypto from 'crypto';
@@ -100,8 +123,13 @@ const __dirname = path.dirname(__filename);
 
 // Load the same local env file Vite uses. Existing process variables remain
 // authoritative; .env.local is considered before the base .env file.
-dotenv.config({ path: path.join(__dirname, '.env.local'), quiet: true });
-dotenv.config({ path: path.join(__dirname, '.env'), quiet: true });
+// Test runs are hermetic: a developer's .env.local must never inject a hosted
+// database, Supabase project or signing secret into an isolated test server
+// (the contract suites deliberately boot a database-free server).
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config({ path: path.join(__dirname, '.env.local'), quiet: true });
+  dotenv.config({ path: path.join(__dirname, '.env'), quiet: true });
+}
 
 const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
 
@@ -112,6 +140,9 @@ const DATA_FILE_PATH = path.join(__dirname, 'live-page-config.json');
  */
 const IS_PRODUCTION_RUNTIME = process.env.NODE_ENV === 'production';
 const REVOKED_SESSION_SIGNATURES = new Set<string>();
+/** Native app shells are first-party; only they may receive a cross-site
+ * (SameSite=None) session cookie. */
+const TRUSTED_NATIVE_APP_ORIGINS = parseNativeAppOrigins(process.env.BOS_NATIVE_APP_ORIGINS);
 
 function assertJsonStoreAllowed(storeName: 'live_page_config' | 'marketplace'): void {
   if (IS_PRODUCTION_RUNTIME) {
@@ -380,6 +411,9 @@ async function startServer() {
   // startup; it never falls back to the JSON compatibility store.
   const providerListingRepository = ProviderListingRepository.fromEnvironment();
   const customerModuleAccessRepository = CustomerModuleAccessRepository.fromEnvironment();
+  // Centralized user-management engine. It writes the same grant tables the
+  // gates below read, so a permission change applies on the next request.
+  const accessControlRepository = AccessControlRepository.fromEnvironment();
   // Classes & Training enrollment shares the single local PostgreSQL selector.
   const classEnrollmentRepository = ClassEnrollmentRepository.fromEnvironment();
   const instituteWorkspaceRepository = InstituteWorkspaceRepository.fromEnvironment();
@@ -1904,11 +1938,60 @@ Task:
     return `${payloadB64}.${sig}`;
   }
 
+  /**
+   * The application session is presented in the HttpOnly `bos_session` cookie
+   * and nowhere else. Page script cannot read it, so injected code cannot
+   * exfiltrate it, and there is no header transport to fall back to.
+   */
   function extractRawTokenFromRequest(req: express.Request): string {
-    return (
-      String(req.headers['x-bos-session-token'] || '') ||
-      String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
-    ).trim();
+    return (readSessionTokenFromCookie(req.headers.cookie) || '').trim();
+  }
+
+  function sessionCookiePolicyFor(req: express.Request): CookiePolicy {
+    const host = String(req.get('host') || '');
+    const selfOrigin = host ? `${req.protocol}://${host}` : '';
+    const requestOrigin = String(req.get('origin') || '');
+    return resolveCookiePolicy({
+      nodeEnv: process.env.NODE_ENV,
+      // The scheme the browser actually used decides whether Secure can be
+      // omitted for loopback development; `Origin` is absent on GET requests.
+      requestOrigin: selfOrigin,
+      nativeOriginAllowed:
+        Boolean(requestOrigin) && TRUSTED_NATIVE_APP_ORIGINS.has(requestOrigin),
+    });
+  }
+
+  /** The cookie must never outlive the session it carries. */
+  function sessionMaxAgeSeconds(token: string): number {
+    try {
+      const [, payloadB64] = token.split('.');
+      const claims = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
+      const remainingMs = Number(claims?.expiresAt) - Date.now();
+      if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 60;
+      return Math.max(60, Math.min(Math.floor(remainingMs / 1000), 7 * 24 * 60 * 60));
+    } catch {
+      return 12 * 60 * 60;
+    }
+  }
+
+  /** Sets the session cookie and returns the CSRF proof the client echoes. */
+  function attachSessionCookie(req: express.Request, res: express.Response, token: string): string {
+    res.append(
+      'Set-Cookie',
+      serializeSessionCookie(token, sessionCookiePolicyFor(req), sessionMaxAgeSeconds(token)),
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    return deriveCsrfToken(token, SERVER_HMAC_SECRET) || '';
+  }
+
+  function clearSessionCookie(req: express.Request, res: express.Response): void {
+    res.append('Set-Cookie', serializeClearedSessionCookie(sessionCookiePolicyFor(req)));
+    res.setHeader('Cache-Control', 'no-store');
+  }
+
+  /** CSRF proof for a session token, used when /api/auth/me refreshes claims. */
+  function csrfTokenFor(token: string): string {
+    return deriveCsrfToken(token, SERVER_HMAC_SECRET) || '';
   }
 
   function verifySessionTokenFromRequest(req: express.Request): SessionClaims | null {
@@ -1962,6 +2045,39 @@ Task:
     );
     if (!currentUser || currentUser.accountStatus !== 'active') return false;
     return hasAdminAuthorization(claims, currentUser.role);
+  }
+
+  /**
+   * Admin authority for the PostgreSQL runtime.
+   *
+   * Local development can run on PostgreSQL while the legacy JSON
+   * compatibility store still holds seed users from before that runtime
+   * existed. Those ids are not the `public.profiles` UUIDs that
+   * `/api/auth/local-dev/session` mints claims from, so `hasCurrentAdminSession`
+   * can never match a Postgres identity. When Postgres is authoritative, resolve
+   * the caller's current profile there instead: an active admin/super-admin
+   * profile is required, and an unknown or unreadable profile fails closed.
+   */
+  async function hasCurrentAdminSessionInPostgres(claims: SessionClaims | null): Promise<boolean> {
+    if (!claims || IS_PRODUCTION_RUNTIME) return false;
+    if (!pgRuntimePool) return hasCurrentAdminSession(claims);
+    // A provider or customer claim never gains admin authority from the database.
+    if (!hasAdminAuthorization(claims, 'admin')) return false;
+    try {
+      const { rows } = await pgRuntimePool.query(
+        `select role, is_super_admin, account_status
+           from public.profiles
+          where id = $1
+          limit 1`,
+        [claims.supabaseUserId || claims.userId],
+      );
+      const profile = rows[0];
+      if (!profile || profile.account_status !== 'active') return false;
+      const currentRole = profile.is_super_admin === true ? 'admin' : String(profile.role || '');
+      return hasAdminAuthorization(claims, currentRole);
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -2343,8 +2459,27 @@ Task:
 
   // 1A. GET GOOGLE OAUTH AUTHORIZATION URL (Supabase OAuth + Popup Flow for Iframe Preview & Cloud Run)
   app.get('/api/auth/google/url', (req, res) => {
-    const requestOrigin = process.env.APP_URL?.replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
-    const callbackUrl = `${requestOrigin}/auth/callback`;
+    // The provider sends its authorization code to this callback, so the origin
+    // must be the configured application origin and never the caller-supplied
+    // Host header. Without an explicit origin a production process refuses the
+    // request instead of guessing.
+    const authOrigin = resolveAuthOrigin({
+      appUrl: process.env.APP_URL,
+      protocol: req.protocol,
+      host: req.get('host') || '',
+      nodeEnv: process.env.NODE_ENV,
+    });
+    if (!authOrigin.ok) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(503).json({
+        ok: false,
+        configured: false,
+        error: authOrigin.error,
+        message: authOrigin.message,
+      });
+      return;
+    }
+    const callbackUrl = authCallbackUrl(authOrigin.origin);
     const configured = Boolean(
       SUPABASE_PROJECT_URL && SUPABASE_PROJECT_ID && serverSupabaseConfig.publishableKey
     );
@@ -2367,6 +2502,33 @@ Task:
         ? 'Google sign-in is delegated to Supabase Auth for the explicitly configured project.'
         : 'Google sign-in is unavailable until a valid Supabase Auth project is configured.',
     });
+  });
+
+  /**
+   * CSRF proof for every state-changing API request that rides on the ambient
+   * session cookie. The token is derived from the presented session, so it
+   * cannot be reused across sessions, needs no server storage, and survives a
+   * process restart. Endpoints that establish a session are exempt because the
+   * caller is verified by the identity provider instead.
+   */
+  app.use('/api', (req, res, next) => {
+    const rawToken = extractRawTokenFromRequest(req);
+    if (!requiresCsrfCheck(req.method, req.path, Boolean(rawToken))) {
+      next();
+      return;
+    }
+    const provided = String(req.get(CSRF_HEADER_NAME) || '').trim();
+    const expected = csrfTokenFor(rawToken);
+    if (!isWellFormedCsrfToken(provided) || !csrfTokensMatch(provided, expected)) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(403).json({
+        ok: false,
+        error: 'CSRF_TOKEN_INVALID',
+        message: 'A valid CSRF token is required for this request.',
+      });
+      return;
+    }
+    next();
   });
 
   // 1B. SUPABASE & GOOGLE OAUTH CALLBACK HANDLER (/auth/callback & /auth/callback/)
@@ -2393,6 +2555,7 @@ Task:
   // keeps the historical Google-only contract; `/api/auth/supabase/authenticate`
   // accepts either verified provider.
   async function issueVerifiedSupabaseSession(
+    req: express.Request,
     res: express.Response,
     identity: VerifiedSupabaseIdentity,
   ): Promise<void> {
@@ -2463,7 +2626,7 @@ Task:
             bookingsCount: 0,
             totalSpentOrEarned: 0,
           },
-          sessionToken: signSessionToken(claims),
+          csrfToken: attachSessionCookie(req, res, signSessionToken(claims)),
           claims,
           redirectTarget: resolveRoleRedirectTarget(profileRole),
         });
@@ -2566,7 +2729,7 @@ Task:
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
       user: responseUser,
-      sessionToken: responseSessionToken,
+      csrfToken: attachSessionCookie(req, res, responseSessionToken),
       claims: responseClaims,
       redirectTarget: responseRedirectTarget,
     });
@@ -2596,7 +2759,7 @@ Task:
       res.status(403).json({ ok: false, error: 'GOOGLE_SIGN_IN_DISABLED', message: 'Google sign-in is currently disabled by the administrator.' });
       return;
     }
-    await issueVerifiedSupabaseSession(res, { ...identity, provider: 'google' });
+    await issueVerifiedSupabaseSession(req, res, { ...identity, provider: 'google' });
   });
 
   // Generic verified-Supabase session exchange. Google OAuth and email OTP
@@ -2631,15 +2794,40 @@ Task:
       });
       return;
     }
-    await issueVerifiedSupabaseSession(res, identity);
+    await issueVerifiedSupabaseSession(req, res, identity);
   });
 
   // 1C-2. EMAIL ONE-TIME-CODE SIGN-IN
   //
   // Supabase generates and verifies the code; Resend delivers it. Neither the
   // public response nor the browser ever receives the code from this server.
+  // One-time-code budgets must survive a Cloud Run instance switch, so they are
+  // charged to the same database-backed limiter the API middleware uses. The
+  // raw email/address is never stored: the bucket key is an HMAC.
+  const emailOtpRateLimiter = pgRuntimePool
+    ? {
+        async consume(bucketKey: string, limit: number, windowSeconds: number) {
+          const hash = crypto
+            .createHmac('sha256', SERVER_HMAC_SECRET)
+            .update(`otp\0${bucketKey}`)
+            .digest('hex');
+          const { rows } = await pgRuntimePool!.query<{ allowed: boolean; retry_after_seconds: number }>(
+            'select allowed, retry_after_seconds from private.consume_api_rate_limit($1, $2, $3)',
+            [hash, limit, windowSeconds],
+          );
+          const row = rows[0];
+          if (!row || typeof row.allowed !== 'boolean') throw new Error('OTP_RATE_LIMIT_RESULT_INVALID');
+          return {
+            allowed: row.allowed,
+            retryAfterSeconds: Math.max(1, Math.min(86400, Number(row.retry_after_seconds) || 1)),
+          };
+        },
+      }
+    : undefined;
+
   const emailOtpService = new EmailOtpService({
     projectUrl: SUPABASE_PROJECT_URL,
+    rateLimiter: emailOtpRateLimiter,
     publishableKey: serverSupabaseConfig.publishableKey,
     secretKey: process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     resendApiKey: process.env.RESEND_API_KEY || '',
@@ -2720,6 +2908,15 @@ Task:
         return null;
       }
     },
+    env: process.env,
+  });
+
+  // Centralized user management and access control. Every route resolves the
+  // caller from the signed session and re-checks the role and account status in
+  // Postgres before the shared engine decides.
+  registerAccessControlApi(app, {
+    repository: accessControlRepository,
+    verifySession: verifySessionTokenFromRequest,
     env: process.env,
   });
 
@@ -2919,7 +3116,7 @@ Task:
       supabaseProjectId: SUPABASE_PROJECT_ID,
       isNewUser: result.isNewUser,
       user: responseUser,
-      sessionToken: responseSessionToken,
+      csrfToken: attachSessionCookie(req, res, responseSessionToken),
       claims: responseClaims,
       redirectTarget: responseRedirectTarget,
     });
@@ -2933,6 +3130,7 @@ Task:
     loadStore: loadAuthoritativeStore,
     saveStore: saveAuthoritativeStore,
     signSession: signSessionToken,
+    issueSessionCookie: attachSessionCookie,
     hmacSecret: SERVER_HMAC_SECRET,
     findBlockedUser: findBlockedUserInStore,
     verifySuperAdmin: async (req) => {
@@ -2979,16 +3177,79 @@ Task:
 
   // Independent business context for provider-owned APIs. Missing, invalid,
   // suspended or revoked context is rejected; administrators retain access.
-  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims', '/api/services/provider', '/api/services/workers', '/api/provider-portal', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
+  // Endpoints inside the provider gate that a customer session may reach: the
+  // shared booking routes it owns, plus `/api/stays/host` — self-service stay
+  // onboarding is how a customer turns into a host before a provider role
+  // exists. Every host handler there authorizes by the session's own
+  // draft/listing ownership and answers 401/403 to a customer without one (the
+  // onboarding suite pins that), so the gate does not need to guess. Every
+  // other gated prefix is provider-only.
+  const CUSTOMER_SHARED_PROVIDER_ROUTES = [
+    '/api/stays/bookings',
+    '/api/pg/bookings',
+    '/api/venue-bookings',
+    '/api/services/bookings',
+    '/api/stays/host',
+  ];
+  app.use(['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/movies/showtimes', '/api/services/earnings', '/api/services/payment-claims', '/api/services/provider', '/api/services/workers', '/api/provider-portal', '/api/pg/bookings', '/api/services/bookings', '/api/venue-bookings', '/api/stays/bookings'], async (req, res, next) => {
     if (String(req.path || '').startsWith('/registrations')) return next();
+    // Showtime reads are public discovery. Only the mutation is category-gated;
+    // without this an anonymous catalogue request would receive a 401.
+    if (
+      (req.method === 'GET' || req.method === 'HEAD')
+      && String(req.originalUrl || '').startsWith('/api/movies/showtimes')
+    ) {
+      return next();
+    }
     const claims = verifySessionTokenFromRequest(req);
     if (!claims) return void res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
-    if (claims.role === 'admin') return next();
-    // Customer routes remain customer-authorized by their own handlers. The
-    // business gate applies to provider-owned data and admin bypasses above.
-    if (claims.role === 'customer') return next();
     if (!pgRuntimePool) return void res.status(503).json({ ok: false, error: 'BUSINESS_DATABASE_UNAVAILABLE' });
     const actorId = claims.supabaseUserId || claims.userId;
+    // The signed token is a claim, never the current truth. Role, status and the
+    // Super Admin flag are re-read from the authoritative profile on every
+    // request, so a suspended, demoted or role-forged session cannot keep the
+    // workspace its token names.
+    let actorProfile: Record<string, unknown> | undefined;
+    try {
+      const actorProfileResult = await pgRuntimePool.query(
+        `select role, account_status, is_super_admin from public.profiles where id = $1 limit 1`,
+        [actorId],
+      );
+      actorProfile = actorProfileResult.rows[0];
+    } catch {
+      return void res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });
+    }
+    if (!actorProfile) return void res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+    if (String(actorProfile.account_status || 'active') !== 'active') {
+      return void res.status(403).json({ ok: false, error: 'ACCOUNT_NOT_ACTIVE' });
+    }
+    const effectiveRole = String(actorProfile.role || '');
+    if (!['customer', 'provider', 'admin'].includes(effectiveRole)) {
+      return void res.status(403).json({ ok: false, error: 'ROLE_NOT_RECOGNIZED' });
+    }
+    if (effectiveRole !== claims.role) {
+      // The account changed role after this token was minted (or the claim was
+      // edited). Signing in again issues a token that matches the account;
+      // neither the stale nor the stored role is used for this request.
+      return void res.status(401).json({ ok: false, error: 'SESSION_ROLE_MISMATCH' });
+    }
+    if (effectiveRole === 'admin' || actorProfile.is_super_admin === true) return next();
+    if (effectiveRole === 'customer') {
+      // Customer routes remain customer-authorized by their own handlers. Only
+      // the shared booking prefixes are open to them; a customer token must
+      // never reach a provider-owned workspace.
+      const customerTarget = `${String(req.baseUrl || '')}${String(req.path || '')}`;
+      const customerAllowed = CUSTOMER_SHARED_PROVIDER_ROUTES.some(
+        (prefix) => customerTarget === prefix || customerTarget.startsWith(`${prefix}/`),
+      );
+      if (!customerAllowed) {
+        return void res.status(403).json({ ok: false, error: 'PROVIDER_ROLE_REQUIRED' });
+      }
+      // The business context is server-owned, so a customer request cannot be
+      // scoped to an arbitrary business by sending the header itself.
+      delete req.headers['x-business-id'];
+      return next();
+    }
     const requestedBusinessId = String(req.header('x-business-id') || '').trim();
     let businessId = requestedBusinessId;
     if (!/^[0-9a-f-]{36}$/i.test(businessId)) {
@@ -3000,7 +3261,10 @@ Task:
           where b.approval_status='approved' and b.is_enabled=true
           order by b.created_at limit 2`,
         [actorId],
-      );
+      ).catch(() => null);
+      if (!candidates) {
+        return void res.status(500).json({ ok: false, error: 'BUSINESS_CONTEXT_UNAVAILABLE' });
+      }
       const selection = selectBusinessContext(
         requestedBusinessId,
         candidates.rows.map((row: Record<string, unknown>) => String(row.id)),
@@ -3033,15 +3297,39 @@ Task:
       );
       const business = rows[0];
       const permission = permissionForProviderRoute(req.method, req.originalUrl);
-      const decision = evaluateProviderBusinessContext({
-        role: claims.role,
-        path: req.originalUrl,
-        business,
-        permission,
-        strictDefaults: strictPermissionDefaults(process.env),
-      });
-      if (!decision.ok) return void res.status(decision.status).json({ ok: false, error: decision.error });
       if (!business) return void res.status(403).json({ ok: false, error: 'BUSINESS_ACCESS_DENIED' });
+      // One decision: the shared engine. The business row is its only input, and
+      // the role/status come from the authoritative profile read above.
+      const decision = authorize(
+        {
+          userId: actorId,
+          role: effectiveRole as 'customer' | 'provider' | 'admin',
+          accountStatus: String(actorProfile.account_status || 'active'),
+          isSuperAdmin: actorProfile.is_super_admin === true,
+          businesses: [
+            {
+              businessId: String(business.id),
+              moduleType: String(business.module_type || ''),
+              approvalStatus: business.approval_status,
+              isEnabled: business.is_enabled,
+              moduleEnabled: business.module_enabled,
+              moduleApprovalStatus: business.module_approval_status,
+              memberRole: business.role,
+              memberModules: business.member_modules,
+              memberSections: business.member_sections,
+              memberActions: business.member_actions,
+            },
+          ],
+        },
+        permission ? permission.moduleKey : String(business.module_type || ''),
+        permission ? permission.action : 'view',
+        {
+          businessId: String(businessId),
+          sectionKey: permission ? permission.sectionKey : null,
+          strictPermissionDefaults: strictPermissionDefaults(process.env),
+        },
+      );
+      if (!decision.ok) return void res.status(decision.status).json({ ok: false, error: decision.error });
       res.locals.businessContext = business;
       res.locals.providerPermission = permission;
       next();
@@ -3065,6 +3353,22 @@ Task:
     if (!pgRuntimePool) return void res.status(503).json({ ok: false, error: 'CUSTOMER_PERMISSIONS_UNAVAILABLE' });
     const actorId = claims.supabaseUserId || claims.userId;
     try {
+      // A suspended or revoked account loses access on its next request even
+      // while its signed session token is still valid.
+      const profileResult = await pgRuntimePool.query(
+        `select role, account_status, is_super_admin from public.profiles where id = $1 limit 1`,
+        [actorId],
+      );
+      const profile = profileResult.rows[0];
+      if (!profile) return void res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
+      if (String(profile.account_status || 'active') !== 'active') {
+        return void res.status(403).json({ ok: false, error: 'ACCOUNT_NOT_ACTIVE' });
+      }
+      // A customer token may only act for a profile that is still a customer.
+      // A promoted account signs in again instead of keeping customer grants.
+      if (String(profile.role || '') !== 'customer') {
+        return void res.status(401).json({ ok: false, error: 'SESSION_ROLE_MISMATCH' });
+      }
       const { rows } = await pgRuntimePool.query(
         `select module_key,
                 to_jsonb(cma) -> 'allowed_sections' as allowed_sections,
@@ -3074,9 +3378,18 @@ Task:
             and (expires_at is null or expires_at > now())`,
         [actorId],
       );
+      // The customer gate shares its semantics with the business gate through
+      // this helper, including the deny-by-default contract for an account
+      // with no grant rows. Reading the flag here (rather than letting the
+      // engine fall back to the legacy allow) keeps
+      // BOS_STRICT_CUSTOMER_DEFAULTS meaningful for customer routes too.
       const decision = evaluateCustomerPermission({
-        role: claims.role,
-        grants: rows as Array<{ module_key: string; allowed_sections?: unknown; allowed_actions?: unknown }>,
+        role: 'customer',
+        grants: rows as Array<{
+          module_key: string;
+          allowed_sections?: unknown;
+          allowed_actions?: unknown;
+        }>,
         permission,
         strictDefaults: strictCustomerDefaults(process.env),
       });
@@ -3154,6 +3467,7 @@ Task:
   // production and limited to the two seeded accounts.
   registerDevDemoSessionApi(app, {
     signSession: signSessionToken,
+    issueSessionCookie: attachSessionCookie,
     env: process.env,
   });
 
@@ -3161,6 +3475,7 @@ Task:
   // only under explicit loopback preview flags (see the module for the gates).
   registerLocalProviderPreviewApi(app, {
     signSession: signSessionToken,
+    issueSessionCookie: attachSessionCookie,
     env: process.env,
   });
 
@@ -3196,13 +3511,21 @@ Task:
           role,
           providerId,
         };
+        // Re-sign only when the claims actually changed. Minting a new token on
+        // every read made concurrent verifications invalidate each other.
+        const incomingToken = extractRawTokenFromRequest(req);
+        const sessionToken = incomingToken && shouldReuseIncomingSessionToken(refreshedClaims, claims)
+          ? incomingToken
+          : signSessionToken(refreshedClaims);
+        // Re-issue so the browser cookie tracks the refreshed claims.
+        const csrfToken = attachSessionCookie(req, res, sessionToken);
         res.json({
           ok: true,
           authenticated: true,
           authProvider: claims.authProvider,
           supabaseProjectId: SUPABASE_PROJECT_ID,
           claims: refreshedClaims,
-          sessionToken: signSessionToken(refreshedClaims),
+          csrfToken,
           user: {
             id: String(profile.id),
             supabaseUserId: claims.supabaseUserId,
@@ -3283,7 +3606,10 @@ Task:
           role: effectiveRole as SessionClaims['role'],
           providerId: effectiveRole === 'provider' ? matchedUser?.providerId || claims.providerId || `prov-${claims.supabaseUserId.slice(0, 8).toLowerCase()}` : undefined,
         };
-        refreshedSessionToken = signSessionToken(refreshedClaims);
+        const incomingToken = extractRawTokenFromRequest(req);
+        refreshedSessionToken = incomingToken && shouldReuseIncomingSessionToken(refreshedClaims, claims)
+          ? incomingToken
+          : signSessionToken(refreshedClaims);
       } catch (error) {
         // A silent 503 hides the real reason, so it is logged before the
         // fail-closed response.
@@ -3327,7 +3653,9 @@ Task:
         ...claims,
         role: effectiveRole as SessionClaims['role'],
       },
-      ...(refreshedSessionToken ? { sessionToken: refreshedSessionToken } : {}),
+      ...(refreshedSessionToken
+        ? { csrfToken: attachSessionCookie(req, res, refreshedSessionToken) }
+        : { csrfToken: csrfTokenFor(extractRawTokenFromRequest(req)) }),
       user: verifiedSessionUser,
       redirectTarget: resolveRoleRedirectTarget(effectiveRole),
     });
@@ -3398,7 +3726,7 @@ Task:
       });
       res.json({
         ok: true,
-        sessionToken,
+        csrfToken: attachSessionCookie(req, res, sessionToken),
         role: effectiveRole as SessionClaims['role'],
         user: { id: profile.id, email: profile.email, name: profile.full_name || profile.email, role: effectiveRole },
       });
@@ -3408,9 +3736,10 @@ Task:
   });
 
   app.post('/api/auth/logout', (req, res) => {
-    const rawHeader = extractRawTokenFromRequest(req);
-    if (rawHeader && rawHeader.includes('.')) {
-      const sig = rawHeader.split('.')[1];
+    const rawToken = extractRawTokenFromRequest(req);
+    clearSessionCookie(req, res);
+    if (rawToken && rawToken.includes('.')) {
+      const sig = rawToken.split('.')[1];
       if (sig) {
         if (IS_PRODUCTION_RUNTIME) {
           REVOKED_SESSION_SIGNATURES.add(sig);
@@ -3626,15 +3955,22 @@ Task:
 
   // 3. ATOMIC SEAT HOLD (Prevents Race Conditions Between Concurrent Users + Blocks Suspended Users)
   app.post('/api/seats/hold', (req, res) => {
-    const { listingId, dateIso, showtime, seats, sessionId, userId, ttlSeconds } = req.body || {};
+    const { listingId, dateIso, showtime, seats, sessionId, ttlSeconds } = req.body || {};
     const sessionClaims = verifySessionTokenFromRequest(req);
+    // A seat hold must belong to the signed-in customer. A body-supplied user
+    // id can never establish identity: it allowed anonymous callers to hold
+    // (and therefore block) inventory.
+    if (!sessionClaims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed customer session is required to hold seats.' });
+      return;
+    }
+    if (sessionClaims.role !== 'customer') {
+      res.status(403).json({ ok: false, error: 'CUSTOMER_SESSION_REQUIRED', message: 'Only a customer account may hold cinema seats.' });
+      return;
+    }
     const store = loadAuthoritativeStore();
 
-    const blocked = findBlockedUserInStore(
-      store,
-      sessionClaims?.userId || userId,
-      sessionClaims?.email
-    );
+    const blocked = findBlockedUserInStore(store, sessionClaims.userId, sessionClaims.email);
     if (blocked) {
       res.status(403).json({
         ok: false,
@@ -3706,7 +4042,7 @@ Task:
         showtime: cleanShowtime,
         seatId,
         sessionId: cleanSessionId,
-        userId: String(sessionClaims?.userId || userId || cleanSessionId),
+        userId: String(sessionClaims.userId),
         status: 'held',
         expiresAt,
         createdAt: new Date(now).toISOString(),
@@ -3734,6 +4070,17 @@ Task:
   // 4. RELEASE HELD SEATS
   app.post('/api/seats/release', (req, res) => {
     const { listingId, dateIso, showtime, seats, sessionId } = req.body || {};
+    const sessionClaims = verifySessionTokenFromRequest(req);
+    // Releasing another customer's hold would free inventory that is not the
+    // caller's; ownership comes from the session, never from the request body.
+    if (!sessionClaims) {
+      res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION', message: 'A signed customer session is required to release seat holds.' });
+      return;
+    }
+    if (sessionClaims.role !== 'customer') {
+      res.status(403).json({ ok: false, error: 'CUSTOMER_SESSION_REQUIRED', message: 'Only a customer account may release its own cinema holds.' });
+      return;
+    }
     const cleanListingId = String(listingId || '').trim();
     const cleanDateIso = String(dateIso || '').trim();
     const cleanShowtime = String(showtime || '').trim();
@@ -3748,6 +4095,7 @@ Task:
     for (const [key, entry] of Object.entries(store.seatLocks)) {
       if (
         entry.status === 'held' &&
+        entry.userId === String(sessionClaims.userId) &&
         entry.sessionId === cleanSessionId &&
         (!cleanListingId || entry.listingId === cleanListingId) &&
         (!cleanDateIso || entry.dateIso === cleanDateIso) &&
@@ -4694,7 +5042,7 @@ Task:
       res.status(401).json({
         ok: false,
         error: 'UNAUTHORIZED_SESSION',
-        message: 'Valid signed session token (x-bos-session-token or Authorization Bearer) is required.',
+        message: 'A signed session cookie is required.',
       });
       return;
     }
@@ -4844,14 +5192,51 @@ Task:
       });
       return;
     }
-    if (!hasCurrentAdminSession(claims)) {
+    if (!(await hasCurrentAdminSessionInPostgres(claims))) {
       res.status(403).json({ ok: false, error: 'FORBIDDEN_ADMIN_ONLY' });
+      return;
+    }
+    // When PostgreSQL is authoritative, list its profiles. The legacy JSON
+    // store keeps pre-Postgres seed rows whose ids are not profile UUIDs, so
+    // returning it here would show identities a role change can never target.
+    if (pgRuntimePool) {
+      const { rows } = await pgRuntimePool.query(
+        `select id, email, full_name, phone, role, account_status, verified, city, created_at
+           from public.profiles
+          order by (role = 'admin') desc, created_at desc
+          limit 1000`,
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({
+        ok: true,
+        users: rows.map((row: any) => ({
+          id: String(row.id),
+          supabaseUserId: String(row.id),
+          googleSub: '',
+          name: String(row.full_name || row.email || 'BookOurSpace user'),
+          email: String(row.email || ''),
+          phone: String(row.phone || ''),
+          role: String(row.role || 'customer'),
+          accountStatus: String(row.account_status || 'active'),
+          status: String(row.account_status || 'active'),
+          verified: row.verified === true,
+          city: String(row.city || ''),
+          joinedAt: row.created_at ? new Date(row.created_at).toISOString().slice(0, 10) : '',
+          lastLoginAt: '',
+          totalBookings: 0,
+          totalListings: 0,
+          walletBalance: 0,
+          authProvider: 'email',
+        })),
+        source: 'postgres',
+      });
       return;
     }
     const store = loadAuthoritativeStore();
     res.json({
       ok: true,
       users: store.users,
+      source: 'json',
     });
   });
 
@@ -4929,6 +5314,48 @@ Task:
     });
   });
 
+  /**
+   * Local (PostgreSQL) authority for account role/status/verification changes.
+   *
+   * Hosted Supabase owns these mutations in production. When that authority is
+   * not configured — local development on `public.profiles` — the same rules run
+   * through the centralized access-control repository. The actor is re-read from
+   * the database rather than trusted from the token, self-changes are refused,
+   * admin-scope changes require a Super Admin, and the last active Super Admin
+   * is protected. Returns `null` in production so the hosted path stays the only
+   * authority there.
+   */
+  const mutateLocalUserAccess = async (
+    req: express.Request,
+    targetUserId: string,
+    operation: (actor: AccessActor) => Promise<AccountSummary>,
+  ): Promise<AccountSummary> => {
+    if (IS_PRODUCTION_RUNTIME) throw new AccessControlError('DATABASE_AUTHORITY_UNAVAILABLE', 503);
+    if (!accessControlRepository) throw new AccessControlError('DATABASE_AUTHORITY_UNAVAILABLE', 503);
+    const claims = verifySessionTokenFromRequest(req);
+    const actorId = String(claims?.supabaseUserId || claims?.userId || '').trim();
+    const actor = actorId ? await accessControlRepository.actorFor(actorId) : null;
+    if (!canManageAccess(actor)) throw new AccessControlError('FORBIDDEN_ADMIN_ONLY', 403);
+    if (!targetUserId) throw new AccessControlError('INVALID_ACCOUNT_ID', 400);
+    return operation(actor!);
+  };
+
+  const sendLocalAccessError = (res: express.Response, error: unknown): boolean => {
+    if (error instanceof AccessControlError) {
+      res.status(error.status).json({ ok: false, error: error.code, message: error.message });
+      return true;
+    }
+    return false;
+  };
+
+  const localAccessUser = (user: AccountSummary) => ({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    accountStatus: user.accountStatus,
+    verified: user.verified,
+  });
+
   app.patch('/api/admin/users/:id/status', async (req, res) => {
     if (!verifySessionTokenFromRequest(req)) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED_SESSION' });
     const nextStatus = String(req.body?.status || req.body?.accountStatus || '').trim();
@@ -4936,9 +5363,31 @@ Task:
     const reason = String(req.body?.reason || '').trim();
     if (!action) return res.status(400).json({ ok: false, error: 'INVALID_ACCOUNT_STATUS' });
     if (reason.length < 5) return res.status(400).json({ ok: false, error: 'AUDIT_REASON_REQUIRED' });
-    const user = await mutateSupabaseUserFromRequest(req, String(req.params.id || ''), action, reason);
-    if (!user) return res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
-    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, accountStatus: user.account_status, verified: user.verified }, source: 'supabase' });
+    const targetUserId = String(req.params.id || '');
+    const supabaseUser = await mutateSupabaseUserFromRequest(req, targetUserId, action, reason);
+    if (supabaseUser) {
+      res.json({ ok: true, user: { id: supabaseUser.id, email: supabaseUser.email, role: supabaseUser.role, accountStatus: supabaseUser.account_status, verified: supabaseUser.verified }, source: 'supabase' });
+      return;
+    }
+    if (!IS_PRODUCTION_RUNTIME && accessControlRepository) {
+      try {
+        const user = await mutateLocalUserAccess(req, targetUserId, (actor) =>
+          accessControlRepository.setAccountStatus(
+            actor,
+            targetUserId,
+            nextStatus as 'active' | 'suspended' | 'blocked' | 'pending_verification',
+            reason,
+          ),
+        );
+        res.json({ ok: true, user: localAccessUser(user), source: 'postgres' });
+      } catch (error) {
+        if (sendLocalAccessError(res, error)) return;
+        logSafeError('admin-users', 'local status change failed', error);
+        res.status(500).json({ ok: false, error: 'ACCOUNT_STATUS_UPDATE_FAILED' });
+      }
+      return;
+    }
+    res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
   });
 
   app.patch('/api/admin/users/:id/role', async (req, res) => {
@@ -4948,9 +5397,31 @@ Task:
     const reason = String(req.body?.reason || '').trim();
     if (!action) return res.status(400).json({ ok: false, error: 'INVALID_ROLE' });
     if (reason.length < 5) return res.status(400).json({ ok: false, error: 'AUDIT_REASON_REQUIRED' });
-    const user = await mutateSupabaseUserFromRequest(req, String(req.params.id || ''), action, reason);
-    if (!user) return res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
-    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, accountStatus: user.account_status, verified: user.verified }, source: 'supabase' });
+    const targetUserId = String(req.params.id || '');
+    const supabaseUser = await mutateSupabaseUserFromRequest(req, targetUserId, action, reason);
+    if (supabaseUser) {
+      res.json({ ok: true, user: { id: supabaseUser.id, email: supabaseUser.email, role: supabaseUser.role, accountStatus: supabaseUser.account_status, verified: supabaseUser.verified }, source: 'supabase' });
+      return;
+    }
+    if (!IS_PRODUCTION_RUNTIME && accessControlRepository) {
+      try {
+        const user = await mutateLocalUserAccess(req, targetUserId, (actor) =>
+          accessControlRepository.setAccountRole(
+            actor,
+            targetUserId,
+            nextRole as 'customer' | 'provider' | 'admin',
+            reason,
+          ),
+        );
+        res.json({ ok: true, user: localAccessUser(user), source: 'postgres' });
+      } catch (error) {
+        if (sendLocalAccessError(res, error)) return;
+        logSafeError('admin-users', 'local role change failed', error);
+        res.status(500).json({ ok: false, error: 'ACCOUNT_ROLE_UPDATE_FAILED' });
+      }
+      return;
+    }
+    res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
   });
 
   app.patch('/api/admin/users/:id/verify', async (req, res) => {
@@ -4958,9 +5429,26 @@ Task:
     const verified = req.body?.verified === true;
     const reason = String(req.body?.reason || '').trim();
     if (reason.length < 5) return res.status(400).json({ ok: false, error: 'AUDIT_REASON_REQUIRED' });
-    const user = await mutateSupabaseUserFromRequest(req, String(req.params.id || ''), verified ? 'verify' : 'unverify', reason);
-    if (!user) return res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
-    res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, accountStatus: user.account_status, verified: user.verified }, source: 'supabase' });
+    const targetUserId = String(req.params.id || '');
+    const supabaseUser = await mutateSupabaseUserFromRequest(req, targetUserId, verified ? 'verify' : 'unverify', reason);
+    if (supabaseUser) {
+      res.json({ ok: true, user: { id: supabaseUser.id, email: supabaseUser.email, role: supabaseUser.role, accountStatus: supabaseUser.account_status, verified: supabaseUser.verified }, source: 'supabase' });
+      return;
+    }
+    if (!IS_PRODUCTION_RUNTIME && accessControlRepository) {
+      try {
+        const user = await mutateLocalUserAccess(req, targetUserId, (actor) =>
+          accessControlRepository.setAccountVerified(actor, targetUserId, verified, reason),
+        );
+        res.json({ ok: true, user: localAccessUser(user), source: 'postgres' });
+      } catch (error) {
+        if (sendLocalAccessError(res, error)) return;
+        logSafeError('admin-users', 'local verification change failed', error);
+        res.status(500).json({ ok: false, error: 'ACCOUNT_VERIFICATION_UPDATE_FAILED' });
+      }
+      return;
+    }
+    res.status(503).json({ ok: false, error: 'DATABASE_AUTHORITY_UNAVAILABLE' });
   });
 
   // ============================================================================
@@ -5179,6 +5667,7 @@ Task:
     });
   }
   if (pgRuntimePool) {
+    registerCouponApi(app, { pool: pgRuntimePool, verifySession: verifySessionTokenFromRequest });
     registerBusinessApi(app, { pool: pgRuntimePool, verifySession: verifySessionTokenFromRequest });
   }
 
@@ -6347,6 +6836,28 @@ Task:
     }
 
     const store = loadAuthoritativeStore();
+
+    // A ticket may only reference the caller's own booking. Accepting an
+    // arbitrary booking id/pass code would let one customer attach support
+    // traffic (and the provider-side view of it) to another customer's ticket.
+    const requestedBookingId = String(bookingId || '').trim();
+    const requestedPassCode = String(passCode || '').trim();
+    if (requestedBookingId || requestedPassCode) {
+      const relatedBooking = store.bookings.find(
+        (booking) =>
+          (requestedBookingId && booking.id === requestedBookingId)
+          || (requestedPassCode && String(booking.passCode || '').toUpperCase() === requestedPassCode.toUpperCase()),
+      );
+      if (!relatedBooking) {
+        res.status(404).json({ ok: false, error: 'BOOKING_NOT_FOUND', message: 'The referenced booking does not exist.' });
+        return;
+      }
+      if (relatedBooking.customerUserId !== claims.userId) {
+        res.status(403).json({ ok: false, error: 'FORBIDDEN_NOT_BOOKING_OWNER', message: 'A support ticket can only reference your own booking.' });
+        return;
+      }
+    }
+
     const engine = getCinemaModuleStore(store);
     const nowIso = new Date().toISOString();
     const tId = `SUP-MOV-${Date.now().toString().slice(-6)}`;
@@ -6410,6 +6921,26 @@ Task:
     if (!target) {
       res.status(404).json({ ok: false, error: 'SUPPORT_TICKET_NOT_FOUND' });
       return;
+    }
+
+    // A provider may only resolve a ticket that belongs to one of its own
+    // bookings. Tickets with no resolvable booking are admin-only, so a provider
+    // can never read or close another cinema's customer support traffic.
+    if (claims.role === 'provider') {
+      const providerId = String(claims.providerId || '').trim();
+      const relatedBooking = store.bookings.find(
+        (booking) =>
+          (target.bookingId && booking.id === String(target.bookingId))
+          || (target.passCode && String(booking.passCode || '').toUpperCase() === String(target.passCode).toUpperCase()),
+      );
+      if (!providerId || !relatedBooking || relatedBooking.providerId !== providerId) {
+        res.status(403).json({
+          ok: false,
+          error: 'FORBIDDEN_NOT_TICKET_PROVIDER',
+          message: 'Only the Cinema Provider that owns the related booking (or an Admin) can resolve this ticket.',
+        });
+        return;
+      }
     }
 
     target.status = status;
