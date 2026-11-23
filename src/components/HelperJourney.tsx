@@ -12,6 +12,8 @@ import {
   isValidCoordinate,
 } from '../lib/deliveryTracking';
 import { fetchServiceBookings } from '../lib/servicesBookingClient';
+import { withSessionAuth } from '../lib/sessionCsrf';
+import { HELPER_DURATIONS, helperSubtotalRupees } from '../lib/helperPricing';
 import {
   ArrowLeft,
   ArrowRight,
@@ -41,9 +43,8 @@ import {
  * "Need Helper" — a BookOurSpace-branded, Noddyy-style on-demand helper
  * journey: describe → book → plan → review → confirm.
  *
- * Everything is local state; no new tables, no new backend routes. Confirming
- * just advances to the success screen so the flow can be demoed end-to-end
- * inside the Services section.
+ * Booking presentation is local, but coupon validation/redemption is always
+ * server-side. The browser never decides the discount amount.
  */
 
 interface HelperJourneyProps {
@@ -73,16 +74,19 @@ const TASK_TYPES: TaskType[] = [
   { id: 'elder-care', label: 'Old Person Care', hint: 'Companionship and daily care', emoji: '👵' },
 ];
 
-const DURATIONS = [
-  { id: '1', label: '1 hour', hours: 1 },
-  { id: '2', label: '2 hours', hours: 2 },
-  { id: '3', label: '3 hours', hours: 3 },
-  { id: '4', label: 'Full day', hours: 8 },
-];
+const DURATION_LABELS: Record<string, string> = {
+  '1': '1 hour',
+  '2': '2 hours',
+  '3': '3 hours',
+  '4': 'Full day',
+};
 
-const HELPER_RATE = 99; // ₹ / hour
-const PLATFORM_FEE = 29;
-const CONVENIENCE_FEE = 12;
+// Hours, hourly rate and fees come from the module the server prices coupons
+// with (SEC-04), so the quote on screen and the server's subtotal cannot drift.
+const DURATIONS = HELPER_DURATIONS.map((entry) => ({
+  ...entry,
+  label: DURATION_LABELS[entry.id] ?? `${entry.hours} hours`,
+}));
 
 function inr(value: number): string {
   return `₹${value.toFixed(2)}`;
@@ -223,6 +227,11 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
   const [helpers, setHelpers] = useState<number>(draft.helpers ?? 1);
   const [coupon, setCoupon] = useState<string>(draft.coupon ?? '');
   const [couponApplied, setCouponApplied] = useState<boolean>(draft.couponApplied ?? false);
+  const subtotal = useMemo(
+    () => helperSubtotalRupees({ durationId, helpers }) ?? 0,
+    [durationId, helpers],
+  );
+  const [couponMessage, setCouponMessage] = useState('');
   const [showBreakdown, setShowBreakdown] = useState(true);
   const [bookingId] = useState(() => draft.bookingId || `BOS-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
   const recognitionRef = useRef<any>(null);
@@ -297,14 +306,42 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
     ? (gpsError === 'PERMISSION_DENIED' ? 'Location permission denied. Allow location in the browser.' : 'Waiting for your device GPS…')
     : 'Waiting for the assigned helper\'s real device GPS…';
 
-  const totals = useMemo(() => {
-    const labour = duration.hours * HELPER_RATE * helpers;
-    const subtotal = labour + PLATFORM_FEE + CONVENIENCE_FEE;
-    const discount = couponApplied ? Math.round(subtotal * 0.1 * 100) / 100 : 0;
-    const tax = Math.round((subtotal - discount) * 0.05 * 100) / 100;
-    const total = Math.round((subtotal - discount + tax) * 100) / 100;
-    return { labour, subtotal, discount, tax, total };
-  }, [duration.hours, helpers, couponApplied]);
+  const validateCoupon = async () => {
+    setCouponMessage('');
+    setCouponApplied(false);
+    if (!coupon.trim()) return;
+    try {
+      const response = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: withSessionAuth({ 'content-type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ code: coupon, durationId: duration.id, helpers }),
+      });
+      const result = await response.json() as { ok?: boolean; discount?: number; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Coupon could not be applied');
+      setCouponApplied(true);
+      setCouponMessage(`Applied on ${inr(subtotal)}: ${inr(Number(result.discount || 0))} off`);
+    } catch (error) {
+      setCouponMessage(error instanceof Error && error.message === 'UNAUTHORIZED_SESSION' ? 'Sign in to use coupons.' : 'Coupon is invalid or expired.');
+    }
+  };
+
+  const confirmBooking = async () => {
+    if (couponApplied) {
+      const response = await fetch('/api/coupons/redeem', {
+        method: 'POST',
+        headers: withSessionAuth({ 'content-type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ code: coupon, bookingId, durationId: duration.id, helpers }),
+      });
+      if (!response.ok) {
+        setCouponApplied(false);
+        setCouponMessage('Coupon could not be redeemed; the booking was not changed.');
+        return;
+      }
+    }
+    next();
+  };
 
   const next = () => setStep((s) => (s < 5 ? ((s + 1) as Step) : s));
   const back = () => (step === 1 ? onClose() : setStep((s) => ((s - 1) as Step)));
@@ -755,6 +792,17 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
             </SectionCard>
           </div>
 
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <label htmlFor="helper-coupon" className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-slate-500">
+              <Ticket className="h-4 w-4 text-[#7c3aed]" /> Coupon code
+            </label>
+            <div className="mt-2 flex gap-2">
+              <input id="helper-coupon" value={coupon} onChange={(event) => { setCoupon(event.target.value.toUpperCase()); setCouponApplied(false); setCouponMessage(''); }} placeholder="Enter code" className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-[13px] font-semibold outline-none focus:border-[#7c3aed]" />
+              <button type="button" onClick={() => void validateCoupon()} className="rounded-xl bg-slate-100 px-3 text-[12px] font-black text-[#5b21b6]">Apply</button>
+            </div>
+            {couponMessage && <p className={`mt-2 text-[11px] font-bold ${couponApplied ? 'text-emerald-700' : 'text-rose-700'}`}>{couponMessage}</p>}
+          </div>
+
           <p className="mt-3 text-center text-[11px] leading-5 text-slate-400">
             No online payment is collected. Your helper&apos;s phone number is shown after confirmation.
           </p>
@@ -764,7 +812,7 @@ export function HelperJourney({ onClose, inline = false }: HelperJourneyProps) {
           <div className="mx-auto w-full max-w-[520px] sm:max-w-[600px]">
             <button
               type="button"
-              onClick={next}
+              onClick={() => void confirmBooking()}
               className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5b21b6] to-[#7c3aed] text-sm font-bold text-white shadow-lg shadow-[#5b21b6]/30 transition hover:from-[#4c1d95] hover:to-[#6d28d9]"
             >
               <ShieldCheck className="h-4 w-4" />

@@ -13,7 +13,7 @@
     "bytes": 1767,
     "sha256": "52288dd132ef41454aa8b7f2de06ab41db4501f8e3dbbc2432d5198e8ab9e7e0"
   },
-  "migrationCount": 125,
+  "migrationCount": 127,
   "migrations": [
     {
       "order": 2,
@@ -868,8 +868,8 @@
       "version": "20261112330000",
       "name": "movies_state_approval",
       "file": "supabase/migrations/20261112330000_movies_state_approval.sql",
-      "bytes": 1264,
-      "sha256": "ace7408bcf1931b130ee5721ed1e2a7d43f2e71f536fdc9ceb9741ab5f12c957"
+      "bytes": 1759,
+      "sha256": "0bf2edacc8a1ea2baf7783796e8d25e053144e83d251f79022404114c2d29cf9"
     },
     {
       "order": 109,
@@ -1014,12 +1014,28 @@
       "file": "supabase/migrations/20261122100000_service_assignment_trigger_privileges.sql",
       "bytes": 904,
       "sha256": "20f600c7e757f2c7e29433c2aad0a50efe892ed70960b6497890f6f09208b7d4"
+    },
+    {
+      "order": 127,
+      "version": "20261122110000",
+      "name": "coupon_validation",
+      "file": "supabase/migrations/20261122110000_coupon_validation.sql",
+      "bytes": 2329,
+      "sha256": "0a044ed43c7adbd5336ed50e8d7577587dab0275086747cce3d15715ef4b75ca"
+    },
+    {
+      "order": 128,
+      "version": "20261122120000",
+      "name": "coupon_redemption_integrity",
+      "file": "supabase/migrations/20261122120000_coupon_redemption_integrity.sql",
+      "bytes": 966,
+      "sha256": "bb7b916adddbc575350342509643e0c068a76d93a2dc9a4758b77c303ef68af8"
     }
   ],
   "review": {
-    "at": "2026-11-22T04:16:46.595Z",
-    "note": "Re-pin after adding 20261122100000_service_assignment_trigger_privileges.sql (revokes the default PUBLIC EXECUTE grant on stamp_service_assignment; no existing migration bytes changed).",
-    "migrationCount": 125,
+    "at": "2026-11-22T12:51:30.689Z",
+    "note": "Re-pin after SEC-04 verification (2026-11-22). Verified 127 unique 14-digit versions, conforming filenames, manifest order/name/version identical to disk, and a full disposable install of all 127 migrations. Only byte change captured is the concurrent movies_state_approval expansion to all Indian states/UTs (1759 bytes, preserved as authored); coupon migrations unchanged. Migration-safety decision (2026-11-23): re-pin in place, no forward migration - the hosted DEV ledger lists 20261112330000 as pending (73 applied, 51 to apply), so no environment holds the previous ace7408b checksum, and the rewrite only widens the accepted state set behind an idempotent drop-constraint/add-constraint pair. If any ledger ever reports this version applied with the earlier checksum, the widened set must ship as a new forward migration instead. Hosted apply intentionally not performed.",
+    "migrationCount": 127,
     "baselineSha256": "007b07e52d08795fc21b83404ff3b60a5199a26e9180482674ae88aec1eae46a"
   }
 }
