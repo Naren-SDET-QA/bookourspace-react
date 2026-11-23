@@ -112,8 +112,12 @@ export interface AccessResource {
   businessId?: string | null;
   /** Category named by the record itself, when it carries one. */
   category?: string | null;
+  /** Workspace section the request belongs to, when the route maps one. */
+  sectionKey?: string | null;
   /** Set false only for a deliberately public read. Defaults to true. */
   requireOwnership?: boolean;
+  /** Mirrors BOS_STRICT_PERMISSION_DEFAULTS for provider members. */
+  strictPermissionDefaults?: boolean;
 }
 
 function deny(
@@ -195,7 +199,9 @@ export function authorize(
       allowed_actions: { [categoryKey]: stringArray(grant.allowed_actions) },
     });
     if (!moduleGranted(scope, categoryKey)) return deny(403, 'CUSTOMER_MODULE_FORBIDDEN', categoryKey);
-    if (!sectionGranted(scope, categoryKey, null)) return deny(403, 'CUSTOMER_SECTION_FORBIDDEN', categoryKey);
+    if (!sectionGranted(scope, categoryKey, resource?.sectionKey ?? null)) {
+      return deny(403, 'CUSTOMER_SECTION_FORBIDDEN', categoryKey);
+    }
     if (!actionGranted(scope, categoryKey, action)) {
       return deny(403, 'CUSTOMER_ACTION_FORBIDDEN', categoryKey);
     }
@@ -211,7 +217,17 @@ export function authorize(
 
   if (role === 'provider') {
     const providerModule = definition.providerModule;
-    const businesses = (actor.businesses || []).filter(
+    const allBusinesses = actor.businesses || [];
+    // A provider whose only businesses belong to another module is a mismatch,
+    // not a missing context; the existing provider contract distinguishes them.
+    if (
+      allBusinesses.length > 0
+      && providerModule !== null
+      && !allBusinesses.some((business) => business?.moduleType === providerModule)
+    ) {
+      return deny(403, 'BUSINESS_MODULE_MISMATCH', categoryKey);
+    }
+    const businesses = allBusinesses.filter(
       (business) =>
         business
         && business.moduleType === providerModule
@@ -242,6 +258,9 @@ export function authorize(
     if (!Array.isArray(business.memberModules)) {
       // No grant row: the legacy contract is unrestricted, unless the operator
       // has explicitly turned deny-by-default on.
+      if (resource?.strictPermissionDefaults === true) {
+        return deny(403, 'BUSINESS_PERMISSIONS_REQUIRED', categoryKey);
+      }
       return allow('PROVIDER_MEMBER_GRANT');
     }
     const scope = accessScopeFrom({
@@ -251,6 +270,9 @@ export function authorize(
     });
     if (!providerModule || !moduleGranted(scope, providerModule)) {
       return deny(403, 'BUSINESS_MODULE_FORBIDDEN', categoryKey);
+    }
+    if (!sectionGranted(scope, providerModule, resource?.sectionKey ?? null)) {
+      return deny(403, 'BUSINESS_SECTION_FORBIDDEN', categoryKey);
     }
     if (!actionGranted(scope, providerModule, action)) {
       return deny(403, 'BUSINESS_ACTION_FORBIDDEN', categoryKey);

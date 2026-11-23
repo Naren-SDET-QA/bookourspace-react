@@ -247,9 +247,47 @@ test('an unapproved, disabled or cross-category business is refused', () => {
   assert.equal(authorize(provider([business({ approvalStatus: 'pending' })]), 'hotels', 'view', null, NOW).ok, false);
   assert.equal(authorize(provider([business({ isEnabled: false })]), 'hotels', 'view', null, NOW).ok, false);
   assert.equal(authorize(provider([business({ moduleEnabled: false })]), 'hotels', 'view', null, NOW).ok, false);
+  // A provider with an approved business in another module is a mismatch, not a
+  // missing context; the provider contract distinguishes the two.
   const crossCategory = authorize(provider([business()]), 'pg', 'view', null, NOW);
   assert.equal(crossCategory.ok, false);
-  assert.equal(crossCategory.error, 'BUSINESS_ACCESS_DENIED');
+  assert.equal(crossCategory.error, 'BUSINESS_MODULE_MISMATCH');
+  // No business at all is a missing context.
+  assert.equal(authorize(provider([]), 'pg', 'view', null, NOW).error, 'BUSINESS_ACCESS_DENIED');
+});
+
+test('a member section grant is enforced independently of the action', () => {
+  const actor = provider([
+    business({
+      memberRole: 'manager',
+      memberModules: ['hotel_stay'],
+      memberSections: { hotel_stay: ['reservations'] },
+      memberActions: { hotel_stay: ['view', 'edit'] },
+    }),
+  ]);
+  assert.equal(authorize(actor, 'hotels', 'view', { sectionKey: 'reservations' }, NOW).ok, true);
+  assert.equal(
+    authorize(actor, 'hotels', 'view', { sectionKey: 'payments' }, NOW).error,
+    'BUSINESS_SECTION_FORBIDDEN',
+  );
+
+  const customerActor = customer([
+    { module_key: 'hotels', allowed_sections: ['hotel_stay'], allowed_actions: ['view'] },
+  ]);
+  assert.equal(authorize(customerActor, 'hotels', 'view', { sectionKey: 'hotel_stay' }, NOW).ok, true);
+  assert.equal(
+    authorize(customerActor, 'hotels', 'view', { sectionKey: 'other' }, NOW).error,
+    'CUSTOMER_SECTION_FORBIDDEN',
+  );
+});
+
+test('strict permission defaults deny an ungranted member only when enabled', () => {
+  const actor = provider([business({ memberRole: 'staff', memberModules: null })]);
+  assert.equal(authorize(actor, 'hotels', 'view', null, NOW).ok, true);
+  assert.equal(
+    authorize(actor, 'hotels', 'view', { strictPermissionDefaults: true }, NOW).error,
+    'BUSINESS_PERMISSIONS_REQUIRED',
+  );
 });
 
 test('a business member is bounded by module, section and action', () => {

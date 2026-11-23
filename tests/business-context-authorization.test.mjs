@@ -152,9 +152,30 @@ test('admin and suspended-business permissions remain correct', () => {
 });
 
 test('the middleware uses the shared policy and loads member scope', () => {
-  assert.match(server, /evaluateProviderBusinessContext\(/);
+  // The shared policy is now the centralized engine; the provider gate must
+  // hand it the resolved business row rather than decide on its own.
+  assert.match(server, /const decision = authorize\(/);
+  assert.match(server, /moduleApprovalStatus: business\.module_approval_status/);
   assert.match(server, /selectBusinessContext\(/);
   assert.match(server, /ma\.allowed_modules as member_modules/);
   assert.match(server, /left join public\.business_member_access ma/);
-  assert.match(server, /if \(claims\.role === 'admin'\) return next\(\);/);
+  // The admin bypass runs after the database re-reads the caller's account, so
+  // a suspended administrator cannot keep using a stale token.
+  assert.match(server, /if \(effectiveRole === 'admin' \|\| actorProfile\.is_super_admin === true\) return next\(\);/);
+  assert.match(server, /if \(String\(actorProfile\.account_status \|\| 'active'\) !== 'active'\)/);
+  // Identity comes from the profile, not from the signed token's role claim: a
+  // token minted before a role change, or with an edited role, is refused.
+  assert.match(server, /const effectiveRole = String\(actorProfile\.role \|\| ''\)/);
+  assert.match(server, /if \(effectiveRole !== claims\.role\)/);
+  assert.match(server, /SESSION_ROLE_MISMATCH/);
+  assert.match(server, /if \(!actorProfile\) return void res\.status\(401\)/);
+  // Customers may only pass the gate on the shared booking prefixes, and never
+  // with a client-supplied business header.
+  assert.match(server, /const customerTarget = `\$\{String\(req\.baseUrl \|\| ''\)\}\$\{String\(req\.path \|\| ''\)\}`/);
+  assert.match(server, /CUSTOMER_SHARED_PROVIDER_ROUTES\.some\(/);
+  // Stay-host onboarding is open to a customer session (that is how a customer
+  // becomes a host); its handlers still authorize by draft ownership.
+  assert.match(server, /'\/api\/stays\/host',/);
+  assert.match(server, /delete req\.headers\['x-business-id'\]/);
+  assert.match(server, /PROVIDER_ROLE_REQUIRED/);
 });

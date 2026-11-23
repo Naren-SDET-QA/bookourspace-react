@@ -221,7 +221,10 @@ test('strict defaults are opt-in through the environment only', () => {
 
 test('the middleware wires the permission and survives a pre-migration database', () => {
   assert.match(server, /permissionForProviderRoute\(req\.method, req\.originalUrl\)/);
-  assert.match(server, /strictDefaults: strictPermissionDefaults\(process\.env\)/);
+  // The provider gate is one engine call; strict defaults now travel as an
+  // engine resource option instead of a bespoke decision argument.
+  assert.match(server, /strictPermissionDefaults: strictPermissionDefaults\(process\.env\)/);
+  assert.match(server, /authorize\(\n\s+\{\n\s+userId: actorId,/);
   assert.match(server, /res\.locals\.providerPermission = permission/);
   // A plain column reference would 500 every provider request when the server is
   // deployed before the allowed_actions migration reaches the database.

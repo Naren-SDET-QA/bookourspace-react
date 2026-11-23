@@ -232,7 +232,14 @@ test('the customer section catalog matches the rendered marketplace sections', (
 
 test('the server wires the customer gate into the shared booking routes', () => {
   assert.match(server, /permissionForCustomerRoute\(req\.method, req\.originalUrl\)/);
-  assert.match(server, /strictCustomerDefaults\(process\.env\)/);
+  // The gate now hands the resolved grants to the one shared engine instead of
+  // a bespoke decision function.
+  assert.match(server, /grants: rows as Array</);
+  // The gate re-reads the caller's profile (status/role) before it resolves
+  // grants, so allow the documented window to cover that lookup too.
+  assert.match(server, /permissionForCustomerRoute[\s\S]{0,2400}evaluateCustomerPermission\(/);
+  // Deny-by-default must remain wired to the environment flag.
+  assert.match(server, /strictDefaults: strictCustomerDefaults\(process\.env\)/);
   assert.match(server, /to_jsonb\(cma\) -> 'allowed_actions'/);
   for (const route of [
     '/api/pg/bookings',

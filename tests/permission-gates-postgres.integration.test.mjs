@@ -167,29 +167,46 @@ before(async () => {
   await pool.query(
     `insert into public.business_member_access
        (business_id, user_id, allowed_modules, allowed_sections, allowed_actions)
-     values ($1,$2,array['pg_hostels'],'{"pg_hostels":["bookings"]}'::jsonb,'{"pg_hostels":["view"]}'::jsonb)`,
+     values ($1,$2,array['pg_hostels'],'{"pg_hostels":["bookings"]}'::jsonb,'{"pg_hostels":["view"]}'::jsonb)
+     on conflict (business_id, user_id) do update set allowed_modules = excluded.allowed_modules, allowed_sections = excluded.allowed_sections, allowed_actions = excluded.allowed_actions`,
     [PG_BUSINESS, staffRestricted],
   );
   // Explicit full grant, the shape the backfill writes.
   await pool.query(
     `insert into public.business_member_access
        (business_id, user_id, allowed_modules, allowed_sections, allowed_actions)
-     values ($1,$2,array['pg_hostels'],'{}'::jsonb,'{}'::jsonb)`,
+     values ($1,$2,array['pg_hostels'],'{}'::jsonb,'{}'::jsonb)
+     on conflict (business_id, user_id) do update set allowed_modules = excluded.allowed_modules, allowed_sections = excluded.allowed_sections, allowed_actions = excluded.allowed_actions`,
     [PG_BUSINESS, staffFull],
   );
   // Section-limited stays member: properties only.
   await pool.query(
     `insert into public.business_member_access
        (business_id, user_id, allowed_modules, allowed_sections, allowed_actions)
-     values ($1,$2,array['hotel_stay'],'{"hotel_stay":["properties"]}'::jsonb,'{}'::jsonb)`,
+     values ($1,$2,array['hotel_stay'],'{"hotel_stay":["properties"]}'::jsonb,'{}'::jsonb)
+     on conflict (business_id, user_id) do update set allowed_modules = excluded.allowed_modules, allowed_sections = excluded.allowed_sections, allowed_actions = excluded.allowed_actions`,
     [STAYS_BUSINESS, staysStaff],
   );
   // Customer: pg with view only, plus an already expired hotels grant.
   await pool.query(
     `insert into public.customer_module_access (user_id, module_key, expires_at, allowed_actions)
      values ($1,'pg', null, '["view"]'::jsonb),
-            ($1,'hotels', now() - interval '1 hour', '[]'::jsonb)`,
+            ($1,'hotels', now() - interval '1 hour', '[]'::jsonb)
+     on conflict (user_id, module_key) do update set
+       expires_at = excluded.expires_at,
+       allowed_actions = excluded.allowed_actions`,
     [customerGranted],
+  );
+  // Signup and member-insert triggers seed default grant rows. The two
+  // "no grant row" scenarios below need a genuinely empty scope, so the
+  // defaults are removed after the fixtures are in place.
+  await pool.query(
+    'delete from public.business_member_access where business_id = $1 and user_id = $2',
+    [PG_BUSINESS, staffWithoutRow],
+  );
+  await pool.query(
+    'delete from public.customer_module_access where user_id = $1',
+    [customerWithoutGrants],
   );
 });
 
