@@ -1,6 +1,8 @@
 import { MODULE_REGISTRY, resolveModuleConfig } from './registry';
 import type { ModuleConfigValues } from './registry';
 
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
+
 /**
  * Module presentation config over the EXISTING live-page-config backend.
  *
@@ -67,8 +69,7 @@ async function requestJson(url: string, init?: RequestInit): Promise<Record<stri
 
 function adminSessionHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
-  const token = window.localStorage.getItem('bos_session_token_v1');
-  return token ? { 'x-bos-session-token': token } : {};
+  return sessionAuthHeaders();
 }
 
 export async function fetchLivePageConfig(): Promise<LivePageConfigResponse> {

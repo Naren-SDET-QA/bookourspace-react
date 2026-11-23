@@ -2,6 +2,9 @@ import { MarketSectionType } from '../data/servicesStayMoviesData';
 import { appendAdminAuditLog } from './adminAuditStore';
 import { supabase } from '../lib/supabaseClient';
 
+import { getSessionIdentityHint } from '../lib/supabaseClient';
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
+
 
 // ---------------------------------------------------------------------------
 // PostgreSQL-backed live page configuration (works without Supabase).
@@ -12,10 +15,7 @@ const LOCAL_LIVE_PAGE_API = '/api/live-page-config';
 
 function localLivePageHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
-  try {
-    const token = window.localStorage.getItem('bos_session_token_v1');
-    if (token) headers['x-bos-session-token'] = token;
-  } catch { /* storage unavailable */ }
+  Object.assign(headers, sessionAuthHeaders());
   return headers;
 }
 
@@ -39,7 +39,7 @@ async function callLocalLivePageApi<T>(path: string, init?: RequestInit): Promis
  */
 function hasBosSessionToken(): boolean {
   try {
-    return typeof window !== 'undefined' && Boolean(window.localStorage.getItem('bos_session_token_v1'));
+    return getSessionIdentityHint() !== null;
   } catch {
     return false;
   }

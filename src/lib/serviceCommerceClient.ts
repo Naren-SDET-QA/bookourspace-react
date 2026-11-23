@@ -6,6 +6,8 @@
  * callback settles the intent on the server.
  */
 
+import { sessionAuthHeaders } from './sessionCsrf';
+
 export interface ServiceAvailabilitySlot {
   date: string;
   start: string;
@@ -64,22 +66,10 @@ export interface ServiceProviderSchedule {
   configured: boolean;
 }
 
-function sessionToken(): string | null {
-  try {
-    return (
-      window.localStorage.getItem('bos_session_token_v1') ||
-      window.localStorage.getItem('bos_authoritative_session_token')
-    );
-  } catch {
-    return null;
-  }
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const token = sessionToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  new Headers(sessionAuthHeaders()).forEach((value, key) => headers.set(key, value));
   const response = await fetch(path, { ...init, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {

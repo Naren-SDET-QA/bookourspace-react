@@ -1,5 +1,7 @@
 export type PublishState = 'draft' | 'published';
 
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
+
 export interface AdminManagedUser {
   id: string;
   name: string;
@@ -834,11 +836,8 @@ function saveToStorage<T>(key: string, value: T): void {
   }
   if (typeof window !== 'undefined') {
     try {
-      const token = localStorage.getItem('bos_session_token_v1');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
+      Object.assign(headers, sessionAuthHeaders());
       void fetch(`/api/admin/modules/${encodeURIComponent(key)}`, {
         method: 'PUT',
         headers,

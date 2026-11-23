@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
 
 type FetchImplementation = typeof fetch;
 
@@ -44,8 +45,13 @@ export function isApiRequest(input: RequestInfo | URL, currentOrigin?: string): 
   }
 }
 
-export function readNativeSessionToken(storage: Pick<Storage, 'getItem'>): string | null {
-  return storage.getItem('bos_session_token_v1');
+/**
+ * Native builds authenticate with the same HttpOnly session cookie as the web
+ * app, which the platform cookie jar attaches when requests opt in with
+ * `credentials: 'include'`. No token is read from device storage.
+ */
+export function readNativeSessionToken(_storage?: Pick<Storage, 'getItem'>): string | null {
+  return null;
 }
 
 export function routeNativeApiRequest(
@@ -62,9 +68,7 @@ export function routeNativeApiRequest(
   const request = input instanceof Request ? input : undefined;
   const headers = new Headers(request?.headers);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-  if (!headers.has('Authorization') && options.sessionToken) {
-    headers.set('Authorization', `Bearer ${options.sessionToken}`);
-  }
+  for (const [key, value] of Object.entries(sessionAuthHeaders())) headers.set(key, value);
   const requestInit: RequestInit = {
     method: request?.method,
     body: request?.body,
@@ -93,22 +97,14 @@ export function installNativeApiTransport(): void {
   const originalFetch: FetchImplementation = window.fetch.bind(window);
   const env = import.meta.env;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    let token: string | null = null;
-    if (isApiRequest(input, window.location.origin)) {
-      try {
-        token = readNativeSessionToken(window.localStorage);
-      } catch {
-        token = null;
-      }
-    }
     const [routedInput, routedInit] = routeNativeApiRequest(input, init, {
       native: true,
       backendOrigin: env.VITE_NATIVE_API_ORIGIN,
       isDev: Boolean(env.DEV),
       currentOrigin: window.location.origin,
-      sessionToken: token,
     });
-    return originalFetch(routedInput, routedInit);
+    const withCookies: RequestInit = { ...(routedInit || {}), credentials: 'include' };
+    return originalFetch(routedInput, withCookies);
   };
   target.__bosNativeApiTransportInstalled = true;
 }

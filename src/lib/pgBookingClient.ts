@@ -427,10 +427,10 @@ export async function requestPgSuperAdminSession(): Promise<string> {
     body: JSON.stringify({}),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body?.sessionToken) {
+  if (!response.ok || !body?.csrfToken) {
     throw new PgBookingClientError(String(body?.error || 'SUPER_ADMIN_SESSION_UNAVAILABLE'), response.status, body || {});
   }
-  const sessionToken = String(body.sessionToken);
-  setStoredAuthoritativeSession(sessionToken, getStoredGoogleAuthUser());
-  return sessionToken;
+  const csrfToken = String(body.csrfToken);
+  setStoredAuthoritativeSession(csrfToken, getStoredGoogleAuthUser());
+  return csrfToken;
 }

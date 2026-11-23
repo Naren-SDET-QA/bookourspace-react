@@ -1,5 +1,7 @@
 import { supabase, SUPABASE_PROJECT_URL } from '../supabaseClient';
 
+import { sessionAuthHeaders } from '../sessionCsrf';
+
 export const MEDIA_URL_TTL_SECONDS = 30 * 60;
 const CACHE_SAFETY_MS = 60_000;
 const MAX_CACHED_URLS = 300;
@@ -342,19 +344,12 @@ export function createSignedStorageUrlResolver(
 
 async function requestServerPrivateSignedUrl(reference: string): Promise<string | null> {
   if (typeof window === 'undefined') return null;
-  let token = '';
-  try {
-    token = window.localStorage.getItem('bos_session_token_v1') || '';
-  } catch {
-    return null;
-  }
-  if (!token) return null;
   try {
     const response = await fetch('/api/media/private-sign', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-bos-session-token': token,
+        ...sessionAuthHeaders(),
       },
       body: JSON.stringify({ reference }),
       cache: 'no-store',

@@ -9,11 +9,13 @@ import type { NormalizedPageDocument } from './validate';
 import type { EntitySchemaDocument } from './registry';
 import type { PolicyDocument } from './policies';
 
+import { sessionAuthHeaders } from '../sessionCsrf';
+
 export interface PublishedPage {
   pageKey: string;
   versionId: string;
   versionNumber: number;
-  status: 'draft' | 'published' | 'superseded_draft';
+  status: 'draft' | 'published' | 'superseded_draft' | 'unpublished';
   document: NormalizedPageDocument;
   summary: string;
   createdAt: string;
@@ -55,8 +57,7 @@ function storage(): Storage | null {
 
 export function sessionHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
-  const token = window.localStorage.getItem('bos_session_token_v1');
-  return token ? { 'x-bos-session-token': token } : {};
+  return sessionAuthHeaders();
 }
 
 async function request<T>(path: string, init: RequestInit = {}, authenticated = false): Promise<T> {
@@ -196,6 +197,21 @@ export async function publishPage(pageKey: string, versionId: string): Promise<P
     true,
   );
   cachePublishedPage(body.page);
+  broadcastPublishedUpdate(pageKey, body.page.versionNumber);
+  return body.page;
+}
+
+/**
+ * Retire the published document. The server requires a Super Admin role and
+ * derives it from the database; the cached published copy is not reused because
+ * there is nothing published to serve afterwards.
+ */
+export async function unpublishPage(pageKey: string, expectedVersion?: number): Promise<PublishedPage> {
+  const body = await request<{ page: PublishedPage }>(
+    `/api/builder/pages/${encodeURIComponent(pageKey)}/unpublish`,
+    { method: 'POST', body: JSON.stringify(expectedVersion ? { expectedVersion } : {}) },
+    true,
+  );
   broadcastPublishedUpdate(pageKey, body.page.versionNumber);
   return body.page;
 }

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, RefreshCw } from 'lucide-react';
-import { getStoredAuthoritativeSessionToken } from '../lib/supabaseClient';
+import { getSessionIdentityHint } from '../lib/supabaseClient';
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
 import { venueDateTimeLabel } from '../lib/venueTime';
 
-async function request(path:string,init:RequestInit={}){const h=new Headers(init.headers);const token=getStoredAuthoritativeSessionToken();if(token)h.set('Authorization',`Bearer ${token}`);if(init.body&&!h.has('Content-Type'))h.set('Content-Type','application/json');const r=await fetch(path,{...init,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`HTTP_${r.status}`);return d;}
+async function request(path:string,init:RequestInit={}){const h=new Headers(init.headers);new Headers(sessionAuthHeaders()).forEach((value,key)=>h.set(key,value));if(init.body&&!h.has('Content-Type'))h.set('Content-Type','application/json');const r=await fetch(path,{...init,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`HTTP_${r.status}`);return d;}
 type Category={id:string;label:string;emoji:string;subcategories:string[];active:boolean;sortOrder:number};
 export function VenueAdminWorkspace(){
   const [bookings,setBookings]=useState<any[]>([]);const [categories,setCategories]=useState<Category[]>([]);

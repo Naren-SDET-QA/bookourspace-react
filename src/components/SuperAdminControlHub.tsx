@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { getCurrentSupabaseSession } from '../lib/supabaseClient';
 
+import { sessionAuthHeaders, setSessionCsrfToken } from '../lib/sessionCsrf';
+
 interface SuperAdminControlHubProps {
   onNotify?: (msg: string) => void;
 }
@@ -89,11 +91,6 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
   };
 
   const getSuperAdminAuthHeaders = async (): Promise<Record<string, string>> => {
-    let token =
-      (typeof window !== 'undefined' &&
-        (localStorage.getItem('bos_authoritative_session_token') ||
-          localStorage.getItem('bos_session_token'))) ||
-      '';
     let supabaseAccessToken = '';
     try {
       supabaseAccessToken = (await getCurrentSupabaseSession())?.access_token || '';
@@ -102,15 +99,14 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
       if (supabaseAccessToken) {
         const resp = await fetch('/api/auth/super-admin/session', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-supabase-access-token': supabaseAccessToken, ...(token ? { 'x-bos-session-token': token } : {}) },
+          headers: { 'Content-Type': 'application/json', 'x-supabase-access-token': supabaseAccessToken, ...sessionAuthHeaders() },
           body: JSON.stringify({}),
         });
         if (resp.ok) {
           const data = await resp.json();
-          if (data.sessionToken) {
-            token = data.sessionToken;
-            localStorage.setItem('bos_authoritative_session_token', data.sessionToken);
-          }
+          // The scoped session is delivered only as an HttpOnly cookie; the
+          // response hands back the CSRF proof, which stays in memory.
+          if (data.csrfToken) setSessionCsrfToken(String(data.csrfToken));
         }
       }
     } catch {
@@ -118,11 +114,8 @@ export const SuperAdminControlHub: React.FC<SuperAdminControlHubProps> = ({ onNo
     }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      ...sessionAuthHeaders(),
     };
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-      headers['x-bos-session-token'] = token;
-    }
     if (supabaseAccessToken) headers['x-supabase-access-token'] = supabaseAccessToken;
     return headers;
   };

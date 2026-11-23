@@ -6,6 +6,9 @@
  * Persisted in localStorage and applied when each section opens.
  */
 
+import { sessionAuthHeaders } from './sessionCsrf';
+import { getSessionIdentityHint } from './supabaseClient';
+
 export type PgStyle = 'style1' | 'style2' | 'style3';
 export type StayStyle = 'old' | 'airbnb' | 'style3';
 export type ServicesStyle = 'old' | 'triangle' | 'noddyy';
@@ -238,11 +241,10 @@ export async function saveSectionStyles(next: SectionStyles): Promise<SectionSty
   // a browser cache write as a published setting.
   try {
     if (typeof window !== 'undefined') {
-      const token = window.localStorage.getItem('bos_session_token_v1');
-      if (token) {
+      if (getSessionIdentityHint() !== null) {
         const response = await fetch('/api/live-page-config/section-styles', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-bos-session-token': token },
+          headers: { 'content-type': 'application/json', ...sessionAuthHeaders() },
           body: JSON.stringify({ styles: locked }),
           cache: 'no-store',
         });

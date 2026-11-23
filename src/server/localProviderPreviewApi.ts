@@ -138,7 +138,11 @@ interface PreviewSessionRoute {
  */
 function registerPreviewSessionRoute(
   app: express.Express,
-  deps: { signSession: (claims: any) => string },
+  deps: {
+    signSession: (claims: any) => string;
+    /** HttpOnly cookie transport; returns the per-session CSRF proof. */
+    issueSessionCookie?: (req: express.Request, res: express.Response, token: string) => string;
+  },
   pool: { query: (text: string, values: unknown[]) => Promise<{ rows: any[] }> },
   config: PreviewSessionRoute,
 ): void {
@@ -187,9 +191,11 @@ function registerPreviewSessionRoute(
         issuedAt: Date.now(),
         expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
       };
+      const sessionToken = deps.signSession(claims);
       res.json({
         ok: true,
-        sessionToken: deps.signSession(claims),
+        // The session itself travels only in the HttpOnly cookie.
+        csrfToken: deps.issueSessionCookie ? deps.issueSessionCookie(req, res, sessionToken) : '',
         user: {
           ...claims,
           id: String(profile.id),
@@ -212,7 +218,11 @@ function registerPreviewSessionRoute(
 
 export function registerLocalProviderPreviewApi(
   app: express.Express,
-  deps: { signSession: (claims: any) => string; env?: NodeJS.ProcessEnv },
+  deps: {
+    signSession: (claims: any) => string;
+    issueSessionCookie?: (req: express.Request, res: express.Response, token: string) => string;
+    env?: NodeJS.ProcessEnv;
+  },
 ): void {
   const env = deps.env || process.env;
   const connectionString = String(env.BOS_LISTINGS_DATABASE_URL || '').trim();

@@ -7,6 +7,8 @@ import type {
   PendingServiceDocumentView,
 } from './serviceCatalog';
 
+import { sessionAuthHeaders } from './sessionCsrf';
+
 export class ServiceCatalogApiError extends Error {
   constructor(readonly code: string, readonly status: number) {
     super(code);
@@ -14,22 +16,10 @@ export class ServiceCatalogApiError extends Error {
   }
 }
 
-function sessionToken(): string | null {
-  try {
-    return (
-      window.localStorage.getItem('bos_session_token_v1') ||
-      window.localStorage.getItem('bos_authoritative_session_token')
-    );
-  } catch {
-    return null;
-  }
-}
-
 async function request<T>(path: string, init: RequestInit = {}, cacheBust = false): Promise<T> {
-  const token = sessionToken();
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  new Headers(sessionAuthHeaders()).forEach((value, key) => headers.set(key, value));
   const suffix = cacheBust ? `${path.includes('?') ? '&' : '?'}ts=${Date.now()}` : '';
   const response = await fetch(`${path}${suffix}`, { ...init, headers, credentials: 'include', cache: 'no-store' });
   const payload = await response.json().catch(() => ({}));

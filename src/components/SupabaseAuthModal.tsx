@@ -23,6 +23,7 @@ import {
 import { useMarketplace } from '../context/MarketplaceContext';
 import { launchGoogleOAuthWindow } from '../lib/googleOAuthLauncher';
 import BOSOfficialLogo from './BOSOfficialLogo';
+import { setStoredAuthoritativeSession } from '../lib/supabaseClient';
 
 interface SupabaseAuthModalProps {
   isOpen: boolean;
@@ -233,11 +234,11 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         body: JSON.stringify({ role }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok || !data?.sessionToken) {
+      if (!response.ok || !data?.ok || !data?.csrfToken) {
         setErrorMsg(data?.message || 'Local demo sign-in is unavailable. Enable BOS_LOCAL_DEV_AUTH on the server.');
         return;
       }
-      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      setStoredAuthoritativeSession(String(data.csrfToken || ''), data.user || null);
       if (role === 'provider') window.location.hash = 'provider';
       window.location.reload();
     } catch {

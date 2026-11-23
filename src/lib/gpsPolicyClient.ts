@@ -1,26 +1,17 @@
+import { sessionAuthHeaders } from './sessionCsrf';
+
 export class GpsPolicyApiError extends Error {
+
   constructor(readonly code: string, readonly status: number) {
     super(code);
     this.name = 'GpsPolicyApiError';
   }
 }
 
-function sessionToken(): string | null {
-  try {
-    return (
-      window.localStorage.getItem('bos_session_token_v1')
-      || window.localStorage.getItem('bos_authoritative_session_token')
-    );
-  } catch {
-    return null;
-  }
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = sessionToken();
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  new Headers(sessionAuthHeaders()).forEach((value, key) => headers.set(key, value));
   const response = await fetch(path, { ...init, headers, credentials: 'include', cache: 'no-store' });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {

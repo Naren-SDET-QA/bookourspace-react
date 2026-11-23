@@ -10,7 +10,8 @@ import {
 } from '../types/marketplace';
 import { ensureListingPriceBreakdown } from '../data/listingPrice';
 import { resolveSupabaseEnvironment } from './supabaseConfig';
-import { decideVerifiedSessionWrite, verifiedResponseStillApplies } from './sessionVerificationGuard';
+import { MAX_SESSION_RECHECKS, decideVerifiedSessionWrite, shouldAcceptExhaustedReverify, verifiedResponseStillApplies } from './sessionVerificationGuard';
+import { clearSessionCsrfToken, getSessionCsrfToken, sessionAuthHeaders, setSessionCsrfToken } from './sessionCsrf';
 import { NATIVE_AUTH_REDIRECT_URL } from '../mobile/nativeOAuthCallback';
 
 // Browser and server share one strict resolver. It requires an explicit URL,
@@ -665,29 +666,44 @@ export interface AuthoritativeGoogleUser {
   authProvider: 'google' | 'email';
 }
 
-const SESSION_TOKEN_STORAGE_KEY = 'bos_session_token_v1';
 const GOOGLE_AUTH_USER_STORAGE_KEY = 'bos_google_auth_user_v1';
+/** Keys from the retired header-token transport. They are actively erased. */
+const LEGACY_SESSION_TOKEN_KEYS = ['bos_session_token_v1', 'bos_authoritative_session_token'];
 
-export function getStoredAuthoritativeSessionToken(): string | null {
-  if (typeof window === 'undefined') return null;
+/**
+ * The application session lives in an HttpOnly cookie the browser attaches by
+ * itself. Script therefore holds no bearer credential at all, only the CSRF
+ * proof for the current page, which is held in memory and never persisted.
+ * Clearing the legacy keys removes any token left behind by an older build.
+ */
+export function purgeLegacySessionTokens(): void {
+  if (typeof window === 'undefined') return;
   try {
-    return localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
+    for (const key of LEGACY_SESSION_TOKEN_KEYS) window.localStorage.removeItem(key);
   } catch {
-    return null;
+    // storage unavailable; nothing was persisted either
   }
 }
 
+purgeLegacySessionTokens();
+
+/**
+ * Only a *hint* that a session may exist: the in-memory CSRF proof. Callers
+ * that gate UI on a signed-in state must treat a null as "not verified yet"
+ * and rely on /api/auth/me for the authoritative answer.
+ */
+export function getSessionIdentityHint(): string | null {
+  return getSessionCsrfToken();
+}
+
 export function setStoredAuthoritativeSession(
-  token: string | null,
+  csrfToken: string | null,
   user: AuthoritativeGoogleUser | null
 ): void {
   if (typeof window === 'undefined') return;
+  setSessionCsrfToken(csrfToken);
+  purgeLegacySessionTokens();
   try {
-    if (token) {
-      localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token);
-    } else {
-      localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
-    }
     if (user) {
       localStorage.setItem(GOOGLE_AUTH_USER_STORAGE_KEY, JSON.stringify(user));
     } else {
@@ -717,8 +733,8 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
     else headers[key] = value;
   }
   headers['Content-Type'] = contentType;
-  const token = getStoredAuthoritativeSessionToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // The session cookie is attached by the browser; only CSRF needs adding.
+  Object.assign(headers, sessionAuthHeaders());
   try {
     const businessId = window.localStorage.getItem('bos_business_id_v1');
     if (businessId && !headers['x-business-id']) headers['x-business-id'] = businessId;
@@ -751,7 +767,7 @@ export async function authenticateWithSupabaseServer(params: {
   httpStatus: number;
   isNewUser?: boolean;
   user?: AuthoritativeGoogleUser;
-  sessionToken?: string;
+  csrfToken?: string;
   redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
   error?: string;
   message?: string;
@@ -776,8 +792,8 @@ export async function authenticateWithSupabaseServer(params: {
       }),
     });
     const data = await resp.json();
-    if (resp.ok && data.ok && data.user && data.sessionToken) {
-      setStoredAuthoritativeSession(data.sessionToken, data.user);
+    if (resp.ok && data.ok && data.user && data.csrfToken) {
+      setStoredAuthoritativeSession(data.csrfToken, data.user);
     } else if (resp.status === 403 && data.error === 'ACCOUNT_BLOCKED') {
       setStoredAuthoritativeSession(null, null);
     }
@@ -786,7 +802,7 @@ export async function authenticateWithSupabaseServer(params: {
       httpStatus: resp.status,
       isNewUser: data.isNewUser,
       user: data.user,
-      sessionToken: data.sessionToken,
+      csrfToken: data.csrfToken,
       redirectTarget: data.redirectTarget,
       error: data.error,
       message: data.message,
@@ -924,7 +940,6 @@ export async function verifyProtectedRouteAccess(
 }
 
 /** Bound the re-verification loop when the stored session keeps changing. */
-const MAX_SESSION_RECHECKS = 2;
 
 export async function fetchCurrentAuthSession(recheck = 0): Promise<{
   ok: boolean;
@@ -936,10 +951,13 @@ export async function fetchCurrentAuthSession(recheck = 0): Promise<{
   error?: string;
   message?: string;
 }> {
-  const token = getStoredAuthoritativeSessionToken();
-  if (!token) {
-    return { ok: true, authenticated: false, httpStatus: 401 };
-  }
+  /**
+   * A fresh document holds no CSRF proof yet, so the first verification is a
+   * bootstrap read: the HttpOnly cookie alone authenticates it, and the
+   * response installs the CSRF proof for this page.
+   */
+  const token = getSessionCsrfToken() || '';
+  const isBootstrap = token === '';
 
   /**
    * The stored session changed while this request was in flight. The response
@@ -959,7 +977,7 @@ export async function fetchCurrentAuthSession(recheck = 0): Promise<{
     });
     const data = await resp.json();
     if (resp.status === 403 && data.error === 'ACCOUNT_BLOCKED') {
-      if (!verifiedResponseStillApplies(token, getStoredAuthoritativeSessionToken())) {
+      if (!isBootstrap && !verifiedResponseStillApplies(token, getSessionCsrfToken())) {
         // A blocked identity that is no longer signed in must not sign out the
         // replacement session.
         return verifyCurrentSession();
@@ -975,16 +993,41 @@ export async function fetchCurrentAuthSession(recheck = 0): Promise<{
       };
     }
     if (resp.ok && data.ok && data.user) {
-      const currentToken = getStoredAuthoritativeSessionToken();
+      if (isBootstrap) {
+        setStoredAuthoritativeSession(data.csrfToken || null, data.user);
+        return {
+          ok: true,
+          authenticated: true,
+          httpStatus: 200,
+          user: data.user,
+          redirectTarget: data.redirectTarget,
+        };
+      }
       const decision = decideVerifiedSessionWrite({
         sentToken: token,
-        currentToken,
-        refreshedToken: data.sessionToken,
+        currentToken: getSessionCsrfToken(),
+        refreshedToken: data.csrfToken,
       });
       if (decision.action === 'unauthenticated') {
         return { ok: true, authenticated: false, httpStatus: 401 };
       }
       if (decision.action === 'reverify') {
+        // A concurrent verification may already have written a freshly signed
+        // token. If the server verified the same identity the browser still
+        // holds, keep that session instead of exhausting re-checks into a
+        // terminal 409 that clears a valid sign-in.
+        if (recheck + 1 >= MAX_SESSION_RECHECKS) {
+          const stored = getStoredGoogleAuthUser();
+          if (shouldAcceptExhaustedReverify(data.user?.id, stored?.id)) {
+            return {
+              ok: true,
+              authenticated: true,
+              httpStatus: 200,
+              user: data.user,
+              redirectTarget: data.redirectTarget,
+            };
+          }
+        }
         return verifyCurrentSession();
       }
       setStoredAuthoritativeSession(decision.token, data.user);
@@ -1018,6 +1061,7 @@ export async function logoutAuthoritativeSession(): Promise<void> {
     // ignore network errors on logout
   }
   setStoredAuthoritativeSession(null, null);
+  clearSessionCsrfToken();
   if (supabase) {
     try {
       await supabase.auth.signOut();

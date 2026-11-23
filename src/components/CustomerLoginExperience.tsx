@@ -19,6 +19,7 @@ import { isSupabaseEmailProviderEnabled, isValidEmailAddress, requestEmailOtp, r
 import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 import type { AuthAccessConfig } from '../lib/authAccessClient';
 import BOSOfficialLogo from './BOSOfficialLogo';
+import { setStoredAuthoritativeSession } from '../lib/supabaseClient';
 
 const EMAIL_OTP_LENGTH = 8;
 const MOBILE_OTP_LENGTH = 6;
@@ -211,8 +212,8 @@ export function CustomerLoginExperience({
     try {
       const response = await fetch('/api/auth/local-dev/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'provider', ...(email ? { email } : {}) }) });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok || !data?.sessionToken) throw new Error(data?.message || data?.error || 'Local provider sign-in is unavailable.');
-      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      if (!response.ok || !data?.ok || !data?.csrfToken) throw new Error(data?.message || data?.error || 'Local provider sign-in is unavailable.');
+      setStoredAuthoritativeSession(String(data.csrfToken || ''), data.user || null);
       window.location.hash = 'provider';
       window.location.reload();
     } catch (reason) {
@@ -226,8 +227,8 @@ export function CustomerLoginExperience({
     try {
       const response = await fetch('/api/auth/local-dev/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'admin' }) });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok || !data?.sessionToken) throw new Error(data?.message || data?.error || 'Local admin sign-in is unavailable.');
-      window.localStorage.setItem('bos_session_token_v1', String(data.sessionToken));
+      if (!response.ok || !data?.ok || !data?.csrfToken) throw new Error(data?.message || data?.error || 'Local admin sign-in is unavailable.');
+      setStoredAuthoritativeSession(String(data.csrfToken || ''), data.user || null);
       window.location.hash = 'admin';
       window.location.reload();
     } catch (reason) {
@@ -392,10 +393,7 @@ export function CustomerLoginExperience({
 
             <div className="mx-auto mt-8 w-full max-w-[430px] lg:mx-0 lg:mt-9 lg:max-w-xl">
               <div className="relative">
-                <h1
-                  id="bos-customer-login-title"
-                  className="text-[32px] font-black leading-[1.08] tracking-tight text-white sm:text-[40px] lg:text-[46px]"
-                >
+                <h1 id="bos-customer-login-hero-title" className="text-[32px] font-black leading-[1.08] tracking-tight text-white sm:text-[40px] lg:text-[46px]">
                   Book Spaces for Every Occasion
                 </h1>
                 <BrushUnderline />
@@ -433,7 +431,11 @@ export function CustomerLoginExperience({
               <div aria-hidden="true" className="mx-auto h-1.5 w-12 rounded-full bg-slate-200 sm:hidden" />
 
               {/* The sheet leads with the method tabs, like the reference; the title is
-                  kept for screen readers so the dialog still has an accessible name. */}
+                  kept for screen readers so the dialog has an accessible name. This heading
+                  is the only element carrying `bos-customer-login-title`, which
+                  `aria-labelledby` above resolves to, so the dialog is named "Sign in or
+                  create an account"; the hero headline has its own
+                  `bos-customer-login-hero-title`. */}
               <h2 id="bos-customer-login-title" className="sr-only">Sign in or create an account</h2>
               {onClose && (
                 <button

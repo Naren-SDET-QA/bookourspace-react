@@ -3,6 +3,9 @@
  * versioned live-page config. A browser-local preference is available only in
  * Vite development, and is explicitly reported as a preview.
  */
+
+import { sessionAuthHeaders } from './sessionCsrf';
+import { getSessionIdentityHint } from '../lib/supabaseClient';
 export interface MarketplaceVisibility {
   popularCategoriesDisabledCities: string[];
   disabledSubcategories: string[];
@@ -82,15 +85,12 @@ export async function saveMarketplaceVisibilityPatch(
 ): Promise<VisibilitySaveResult> {
   const current = loadMarketplaceVisibility();
   const next = normalize({ ...current, ...patch });
-  const token = typeof window !== 'undefined'
-    ? window.localStorage.getItem('bos_session_token_v1')
-    : null;
 
-  if (token) {
+  if (getSessionIdentityHint()) {
     try {
       const response = await fetch('/api/live-page-config/visibility', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bos-session-token': token },
+        headers: { 'content-type': 'application/json', ...sessionAuthHeaders() },
         body: JSON.stringify({ visibility: patch }),
         cache: 'no-store',
       });

@@ -5,6 +5,8 @@ import { FORMER_LOCAL_SERVICE_CATEGORY_IDS } from './formerLocalServices';
 import type { FormerLocalServiceRow } from './formerLocalServices';
 import { isRenderableListingImageSource } from './media/signedStorageUrl';
 
+import { sessionAuthHeaders } from './sessionCsrf';
+
 export const STAY_PAGE_SIZE = 24;
 
 /**
@@ -107,13 +109,9 @@ export async function updatePlatformModuleFlag(
   moduleKey: string,
   patch: { is_enabled?: boolean; allow_contact_owner?: boolean }
 ): Promise<ModuleFlagRow> {
-  const token = typeof window !== 'undefined'
-    ? window.localStorage.getItem('bos_session_token_v1')
-    : null;
-  if (!token) throw new Error('SUPER_ADMIN_SESSION_REQUIRED');
   const response = await fetch(`/api/platform-settings/module-flags/${encodeURIComponent(moduleKey)}`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json', 'x-bos-session-token': token },
+    headers: { 'content-type': 'application/json', ...sessionAuthHeaders() },
     body: JSON.stringify(patch),
     cache: 'no-store',
   });

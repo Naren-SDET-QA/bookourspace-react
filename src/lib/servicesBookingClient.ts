@@ -4,6 +4,8 @@
  * treats a client action, UPI reference or screenshot as proof of payment.
  */
 
+import { sessionAuthHeaders } from './sessionCsrf';
+
 export interface ServiceBooking {
   id: string;
   bookingRef: string;
@@ -94,22 +96,10 @@ export class ServiceBookingApiError extends Error {
   }
 }
 
-function sessionToken(): string | null {
-  try {
-    return (
-      window.localStorage.getItem('bos_session_token_v1') ||
-      window.localStorage.getItem('bos_authoritative_session_token')
-    );
-  } catch {
-    return null;
-  }
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = sessionToken();
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  new Headers(sessionAuthHeaders()).forEach((value, key) => headers.set(key, value));
   const response = await fetch(path, { ...init, headers, credentials: 'include' });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {

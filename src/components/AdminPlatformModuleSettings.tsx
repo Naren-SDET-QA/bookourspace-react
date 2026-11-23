@@ -16,6 +16,8 @@ import {
   updatePlatformModuleFlag,
 } from '../lib/stayDiscoveryData';
 
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
+
 const MODULE_LABELS: Record<string, string> = {
   services: 'Home Services',
   hotels: 'Hotels & Stays',
@@ -38,10 +40,9 @@ export function AdminPlatformModuleSettings() {
     setLoading(true);
     setError(null);
     try {
-      const token = window.localStorage.getItem('bos_session_token_v1');
       const [accessResponse, loadedFlags] = await Promise.all([
         fetch('/api/platform-settings/access', {
-          headers: token ? { 'x-bos-session-token': token } : {},
+          headers: sessionAuthHeaders(),
           cache: 'no-store',
         }),
         fetchPlatformModuleFlags(),

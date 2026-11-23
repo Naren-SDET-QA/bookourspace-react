@@ -152,7 +152,6 @@ interface MarketplaceContextType {
   }>;
   applyPopupOAuthLogin: (payload: {
     user: AuthoritativeGoogleUser;
-    sessionToken: string;
     isNewUser?: boolean;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
   }) => Promise<void>;
@@ -740,13 +739,12 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
             setAuthUser(syncRes.user);
             setUserRoleState(syncRes.user.role);
             syncLocalProfileWithGoogleUser(syncRes.user);
-            if (window.opener && syncRes.sessionToken) {
+            if (window.opener) {
               window.opener.postMessage(
                 {
                   type: 'OAUTH_AUTH_SUCCESS',
                   isNewUser: syncRes.isNewUser,
                   user: syncRes.user,
-                  sessionToken: syncRes.sessionToken,
                   redirectTarget: syncRes.redirectTarget,
                 },
                 window.location.origin
@@ -912,10 +910,9 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (event.origin !== window.location.origin) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
-      if (data.type === 'OAUTH_AUTH_SUCCESS' && data.user && data.sessionToken) {
+      if (data.type === 'OAUTH_AUTH_SUCCESS' && data.user) {
         void applyPopupOAuthLogin({
           user: data.user,
-          sessionToken: data.sessionToken,
           isNewUser: data.isNewUser,
           redirectTarget: data.redirectTarget,
         });
@@ -1056,7 +1053,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     }
     const result = await authenticateWithSupabaseServer({ accessToken });
-    if (!result.ok || !result.user || !result.sessionToken) {
+    if (!result.ok || !result.user || !result.csrfToken) {
       if (result.error === 'ACCOUNT_BLOCKED') {
         setIsAccountBlocked(true);
         setBlockedReason(result.message || 'Your account is blocked.');
@@ -1088,11 +1085,12 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const applyPopupOAuthLogin = (payload: {
     user: AuthoritativeGoogleUser;
-    sessionToken: string;
     isNewUser?: boolean;
     redirectTarget?: 'marketplace' | 'provider_portal' | 'admin_console';
   }): Promise<void> => {
-    setStoredAuthoritativeSession(payload.sessionToken, payload.user);
+    // The popup wrote the HttpOnly cookie in this same cookie jar; adopt the
+    // profile and let /api/auth/me install the CSRF proof.
+    setStoredAuthoritativeSession(null, payload.user);
     setAuthUser(null);
     setUserRoleState('customer');
     return fetchCurrentAuthSession().then(async (sessionRes) => {

@@ -12,7 +12,12 @@ import { getSharedPostgresPool } from './postgresPool';
  */
 export function registerDevDemoSessionApi(
   app: express.Express,
-  deps: { signSession: (claims: any) => string; env?: NodeJS.ProcessEnv },
+  deps: {
+    signSession: (claims: any) => string;
+    /** HttpOnly cookie transport; returns the per-session CSRF proof. */
+    issueSessionCookie?: (req: express.Request, res: express.Response, token: string) => string;
+    env?: NodeJS.ProcessEnv;
+  },
 ): void {
   const env = deps.env || process.env;
   const connectionString = String(env.BOS_LISTINGS_DATABASE_URL || '').trim();
@@ -79,7 +84,7 @@ export function registerDevDemoSessionApi(
       res.setHeader('Cache-Control', 'no-store');
       res.json({
         ok: true,
-        sessionToken,
+        csrfToken: deps.issueSessionCookie ? deps.issueSessionCookie(req, res, sessionToken) : '',
         user: {
           ...claims,
           id: String(profile.id),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Ban, CalendarDays, ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
-import { getStoredAuthoritativeSessionToken } from '../lib/supabaseClient';
+import { getSessionIdentityHint } from '../lib/supabaseClient';
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
 import { venueToday, venueWallTimeCandidates } from '../lib/venueTime';
 
 type BusyInterval = { startsAt: string; endsAt: string; kind: string };
@@ -20,8 +21,7 @@ const monthLabel = (date: Date) =>
 
 async function request(path: string) {
   const headers = new Headers();
-  const token = getStoredAuthoritativeSessionToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  new Headers(sessionAuthHeaders()).forEach((value, key) => headers.set(key, value));
   const response = await fetch(path, { headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP_${response.status}`);

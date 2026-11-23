@@ -26,6 +26,11 @@ export interface PlatformApiDeps {
   loadStore: () => any;
   saveStore: (store: any) => boolean;
   signSession: (claims: any) => string;
+  /**
+   * Delivers a session as the HttpOnly cookie and returns its CSRF proof.
+   * A session token must never travel in a response body.
+   */
+  issueSessionCookie?: (req: express.Request, res: express.Response, token: string) => string;
   hmacSecret: string;
   findBlockedUser: (store: any, userId: string, email?: string) => any;
   env?: NodeJS.ProcessEnv;
@@ -509,7 +514,11 @@ export function registerPlatformApi(app: express.Express, deps: PlatformApiDeps)
       return;
     }
     const token = deps.signSession({ ...existing, role: 'admin', scope: 'super_admin' });
-    res.json({ ok: true, sessionToken: token, role: 'admin', scope: 'super_admin', issuedAt: Date.now() });
+    // The scoped session is a bearer credential: it is delivered only through
+    // the HttpOnly cookie. The caller receives the CSRF proof for it.
+    const csrfToken = deps.issueSessionCookie ? deps.issueSessionCookie(req, res, token) : '';
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, csrfToken, role: 'admin', scope: 'super_admin', issuedAt: Date.now() });
   });
 
   app.get('/api/super-admin/overview', (req, res) => {

@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Clock, Film, Loader2, MapPin, Pencil, RotateCcw, Search, ShieldCheck, X } from 'lucide-react';
 import { saveStylePreference } from '../lib/sectionStyleSettings';
 import { StyleThreeList } from './sectionStyle/StyleThreeList';
+import SafeImage from './SafeImage';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { LastUpdated } from './ui/LastUpdated';
 import type { PageCopyOverrides } from '../utils/livePageEditorStore';
+
+import { sessionAuthHeaders } from '../lib/sessionCsrf';
 
 interface ShowtimeScreen {
   id: string;
@@ -76,9 +79,8 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
     setLoading(true);
     setError('');
     try {
-      const token = window.localStorage.getItem('bos_session_token_v1');
       const response = await fetch(`/api/movies/showtimes${canManage ? '?includeHidden=1' : ''}`, {
-        headers: token ? { 'x-bos-session-token': token } : undefined,
+        headers: sessionAuthHeaders(),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.ok) {
@@ -157,10 +159,9 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
   const approve = async (screen: ShowtimeScreen, status: 'approved' | 'disabled') => {
     setSaving(true); setError('');
     try {
-      const token = window.localStorage.getItem('bos_session_token_v1');
       const response = await fetch(`/api/admin/movies/theatres/${encodeURIComponent(screen.id)}/approval`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json', ...(token ? { 'x-bos-session-token': token } : {}) },
+        headers: { 'content-type': 'application/json', ...sessionAuthHeaders() },
         body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => ({}));
@@ -175,10 +176,9 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
     setError('');
     try {
       const times = values.showtimes.split(',').map((time) => time.trim()).filter(Boolean);
-      const token = window.localStorage.getItem('bos_session_token_v1');
       const response = await fetch(`/api/movies/showtimes/${encodeURIComponent(form.id)}`, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json', ...(token ? { 'x-bos-session-token': token } : {}) },
+        headers: { 'content-type': 'application/json', ...sessionAuthHeaders() },
         body: JSON.stringify({
           movieTitle: values.movieTitle,
           showDate: values.showDate,
@@ -229,6 +229,15 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
       </header>
 
       <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:px-5">
+        {/* The directory has no poster data of its own, so the section opens on
+            the module's own cinema illustration instead of a bare form. It is
+            decorative: it never stands in for a specific movie. */}
+        <SafeImage
+          category="movies"
+          src={null}
+          alt="Cinema showtimes illustration"
+          className="h-24 w-full rounded-2xl object-cover sm:h-32"
+        />
         <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="Location filters">
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-44 flex-[1.2] text-[10px] font-bold uppercase tracking-wide text-slate-500">
