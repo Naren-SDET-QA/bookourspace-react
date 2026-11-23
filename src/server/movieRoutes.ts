@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { INDIA_MOVIE_STATES } from '../lib/indiaMovieStates';
 
 export interface MovieGateway {
   publicRpc(name: string, args: Record<string, unknown>): Promise<any>;
@@ -29,7 +30,7 @@ export function createMovieGateway(): MovieGateway | null {
   };
 }
 
-export const movieStates = ['Andhra Pradesh', 'Telangana', 'Karnataka', 'Tamil Nadu'] as const;
+export const movieStates = INDIA_MOVIE_STATES;
 const kinds = ['theatre','movie','showtime'];
 const numberParam = (value: unknown, fallback: number, max: number) => {
   const num = Number(value);

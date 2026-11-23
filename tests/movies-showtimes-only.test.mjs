@@ -15,14 +15,14 @@ test('Movies active UI is showtimes-only with no seat, booking, payment or ticke
   assert.match(ui, /No online booking for Movies/);
 });
 
-test('Movies supports AP, Telangana and Karnataka state filters and approval-gated visibility', () => {
+test('Movies supports all-India state filters and approval-gated visibility', () => {
   const ui = read('src/components/MoviesShowtimes.tsx');
   const api = read('src/server/moviesShowtimesApi.ts');
   const migration = read('supabase/migrations/20261112330000_movies_state_approval.sql');
-  for (const state of ['Andhra Pradesh', 'Telangana', 'Karnataka']) {
-    assert.match(ui, new RegExp(state));
-    assert.match(migration, new RegExp(state));
-  }
+  assert.match(ui, /INDIA_MOVIE_STATES\.map/);
+  assert.match(migration, /all Indian states and/);
+  assert.match(migration, /Andaman and Nicobar Islands/);
+  assert.match(migration, /Dadra and Nagar Haveli and Daman and Diu/);
   assert.match(api, /approval_status = 'approved'/);
   assert.match(api, /show_date = current_date/);
   assert.match(api, /state =/);

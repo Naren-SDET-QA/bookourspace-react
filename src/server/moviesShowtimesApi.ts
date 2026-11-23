@@ -1,5 +1,6 @@
 import type express from 'express';
 import type { Pool } from 'pg';
+import { INDIA_MOVIE_STATES } from '../lib/indiaMovieStates';
 
 type SessionClaims = {
   userId?: string;
@@ -14,6 +15,7 @@ type Deps = {
 };
 
 const TIME_PATTERN = /^(0?[1-9]|1[0-2]):[0-5]\d\s?(AM|PM)$/i;
+const INDIA_MOVIE_STATE_SET = new Set<string>(INDIA_MOVIE_STATES);
 
 function text(value: unknown, max: number): string | null {
   if (value === null || value === undefined) return null;
@@ -210,6 +212,10 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
     if (!nextShowDate || !/^\d{4}-\d{2}-\d{2}$/.test(nextShowDate) || Number.isNaN(Date.parse(nextShowDate))) {
       return res.status(400).json({ ok: false, error: 'SHOW_DATE_REQUIRED', message: 'A valid show date (YYYY-MM-DD) is required.' });
     }
+    const nextState = text(body.state, 120);
+    if (nextState && !INDIA_MOVIE_STATE_SET.has(nextState)) {
+      return res.status(400).json({ ok: false, error: 'INVALID_STATE', message: 'State must be an Indian state or union territory.' });
+    }
     const isVisible = typeof body.isVisible === 'boolean' ? body.isVisible : null;
     try {
       let existingApproval = 'pending';
@@ -240,7 +246,7 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
            state = coalesce($9, state),
            show_date = $7::date,
            showtimes = $8::jsonb,
-           is_visible = case when $10 then coalesce($9, is_visible) else false end,
+           is_visible = case when $11 then coalesce($10, is_visible) else false end,
            showtime_source = 'manual',
            updated_at = now()
          where id = $1
@@ -254,7 +260,8 @@ export function registerMoviesShowtimesApi(app: express.Express, deps: Deps): vo
           text(body.pincode, 10),
           nextShowDate,
           JSON.stringify(nextShowtimes),
-          text(body.state, 40),
+          nextState,
+          isVisible,
           claims.role === 'admin' || (existingApproval === 'approved' && isVisible !== false),
         ],
       );

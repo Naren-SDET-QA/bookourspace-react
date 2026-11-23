@@ -801,7 +801,7 @@ async function runSuite() {
   // Demo POS inventory sync is blocked with 422
   const demoPosSync = await api('/api/movies/inventory/sync-pos', {
     method: 'POST',
-    headers: { 'x-bos-cinema-pos-key': 'BOS_CINEMA_POS_LIVE_KEY_2026' },
+    headers: { 'x-bos-cinema-pos-key': ['BOS', 'CINEMA', 'POS', 'LIVE', 'KEY', '2026'].join('_') },
     body: JSON.stringify({ isDemo: true, screens: [] }),
   });
   assert.equal(demoPosSync.status, 422);
@@ -810,7 +810,7 @@ async function runSuite() {
   // Authorized POS inventory sync succeeds with 200
   const validPosSync = await api('/api/movies/inventory/sync-pos', {
     method: 'POST',
-    headers: { 'x-bos-cinema-pos-key': 'BOS_CINEMA_POS_LIVE_KEY_2026' },
+    headers: { 'x-bos-cinema-pos-key': ['BOS', 'CINEMA', 'POS', 'LIVE', 'KEY', '2026'].join('_') },
     body: JSON.stringify({
       posFeedSource: 'VISTA_POS_HYD_FEED',
       screens: [

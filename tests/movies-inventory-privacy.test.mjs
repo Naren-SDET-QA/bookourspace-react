@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { sessionCookieHeaders, sessionCookieFromResponse } from './lib/session-cookies.mjs';
 
 /**
  * Movies V1 privacy regression suite.
@@ -174,7 +175,7 @@ async function freePort() {
 
 async function get(pathname, { token, headers = {} } = {}) {
   const response = await fetch(`${baseUrl}${pathname}`, {
-    headers: { connection: 'close', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
+    headers: { connection: 'close', ...(token ? sessionCookieHeaders(token, SECRET) : {}), ...headers },
   });
   return { status: response.status, body: await response.json().catch(() => null) };
 }

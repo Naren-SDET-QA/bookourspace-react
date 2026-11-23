@@ -1,12 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { assertLocalHttpUrl } from '../../lib/localDemoSafety';
+import { INDIA_MOVIE_STATES } from '../../lib/indiaMovieStates';
 
 const url = import.meta.env.VITE_MOVIES_SUPABASE_URL;
 if (import.meta.env.VITE_LOCAL_DEMO === 'true') assertLocalHttpUrl(url || '');
 const key = import.meta.env.VITE_MOVIES_SUPABASE_PUBLISHABLE_KEY;
 export const moviesAuth = url && key ? createClient(url,key,{auth:{storageKey:'bos_movies_auth_v1',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}) : null;
 
-export const supportedMovieStates = ['Andhra Pradesh','Telangana','Karnataka','Tamil Nadu'];
+export const supportedMovieStates = INDIA_MOVIE_STATES;
 export interface PublicShowtime {
   showtime_id:string; theatre_id:string; theatre_name:string; state:string; city:string; area:string;
   movie_id:string; title:string; language:string; poster_url:string; starts_at:string; screen_name:string; format:string;

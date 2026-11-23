@@ -8,6 +8,7 @@ import { LastUpdated } from './ui/LastUpdated';
 import type { PageCopyOverrides } from '../utils/livePageEditorStore';
 
 import { sessionAuthHeaders } from '../lib/sessionCsrf';
+import { INDIA_MOVIE_STATES } from '../lib/indiaMovieStates';
 
 interface ShowtimeScreen {
   id: string;
@@ -251,9 +252,7 @@ export function MoviesShowtimes({ selectedCity = 'All Cities', inline = false, o
               State
               <select value={state} onChange={(event) => setState(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900">
                 <option value="All states">All states</option>
-                <option value="Andhra Pradesh">Andhra Pradesh</option>
-                <option value="Telangana">Telangana</option>
-                <option value="Karnataka">Karnataka</option>
+                {INDIA_MOVIE_STATES.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
             </label>
             <label className="min-w-40 flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
@@ -430,7 +429,7 @@ function EditShowtimeDialog({
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <label className="text-[10px] font-bold uppercase text-slate-500">Movie title (required)<input value={movieTitle} onChange={(event) => setMovieTitle(event.target.value)} required className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">Show date (required)<input type="date" value={showDate} onChange={(event) => setShowDate(event.target.value)} required className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
-          <label className="text-[10px] font-bold uppercase text-slate-500">State<select value={state} onChange={(event) => setState(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold"><option value="">Select state</option><option value="Andhra Pradesh">Andhra Pradesh</option><option value="Telangana">Telangana</option><option value="Karnataka">Karnataka</option></select></label>
+          <label className="text-[10px] font-bold uppercase text-slate-500">State<select value={state} onChange={(event) => setState(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold"><option value="">Select state</option>{INDIA_MOVIE_STATES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">City<input value={city} onChange={(event) => setCity(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">Area<input value={area} onChange={(event) => setArea(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
           <label className="text-[10px] font-bold uppercase text-slate-500">PIN code<input value={pincode} onChange={(event) => setPincode(event.target.value.replace(/\D/g, '').slice(0, 6))} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-xs font-semibold" /></label>
