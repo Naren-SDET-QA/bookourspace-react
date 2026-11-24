@@ -7,6 +7,9 @@ drop policy if exists "Customers and business finance read invoices" on public.p
 create policy "Customers and business finance read invoices" on public.pg_invoices for select to authenticated
 using (
   user_id = (select auth.uid())
+  or (business_id is null and exists (
+        select 1 from public.bookings b
+         where b.id = pg_invoices.booking_id and b.provider_id = (select auth.uid())::text))
   or public.can_access_business_module(business_id, array['owner','manager','accountant'])
   or public.is_admin()
 );
@@ -16,22 +19,43 @@ drop policy if exists "Customers and business members read enquiries" on public.
 create policy "Customers and business members read enquiries" on public.enquiries for select to authenticated
 using (
   user_id = (select auth.uid())
+  or (business_id is null and provider_id = (select auth.uid())::text)
   or public.can_access_business_module(business_id, array['owner','manager','staff'])
   or public.is_admin()
 );
 drop policy if exists "Business members update enquiries" on public.enquiries;
 create policy "Business members update enquiries" on public.enquiries for update to authenticated
-using (public.can_access_business_module(business_id, array['owner','manager','staff']) or public.is_admin())
-with check (public.can_access_business_module(business_id, array['owner','manager','staff']) or public.is_admin());
+using (
+  (business_id is null and provider_id = (select auth.uid())::text)
+  or public.can_access_business_module(business_id, array['owner','manager','staff'])
+  or public.is_admin()
+)
+with check (
+  (business_id is null and provider_id = (select auth.uid())::text)
+  or public.can_access_business_module(business_id, array['owner','manager','staff'])
+  or public.is_admin()
+);
 
 drop policy if exists "Owners manage their contact settings" on public.provider_contact_settings;
 drop policy if exists "Business members read contact settings" on public.provider_contact_settings;
 create policy "Business members read contact settings" on public.provider_contact_settings for select to authenticated
-using (public.can_access_business_module(business_id, array['owner','manager','staff','accountant']) or public.is_admin());
+using (
+  (business_id is null and owner_user_id = (select auth.uid()))
+  or public.can_access_business_module(business_id, array['owner','manager','staff','accountant'])
+  or public.is_admin()
+);
 drop policy if exists "Business owners manage contact settings" on public.provider_contact_settings;
 create policy "Business owners manage contact settings" on public.provider_contact_settings for all to authenticated
-using (public.can_access_business_module(business_id, array['owner','manager']) or public.is_admin())
-with check (public.can_access_business_module(business_id, array['owner','manager']) or public.is_admin());
+using (
+  (business_id is null and owner_user_id = (select auth.uid()))
+  or public.can_access_business_module(business_id, array['owner','manager'])
+  or public.is_admin()
+)
+with check (
+  (business_id is null and owner_user_id = (select auth.uid()))
+  or public.can_access_business_module(business_id, array['owner','manager'])
+  or public.is_admin()
+);
 
 drop policy if exists "PG booking parties read payment claims" on public.pg_payment_claims;
 drop policy if exists "Customers and business finance read payment claims" on public.pg_payment_claims;
@@ -42,6 +66,9 @@ using (
      where b.id = pg_payment_claims.booking_id
        and b.user_id = (select auth.uid())
   )
+  or (business_id is null and exists (
+        select 1 from public.bookings b
+         where b.id = pg_payment_claims.booking_id and b.provider_id = (select auth.uid())::text))
   or public.can_access_business_module(business_id, array['owner','manager','accountant'])
   or public.is_admin()
 );
@@ -55,6 +82,9 @@ using (
      where b.id = service_payment_claims.booking_id
        and b.customer_id = (select auth.uid())
   )
+  or (business_id is null and exists (
+        select 1 from public.service_bookings b
+         where b.id = service_payment_claims.booking_id and b.provider_id = (select auth.uid())))
   or public.can_access_business_module(business_id, array['owner','manager','accountant'])
   or public.is_admin()
 );

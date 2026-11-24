@@ -33,3 +33,5 @@ end;
 $$;
 drop trigger if exists trg_business_transfer_audit on public.business_ownership_transfers;
 create trigger trg_business_transfer_audit after insert or update on public.business_ownership_transfers for each row execute function public.record_business_transfer_audit();
+
+revoke all on function public.record_business_transfer_audit() from public, anon, authenticated;

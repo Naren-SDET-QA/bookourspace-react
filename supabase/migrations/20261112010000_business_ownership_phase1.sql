@@ -69,6 +69,20 @@ create table if not exists public.business_module_access (
   unique (business_id, module_type)
 );
 
+-- Member-level module scope consumed by the provider API
+-- (server.ts: left join public.business_member_access). Without this table every
+-- provider write that carries x-business-id fails with 500
+-- BUSINESS_CONTEXT_UNAVAILABLE.
+create table if not exists public.business_member_access (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  allowed_modules text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (business_id, user_id)
+);
+
 create table if not exists public.business_audit_events (
   id bigint generated always as identity primary key,
   business_id uuid not null references public.businesses(id) on delete cascade,
@@ -98,13 +112,16 @@ alter table public.businesses enable row level security;
 alter table public.business_members enable row level security;
 alter table public.business_invitations enable row level security;
 alter table public.business_module_access enable row level security;
+alter table public.business_member_access enable row level security;
 alter table public.business_audit_events enable row level security;
 alter table public.business_backfill_review enable row level security;
 
 revoke all on public.businesses, public.business_members, public.business_invitations, public.business_module_access from public, anon;
+revoke all on public.business_member_access from public, anon;
 revoke all on public.business_audit_events from public, anon;
 revoke insert, update, delete on public.business_audit_events from authenticated;
-grant select on public.businesses, public.business_members, public.business_invitations, public.business_module_access, public.business_audit_events to authenticated;
+grant select on public.businesses, public.business_members, public.business_invitations, public.business_module_access, public.business_member_access, public.business_audit_events to authenticated;
+grant insert, update, delete on public.business_member_access to authenticated;
 grant insert, update on public.businesses, public.business_members, public.business_invitations, public.business_module_access to authenticated;
 grant select, insert on public.business_backfill_review to authenticated;
 
@@ -314,6 +331,15 @@ drop policy if exists "Only super admins write module access" on public.business
 create policy "Only super admins write module access" on public.business_module_access for all to authenticated
 using (public.is_current_user_super_admin()) with check (public.is_current_user_super_admin());
 
+drop policy if exists "Business members read member access" on public.business_member_access;
+create policy "Business members read member access" on public.business_member_access for select to authenticated
+using (public.is_business_member(business_id) or public.is_admin());
+
+drop policy if exists "Owners manage member access" on public.business_member_access;
+create policy "Owners manage member access" on public.business_member_access for all to authenticated
+using (public.is_business_member(business_id, array['owner']) or public.is_admin())
+with check (public.is_business_member(business_id, array['owner']) or public.is_admin());
+
 drop policy if exists "Business members read audit" on public.business_audit_events;
 create policy "Business members read audit" on public.business_audit_events for select to authenticated
 using (public.is_business_member(business_id) or public.is_admin());
@@ -358,3 +384,17 @@ create index if not exists idx_bookings_business on public.bookings (business_id
 create index if not exists idx_service_bookings_business on public.service_bookings (business_id);
 create index if not exists idx_stay_properties_business on public.stay_properties (business_id);
 create index if not exists idx_venue_bookings_business on public.venue_bookings (business_id);
+
+-- Explicit EXECUTE boundary. Default PUBLIC grants would make every helper a
+-- PostgREST RPC; the security-advisor suite fails on exactly that.
+revoke all on function public.business_role(uuid) from public, anon;
+revoke all on function public.is_business_member(uuid, text[]) from public, anon;
+revoke all on function public.can_access_business(uuid, text[]) from public, anon;
+revoke all on function public.business_module_enabled(uuid, text) from public, anon;
+revoke all on function public.record_business_audit() from public, anon, authenticated;
+revoke all on function public.ensure_business_owner_membership() from public, anon, authenticated;
+revoke all on function public.guard_business_privileged_changes() from public, anon, authenticated;
+grant execute on function public.business_role(uuid) to authenticated, service_role;
+grant execute on function public.is_business_member(uuid, text[]) to authenticated, service_role;
+grant execute on function public.can_access_business(uuid, text[]) to authenticated, service_role;
+grant execute on function public.business_module_enabled(uuid, text) to authenticated, service_role;

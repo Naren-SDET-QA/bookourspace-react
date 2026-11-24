@@ -33,7 +33,7 @@ export function ConfirmDialog({
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/60 p-4 sm:items-center" role="presentation" onClick={onCancel}>
+    <div className="fixed inset-0 z-[10000] flex items-end justify-center bg-slate-950/60 p-4 sm:items-center" role="presentation" onClick={onCancel}>
       <div
         role="dialog"
         aria-modal="true"

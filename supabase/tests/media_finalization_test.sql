@@ -548,8 +548,20 @@ begin
    where schemaname = 'storage'
      and tablename = 'objects'
      and cmd in ('UPDATE', 'DELETE', 'ALL');
-  if insert_policies is distinct from 3 then
+  -- Four INSERT policies after 20261111210000 adds the customer document
+  -- upload policy; any other change to this count is still a hard failure.
+  if insert_policies is distinct from 4 then
     raise exception 'FAIL storage insert policy count changed';
+  end if;
+  if not exists (
+    select 1 from pg_policies
+     where schemaname='storage' and tablename='objects'
+       and policyname='Booking parties upload private documents' and cmd='INSERT'
+       and with_check like '%bos-private-documents%'
+       and with_check like '%auth.uid%'
+       and with_check like '%is_active_user%'
+  ) then
+    raise exception 'FAIL customer document upload policy is missing or unscoped';
   end if;
   if not exists (
     select 1 from pg_policies

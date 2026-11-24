@@ -264,7 +264,10 @@ for MIG_FILE in "$REPO_ROOT"/supabase/migrations/*.sql; do
       test_forward_migration_failure_atomicity "$MIG_FILE" "${MIG_NAME%.sql}"
       ;;
   esac
-  pq -d "$DB" -q -v ON_ERROR_STOP=1 -f "$MIG_FILE" \
+  # -1 gives every file the same per-migration transaction the Supabase CLI
+  # uses (BEGIN … statements … history insert … COMMIT), so a migration that
+  # omits its own BEGIN/COMMIT is still validated atomically.
+  pq -d "$DB" -q -v ON_ERROR_STOP=1 -1 -f "$MIG_FILE" \
      > "$OUT/migration.out" 2> "$OUT/migration.err" || {
        grep -E "ERROR|DETAIL" "$OUT/migration.err" | head -10 >&2
        fail "migration $MIG_NAME"

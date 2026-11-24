@@ -7,7 +7,11 @@
 --   * upload is limited to an active user's own path prefix;
 --   * reads remain owner/Super-Admin only;
 --   * no public, provider-wide or cross-customer read is granted.
-begin;
+--
+-- Transaction control is intentionally omitted: `supabase db push` (and the
+-- GitHub integration) wraps each migration and its ledger insert in one
+-- transaction. A file-level COMMIT here would commit these policies without
+-- the supabase_migrations history row.
 
 do $storage$
 begin
@@ -51,5 +55,3 @@ begin
   $policy$;
 end
 $media$;
-
-commit;

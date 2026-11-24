@@ -348,3 +348,8 @@ $$;
 
 revoke all on function public.review_delivery_prescription(uuid, text, text) from public, anon;
 grant execute on function public.review_delivery_prescription(uuid, text, text) to authenticated;
+
+-- Trigger-only helpers. PostgreSQL does not check EXECUTE when a trigger fires;
+-- leaving the default PUBLIC grant would expose them as PostgREST RPCs.
+revoke all on function public.stop_delivery_tracking_on_terminal() from public, anon, authenticated;
+revoke all on function public.ensure_service_delivery_profile() from public, anon, authenticated;

@@ -26,6 +26,49 @@ let pool;
 let child;
 let serverUrl;
 let databaseAvailable;
+let providerBusinessId;
+
+/**
+ * Seed the business context the provider write gate re-derives from
+ * PostgreSQL on every request. The owner membership and the approved module
+ * access row are created by the phase-1 trigger, so only the business row is
+ * written here.
+ */
+async function ensureBusiness(ref, ownerId, moduleType) {
+  // Idempotent: the row is reused across runs because listings reference it
+  // (ON DELETE RESTRICT), and a re-run must not orphan them.
+  const { rows } = await pool.query(
+    `insert into public.businesses
+       (business_ref, name, module_type, owner_user_id, approval_status, is_enabled, backfill_source)
+     values ($1, $2, $3, $4, 'approved', true, 'integration_fixture')
+     on conflict (business_ref) do update set
+       name = excluded.name,
+       module_type = excluded.module_type,
+       owner_user_id = excluded.owner_user_id,
+       approval_status = 'approved',
+       is_enabled = true,
+       backfill_source = 'integration_fixture'
+     returning id`,
+    [ref, `Fixture business ${moduleType}`, moduleType, ownerId],
+  );
+  const businessId = rows[0].id;
+  // The phase-1 trigger only runs on insert, so the owner membership and the
+  // approved module access row are re-asserted here for the update path.
+  await pool.query(
+    `insert into public.business_members (business_id, user_id, role, status, accepted_at)
+     values ($1, $2, 'owner', 'active', now())
+     on conflict (business_id, user_id) do update set role = 'owner', status = 'active'`,
+    [businessId, ownerId],
+  );
+  await pool.query(
+    `insert into public.business_module_access (business_id, module_type, enabled, approval_status, approved_at)
+     values ($1, $2, true, 'approved', now())
+     on conflict (business_id, module_type) do update set
+       enabled = true, approval_status = 'approved', approved_at = now()`,
+    [businessId, moduleType],
+  );
+  return businessId;
+}
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -63,6 +106,9 @@ async function request(method, url, token, body) {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // The authorized provider selects its own business; customers and admins
+      // never send one.
+      ...(token === providerToken && providerBusinessId ? { 'x-business-id': providerBusinessId } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(stripHelperFields(body)) } : {}),
@@ -124,6 +170,7 @@ async function seed() {
      on conflict (id) do update set status = 'active'`,
     [listingId, provider],
   );
+  providerBusinessId = await ensureBusiness('biz-svc-e2e-fixture', provider, 'services');
 }
 
 function futureDate(days = 7) {

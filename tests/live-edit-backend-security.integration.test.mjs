@@ -35,6 +35,56 @@ let child;
 let serverUrl;
 let tempDir;
 let storePath;
+// token → approved business ids, one per module the fixture provider writes in.
+const businessByToken = new Map();
+
+/**
+ * Seed the business context the provider write gate re-derives from PostgreSQL
+ * on every request. The owner membership and approved module access row are
+ * created by the phase-1 trigger, so only the business row is written here.
+ */
+async function ensureBusiness(ref, ownerId, moduleType) {
+  // Idempotent: the row is reused across runs because listings reference it
+  // (ON DELETE RESTRICT), and a re-run must not orphan them.
+  const { rows } = await pool.query(
+    `insert into public.businesses
+       (business_ref, name, module_type, owner_user_id, approval_status, is_enabled, backfill_source)
+     values ($1, $2, $3, $4, 'approved', true, 'integration_fixture')
+     on conflict (business_ref) do update set
+       name = excluded.name,
+       module_type = excluded.module_type,
+       owner_user_id = excluded.owner_user_id,
+       approval_status = 'approved',
+       is_enabled = true,
+       backfill_source = 'integration_fixture'
+     returning id`,
+    [ref, `Fixture business ${moduleType}`, moduleType, ownerId],
+  );
+  const businessId = rows[0].id;
+  // The phase-1 trigger only runs on insert, so the owner membership and the
+  // approved module access row are re-asserted here for the update path.
+  await pool.query(
+    `insert into public.business_members (business_id, user_id, role, status, accepted_at)
+     values ($1, $2, 'owner', 'active', now())
+     on conflict (business_id, user_id) do update set role = 'owner', status = 'active'`,
+    [businessId, ownerId],
+  );
+  await pool.query(
+    `insert into public.business_module_access (business_id, module_type, enabled, approval_status, approved_at)
+     values ($1, $2, true, 'approved', now())
+     on conflict (business_id, module_type) do update set
+       enabled = true, approval_status = 'approved', approved_at = now()`,
+    [businessId, moduleType],
+  );
+  return businessId;
+}
+
+function businessHeadersFor(sessionToken, url) {
+  const entry = businessByToken.get(sessionToken);
+  if (!entry) return {};
+  const businessId = String(url).startsWith('/api/movies') ? entry.movies : entry.pgHostels;
+  return businessId ? { 'x-business-id': businessId } : {};
+}
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -125,11 +175,15 @@ async function stopServer() {
   await new Promise((resolve) => processToStop.once('exit', resolve));
 }
 
-async function request(method, url, sessionToken, body) {
+async function request(method, url, sessionToken, body, options = {}) {
+  const contextHeaders = options.businessId === undefined
+    ? businessHeadersFor(sessionToken, url)
+    : (options.businessId ? { 'x-business-id': options.businessId } : {});
   const response = await fetch(`${serverUrl}${url}`, {
     method,
     headers: {
       ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...contextHeaders,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -249,6 +303,38 @@ async function seed() {
     );
   }
 
+  const pgA = await ensureBusiness('biz-le-pg-a', A, 'pg_hostels');
+  const moviesA = await ensureBusiness('biz-le-movies-a', A, 'movies');
+  const pgB = await ensureBusiness('biz-le-pg-b', B, 'pg_hostels');
+  const moviesB = await ensureBusiness('biz-le-movies-b', B, 'movies');
+  const pgSuspended = await ensureBusiness('biz-le-pg-suspended', SUSPENDED_PROVIDER, 'pg_hostels');
+  const moviesSuspended = await ensureBusiness('biz-le-movies-suspended', SUSPENDED_PROVIDER, 'movies');
+  businessByToken.set(tokens.providerA, { pgHostels: pgA, movies: moviesA });
+  businessByToken.set(tokens.providerB, { pgHostels: pgB, movies: moviesB });
+  businessByToken.set(tokens.suspendedProvider, { pgHostels: pgSuspended, movies: moviesSuspended });
+
+  // Each listing belongs to the fixture business that will act on it. Cinema
+  // screens stay owned per screen by live_edit_cinema_screen_owners.
+  const businessByOwner = new Map([
+    [A, pgA],
+    [B, pgB],
+    [SUSPENDED_PROVIDER, pgSuspended],
+  ]);
+
+  // A previous failed run may have left a test-only audit rejection trigger
+  // behind; drop it so this run starts from a clean database.
+  await sql('drop trigger if exists test_reject_live_edit_audit on public.live_edit_audit_events');
+  await sql('drop function if exists public.test_reject_live_edit_audit()');
+  await sql('drop trigger if exists test_reject_cinema_audit on public.live_edit_audit_events');
+  await sql('drop function if exists public.test_reject_cinema_audit()');
+  // Cinema screens are shared rows mutated by the assertions below, so reset
+  // the fields they change instead of inheriting the previous run's values.
+  await sql(
+    `update public.cinema_screens set refund_percent = 25, row_version = row_version + 1
+      where id = any($1::text[])`,
+    [[SCREEN_A, SCREEN_B, SCREEN_UNOWNED]],
+  );
+
   const payloadA = {
     description: 'A verified PG in Madhapur with food and Wi-Fi.',
     images: ['https://images.example.com/pg-a.jpg'],
@@ -273,16 +359,16 @@ async function seed() {
     await sql(
       `insert into public.listings
          (id, owner_id, title, category_id, subcategory, entity_type, price, price_unit,
-          status, payload, provider_availability_status, is_verified)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'not_reported', false)
+          status, payload, provider_availability_status, is_verified, business_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'not_reported', false, $11)
        on conflict (id) do update set
          owner_id = excluded.owner_id, title = excluded.title,
          category_id = excluded.category_id, subcategory = excluded.subcategory,
          entity_type = excluded.entity_type, price = excluded.price,
          price_unit = excluded.price_unit, status = excluded.status,
          payload = excluded.payload, provider_availability_status = 'not_reported',
-         is_verified = false`,
-      row,
+         is_verified = false, business_id = excluded.business_id`,
+      [...row, businessByOwner.get(row[1])],
     );
   }
 
@@ -463,6 +549,52 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
     assert.equal((await listingRow(LISTING_A)).status, 'active');
   });
 
+  await t.test('missing, malformed, foreign and wrong-module business context are denied', async () => {
+    const editA = (options) => request(
+      'PATCH',
+      `/api/provider/listings/${encodeURIComponent(LISTING_A)}`,
+      tokens.providerA,
+      { title: 'Business context probe' },
+      options,
+    );
+
+    const missing = await editA({ businessId: '' });
+    assert.equal(missing.status, 403, JSON.stringify(missing.data));
+    assert.equal(missing.data.error, 'BUSINESS_CONTEXT_REQUIRED');
+
+    const malformed = await editA({ businessId: 'not-a-uuid' });
+    assert.equal(malformed.status, 403, JSON.stringify(malformed.data));
+    assert.equal(malformed.data.error, 'BUSINESS_CONTEXT_REQUIRED');
+
+    const foreign = await editA({ businessId: businessByToken.get(tokens.providerB).pgHostels });
+    assert.equal(foreign.status, 403, JSON.stringify(foreign.data));
+    assert.equal(foreign.data.error, 'BUSINESS_ACCESS_DENIED');
+
+    // A business of another module cannot be used for a module-scoped route.
+    const wrongModule = await request(
+      'PUT',
+      '/api/movies/screens',
+      tokens.providerA,
+      { screenId: SCREEN_A, refundPercent: 90 },
+      { businessId: businessByToken.get(tokens.providerA).pgHostels },
+    );
+    assert.equal(wrongModule.status, 403, JSON.stringify(wrongModule.data));
+    assert.equal(wrongModule.data.error, 'BUSINESS_MODULE_MISMATCH');
+
+    // A non-provider session gets no business-backed write either.
+    const customer = await request(
+      'PATCH',
+      `/api/provider/listings/${encodeURIComponent(LISTING_A)}`,
+      tokens.customer,
+      { title: 'Customer probe' },
+    );
+    assert.equal(customer.status, 403, JSON.stringify(customer.data));
+
+    const row = await listingRow(LISTING_A);
+    assert.notEqual(row.title, 'Business context probe');
+    assert.notEqual(row.title, 'Customer probe');
+  });
+
   await t.test('suspended accounts are denied even with a signed token', async () => {
     const response = await patchListing(tokens.suspendedProvider, LISTING_SUSPENDED, {
       title: 'Suspended edit',
@@ -470,14 +602,15 @@ dbTest('Live Edit backend security', { skip: !connectionString }, async (t) => {
     assert.equal(response.status, 403);
     assert.equal(response.data.error, 'ACTIVE_PROFILE_REQUIRED');
 
-    const rowCount = await asActor(SUSPENDED_PROVIDER, async (client) => {
-      const result = await client.query('update public.listings set title = $2 where id = $1', [
+    // The database refuses the write for a suspended actor instead of silently
+    // matching zero rows, so the denial is asserted as the raised guard.
+    await assert.rejects(
+      asActor(SUSPENDED_PROVIDER, (client) => client.query('update public.listings set title = $2 where id = $1', [
         LISTING_SUSPENDED,
         'Suspended SQL edit',
-      ]);
-      return result.rowCount;
-    });
-    assert.equal(rowCount, 0);
+      ])),
+      /LIVE_EDIT_ACTIVE_PROFILE_REQUIRED/,
+    );
 
     const movie = await request('PUT', '/api/movies/screens', tokens.suspendedProvider, {
       screenId: SCREEN_A,

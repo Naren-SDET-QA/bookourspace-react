@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SafeImage from './SafeImage';
 import * as d3 from 'd3';
 import { 
@@ -69,8 +69,14 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
 
   const [activeSubTab, setActiveSubTab] = useState<'listings' | 'enquiries' | 'bookings' | 'analytics' | 'plans' | 'visiting_card' | 'stays' | 'pg_inventory' | 'pg_owner'>('pg_owner');
   const [businesses, setBusinesses] = useState<BusinessMembership[]>([]);
-  const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  // Start from the selection persisted by the previous visit. Starting empty and
+  // clearing storage on the first render made every business-scoped panel fetch
+  // without x-business-id and receive 403 BUSINESS_CONTEXT_REQUIRED.
+  const [selectedBusinessId, setSelectedBusinessId] = useState(() => {
+    try { return window.localStorage.getItem('bos_business_id_v1') || ''; } catch { return ''; }
+  });
   const [businessError, setBusinessError] = useState('');
+  const initialStoredBusinessId = useRef(selectedBusinessId);
 
   useEffect(() => {
     let active = true;
@@ -79,7 +85,9 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         if (!active) return;
         setBusinesses(rows);
         const preferred = rows.find((row) => row.module_type === 'pg_hostels' && row.approval_status === 'approved') || rows[0];
-        setSelectedBusinessId((current) => current || preferred?.id || '');
+        // Keep the stored selection only while it is still a membership of this
+        // account; otherwise fall back to the preferred business.
+        setSelectedBusinessId((current) => (rows.some((row) => row.id === current) ? current : preferred?.id || ''));
         setBusinessError('');
       })
       .catch((caught) => {
@@ -91,10 +99,20 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
   const selectedBusiness = businesses.find((row) => row.id === selectedBusinessId) || null;
   useEffect(() => {
     try {
-      if (selectedBusinessId) window.localStorage.setItem('bos_business_id_v1', selectedBusinessId);
-      else window.localStorage.removeItem('bos_business_id_v1');
+      if (selectedBusinessId) {
+        window.localStorage.setItem('bos_business_id_v1', selectedBusinessId);
+        // Panels mounted before the membership list resolved fetched without a
+        // business context; let them retry once the selection exists or changes.
+        if (selectedBusinessId !== initialStoredBusinessId.current) {
+          window.dispatchEvent(new Event('bos-business-context-changed'));
+        }
+      } else if (businesses.length === 0 && !businessError) {
+        // Clear only once the account is known to have no business at all. The
+        // first render must not erase the id the panels are already using.
+        window.localStorage.removeItem('bos_business_id_v1');
+      }
     } catch { /* storage is optional */ }
-  }, [selectedBusinessId]);
+  }, [selectedBusinessId, businesses.length, businessError]);
   const businessScopedListings = useMemo(() => {
     if (!selectedBusiness) return myListings;
     return myListings.filter((listing) => {
@@ -360,6 +378,22 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
         </section>
       )}
       {!businesses.length && !businessError && <BusinessCreatePanel onCreated={(business) => { setBusinesses([business]); setSelectedBusinessId(business.id); }} />}
+      {businesses.length > 0 && (
+        <section aria-label="Business context" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wide text-brand-teal-deep">Business</span>
+            {businesses.length > 1 ? (
+              <select value={selectedBusinessId} onChange={(event) => setSelectedBusinessId(event.target.value)} aria-label="Select business" className="min-h-9 max-w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                {businesses.map((business) => <option key={business.id} value={business.id}>{business.name} · {BUSINESS_MODULE_LABELS[business.module_type]}</option>)}
+              </select>
+            ) : (
+              <span className="truncate text-xs font-black text-slate-800 dark:text-slate-100">{selectedBusiness?.name} · {selectedBusiness ? BUSINESS_MODULE_LABELS[selectedBusiness.module_type] : ''}</span>
+            )}
+            {selectedBusiness && <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${selectedBusiness.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{selectedBusiness.approval_status}</span>}
+          </div>
+          <span className="text-[10px] font-semibold text-slate-500">{selectedBusiness?.role || 'Provider account'}</span>
+        </section>
+      )}
       {businessError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">Business context unavailable: {businessError}. Showing the legacy provider view.</p>}
 
       {/* Navigation Sub-Tabs */}
@@ -740,7 +774,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({
           businessRole={selectedBusiness?.role}
         />
       )}
-      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace />}
+      {activeSubTab === 'pg_inventory' && <PgProviderWorkspace businessId={selectedBusinessId || undefined} />}
 
       {/* --- SUBTAB 1: MY LISTINGS --- */}
       {activeSubTab === 'listings' && (

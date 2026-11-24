@@ -27,6 +27,49 @@ let storePath;
 let serverUrl;
 let authTestServer;
 let serverAuthConfig = {};
+// session token → approved business id, exactly as the browser selection sends it.
+const businessByToken = new Map();
+
+/**
+ * Seed the business context the provider write gate re-derives from PostgreSQL
+ * on every request. The owner membership and approved module access row are
+ * created by the phase-1 trigger, so only the business row is written here.
+ */
+async function ensureBusiness(ref, ownerId, moduleType) {
+  // Idempotent: the row is reused across runs because listings reference it
+  // (ON DELETE RESTRICT), and a re-run must not orphan them.
+  const { rows } = await pool.query(
+    `insert into public.businesses
+       (business_ref, name, module_type, owner_user_id, approval_status, is_enabled, backfill_source)
+     values ($1, $2, $3, $4, 'approved', true, 'integration_fixture')
+     on conflict (business_ref) do update set
+       name = excluded.name,
+       module_type = excluded.module_type,
+       owner_user_id = excluded.owner_user_id,
+       approval_status = 'approved',
+       is_enabled = true,
+       backfill_source = 'integration_fixture'
+     returning id`,
+    [ref, `Fixture business ${moduleType}`, moduleType, ownerId],
+  );
+  const businessId = rows[0].id;
+  // The phase-1 trigger only runs on insert, so the owner membership and the
+  // approved module access row are re-asserted here for the update path.
+  await pool.query(
+    `insert into public.business_members (business_id, user_id, role, status, accepted_at)
+     values ($1, $2, 'owner', 'active', now())
+     on conflict (business_id, user_id) do update set role = 'owner', status = 'active'`,
+    [businessId, ownerId],
+  );
+  await pool.query(
+    `insert into public.business_module_access (business_id, module_type, enabled, approval_status, approved_at)
+     values ($1, $2, true, 'approved', now())
+     on conflict (business_id, module_type) do update set
+       enabled = true, approval_status = 'approved', approved_at = now()`,
+    [businessId, moduleType],
+  );
+  return businessId;
+}
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -109,6 +152,7 @@ async function request(method, url, token, body) {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(businessByToken.get(token) ? { 'x-business-id': businessByToken.get(token) } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -165,6 +209,8 @@ async function seedProfiles() {
       where id = any($1::uuid[])`,
     [actors.map(([id]) => id)],
   );
+  businessByToken.set(providerAToken, await ensureBusiness('biz-it-provider-a', providerA, 'pg_hostels'));
+  businessByToken.set(providerBToken, await ensureBusiness('biz-it-provider-b', providerB, 'pg_hostels'));
 }
 
 dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip: !connectionString }, async (t) => {
@@ -197,7 +243,18 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     [applicant],
   );
   // Simulate a missing Auth trigger profile. The verified app session must
-  // provision it transactionally on the onboarding request.
+  // provision it transactionally on the onboarding request. Any business or
+  // listing this fixture's earlier runs left behind is removed first: the
+  // owner reference is ON DELETE RESTRICT, and the profile row is the subject
+  // under test here.
+  await pool.query(
+    `delete from public.listings
+      where owner_id = $1
+         or business_id in (select id from public.businesses where owner_user_id = $1)`,
+    [applicant],
+  );
+  await pool.query('delete from public.businesses where owner_user_id = $1', [applicant]);
+  await pool.query('delete from public.business_members where user_id = $1', [applicant]);
   await pool.query('delete from public.profiles where id = $1', [applicant]);
   const authPort = await freePort();
   authTestServer = http.createServer((req, res) => {
@@ -235,9 +292,16 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
   await t.test('unauthorized and customer requests cannot create provider listings', async () => {
     const unauthenticated = await request('POST', '/api/provider/listings', undefined, { title: 'No auth' });
     assert.equal(unauthenticated.response.status, 401);
-    const customerWrite = await request('POST', '/api/provider/listings', customerToken, { title: 'No provider role' });
+    // A customer on a provider-only route is denied by the business-context
+    // gate before provider-role routing, so the refusal is
+    // BUSINESS_CONTEXT_REQUIRED. The security property asserted here is the one
+    // that matters: a customer session creates no listing.
+    const customerListingId = `pg-it-customer-${randomUUID()}`;
+    const customerWrite = await request('POST', '/api/provider/listings', customerToken, { id: customerListingId, title: 'No provider role' });
     assert.equal(customerWrite.response.status, 403);
-    assert.equal(customerWrite.data.error, 'FORBIDDEN_PROVIDER_ROLE_REQUIRED');
+    assert.equal(customerWrite.data.error, 'BUSINESS_CONTEXT_REQUIRED');
+    const customerRow = await pool.query('select 1 from public.listings where id = $1', [customerListingId]);
+    assert.equal(customerRow.rowCount, 0, 'a customer request must not create a listing');
     const forgedRole = await request('GET', '/api/provider/listings', forgedCustomerProviderToken);
     assert.equal(forgedRole.response.status, 403);
     assert.equal(forgedRole.data.error, 'SESSION_ROLE_MISMATCH');
@@ -270,7 +334,7 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
       status: 'approved',
     };
     const rollbackIdentity = 'e6a699bb-347f-45aa-9a71-03436237bcfa';
-    await pool.query(`insert into auth.users (id,email,raw_user_meta_data) values ($1,'rollback-provider@example.test','{}'::jsonb)`, [rollbackIdentity]);
+    await pool.query(`insert into auth.users (id,email,raw_user_meta_data) values ($1,'rollback-provider@example.test','{}'::jsonb) on conflict (id) do nothing`, [rollbackIdentity]);
     await pool.query('delete from public.profiles where id=$1', [rollbackIdentity]);
     await pool.query(`create or replace function public.bos_test_fail_provider_registration()
       returns trigger language plpgsql as $$ begin
@@ -355,6 +419,11 @@ dbTest('provider listing API uses local PostgreSQL transactions and RLS', { skip
     assert.equal(refreshed.response.status, 200);
     assert.equal(refreshed.data.user.role, 'provider');
     assert.ok(refreshed.data.sessionToken, 'role refresh is signed by the server');
+    // An activated provider writes through an approved business of its own.
+    businessByToken.set(
+      refreshed.data.sessionToken,
+      await ensureBusiness('biz-it-applicant-services', applicant, 'services'),
+    );
     const created = await createListing(refreshed.data.sessionToken, `new-provider-${randomUUID()}`, {
       categoryId: 'services', subcategory: 'Electrical repair', entityType: 'service',
       title: 'New provider listing', price: 500,

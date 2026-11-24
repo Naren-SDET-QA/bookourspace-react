@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CalendarClock, LoaderCircle, RefreshCw } from 'lucide-react';
-import { getStoredAuthoritativeSessionToken } from '../lib/supabaseClient';
+import { buildAuthHeaders } from '../lib/supabaseClient';
 import { VenueAvailabilityCalendar } from './VenueAvailabilityCalendar';
 import { venueDateTimeLabel, venueWallTimeCandidates } from '../lib/venueTime';
 
 type Listing={id:string;title:string;categoryId?:string;entityType?:string;price?:number;payload?:Record<string,any>};
 type Dispute={id:string;status:string;reason:string;resolution?:string|null;openedByRole:string};
 type Booking={id:string;bookingRef:string;listingId:string;listingTitle:string;startsAt:string;endsAt:string;timeZone?:string;slotType:string;guests:number;status:string;paymentMode:string;paymentStatus:string;totalPaise:number;refundPaise:number;disputes?:Dispute[]};
-async function request(path:string,init:RequestInit={}){const outgoing=new Headers(init.headers);const token=getStoredAuthoritativeSessionToken();if(token)outgoing.set('Authorization',`Bearer ${token}`);if(init.body&&!outgoing.has('Content-Type'))outgoing.set('Content-Type','application/json');const r=await fetch(path,{...init,headers:outgoing});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`HTTP_${r.status}`);return d;}
+async function request(path:string,init:RequestInit={}){const outgoing=new Headers(buildAuthHeaders(init.headers as Record<string,string>|undefined));if(init.body&&!outgoing.has('Content-Type'))outgoing.set('Content-Type','application/json');const r=await fetch(path,{...init,headers:outgoing});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`HTTP_${r.status}`);return d;}
 
 export function VenueOwnerWorkspace(){
   const [listings,setListings]=useState<Listing[]>([]);const [selected,setSelected]=useState('');const [bookings,setBookings]=useState<Booking[]>([]);const [blocks,setBlocks]=useState<any[]>([]);
@@ -17,6 +17,7 @@ export function VenueOwnerWorkspace(){
   const loadListings=useCallback(async()=>{const d=await request('/api/provider/listings');const venues=(d.listings||[]).filter((x:Listing)=>x.entityType==='venue'||String(x.categoryId||'').startsWith('venue-'));setListings(venues);setSelected(old=>venues.some((x:Listing)=>x.id===old)?old:venues[0]?.id||'');},[]);
   const refresh=useCallback(async()=>{if(!selected)return;setBusy(true);setError('');try{const [b,x]=await Promise.all([request('/api/venue-bookings?scope=owner'),request(`/api/provider/venues/${encodeURIComponent(selected)}/blocks`)]);setBookings(b.bookings||[]);setBlocks(x.blocks||[]);}catch(e){setError(e instanceof Error?e.message:'VENUE_WORKSPACE_LOAD_FAILED');}finally{setBusy(false);}},[selected]);
   useEffect(()=>{loadListings().catch(e=>setError(e instanceof Error?e.message:'VENUE_LISTINGS_UNAVAILABLE'));},[loadListings]);
+  useEffect(()=>{const reload=()=>{void loadListings().then(()=>setError('')).catch(e=>setError(e instanceof Error?e.message:'VENUE_LISTINGS_UNAVAILABLE'));};window.addEventListener('bos-business-context-changed',reload);return()=>window.removeEventListener('bos-business-context-changed',reload);},[loadListings]);
   useEffect(()=>{void refresh();},[refresh]);
   useEffect(()=>{if(!selected)return;let live=true;request(`/api/venues/${encodeURIComponent(selected)}/booking-settings`).then(d=>{if(!live)return;const s=d.settings;setForm({timeZone:s.timeZone||'Asia/Kolkata',capacity:String(s.capacity),hourlyRate:String(s.hourlyRatePaise/100),halfDayRate:String(s.halfDayRatePaise/100),fullDayRate:String(s.fullDayRatePaise/100),perGuestRate:String(s.perGuestRatePaise/100),includedGuests:String(s.includedGuests),deposit:String(s.depositPaise/100),taxPercent:String(s.taxPercent),setupBufferMinutes:String(s.setupBufferMinutes),cleanupBufferMinutes:String(s.cleanupBufferMinutes),advanceBookingDays:String(s.advanceBookingDays),minimumAdvanceMinutes:String(s.minimumAdvanceMinutes)});}).catch(e=>{if(live&&String(e?.message)!=='VENUE_INVENTORY_NOT_CONFIGURED')setError(e instanceof Error?e.message:'VENUE_SETTINGS_LOAD_FAILED');});return()=>{live=false;};},[selected]);
   const mutate=async(path:string,method:string,body:unknown)=>{setBusy(true);setError('');setNotice('');try{await request(path,{method,body:JSON.stringify(body)});setNotice('Saved to PostgreSQL.');await refresh();}catch(e){setError(e instanceof Error?e.message:'VENUE_ACTION_FAILED');}finally{setBusy(false);}};

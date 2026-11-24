@@ -18,7 +18,10 @@
 -- Additive only: no existing booking, listing, profile or payment row is
 -- rewritten, and no hosted project is modified by this file.
 -- ============================================================================
-begin;
+-- Transaction control is intentionally omitted: `supabase db push` (and the
+-- GitHub integration) wraps each migration and its ledger insert in one
+-- transaction. A file-level COMMIT here would commit this schema without the
+-- supabase_migrations history row.
 
 -- ---------------------------------------------------------------------------
 -- 1. Small, auditable helpers.
@@ -1828,4 +1831,6 @@ comment on table public.service_booking_documents is
 comment on table public.service_provider_credentials is
   'Provider licences. A verified, unexpired pharmacy licence is required for medicine bookings.';
 
-commit;
+-- Trigger-only helpers: no client role may call them directly.
+revoke all on function public.service_booking_requirements_check() from public, anon, authenticated;
+revoke all on function public.service_booking_category_transition_guard() from public, anon, authenticated;

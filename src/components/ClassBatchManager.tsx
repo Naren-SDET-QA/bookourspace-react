@@ -106,6 +106,7 @@ export function ClassBatchManager() {
 
   const load = async () => {
     setLoading(true);
+    setError('');
     const [courseResult, batchResult] = await Promise.all([
       fetchProviderCourses(),
       fetchProviderClassBatches(),
@@ -128,6 +129,16 @@ export function ClassBatchManager() {
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The trainer console can mount before the provider dashboard resolves which
+  // business is active. Re-load once that context exists so the batches and
+  // courses requests carry x-business-id instead of failing 403.
+  useEffect(() => {
+    const reload = () => { void load(); };
+    window.addEventListener('bos-business-context-changed', reload);
+    return () => window.removeEventListener('bos-business-context-changed', reload);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
