@@ -2428,6 +2428,18 @@ Task:
     const providerOnlyPrefixes = ['/api/provider', '/api/stays/host', '/api/movies/screens', '/api/services/earnings', '/api/services/payment-claims'];
     const providerOnly = providerOnlyPrefixes.some((prefix) => req.originalUrl.startsWith(prefix)) || isProviderOnlyPath(req.originalUrl);
     if (claims.role === 'customer' && !providerOnly) return next();
+    // A customer may onboard as a stay owner before owning any business, and
+    // the stay host API then authorizes every call by listing ownership in
+    // PostgreSQL (requireHost/requireOwnedStayListing). Only /api/stays/host is
+    // exempt for customers; every other provider-only path still requires a
+    // business context, and a provider that has a business must still send it.
+    if (
+      claims.role === 'customer'
+      && req.originalUrl.split('?')[0].startsWith('/api/stays/host')
+    ) {
+      res.locals.businessContext = null;
+      return next();
+    }
     if (!pgRuntimePool) {
       res.status(503).json({ ok: false, error: 'BUSINESS_DATABASE_UNAVAILABLE' });
       return;
