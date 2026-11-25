@@ -49,8 +49,10 @@ function futureDate(days: number) {
 }
 
 function dateLabel(date: string) {
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', {
-    day: '2-digit',
+  // Match the product: venue labels use Intl en-IN with a numeric day ("6 Dec
+  // 2026"), see venueDateTimeLabel in src/lib/venueTime.ts.
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-IN', {
+    day: 'numeric',
     month: 'short',
     year: 'numeric',
     timeZone: 'UTC',
@@ -191,13 +193,26 @@ async function sandboxWebhook(
 }
 
 async function calendarDay(owner: Page, date: string, state: 'available' | 'blocked' | 'reserved') {
+  // Advance only while the calendar is showing an earlier month, and wait for
+  // each month's availability request. Blindly clicking "Next month" skips
+  // past the target whenever the previous month is still loading.
+  const monthName = new Date(`${date}T00:00:00Z`).toLocaleDateString('en-IN', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
   for (let step = 0; step < 3; step += 1) {
     const day = owner.getByRole('button', { name: new RegExp(`^${date} ${state}$`) });
     if ((await day.count()) > 0) {
       await expect(day.first()).toBeVisible();
       return;
     }
+    if ((await owner.getByText(monthName).count()) > 0) break;
+    const nextMonthLoaded = owner.waitForResponse(
+      (response: { url: () => string; ok: () => boolean }) => response.url().includes('/calendar?') && response.ok(),
+    );
     await owner.getByRole('button', { name: 'Next month' }).click();
+    await nextMonthLoaded;
   }
   await expect(owner.getByRole('button', { name: new RegExp(`^${date} ${state}$`) })).toBeVisible();
 }

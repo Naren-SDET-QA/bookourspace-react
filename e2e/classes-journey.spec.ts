@@ -134,6 +134,8 @@ async function newPage(
       try {
         localStorage.setItem('bos_session_token_v1', token);
         localStorage.setItem('bos_google_auth_user_v1', JSON.stringify(storedUser));
+        // Skip the modal consent sheet so footer and card actions stay clickable.
+        localStorage.setItem('bos_privacy_consent_v1', JSON.stringify({ choice: 'essential', at: new Date().toISOString() }));
       } catch {
         // Ignore storage failures on non-origin documents.
       }
@@ -162,6 +164,13 @@ async function newPage(
 async function openClasses(page: Page): Promise<void> {
   await page.goto(`${harness.uiUrl}/#classes`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Classes & Training' })).toBeVisible({ timeout: 30_000 });
+  // The consent sheet is modal on a first visit; dismiss it so footer actions
+  // are clickable later in the journey. Bounded so pages without it cost 2s.
+  await page
+    .getByRole('dialog', { name: 'Privacy choices' })
+    .getByRole('button', { name: 'Essential only' })
+    .click({ timeout: 2_000 })
+    .catch(() => undefined);
 }
 
 async function api(
@@ -233,7 +242,7 @@ async function openCourseDetail(page: Page) {
 }
 
 async function openEnrollment(page: Page, detail: Locator) {
-  await detail.getByRole('button', { name: 'Select batch & enroll' }).click();
+  await detail.getByRole('button', { name: 'Enroll Now' }).click();
   const enrollment = page.getByTestId('class-enrollment-modal');
   await expect(enrollment).toBeVisible({ timeout: 15_000 });
   return enrollment;
@@ -354,9 +363,11 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   await expect(card).toContainText('2 seats left');
 
   // Filters are computed from the live PostgreSQL calendar, not demo data.
-  await student.page.getByLabel('Mode').selectOption('Online');
+  // Address the filter combobox explicitly: "Mode" also appears in the
+  // header's "Switch to Dark Mode" button label.
+  await student.page.getByRole('combobox', { name: 'Mode', exact: true }).selectOption('Online');
   await expect(card).toBeHidden();
-  await student.page.getByLabel('Mode').selectOption('Hybrid');
+  await student.page.getByRole('combobox', { name: 'Mode', exact: true }).selectOption('Hybrid');
   await expect(card).toBeVisible();
   await student.page.getByLabel('Timing').selectOption('Evening');
   await expect(card).toBeVisible();
@@ -381,11 +392,12 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   await student.page.getByLabel('Filter by area').fill('');
 
   const detail = await openCourseDetail(student.page);
-  await expect(detail).toContainText('Batches & timings');
-  await expect(detail).toContainText('Evening · Mon-Fri');
+  await expect(detail).toContainText('Batches & Timings');
+  await expect(detail).toContainText('Regular Batch · Mon-Fri');
   await expect(detail).toContainText('6:00 PM – 8:00 PM');
   await expect(detail).toContainText('Dr. Meera Rao');
-  await expect(detail).toContainText('Seats left: 2');
+  await expect(detail).toContainText('Course fee');
+  await expect(detail).toContainText('4,000');
   await expect(detail).toContainText('8 weeks');
 
   const enrollment = await openEnrollment(student.page, detail);
@@ -401,7 +413,7 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   await expect(enrollment).toContainText(/₹4,000\s*\/\s*month/i);
   await expect(enrollment).toContainText('Pay at institute · obligation recorded');
   await enrollment.getByRole('button', { name: 'Done' }).click();
-  await detail.getByRole('button', { name: 'Close', exact: true }).click();
+  await detail.getByRole('button', { name: 'Back to all classes' }).click();
 
   // Duplicate enrollment is rejected by PostgreSQL, and the UI reports it.
   const duplicateDetail = await openCourseDetail(student.page);
@@ -409,7 +421,7 @@ test('trainer creates a batch, admin approves it, student enrolls, duplicate is 
   await duplicateEnrollment.getByRole('button', { name: 'Confirm enrollment' }).click();
   await expect(duplicateEnrollment.getByRole('alert')).toContainText('You are already enrolled in this batch.');
   await duplicateEnrollment.getByRole('button', { name: 'Close enrollment' }).click();
-  await duplicateDetail.getByRole('button', { name: 'Close', exact: true }).click();
+  await duplicateDetail.getByRole('button', { name: 'Back to all classes' }).click();
 
   await student.page.getByRole('button', { name: 'My classes' }).click();
   const myClasses = student.page.getByRole('dialog', { name: 'My Classes' });
@@ -697,9 +709,9 @@ test('the full enrollment and cancellation journey works at mobile, tablet and d
     await student.page.getByRole('button', { name: 'View E2E Algebra Mastery' }).click();
     const detail = student.page.getByTestId('class-detail-modal');
     await expect(detail).toBeVisible();
-    await expect(detail).toContainText('Batches & timings');
+    await expect(detail).toContainText('Batches & Timings');
     await noHorizontalOverflow(student.page, `${viewport.name} course detail`);
-    await detail.getByRole('button', { name: 'Select batch & enroll' }).click();
+    await detail.getByRole('button', { name: 'Enroll Now' }).click();
     const enrollment = student.page.getByTestId('class-enrollment-modal');
     await expect(enrollment).toBeVisible();
     await enrollment.getByRole('radio').filter({ hasText: title }).click();
@@ -711,7 +723,7 @@ test('the full enrollment and cancellation journey works at mobile, tablet and d
     await expect(enrollment.getByRole('heading', { name: 'Seat confirmed' })).toBeVisible();
     await expect(enrollment).toContainText(/₹4,500\s*\/\s*month/i);
     await enrollment.getByRole('button', { name: 'Done' }).click();
-    await detail.getByRole('button', { name: 'Close', exact: true }).click();
+    await detail.getByRole('button', { name: 'Back to all classes' }).click();
 
     await student.page.getByRole('button', { name: 'My classes' }).click();
     const myClasses = student.page.getByRole('dialog', { name: 'My Classes' });

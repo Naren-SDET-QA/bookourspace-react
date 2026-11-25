@@ -72,7 +72,9 @@ export default function SiteChrome({ onOpenHelp }: { onOpenHelp: () => void }) {
     const onScroll = () => {
       const { top, max } = getScrollMetrics();
       setProgress(Math.min(100, Math.max(0, (top / max) * 100)));
-      setShowTop(top > 420);
+      // Short pages never scroll 420px; reveal the control once the reader has
+      // covered half the available distance (capped at the usual 420px).
+      setShowTop(top > Math.min(420, Math.max(120, max * 0.5)));
     };
     onScroll();
     const shell = document.querySelector('.bos-app-shell:not(.bos-app-shell-bento)');

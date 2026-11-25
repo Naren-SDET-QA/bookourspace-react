@@ -13,8 +13,15 @@ test.describe('site chrome', () => {
     await cookie.getByRole('button', { name: 'Essential only' }).click();
     await expect(cookie).toHaveCount(0);
 
+    // The bento home is deliberately viewport-fit, so it never scrolls enough to
+    // reveal the control. Exercise it on a module page that really overflows:
+    // open PG listings, then scroll whichever container owns the scroll.
+    await page.getByTestId('market-section-pg_hostels').click();
+    await expect(page.locator('article[aria-label^="PG listing"]').first()).toBeVisible({ timeout: 30_000 });
     await page.evaluate(() => {
-      const shell = document.querySelector('.bos-app-shell') as HTMLElement | null;
+      // Mirror SiteChrome.getScrollMetrics: only the non-bento shell is a real
+      // scroll container; otherwise the document scrolls.
+      const shell = document.querySelector('.bos-app-shell:not(.bos-app-shell-bento)') as HTMLElement | null;
       if (shell && shell.scrollHeight > shell.clientHeight + 24) shell.scrollTop = 900;
       else window.scrollTo(0, 1200);
     });

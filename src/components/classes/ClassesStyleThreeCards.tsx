@@ -14,6 +14,13 @@ const feeLabel = (course: CourseListing): string => {
   return `₹${Math.round(course.fee).toLocaleString('en-IN')}`;
 };
 
+const feeSuffix = (unit: CourseListing['feeUnit']): string => {
+  const value = String(unit || '').trim().toLowerCase();
+  if (value === 'month') return '/month';
+  if (value === 'course') return '/course';
+  return value ? `/${value}` : '';
+};
+
 function modeDisplay(course: CourseListing): string {
   const options = new Set([course.mode, ...course.modeOptions]);
   if (options.has('Online') && options.has('Offline')) return 'Online + Offline';
@@ -35,7 +42,12 @@ export function ClassesStyleThreeCards({ courses, onOpen }: ClassesStyleThreeCar
             aria-label={`Course listing ${course.title}`}
             className="group overflow-hidden rounded-2xl border border-[#ece8fb] bg-white shadow-[0_2px_10px_rgba(91,33,182,0.05)] transition hover:shadow-[0_10px_26px_rgba(91,33,182,0.14)]"
           >
-            <button type="button" onClick={() => onOpen(course)} className="relative block aspect-[16/9] w-full overflow-hidden text-left">
+            <button
+              type="button"
+              onClick={() => onOpen(course)}
+              aria-label={`View ${course.title}`}
+              className="relative block aspect-[16/9] w-full overflow-hidden text-left"
+            >
               <SafeImage src={course.image} alt={course.title} category="classes" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" sizes="(max-width: 640px) 92vw, 560px" />
               <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[9px] font-black text-white shadow-sm">
                 <BadgeCheck className="h-3 w-3" aria-hidden="true" /> {course.verified ? 'Verified' : course.demo ? 'Sample' : 'Listed'}
@@ -105,6 +117,18 @@ export function ClassesStyleThreeCards({ courses, onOpen }: ClassesStyleThreeCar
                     <span className="text-[7px] font-semibold uppercase tracking-wide text-slate-400">Next Batch</span>
                   </span>
                 </div>
+
+                {(course.liveBatchCount ?? course.batches.length) > 0 && (
+                  <p className="mt-1.5 flex items-center gap-1 text-[8.5px] font-bold text-slate-500">
+                    <CalendarDays className="h-2.5 w-2.5" aria-hidden="true" /> {course.liveBatchCount ?? course.batches.length} live batch{(course.liveBatchCount ?? course.batches.length) === 1 ? '' : 'es'}
+                  </p>
+                )}
+
+                {!course.free && course.fee > 0 && (
+                  <p className="mt-1 text-[9px] font-black text-violet-700">
+                    From {feeLabel(course)}{feeSuffix(course.feeUnit)}
+                  </p>
+                )}
 
                 {course.seats !== null && (
                   <p className="mt-1.5 flex items-center gap-1 text-[8.5px] font-bold text-slate-500">

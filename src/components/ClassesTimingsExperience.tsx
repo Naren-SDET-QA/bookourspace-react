@@ -1030,7 +1030,9 @@ function FilterSelect({
   return (
     <label className="inline-flex items-center gap-1 rounded-full border border-[#ece8fb] bg-white px-2.5 py-1.5">
       <span className="text-[9px] font-bold uppercase tracking-wide text-[#94a3b8]">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="max-w-[110px] bg-transparent text-[11px] font-bold text-[#4c1d95] outline-none">
+      {/* An explicit name keeps the control addressable: without it the
+          accessible name concatenates every option ("ModeAllOnlineOffline…"). */}
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} className="max-w-[110px] bg-transparent text-[11px] font-bold text-[#4c1d95] outline-none">
         {options.map((o) => {
           const [val, text] = Array.isArray(o) ? o : [o, o];
           return <option key={val} value={val}>{text}</option>;

@@ -56,4 +56,41 @@ const variants: MarketplaceListing[] = variantSeeds.map((seed, index) => {
   };
 });
 
-export const DEMO_PG_LISTINGS: MarketplaceListing[] = [...initialPGListings, ...variants];
+// Mumbai inventory keeps the shared selected-city journey representative for
+// every metro in the demo catalogue, not only Hyderabad.
+const mumbai: MarketplaceListing = {
+  ...initialPGListings[0],
+  id: 'pg-demo-mumbai-1',
+  title: 'Demo PG — Andheri East Business Stay',
+  titleTe: 'Demo PG — Andheri East Business Stay',
+  titleHi: 'Demo PG — Andheri East Business Stay',
+  subcategory: '1 sharing',
+  subcategoryTe: '1 sharing',
+  categoryId: 'pg-professionals',
+  price: 11000,
+  priceUnit: '/month',
+  status: 'active',
+  isVerified: true,
+  isFeatured: false,
+  providerName: 'Demo PG Partner Mumbai',
+  providerId: 'demo-pg-provider-mumbai',
+  location: {
+    ...initialPGListings[0].location,
+    city: 'Mumbai',
+    area: 'Andheri East',
+    distanceKm: 1.6,
+  },
+  customFieldValues: {
+    ...initialPGListings[0].customFieldValues,
+    roomTypesAvailable: '1 sharing',
+    sharingHighlight: '1 sharing',
+    foodIncluded: 'Yes',
+    acType: 'AC',
+    attachedWashroom: 'Yes',
+    bedsAvailable: 4,
+    genderPolicy: 'Boys and girls',
+    occupantType: 'Working professionals',
+  },
+};
+
+export const DEMO_PG_LISTINGS: MarketplaceListing[] = [...initialPGListings, ...variants, mumbai];

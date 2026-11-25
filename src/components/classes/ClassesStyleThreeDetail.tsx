@@ -141,7 +141,7 @@ export function ClassesStyleThreeDetail({ course, onClose, onEnroll }: ClassesSt
   };
 
   return (
-    <div className="fixed inset-0 z-[95] overflow-y-auto bg-white text-[#1e1b4b] dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="classes-style3-detail-title">
+    <div data-testid="class-detail-modal" className="fixed inset-0 z-[95] overflow-y-auto bg-white text-[#1e1b4b] dark:bg-slate-950 dark:text-slate-100" role="dialog" aria-modal="true" aria-labelledby="classes-style3-detail-title">
       <header className="sticky top-0 z-20 border-b border-[#ece8fb] bg-white/95 px-3 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
         <div className="mx-auto flex max-w-3xl items-center gap-2">
           <button type="button" onClick={onClose} aria-label="Back to all classes" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#ece8fb] text-[#4c1d95] hover:bg-[#f5f3ff] dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">

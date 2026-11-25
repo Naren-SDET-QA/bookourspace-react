@@ -3,6 +3,12 @@
 # from the existing demo catalog. Never used by production start/deploy.
 set -euo pipefail
 
+# PostgreSQL 17 aborts startup ("postmaster became multithreaded during
+# startup") when the shell has no valid locale. Pin one for this throwaway
+# loopback cluster so `npm run dev:local` and `npm run e2e` work from any shell.
+export LC_ALL="${LC_ALL:-C}"
+export LANG="${LANG:-C}"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="${BOS_DEV_DB_DATA_DIR:-$ROOT/.local/stays-db}"
 DB_NAME="bookourspace_dev"
