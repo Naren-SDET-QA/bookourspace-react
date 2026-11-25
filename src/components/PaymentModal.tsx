@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import GooglePayButton from '@google-pay/button-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
@@ -31,6 +31,7 @@ import {
 import { UniversalBarcode, generateBosBarcodeId } from './UniversalBarcode';
 import { triggerGlobalGlobeLoader } from './BOSBrandLogo';
 import { createServerPaymentIntent, verifyServerUpiPayment, PAYMENT_VERIFICATION_AVAILABLE } from '../lib/supabaseClient';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -254,6 +255,22 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
     return `upi://pay?${params}`;
   };
+
+  // Hooks must run on every render, including the closed one: returning null
+  // before this point changed the hook order between closed and open renders
+  // and crashed React with "Rendered more hooks than during the previous
+  // render". The reset handler lives here for the same reason.
+  const handleReset = () => {
+    setPaymentSuccess(false);
+    setPaymentIntentId('');
+    setUtrReference('');
+    setAppLaunchedNotice(null);
+    onClose();
+  };
+
+  const dialogPanelRef = useRef<HTMLDivElement | null>(null);
+  // Drive focus/Escape from the prop so a closed modal never traps focus.
+  useDialogFocus(isOpen, handleReset, dialogPanelRef);
 
   if (!isOpen) return null;
 
@@ -489,18 +506,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     void finalizePaymentSuccess();
   };
 
-  const handleReset = () => {
-    setPaymentSuccess(false);
-    setPaymentIntentId('');
-    setUtrReference('');
-    setAppLaunchedNotice(null);
-    onClose();
-  };
-
   if (!PAYMENT_VERIFICATION_AVAILABLE) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm" role="presentation">
         <section
+          ref={dialogPanelRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="payment-unavailable-title"
@@ -522,7 +532,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={dialogPanelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="payment-dialog-title"
+        className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-200"
+      >
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
@@ -532,7 +548,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="font-black text-slate-900 dark:text-white text-base">
+                <h3 id="payment-dialog-title" className="font-black text-slate-900 dark:text-white text-base">
                   Zero-Fee Direct UPI & Google Pay
                 </h3>
                 <span className="px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300/50">
@@ -546,6 +562,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </div>
           <button
             onClick={handleReset}
+            aria-label="Close payment dialog"
             className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />

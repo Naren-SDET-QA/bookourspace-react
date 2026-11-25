@@ -44,6 +44,7 @@ import {
 import { UniversalBarcode, generateBosBarcodeId } from './UniversalBarcode';
 import { saveServerProviderListing } from '../lib/supabaseClient';
 import { ProviderOnboardingForm } from './ProviderOnboardingForm';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import {
   UniversalObjectEditorModal,
   getSectionScopedElements,
@@ -1179,6 +1180,12 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
     setProviderRegistrationNote(getDefaultAdminNote(currentLang));
   }, [currentLang, authUser?.name]);
 
+  // Hooks run before these early returns: skipping them while closed changed
+  // the hook order on the next open and crashed React. Focus/Escape follows
+  // the prop so the closed wizard (or its onboarding hand-off) is inert.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(isOpen, onClose, panelRef);
+
   if (!isOpen) return null;
   if (!authUser || !['provider', 'admin'].includes(authUser.role)) {
     return <ProviderOnboardingForm authUser={authUser} defaultSection={defaultSection} onClose={onClose} />;
@@ -1537,7 +1544,13 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
       onPaste={(e) => handleClipboardPaste(e, 'listing')}
       className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/75 backdrop-blur-xs overflow-y-auto"
     >
-      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-3 max-h-[94vh] flex flex-col">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="post-listing-title"
+        className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-3 max-h-[94vh] flex flex-col"
+      >
         {/* Top Header */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-[#4A148C] via-purple-800 to-indigo-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -1545,7 +1558,7 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-black text-sm sm:text-base leading-tight">
+              <h3 id="post-listing-title" className="font-black text-sm sm:text-base leading-tight">
                 {tDict('modalTitle')}
               </h3>
               <p className="text-[11px] text-purple-200 mt-0.5">
@@ -1565,6 +1578,7 @@ export const PostListingWizard: React.FC<PostListingWizardProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close listing form"
             className="p-1.5 rounded-full hover:bg-white/20 text-white cursor-pointer"
           >
             <X className="w-5 h-5" />
