@@ -385,6 +385,7 @@ function MarketplaceAppContent() {
     clearAllNotifications,
     isOnline,
     isCachedData,
+    isCatalogLoading,
     lastCacheTime,
     syncOfflineCache
   } = useMarketplace();
@@ -2959,6 +2960,7 @@ function MarketplaceAppContent() {
                     inline
                     style={sectionStyles.pg}
                     listings={locationFilteredListings}
+                    isLoading={isCatalogLoading}
                     selectedCategory={selectedCategory}
                     selectedSubcategory={selectedSubcategory}
                     selectedCity={sharedSelectedCity}
@@ -2997,6 +2999,7 @@ function MarketplaceAppContent() {
                     inline
                     style={sectionStyles.services}
                     listings={locationFilteredListings}
+                    isLoading={isCatalogLoading}
                     initialCategoryId={selectedCategory === 'all' ? undefined : selectedCategory}
                     moduleLabel={modulePresentation.services?.values.label}
                     moduleHeadline={modulePresentation.services?.values.headline}

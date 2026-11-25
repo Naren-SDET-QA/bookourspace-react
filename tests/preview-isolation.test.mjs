@@ -103,7 +103,10 @@ test('the build never forces demo data on, so AI Studio serves real data by defa
 
 test('the browser harness can exercise the AI Studio preview path without demo data', () => {
   assert.match(PLAYWRIGHT_SOURCE, /BOS_E2E_AI_STUDIO === '1'/);
-  assert.match(PLAYWRIGHT_SOURCE, /VITE_ENABLE_DEMO_DATA: aiStudioPreview \? 'false' : 'true'/);
+  // Demo inventory must be off for the AI Studio path and for the
+  // production-like loading harness, and on for the ordinary local run.
+  assert.match(PLAYWRIGHT_SOURCE, /VITE_ENABLE_DEMO_DATA: aiStudioPreview \|\| noDemoInventory \? 'false' : 'true'/);
+  assert.match(PLAYWRIGHT_SOURCE, /BOS_E2E_NO_DEMO === '1'/);
   assert.match(PLAYWRIGHT_SOURCE, /AI_STUDIO: 'true'/);
   assert.match(PLAYWRIGHT_SOURCE, /BOS_AI_STUDIO_PREVIEW: '1'/);
 });

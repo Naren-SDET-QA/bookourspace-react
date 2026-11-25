@@ -33,6 +33,9 @@ const localDbDataDir = process.env.BOS_PLAYWRIGHT_DB_DATA_DIR || `/tmp/bookoursp
 const defaultBaseURL = `http://127.0.0.1:${localWebPort}`;
 const externalBaseURL = process.env.E2E_BASE_URL;
 const aiStudioPreview = process.env.BOS_E2E_AI_STUDIO === '1';
+// Production starts with an empty catalog until PostgreSQL answers. Demo mode
+// seeds local listings synchronously, so loading-state tests need this mode.
+const noDemoInventory = process.env.BOS_E2E_NO_DEMO === '1';
 
 export default defineConfig({
   testDir: './e2e',
@@ -80,7 +83,7 @@ export default defineConfig({
       // SafeImage and module smoke tests use clearly labelled local fixtures in
       // the normal harness. The AI Studio preview path must run without demo
       // inventory so it exercises real Storage signing instead.
-      VITE_ENABLE_DEMO_DATA: aiStudioPreview ? 'false' : 'true',
+      VITE_ENABLE_DEMO_DATA: aiStudioPreview || noDemoInventory ? 'false' : 'true',
       ...(aiStudioPreview ? { AI_STUDIO: 'true', BOS_AI_STUDIO_PREVIEW: '1' } : {}),
       // Keep browser tests stable when another local task is editing source:
       // HMR can replace a lazy module during a journey and reset React state.

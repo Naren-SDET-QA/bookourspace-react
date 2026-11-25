@@ -240,6 +240,13 @@ interface MarketplaceContextType {
   // Offline Caching & Connectivity
   isOnline: boolean;
   isCachedData: boolean;
+  /**
+   * True while the first PostgreSQL catalog hydration is still in flight and
+   * there is nothing to show yet. Demo builds have local listings immediately,
+   * so this stays false there; a production build starts empty and must show a
+   * skeleton rather than an empty state.
+   */
+  isCatalogLoading: boolean;
   lastCacheTime: string | null;
   syncOfflineCache: () => Promise<void>;
 }
@@ -437,6 +444,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const isOnline = useOnlineStatus();
   const [lastCacheTime, setLastCacheTime] = useState<string | null>(null);
   const [isCachedData, setIsCachedData] = useState<boolean>(false);
+  const [catalogHydrated, setCatalogHydrated] = useState(false);
 
   // Sync to Browser Cache Storage & LocalStorage
   useEffect(() => {
@@ -1143,6 +1151,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
           : mapped);
       } catch {
         // Offline or JSON mode: keep the existing local state.
+      } finally {
+        if (!cancelled) setCatalogHydrated(true);
       }
     })();
     const refresh = () => {
@@ -1891,6 +1901,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         pushSystemNotification,
         isOnline,
         isCachedData,
+        isCatalogLoading: !catalogHydrated && listings.length === 0,
         lastCacheTime,
         syncOfflineCache
       }}
