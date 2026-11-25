@@ -48,6 +48,7 @@ import { registerMediaValidationApi } from './src/server/mediaValidationApi';
 import { registerAccountClosureApi } from './src/server/accountClosureApi';
 import { createNativeAppCorsMiddleware } from './src/server/nativeAppCors';
 import { createDistributedApiRateLimitMiddleware } from './src/server/distributedApiRateLimit';
+import { apiRouteNotFound } from './src/server/apiRouteNotFound';
 import { apiNoStoreByDefault } from './src/server/apiCachePrivacy';
 import { logSafeError } from './src/server/safeLogging';
 import crypto from 'crypto';
@@ -5755,6 +5756,11 @@ Task:
     saveAuthoritativeStore(store);
     res.json({ ok: true, ticket: target, supportTicket: target });
   });
+
+  // Any /api path that reached this point matched no route above. Answer JSON
+  // 404 here; otherwise the SPA fallback below would return 200 text/html for a
+  // misspelled or retired endpoint and monitoring would see a healthy request.
+  app.use('/api', apiRouteNotFound);
 
   // Vite dev middleware or production static serving
   const distPath = path.join(__dirname, 'dist');
