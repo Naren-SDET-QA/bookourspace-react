@@ -673,9 +673,9 @@
     }
   ],
   "review": {
-    "at": "2026-11-07T20:41:08.790Z",
-    "note": "Reviewed 20261108150000_superadmin_module_visibility: public reads and RLS preserved; direct anon/authenticated writes revoked; server requires active Super Admin and audits updates; fresh PostgreSQL 17 chain and reapply checks pass.",
-    "migrationCount": 73,
+    "at": "2026-11-25T03:04:49.027Z",
+    "note": "Gate R3 independent audit 2026-11-25: reviewed all 82 migrations + baseline for unique versions, ascending order, no rewrite of applied files, no destructive DDL; rehearsed from zero on PostgreSQL 17.11 with postconditions and idempotency; sha256 pinned from working tree.",
+    "migrationCount": 82,
     "baselineSha256": "f37bdbcaf1870a05fe8f45acbf2ec17f0cc99162cd7e60270d5f8d5fabe412c2"
   }
 }
